@@ -27,8 +27,11 @@
 ```
 manifest.json              MV3 매니페스트 (activeTab, scripting, storage — host_permissions 없음)
 background.js              서비스 워커: 토글, CSS/JS 주입, 배지
-content.js                 주입되는 콘텐츠 스크립트 (단일 IIFE)
+content.js                 주입되는 콘텐츠 스크립트 (단일 IIFE) — 생성물, src/에서 빌드됨
 content.css                문서 레벨 스타일 (USER origin으로 주입, crs- 접두사만 사용)
+src/                       content.js의 실제 소스 — 조각 파일 26개 (목록은 src/modules.json)
+src/modules.json           src/ 조각 파일의 빌드 순서
+tools/build.js             src/의 조각을 src/modules.json 순서대로 이어 붙여 content.js를 생성
 icons/                     icon16/32/48/128.png — tools/make-icons.py가 생성
 _locales/ko, _locales/en   UI 문자열 (ko가 기본 로케일)
 tools/make-icons.py        아이콘 생성기 (순수 파이썬)
@@ -42,25 +45,27 @@ docs/                      아키텍처·릴리스 문서
 .github/workflows/         CI, 릴리스, 스토어 배포
 ```
 
-### 앞으로의 구조: `src/` + `tools/build.js`
+### 소스 구조: `src/` + `tools/build.js`
 
-`content.js`는 약 4 000줄짜리 단일 파일입니다. 유지보수를 위해 **소스를 `src/`의 조각 파일들로 나누고
-`tools/build.js`가 다시 한 파일로 이어 붙이는** 모델로 옮겨 갈 예정입니다.
+`content.js`는 **생성물입니다. 직접 편집하지 마세요.** 실제 소스는 `src/` 아래 조각 파일들이고,
+`tools/build.js`가 다시 한 파일로 이어 붙입니다.
 
-- 런타임은 지금과 똑같이 **하나로 합쳐진 `content.js`** 입니다. 주입 방식은 전혀 바뀌지 않습니다.
+- 런타임은 **하나로 합쳐진 `content.js`** 입니다. 주입 방식은 전혀 바뀌지 않습니다.
 - `src/`의 조각들은 **하나의 공유 클로저 안에서** 순서대로 실행됩니다. 네임스페이스 객체도, 전역 변수도,
   모듈 시스템도 없습니다. 조각끼리는 서로의 `const` / `function` 선언을 그대로 봅니다.
 - 순서는 `src/modules.json`이 정합니다. 목록에 있는 파일이 없거나, `src/`에 목록에 없는 `.js`가 있으면
   빌드가 실패합니다.
 - 조각 파일 이름과 담당 범위는 `docs/ARCHITECTURE.md`의 모듈 맵을 참고하세요.
 
-이 전환이 끝나기 전까지는 **`content.js`를 직접 편집합니다.** 전환 이후에는 다음 규칙이 적용됩니다.
+규칙:
 
-- `content.js`는 생성물입니다. 맨 위에 `DO NOT EDIT — generated from src/ by tools/build.js` 헤더가 붙고,
-  `tools/validate.js`가 그 헤더를 검사합니다. 직접 고치지 마세요.
-- 소스를 고친 뒤에는 `npm run build`(= `node tools/build.js`)로 다시 생성하고,
+- `content.js`는 생성물입니다. 맨 위에 `AUTO-GENERATED FILE — DO NOT EDIT — generated from src/ by
+  tools/build.js` 헤더가 붙고, `tools/validate.js`가 그 헤더를 검사합니다. **직접 고치지 마세요** —
+  고쳐도 다음 빌드에서 조용히 덮어써집니다.
+- `src/`의 해당 조각 파일을 고친 뒤 `npm run build`(= `node tools/build.js`)로 `content.js`를 다시 생성하고,
   **생성된 `content.js`도 함께 커밋합니다.**
-- CI는 `node tools/build.js --check`로 디스크의 `content.js`가 `src/`와 일치하는지 확인합니다.
+- CI는 `node tools/build.js --check`로 디스크의 `content.js`가 `src/`와 일치하는지 확인하고,
+  일치하지 않으면(`src/`만 고치고 재생성을 깜빡한 경우 포함) 실패합니다.
 
 ---
 

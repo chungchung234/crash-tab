@@ -1,10 +1,26 @@
 name: CI
 
-# Spec A7. Runs on every push to main, every pull request, and on demand.
+# Spec A7. Runs on pushes to main that touch shippable code, on pull requests, and on demand.
+# paths-ignore keeps documentation-only commits from spending a full 20-minute runner slot:
+# the heavy step here is the end-to-end suite, which downloads Chrome and drives three browsers.
+# Push several commits at once rather than one at a time — concurrency cancels superseded runs,
+# but each push still starts a run.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/pull_request_template.md'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/pull_request_template.md'
   workflow_dispatch:
 
 permissions:

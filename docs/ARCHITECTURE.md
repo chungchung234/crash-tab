@@ -1,8 +1,8 @@
 # 아키텍처
 
 화면부수기(crash-tab)가 실제로 어떻게 동작하는지 설명합니다. 이 문서는 현재 코드
-(`manifest.json`, `background.js`, `content.js` v1.2.0, `content.css`)를 읽고 쓴 것이며,
-언급한 함수 이름은 모두 코드에 실제로 있는 것입니다.
+(`manifest.json`, `background.js`, `src/`로 분리되어 `content.js` v1.2.0로 빌드되는 콘텐츠 스크립트, `content.css`)를
+읽고 쓴 것이며, 언급한 함수 이름은 모두 코드에 실제로 있는 것입니다.
 
 목차
 
@@ -540,39 +540,59 @@ doc.addEventListener('visibilitychange', …)   // 탭 복귀 시 배지 동기�
 
 ---
 
-## 10. 모듈 맵 (`src/` 분리 계획)
+## 10. 모듈 맵 (`src/`)
 
-현재 `content.js`는 번호가 붙은 16개 구역(`/* 0. … */` ~ `/* 15. … */`)으로 나뉜 하나의 파일입니다.
-계획된 `src/` 분리는 **이 경계를 그대로 파일로 옮기는 순수 이동**입니다.
-런타임은 여전히 하나로 합쳐진 `content.js`이고, 조각들은 하나의 공유 클로저 안에서 순서대로 실행됩니다.
+`content.js`는 생성물입니다. 소스는 `src/` 아래 26개 조각 파일로 나뉘어 있고, `tools/build.js`가
+`src/modules.json`이 정한 순서대로 이어 붙여 `content.js`를 씁니다. 런타임은 여전히 하나로 합쳐진
+`content.js`이고, 조각들은 하나의 공유 클로저 안에서 순서대로 실행됩니다 — 조각 사이에 네임스페이스
+객체도, 모듈 시스템도 없습니다.
 
-| 계획된 파일 | 현재 구역 | 들어갈 것 |
+아래 표는 `src/modules.json`에 적힌 순서 그대로이며, 줄 수는 각 파일의 실제 줄 수입니다.
+
+| 파일 | 줄 수 | 맡은 일 |
 | --- | --- | --- |
-| `src/00-prelude.js` | 0 | `VERSION`, 싱글턴 가드, 캡처한 전역(`win`/`doc`/`raf`/`setT`/…), `safe()`, `safeThen()`, `later()` / `track()` / `untrack()`, `trackAnim()` |
-| `src/10-util.js` | 0, 2 | `rand`/`clamp`/`px`, `alphaOf()`, `mk()`, `imp()`, `countDescendants()`, `rectOf`/`gcs`/`tagOf`/`parentOf`/`viewW`/`viewH`/`isOurs`, `KO` 사전과 `msg()` |
-| `src/20-state.js` | 1, 15(일부) | `state` 객체, `handledEvents`/`handledKeys`, DOM 참조 변수, `loadPrefs()`, `setWeapon`/`setPower`/`setMuted` 같은 설정 반영 |
-| `src/30-canvas.js` | 2, 3, 4 | `raise`/`lower`/`reraiseAll`/`ensureMounted`/`applyZoom`/`mountHosts`, `setupCanvas`/`clearCanvas`, `CRACK` 프로필과 `makeRay`/`pointAt`/`drawCrack`/`runFx`, `drawSlash`, `scorchDab`, `flash`/`ring`/`shake`/`swingCursor` |
-| `src/40-audio.js` | 5 | `audio`, `ensureAudio`, `env`/`noiseBurst`/`noiseSweep`/`tone`, `startLoop`/`stopLoop`, `sfx` |
-| `src/50-target.js` | 7 | `effectiveOpacity`/`visibleCandidate`/`isOverlay`/`pickFromList`/`pickTarget`, `hpMax`/`hpOf`/`hpOfPublic`, `showTarget`/`refreshHover`/`scheduleHover`/`pulseTarget`/`critFlashFill`, `walkCandidates` |
-| `src/60-break.js` | 8, 9, 11 | `polyInfo`/`rayExit`/`pieSplit`/`gridSplit`/`splitRect`/`polyToClip`, `substitute`/`canvasOf`/`copyAttrs`/`copyInlineStyle`/`copyFormState`/`cloneTree`/`diffStyles`/`replayPlan`/`normalizeRoot`/`buildStyledClone`, `hideOriginal`, `textDominant`/`boxVisible`/`pieceCount`/`spawnGeometric`/`graphemes`/`tokenize`/`spawnWordPieces`/`spawnFieldSpill`/`breakElement`/`reactDamage` |
-| `src/70-physics.js` | 10, 13 | `velocityFor`, `addPiece`/`applyTransform`/`restPiece`/`wakePiece`/`evictPieces`/`batchGpu`/`enforceCap`/`makeWrapper`/`debrisCount`, `kick`/`tick`/`tickFrame`/`onResize` |
-| `src/80-weapons.js` | 12(앞부분) | `rollCrit`/`rollSniperCrit`/`rollDamage`, `applyHit`/`spawnDmg`/`showTint` 계열, `onCooldown`/`startCooldown`, `aoeCandidates`/`aoeHit`, `fireHammer`/`firePistol`/`fireSmg`/`fireSniper`/`fireAxe`/`fireStab`/`doSlash`/`fireBomb`/`fireRocket`/`fireFlame`/`doCollapse`, `action`/`smashAt`/`slashSegment`/`startHold`/`holdStep`/`stopHold`/`startSlash`/`resolveSlash`, 탄약(`initAmmo`/`spend`/`startReload`/`stopReload`/`ammoInfo`), 조준경(`scopeOn`/`scopeOff`/`syncScope`/`scopeStep`/`scopeRadius`/`scopeMag`/`tracerFx`) |
-| `src/85-loadout.js` | 12(일부) | `slotKey`/`slotOf`, `isPermutation`/`setLoadout`/`applyPreset`/`moveToSlot`/`stepSlot` |
-| `src/90-combat.js` | 12(뒷부분) | `armCombat`/`clockTick`/`selectTick`/`markHostile`/`releaseHostile`/`hostileKilled`/`scheduleAttack`/`hostileAttack`/`clearPhase`/`placeAura`/`setAuraPulse`/`scheduleAura`, 구체(`spawnOrb`/`launchOrb`/`orbStep`/`popOrb`/`intercept*`), 빔(`placeBeam`/`fireBeam`/`beamStep`/`checkBeamHit`), 플레이어(`damagePlayer`/`regenStep`/`showKo`/`hideKo`/`restartFromKo`/`pauseCombat`/`resumeCombat`/`setCombat`) |
-| `src/95-hud.js` | 6, 12(일부) | `HUD_CSS`, `hudButton`/`buildHud`/`hudFallbackCheck`, `updateHud`/`scheduleHud`/`reorderHud`/`pulseBadge`/`hudLastHit`/`bumpCombo`, `updateAmmoHud`, `updatePlayerHud`, `toast`/`hideToast` |
-| `src/99-api.js` | 14, 15 | `SWALLOW`와 모든 이벤트 핸들러(`onSwallow`/`onHoldEnd`/`onMove`/`onKey`/`onKeyUp`/`onWheel`/`onToggleEvt`/`onWindowBlur`/`onWindowFocus`/`onVisibility`/`onScroll`/`onPointerEnter`/`onPointerLeave`), `listen`/`bindEvents`/`unbindEvents`, `clearTimers`/`cancelAnims`/`sweepLeftovers`, `restore`/`activate`/`deactivate`/`toggle`, `stats`/`weaponList`, 수명 주기 리스너, `api` 객체와 부트스트랩 반환값 |
+| `src/00-prelude.js` | 84 | 버전·싱글턴 가드, 캡처한 전역(`win`/`doc`/`raf`/`setT`/…), 무기 표(`WEAPONS`), `safe()`/`safeThen()`/`later()`/`track()`/`trackAnim()` |
+| `src/10-util.js` | 70 | `rand`/`clamp`/`px`, `mk()`/`imp()`, `rectOf`/`gcs`/`viewW`/`viewH` 같은 DOM 유틸, `KO` 사전과 `msg()` |
+| `src/20-state.js` | 58 | 전역 `state` 객체와 그 초기값 |
+| `src/25-layers.js` | 50 | 마운트 지점: `raise`/`lower`/`reraiseAll`/`ensureMounted`/`applyZoom`/`mountHosts` |
+| `src/30-canvas.js` | 238 | 균열 캔버스: `setupCanvas`/`clearCanvas`, `CRACK` 프로필, `drawCrack`/`runFx`, `drawSlash`, `scorchDab` |
+| `src/35-effects.js` | 44 | 번쩍임·링·흔들림 이펙트: `flash`/`ring`/`shake`/`swingCursor` |
+| `src/40-audio.js` | 123 | Web Audio 합성: `ensureAudio`, `env`/`noiseBurst`/`noiseSweep`/`tone`, `startLoop`/`stopLoop`, `sfx` |
+| `src/45-hud.js` | 335 | HUD(shadow DOM): `HUD_CSS`, `buildHud`, `updateHud`/`scheduleHud`/`reorderHud`/`pulseBadge`/`hudLastHit`/`bumpCombo` |
+| `src/50-target.js` | 151 | 타겟 고르기와 호버: `effectiveOpacity`/`visibleCandidate`/`pickTarget`, `hpMax`/`hpOf`, `showTarget`/`refreshHover`/`pulseTarget` |
+| `src/55-geometry.js` | 90 | 조각 분할 기하: `polyInfo`/`rayExit`/`pieSplit`/`gridSplit`/`splitRect`/`polyToClip` |
+| `src/60-clone.js` | 145 | 요소 복제: `substitute`/`canvasOf`/`copyAttrs`/`copyFormState`/`cloneTree`/`diffStyles`/`replayPlan`/`buildStyledClone` |
+| `src/65-pieces.js` | 128 | 조각 물리 상태: `velocityFor`, `addPiece`/`applyTransform`/`restPiece`/`wakePiece`/`evictPieces`/`enforceCap` |
+| `src/70-break.js` | 348 | 요소 부수기: `hideOriginal`, `textDominant`/`spawnGeometric`/`tokenize`/`spawnWordPieces`/`spawnFieldSpill`/`breakElement`/`reactDamage` |
+| `src/71-weapon-helpers.js` | 10 | 공용 전투 헬퍼: 치명타/피해 굴림, `weaponBtn`, `willBreak` |
+| `src/73-hit-resolution.js` | 245 | 피격 처리: 쿨다운 게이트, 피해 숫자·붉은 물듦, `applyHit`, 범위 피해(AoE) 후보·감쇠 |
+| `src/76-weapon-fire.js` | 299 | 무기 아홉 종의 `fire()` 구현(근접/총/폭발/화염/검)과 붕괴 체인 |
+| `src/79-weapon-actions.js` | 156 | 액션 디스패치: 쿨다운/교체/탄약 게이트, `smashAt`/`slashSegment`, 꾹 누르기·검 드래그, `WEAPONS.*.fire` 연결 |
+| `src/82-ammo-reload.js` | 105 | 탄약과 재장전: 탄창 소모, 자동/수동 재장전 상태 기계, 탄약 HUD |
+| `src/83-scope.js` | 96 | 조준경: ADS 조준선 구성/표시·숨김, 2배 확대, 흔들림·반동 스텝 |
+| `src/84-sniper.js` | 35 | 저격총: 예광탄 이펙트와 헤드샷 치명타가 있는 히트스캔 발사 |
+| `src/85-loadout.js` | 38 | 로드아웃: `slotKey`/`slotOf`, `isPermutation`/`setLoadout`/`applyPreset`/`moveToSlot`/`stepSlot` |
+| `src/88-toast.js` | 23 | 토스트 알림: `toast`/`hideToast` |
+| `src/90-combat.js` | 508 | 전투: 적 선택·수명 주기(`selectTick`/`markHostile`/`hostileKilled`), 구체·빔 전투, 플레이어 체력·회복·KO |
+| `src/92-tick.js` | 98 | 물리 루프: `kick`/`tick`/`tickFrame`, `onResize` |
+| `src/95-events.js` | 218 | 이벤트: 포인터/키보드/휠/포커스 핸들러, `listen`/`bindEvents`/`unbindEvents` |
+| `src/99-api.js` | 264 | 공개 API와 수명 주기: `restore`/`activate`/`deactivate`/`toggle`, `stats`/`weaponList`, `api` 객체와 부트스트랩 반환값 |
 
-### 분리 규칙
+(`wc -l src/*.js`로 언제든 다시 셀 수 있습니다. 총 3 959줄.)
+
+### 빌드 규칙
 
 - `src/modules.json`이 순서를 정합니다. 목록에 없는 `.js`가 `src/`에 있거나, 목록의 파일이 없으면
-  `tools/build.js`가 실패합니다.
+  `tools/build.js`가 실패합니다 (`tools/validate.js`의 R13 `module-manifest`가 같은 것을 다시 확인합니다).
 - `tools/build.js`가 조각들을 `// ── <파일명> ──` 배너와 함께 이어 붙이고,
   v1의 IIFE 껍데기(완료값이 `'on'`/`'off'`인 그 IIFE)로 감싼 뒤,
-  `DO NOT EDIT — generated from src/ by tools/build.js` 헤더를 붙여 `content.js`를 씁니다.
+  `AUTO-GENERATED FILE — DO NOT EDIT — generated from src/ by tools/build.js` 헤더를 붙여 `content.js`를 씁니다.
 - 조각 사이에 `import`/`export`도, 네임스페이스 객체도 없습니다. 함수 선언은 호이스팅되므로
   뒤쪽 파일의 함수를 앞쪽 파일에서 불러도 됩니다. 다만 **`const` 초기화 순서는 실행 순서를 따릅니다** —
   모듈 최상위에서 다른 모듈의 `const`를 즉시 읽으면 안 됩니다.
-- 이 전환은 **동작을 바꾸지 않습니다.** 분리 직후 e2e가 단언 개수까지 그대로 통과해야 합니다.
+- `content.js`는 손으로 고치지 않습니다. 소스를 고친 뒤 `node tools/build.js`로 다시 생성하고,
+  생성된 `content.js`도 함께 커밋합니다. CI는 `node tools/build.js --check`로 디스크의 `content.js`가
+  `src/`와 일치하는지 확인합니다.
 
 ---
 

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "node tools/build.js",
-    "check": "node -e \"const f='tools/build.js';if(require('fs').existsSync(f))require('child_process').execFileSync(process.execPath,[f,'--check'],{stdio:'inherit'});else console.log('check: tools/build.js not present yet (spec A2) - skipping build --check')\" && node tools/validate.js",
+    "check": "node tools/build.js --check && node tools/validate.js",
     "test": "node test/e2e.js",
     "package": "node tools/package.js",
     "icons": "python3 tools/make-icons.py",

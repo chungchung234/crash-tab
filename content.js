@@ -1902,7 +1902,8 @@
     } catch (e) { /* ignore */ }
   }
 
-// ── 80-weapons.js ──
+// ── 71-weapon-helpers.js ──
+// ── shared combat helpers: crit/damage rolls, cooldown gate, HUD weapon-button lookup ──
   /* ===================================================================== */
   /* 12. Weapons (v1.1): damage roll, hit feedback, the nine fire() entries, actions   */
   /* ===================================================================== */
@@ -1913,6 +1914,8 @@
   function weaponBtn(id) { return (hudEls.weaponBtns && hudEls.weaponBtns[id]) || null; }
   function willBreak(el, dmg) { if (!el) return false; const r = state.hp.get(el); return (r ? r.hp : hpMax(el)) - dmg <= 0; }
 
+// ── 73-hit-resolution.js ──
+// ── hit resolution: floating damage numbers, hit tint, hold-window aggregation, applyHit, bullet chips, AoE candidates/falloff ──
   /* --- cooldown (A3): one global timestamp, set only when an attack actually happened --- */
   function onCooldown() { return !debug.noCooldown && now() < state.cooldownUntil; }
   function startCooldown(id, ms) {
@@ -2158,6 +2161,8 @@
     }
   }
 
+// ── 76-weapon-fire.js ──
+// ── the nine fire() entries (melee/gun/bomb/rocket/flame/sword) + collapse chain ──
   /* --- fire(x, y, ctx) entries. ctx.hold: fired by a hold tick (ctx.h = the hold session); each returns the element hit --- */
   function fireHammer(x, y) {
     state.shots++;
@@ -2457,6 +2462,8 @@
     state.collapse = null;
   }
 
+// ── 79-weapon-actions.js ──
+// ── action dispatch: cooldown/swap/ammo gating, smashAt/slashSegment, hold weapons, sword drag, WEAPONS.*.fire wiring ──
 
   WEAPONS.hammer.fire = fireHammer; WEAPONS.pistol.fire = firePistol; WEAPONS.smg.fire = fireSmg; WEAPONS.axe.fire = fireAxe;
   WEAPONS.sword.fire = fireStab; WEAPONS.bomb.fire = fireBomb; WEAPONS.rocket.fire = fireRocket; WEAPONS.flame.fire = fireFlame;
@@ -2613,7 +2620,8 @@
     return slashSegment(s.x1, s.y1, s.x2, s.y2);
   }
 
-// ── 82-ammo.js ──
+// ── 82-ammo-reload.js ──
+// ── ammo & reload: magazine spend, auto/manual reload state machine, ammo HUD ──
   /* ===================================================================== */
   /* 12b. v1.2: ammo / reload, scope + sniper, loadouts, combat, toasts         */
   /* ===================================================================== */
@@ -2719,6 +2727,8 @@
     } catch (e) { /* ignore */ }
   }
 
+// ── 83-scope.js ──
+// ── scope: ADS reticle build/show/hide, 2x body magnification, sway/recoil step ──
   /* --- scope (A2–A4): visual layer in the glass root + 2× body transform saved/restored exactly --- */
   function scopeMag() { return (state.scoped && state.scope.magnified) ? 2 : 1; }
   function scopeRadius() { return 0.42 * Math.min(viewW(), viewH()); }
@@ -2815,6 +2825,8 @@
     if (hot !== sc.hot) { sc.hot = hot; try { sc.node.classList.toggle('crs-scope-hot', hot); } catch (e) { /* ignore */ } }
   }
 
+// ── 84-sniper.js ──
+// ── sniper: tracer fx + hitscan fire with headshot crit ──
   /* --- sniper (A4): hitscan with ±25 px unscoped spread, tracer, bolt, headshots --- */
   function tracerFx(x, y) {
     if (!root) return;

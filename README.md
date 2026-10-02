@@ -35,7 +35,8 @@ v1.2부터는 FPS처럼 **탄창과 재장전**, **저격총과 조준경(2배 �
 3. **압축해제된 확장 프로그램을 로드합니다** 를 누르고 이 폴더를 선택합니다.
 4. 아이콘은 `icons/`에 포함되어 있어 바로 툴바에 표시됩니다. (다시 생성하려면 `python3 tools/make-icons.py`를 실행하세요.)
 
-빌드 과정이나 npm 의존성은 없습니다.
+빌드 과정이나 npm 의존성은 없습니다. 소스를 직접 받는 대신 완성된 폴더가 필요하다면
+[Releases](https://github.com/chungchung234/crash-tab/releases)에서 zip을 내려받아 압축을 풀고 3번부터 따라 하세요.
 
 ## 사용법
 
@@ -273,6 +274,11 @@ HUD는 제목 줄을 끌어서 옮길 수 있습니다. 입력창에 포커스�
 - **전투 모드**는 창이 포커스를 잃거나 탭이 숨겨지면 일시정지되고, 포인터가 창 밖에 있는 동안은 공격하지 않습니다.
 
 ## 개발 / 테스트
+
+자세한 저장소 구조, 코드 규칙, 커밋·PR 규칙은 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고하세요.
+`content.js`는 `src/`에서 빌드되는 생성물이므로 **직접 고치지 않습니다** — `src/`의 해당 조각 파일을
+고친 뒤 `node tools/build.js`(= `npm run build`)로 다시 생성하고 함께 커밋합니다. CI는
+`node tools/build.js --check`로 이 둘이 일치하는지 확인합니다.
 
 ```bash
 python3 tools/make-icons.py   # icons/icon{16,32,48,128}.png 생성 (순수 파이썬, Pillow 불필요)

@@ -1921,11 +1921,17 @@ async function suiteA12(page, log, contentJs) {
   const rocketRet = await api.smashAt(page, fg8.left + 6, fg8.top + 6);
   const killed = await poll(async () => { const p = await api.player(page); return p.kills >= 1 && (await api.broken(page, '#figure')) ? p : null; }, 1200, 20);
   const seen8 = await api.seen(page);
-  const s8 = await api.stats(page);
+  // stats() and player() must be read in ONE evaluate: the rocket's AoE keeps breaking non-hostile
+  // elements for up to 60 ms after the kill, and each of those adds round(maxHp/4) to the score while
+  // combat is on. Two separate reads can straddle that and differ by a few points on a slow runner.
+  const s8 = await page.evaluate(() => {
+    const st = window.__crashScreen.stats(), pl = window.__crashScreen.player();
+    return { kills: st.kills, score: st.score, hostiles: st.hostiles, pKills: pl.kills, pScore: pl.score };
+  });
   check('A.combat 8: a rocket on the hostile figure (padding zone) breaks it → player().kills === 1 and the aura is gone', rocketRet === true && !!killed && killed.kills === 1 && (await api.count(page, '.crs-hostile')) === 0, { ret: rocketRet, player: killed || await api.player(page), auras: await api.count(page, '.crs-hostile') });
   check('A.combat 8: score increased by at least the hostile\'s max HP', !!killed && killed.score - score8a >= max8, { before: score8a, after: killed && killed.score, max: max8 });
   check('A.combat 8: a .crs-dmg "처치!" floating text was seen', seen8.dmgTexts.some((t) => t.includes('처치')), seen8.dmgTexts);
-  check('A.combat 8: stats() mirrors kills / score / hostiles', !!killed && s8.kills === 1 && s8.score === killed.score && s8.hostiles === 0, { kills: s8.kills, score: s8.score, hostiles: s8.hostiles });
+  check('A.combat 8: stats() mirrors kills / score / hostiles', !!killed && s8.kills === 1 && s8.kills === s8.pKills && s8.score === s8.pScore && s8.score >= killed.score && s8.hostiles === 0, s8);
 
   // ---- (9) KO ----------------------------------------------------------------------------------------------
   await api.restore(page);
