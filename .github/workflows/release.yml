@@ -1,0 +1,140 @@
+name: Release
+
+# Spec A8. Fires on a pushed v* tag, or on demand for a tag that already exists.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, e.g. v1.2.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  # Never cancel a release that is already uploading an asset.
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package and publish the GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve the tag and version
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          TAG="${INPUT_TAG:-$REF_NAME}"
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::tag must look like v<x.y.z> (got '$TAG')"; exit 1 ;;
+          esac
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG (version $VERSION)"
+
+      - name: Check out the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify the tag matches manifest.json, package.json and VERSION
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=$VERSION manifest.json=$MANIFEST_VERSION package.json=$PACKAGE_VERSION"
+          fail=0
+          if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
+            echo "::error file=manifest.json::manifest.json version is $MANIFEST_VERSION but the tag says $VERSION"
+            fail=1
+          fi
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "::error file=package.json::package.json version is $PACKAGE_VERSION but the tag says $VERSION"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] || exit 1
+          # Also asserts the VERSION constant in the source agrees.
+          node tools/validate.js --expect-version "$VERSION"
+
+      - name: Restore npm and puppeteer caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/puppeteer
+          key: ${{ runner.os }}-npm-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Install dev dependencies
+        run: npm install --no-audit --no-fund --prefer-offline
+
+      - name: Build check and static validation
+        # Equivalent to `npm run check`, but tolerant of tools/build.js not existing
+        # yet (spec A2), exactly like ci.yml.
+        run: |
+          if [ -f tools/build.js ]; then
+            node tools/build.js --check
+          else
+            echo "::notice::tools/build.js not present yet (spec A2) - skipping build --check"
+          fi
+          node tools/validate.js
+
+      - name: End-to-end tests
+        timeout-minutes: 10
+        run: npm test
+
+      - name: Build the release package
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          npm run package
+          ls -l "dist/crash-tab-$VERSION.zip"
+          echo "sha256: $(sha256sum "dist/crash-tab-$VERSION.zip" | cut -d' ' -f1)"
+
+      - name: Extract the CHANGELOG section for this version
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          node tools/version.js --changelog-section "$VERSION" > "$RUNNER_TEMP/body.md"
+          if [ ! -s "$RUNNER_TEMP/body.md" ]; then
+            echo "::error file=CHANGELOG.md::no CHANGELOG.md section found for $VERSION"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/body.md"
+
+      - name: Upload the package as a run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-tab-${{ steps.meta.outputs.version }}
+          path: dist/*.zip
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          gh release create "$TAG" "dist/crash-tab-$VERSION.zip" \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/body.md" \
+            --verify-tag

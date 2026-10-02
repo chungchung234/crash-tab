@@ -3,3 +3,7 @@ dist/
 test/out/
 .DS_Store
 *.log
+
+# 사용자 전역 gitignore(~/.gitignore_global)가 `docs`를 제외하므로 되살린다
+!docs/
+!docs/**

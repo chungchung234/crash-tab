@@ -1,0 +1,107 @@
+name: 버그 신고 / Bug report
+description: 동작하지 않는 부분을 알려주세요. / Report something that does not work.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        한국어 또는 영어로 작성해 주세요. / Please write in Korean or English.
+
+        이 확장 프로그램은 네트워크를 전혀 사용하지 않습니다. 로그나 스크린샷을 올리기 전에
+        개인 정보가 담긴 페이지 내용이 포함되지 않았는지 확인해 주세요.
+        This extension makes no network requests. Before attaching logs or screenshots,
+        please check that no private page content is visible in them.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 무슨 일이 일어났나요? / What happened?
+      description: 기대한 동작과 실제 동작을 함께 적어주세요. / Describe both the expected and the actual behaviour.
+      placeholder: |
+        기대: 망치로 때리면 요소가 부서진다
+        실제: 아무 일도 일어나지 않는다
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 방법 / Steps to reproduce
+      description: 가능하면 공개된 페이지 주소를 함께 적어주세요. / Include a public page URL when possible.
+      placeholder: |
+        1. https://example.com 접속
+        2. Ctrl+Shift+X 로 활성화
+        3. 본문 문단을 클릭
+        4. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 확장 버전 / Extension version
+      description: chrome://extensions 에 표시된 버전, 또는 설치한 릴리스 태그. / The version shown on chrome://extensions, or the release tag you installed.
+      placeholder: "1.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome 버전 / Chrome version
+      description: chrome://version 첫 줄. / The first line of chrome://version.
+      placeholder: "Chrome 131.0.6778.86 (Official Build) (arm64)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 운영체제 / Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - ChromeOS
+        - 기타 / Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: 설치 방법 / How did you install it?
+      options:
+        - 릴리스 zip 압축 해제 후 로드 / Unpacked from a release zip
+        - 소스에서 직접 로드 / Loaded from source
+        - Chrome 웹 스토어 / Chrome Web Store
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: 콘솔 오류 / Console errors
+      description: DevTools 콘솔(F12)의 빨간 오류를 그대로 붙여넣어 주세요. / Paste any red errors from the DevTools console (F12).
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 그 밖의 정보 / Anything else
+      description: 스크린샷, 녹화, 사용한 무기나 설정 등. / Screenshots, recordings, the weapon or settings in use.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 확인 / Checklist
+      options:
+        - label: 같은 내용의 이슈가 이미 있는지 검색했습니다. / I searched for an existing issue.
+          required: true
+        - label: 다른 확장 프로그램을 모두 끈 상태에서도 재현됩니다. / It still reproduces with other extensions disabled.
+          required: false

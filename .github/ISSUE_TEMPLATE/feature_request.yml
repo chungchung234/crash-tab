@@ -1,0 +1,68 @@
+name: 기능 제안 / Feature request
+description: 새로운 무기, 모드, 설정 등을 제안합니다. / Suggest a new weapon, mode or setting.
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        한국어 또는 영어로 작성해 주세요. / Please write in Korean or English.
+
+        이 프로젝트는 네트워크 요청과 텔레메트리를 전혀 쓰지 않고, 권한은 `activeTab`,
+        `scripting`, `storage` 세 가지로 고정되어 있습니다. 새 권한이나 외부 서비스를
+        필요로 하는 제안은 받지 않습니다.
+        This project makes no network requests and collects no telemetry. Its permissions
+        are fixed at `activeTab`, `scripting` and `storage`; proposals that need new
+        permissions or an external service will not be accepted.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 어느 영역인가요? / Which area?
+      options:
+        - 무기 / Weapon
+        - 전투 모드 / Combat mode
+        - 물리·파괴 연출 / Physics and destruction
+        - HUD·UI
+        - 설정·옵션 페이지 / Settings and options page
+        - 접근성 / Accessibility
+        - 성능 / Performance
+        - 개발 도구·빌드 / Developer tooling and build
+        - 기타 / Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 어떤 문제를 해결하나요? / What problem does this solve?
+      description: 해결하려는 상황을 먼저 적어주세요. / Describe the situation first, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 제안 내용 / Proposal
+      description: 동작 방식, 단축키, 화면에서 보이는 모습 등을 구체적으로 적어주세요. / Describe the behaviour, hotkeys and what it looks like on screen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 고려한 대안 / Alternatives considered
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: 제약 확인 / Constraint check
+      options:
+        - label: 새로운 권한이나 host_permissions 를 요구하지 않습니다. / Needs no new permissions and no host_permissions.
+          required: true
+        - label: 네트워크 요청이나 외부 서비스를 요구하지 않습니다. / Needs no network requests and no external service.
+          required: true
+        - label: 같은 내용의 이슈가 이미 있는지 검색했습니다. / I searched for an existing issue.
+          required: true

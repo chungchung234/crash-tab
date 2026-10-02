@@ -1,0 +1,180 @@
+name: Publish to Chrome Web Store
+
+# Spec A9. Manual only. With no store secrets configured the job prints the setup
+# checklist and exits 0 without publishing anything.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Released tag to publish, e.g. v1.2.0'
+        required: true
+        type: string
+      dry_run:
+        description: 'Upload a draft only and never call publish'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-store
+  # Two overlapping uploads of the same item would fight; queue instead.
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Upload (and optionally publish) the store package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check for the Chrome Web Store secrets
+        id: secrets
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: |
+          missing=''
+          [ -n "$CWS_CLIENT_ID" ]     || missing="$missing CWS_CLIENT_ID"
+          [ -n "$CWS_CLIENT_SECRET" ] || missing="$missing CWS_CLIENT_SECRET"
+          [ -n "$CWS_REFRESH_TOKEN" ] || missing="$missing CWS_REFRESH_TOKEN"
+          [ -n "$CWS_EXTENSION_ID" ]  || missing="$missing CWS_EXTENSION_ID"
+          if [ -n "$missing" ]; then
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            {
+              echo '## Chrome Web Store publishing is not configured'
+              echo
+              echo 'Missing repository secrets:'
+              for name in $missing; do echo "- \`$name\`"; done
+              echo
+              echo 'To enable publishing:'
+              echo '1. Create a Google Cloud project and enable the Chrome Web Store API.'
+              echo '2. Create an OAuth client of type "Desktop app"; note the client ID and secret.'
+              echo '3. Obtain a refresh token for that client with the'
+              echo '   `https://www.googleapis.com/auth/chromewebstore` scope.'
+              echo '4. Copy the 32-character extension ID from the Developer Dashboard URL.'
+              echo '5. Add all four under Settings > Secrets and variables > Actions as'
+              echo '   `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`, `CWS_EXTENSION_ID`.'
+              echo
+              echo 'Full walkthrough: `docs/RELEASING.md`.'
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '::notice::Store secrets are absent - nothing was uploaded or published. This run is a no-op, not a release.'
+            exit 0
+          fi
+          echo 'configured=true' >> "$GITHUB_OUTPUT"
+          echo 'All four Chrome Web Store secrets are present.'
+
+      - name: Check out the tag
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Set up Node.js
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify the tag matches manifest.json
+        if: steps.secrets.outputs.configured == 'true'
+        id: meta
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          MANIFEST_VERSION="$(node -p "require('./manifest.json').version")"
+          if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
+            echo "::error file=manifest.json::manifest.json version is $MANIFEST_VERSION but the tag says $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build the store package
+        if: steps.secrets.outputs.configured == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        # tools/package.js is reproducible, so rebuilding at the tag yields the same
+        # bytes as the asset attached to the GitHub release.
+        run: |
+          npm run package
+          ZIP="dist/crash-tab-$VERSION.zip"
+          ls -l "$ZIP"
+          echo "sha256: $(sha256sum "$ZIP" | cut -d' ' -f1)"
+
+      - name: Upload to the Chrome Web Store
+        if: steps.secrets.outputs.configured == 'true'
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        # Response bodies are never echoed: they can carry tokens. Only the HTTP
+        # status and the parsed uploadState / error codes are printed.
+        run: |
+          set -euo pipefail
+          ZIP="dist/crash-tab-$VERSION.zip"
+
+          status="$(curl -sS -o "$RUNNER_TEMP/token.json" -w '%{http_code}' \
+            -X POST https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$CWS_CLIENT_ID" \
+            --data-urlencode "client_secret=$CWS_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$CWS_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')"
+          if [ "$status" != "200" ]; then
+            echo "::error::OAuth token exchange failed with HTTP $status"
+            exit 1
+          fi
+          ACCESS_TOKEN="$(node -e 'process.stdout.write(String(require(process.env.RUNNER_TEMP + "/token.json").access_token || ""))')"
+          rm -f "$RUNNER_TEMP/token.json"
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo '::error::OAuth response contained no access_token'
+            exit 1
+          fi
+          echo "::add-mask::$ACCESS_TOKEN"
+
+          status="$(curl -sS -o "$RUNNER_TEMP/upload.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H 'x-goog-api-version: 2' \
+            -T "$ZIP" \
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$CWS_EXTENSION_ID?uploadType=media")"
+          node -e '
+            const r = require(process.env.RUNNER_TEMP + "/upload.json");
+            console.log("uploadState:", r.uploadState);
+            for (const e of r.itemError || []) console.log("  error:", e.error_code, e.error_detail);
+          '
+          rm -f "$RUNNER_TEMP/upload.json"
+          if [ "$status" != "200" ]; then
+            echo "::error::Store upload failed with HTTP $status"
+            exit 1
+          fi
+          echo "Draft upload complete for version $VERSION."
+
+          # The access token stays inside this step: it is never written to
+          # $GITHUB_ENV, so it cannot leak into a later step's environment.
+          if [ "$DRY_RUN" = "false" ]; then
+            status="$(curl -sS -o "$RUNNER_TEMP/publish.json" -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $ACCESS_TOKEN" \
+              -H 'x-goog-api-version: 2' \
+              -H 'Content-Length: 0' \
+              "https://www.googleapis.com/chromewebstore/v1.1/items/$CWS_EXTENSION_ID/publish")"
+            node -e '
+              const r = require(process.env.RUNNER_TEMP + "/publish.json");
+              console.log("status:", (r.status || []).join(", "));
+              console.log("detail:", (r.statusDetail || []).join(", "));
+            '
+            rm -f "$RUNNER_TEMP/publish.json"
+            if [ "$status" != "200" ]; then
+              echo "::error::Store publish failed with HTTP $status"
+              exit 1
+            fi
+            echo "Published version $VERSION to the Chrome Web Store."
+          else
+            echo '::notice::dry_run was true - uploaded as a draft, publish was NOT called.'
+          fi
