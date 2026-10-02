@@ -6,12 +6,12 @@
   function slotOf(id) { return state.loadout.indexOf(id) + 1; }
 
   /* --- ammo (A5): state.ammo[id] rounds, reserve ∞, later()-chained reload, swap delay --- */
-  function initAmmo() { state.pendingReload = null; for (const id of WEAPON_IDS) state.ammo[id] = WEAPONS[id].mag == null ? null : WEAPONS[id].mag; }
+  function initAmmo() { state.pendingReload = null; resetAim(); for (const id of WEAPON_IDS) state.ammo[id] = WEAPONS[id].mag == null ? null : WEAPONS[id].mag; }   // v1.5 §3.2: recoil kick / bloom reset with the magazines
   function isReloading(id) { return !!(state.reload && state.reload.id === id); }
   function swapActive() { return !debug.noCooldown && now() < state.swapUntil; }
   function emptyClick() {   // at most once per 300 ms
     const t = now();
-    if (t - state.lastEmptyAt >= 300) { state.lastEmptyAt = t; sfx('empty'); }
+    if (t - state.lastEmptyAt >= 300) { state.lastEmptyAt = t; sfx('empty'); vmDry(); }   // v1.5 §2.1: 빈 탄창 격발 — two short shakes
   }
   function spend(id) {
     const W = WEAPONS[id];
@@ -39,6 +39,7 @@
     const ms = debug.fastReload ? 30 : W.reloadMs;
     const rec = { id, startedAt: now(), ms, timer: 0, magTimer: 0 };
     state.reload = rec;
+    vmReload(ms);   // ── v1.5 §2.1: tilt down, drop the magazine, bring a fresh one up, across the whole reloadMs ──
     sfx('magout');
     rec.magTimer = later(() => { rec.magTimer = 0; if (state.reload === rec) sfx('magin'); }, Math.round(ms * 0.8));
     rec.timer = later(() => {
@@ -93,6 +94,7 @@
   function updateAmmoHud() {
     const a = hudEls.ammo;
     if (!a) return;
+    syncAmmoArt();   // ── v1.5 §1: the 28 px weapon picture left of the round count follows the weapon in hand ──
     try {
       const id = state.weapon, W = WEAPONS[id], size = W.mag;
       hudEls.aEmoji.textContent = W.emoji;

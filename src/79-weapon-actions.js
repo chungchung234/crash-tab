@@ -20,6 +20,7 @@
     swingCursor();
     let out = null;
     try { out = run(); } catch (e) { state.lastError = String((e && e.stack) || e); }
+    vmFire(id);   // ── v1.5 §2.1: recoil (guns) or the melee swing — only for an attack that was NOT rejected ──
     flushPendingReload();   // A5: the emptying round reloads right after it was fired (A4: scoped shots stay exact)
     updateHud();
     updateAmmoHud();
@@ -91,6 +92,7 @@
     h.tick++;
     let hit = null;
     try { hit = WEAPONS[h.id].fire(state.hoverX, state.hoverY, { hold: true, h }) || null; } catch (e) { state.lastError = String((e && e.stack) || e); }
+    vmFire(h.id);   // ── v1.5 §2.1: sustained fire kicks too (vmFire throttles itself to one per 60 ms) ──
     flushPendingReload();
     if (state.hold !== h) return;   // the tick itself ended the hold (deactivate from a page handler)
     for (const el of Array.from(h.tintEls)) if (el !== hit) { fadeTint(el); h.tintEls.delete(el); }

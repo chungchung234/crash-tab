@@ -48,6 +48,7 @@
     } catch (e) { sc.magnified = false; }
     scopeStep(now());
     placeSelf();   // v1.3 §3.1: ADS drops the player ring to 20 % so it cannot cover the reticle
+    vmVisibility();   // ── v1.5 §2.1: the scope picture replaces the weapon — fade the viewmodel out ──
     scheduleAura();   // A3: every page rect just changed under the 2× transform — hostile auras must follow
     sfx('scopeIn');
     kick();
@@ -68,7 +69,7 @@
       } catch (e) { /* ignore */ }
     }
     sc.magnified = false; sc.saved = null;
-    if (state.active) { placeSelf(); scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras
+    if (state.active) { placeSelf(); vmVisibility(); scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras; v1.5 §2.1: the viewmodel comes back
     return true;
   }
   /* RMB (chord model) OR Shift (after its 120 ms delay) want the scope while the sniper is selected. */

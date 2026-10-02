@@ -177,7 +177,9 @@
     toastCombatOn: '⚔️ 전투 모드: 큰 요소들이 반격해요 (H로 끄기)', toastCombatOff: '전투 모드 꺼짐', toastReload: '재장전', labelSwapping: '교체 중',
     // v1.3 (§2 / §3.4): the dodge call-out next to the player ring
     dodgeLabel: '회피!',
-    unitSec: '초'
+    unitSec: '초',
+    // v1.5 (§3.3): the two extra stats in the weapon-button tooltip
+    statCrit: '치명', statSwap: '교체'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));
@@ -716,6 +718,233 @@
     } catch (e) { /* ignore */ }
   }
 
+// ── 44-weapon-art.js ──
+// ── v1.5 §1: weapon art — ten side silhouettes assembled node by node with createElementNS ──
+  /* ===================================================================== */
+  /* 5b. Weapon art (v1.5 §1)                                               */
+  /*                                                                        */
+  /* No binary assets ship: every weapon picture is an <svg> built with      */
+  /* document.createElementNS and setAttribute, so it survives a strict CSP  */
+  /* / Trusted-Types page exactly like the rest of the overlay, scales to    */
+  /* any size and takes the theme colours straight from ART.                 */
+  /*                                                                        */
+  /* One picture, three places (§1): the viewmodel (§2), the HUD weapon      */
+  /* grid buttons and the ammo panel. Shapes only — filled paths, rounded    */
+  /* rects and circles, never strokes — because a stroke that scales badly   */
+  /* is the fastest way to turn a 22 px button icon into mud. The goal is a  */
+  /* silhouette you can NAME, not a rendering.                               */
+  /* ===================================================================== */
+  const ART = {
+    metal: '#b9c2d0',      // bright metal: slides, blades, barrels
+    metalMid: '#7c8696',   // mid metal: shrouds, guards, bodies
+    metalDark: '#4a5361',  // dark metal: grips, magazines, stocks
+    wood: '#8b6240',       // wood: hafts, handles, fuses
+    accent: '#e5484d',     // the one hot colour: warheads, flame, plunger
+    hot: '#ffb224',        // flame / spark core (accent's lighter partner)
+    dark: '#2b3038'        // shadow: bomb body, holes, feet
+  };
+
+  function svgNode(tag, attrs) {
+    const n = doc.createElementNS(SVG_NS, tag);
+    if (attrs) for (const k of Object.keys(attrs)) n.setAttribute(k, String(attrs[k]));
+    return n;
+  }
+  function artRect(x, y, w, h, fill, r) {
+    return svgNode('rect', r ? { x, y, width: w, height: h, rx: r, ry: r, fill } : { x, y, width: w, height: h, fill });
+  }
+  function artPath(d, fill, rule) {
+    return rule ? svgNode('path', { d, fill, 'fill-rule': rule }) : svgNode('path', { d, fill });
+  }
+  function artCircle(cx, cy, r, fill) { return svgNode('circle', { cx, cy, r, fill }); }
+
+  /* Ten builders. Each pushes its shapes back-to-front into `out`; viewBox is 0 0 120 60 for all of them,
+   * so the HUD can swap one for another without re-measuring anything. */
+  const WEAPON_ART = {
+    /* 나무 자루 + 직사각 머리 + 쐐기 뒷날 */
+    hammer: () => [
+      artRect(6, 26, 80, 8, ART.wood, 4),                       // haft
+      artRect(8, 24, 22, 12, ART.metalDark, 5),                 // grip wrap
+      artPath('M86,16 L62,27 L64,35 L86,28 Z', ART.metalMid),   // wedge claw hooking back
+      artRect(84, 9, 28, 42, ART.metal, 4),                     // head block
+      artRect(104, 9, 8, 42, ART.metalMid, 4)                   // striking face
+    ],
+    /* 슬라이드 + 그립 + 방아쇠울 */
+    pistol: () => [
+      artRect(38, 12, 76, 15, ART.metal, 3),                    // slide
+      artRect(104, 16, 12, 7, ART.metalMid, 2),                 // muzzle
+      artRect(38, 27, 58, 8, ART.metalMid, 2),                  // frame
+      artPath('M42,33 L70,33 L58,59 L32,59 Z', ART.metalDark),  // grip
+      artPath('M60,33 h24 v7 a12,12 0 0 1 -24,0 z M64,36 h16 v4 a8,8 0 0 1 -16,0 z', ART.metalMid, 'evenodd'),
+      artRect(69, 35, 4, 8, ART.metal, 1)                       // trigger
+    ],
+    /* 긴 몸체 + 탄창 + 총열덮개 구멍 3개 */
+    smg: () => [
+      artRect(6, 20, 26, 12, ART.metalDark, 3),                 // stock
+      artRect(24, 17, 78, 17, ART.metal, 3),                    // receiver + shroud
+      artRect(100, 22, 18, 7, ART.metalMid, 3),                 // barrel
+      artCircle(64, 25, 4, ART.dark), artCircle(77, 25, 4, ART.dark), artCircle(90, 25, 4, ART.dark),
+      artPath('M44,34 L60,34 L57,57 L41,57 Z', ART.metalDark),  // magazine
+      artPath('M26,34 L40,34 L36,52 L24,52 Z', ART.metalMid)    // grip
+    ],
+    /* 긴 총열 + 조준경 원통 + 개머리판 */
+    sniper: () => [
+      artPath('M2,24 L34,19 L34,41 L16,41 L2,33 Z', ART.wood),  // stock
+      artRect(30, 21, 42, 16, ART.metal, 3),                    // receiver
+      artRect(68, 25, 50, 7, ART.metalMid, 3),                  // barrel
+      artRect(108, 23, 10, 11, ART.metalDark, 2),               // muzzle brake
+      artRect(52, 19, 6, 5, ART.metalDark), artRect(82, 19, 6, 5, ART.metalDark),   // scope mounts
+      artRect(46, 5, 48, 15, ART.metalDark, 7),                 // scope tube
+      artRect(88, 5, 9, 15, ART.metalMid, 4),                   // objective bell
+      artPath('M34,36 L48,36 L44,54 L30,52 Z', ART.metalDark)   // pistol grip
+    ],
+    /* 긴 자루 + 초승달 날 */
+    axe: () => [
+      artPath('M4,40 L72,18 L76,30 L8,52 Z', ART.wood),         // haft, raked down-left
+      artPath('M4,40 L22,34 L26,46 L8,52 Z', ART.metalDark),    // butt wrap
+      artPath('M58,11 L94,3 C110,13 110,47 94,57 L58,49 C70,40 70,20 58,11 Z', ART.metal),   // bit
+      artRect(46, 20, 18, 20, ART.metalMid, 3)                  // poll + eye: where the haft enters the head
+    ],
+    /* 칼날 + 날밑 + 손잡이 + 둥근 자루머리 */
+    sword: () => [
+      artPath('M44,23 L104,25 L118,30 L104,35 L44,37 Z', ART.metal),   // blade
+      artPath('M44,28 L108,29 L108,31 L44,32 Z', ART.metalMid),        // fuller
+      artRect(38, 11, 9, 38, ART.metalMid, 3),                         // crossguard
+      artRect(20, 26, 20, 8, ART.wood, 3),                             // grip
+      artCircle(16, 30, 8, ART.metalMid)                               // pommel
+    ],
+    /* 둥근 몸체 + 심지 + 불꽃 */
+    bomb: () => [
+      artCircle(44, 36, 25, ART.metalDark),                     // rim: the near-black body needs an edge to read on a dark HUD
+      artCircle(44, 36, 23, ART.dark),                          // body
+      artCircle(35, 27, 6, ART.metalDark),                      // highlight
+      artRect(37, 8, 14, 9, ART.metalDark, 3),                  // collar
+      artPath('M45,11 C55,3 64,12 74,5 L77,10 C66,18 57,10 47,18 Z', ART.wood),   // fuse
+      artCircle(84, 7, 7, ART.accent), artCircle(84, 7, 3.4, ART.hot)             // spark
+    ],
+    /* 발사관 + 탄두 원뿔 + 날개 + 조준 손잡이 */
+    rocket: () => [
+      /* the two fins (날개) are drawn FIRST so the warhead cone covers their roots: a fin that visibly
+       * sprouts from under the cone reads as part of the rocket, a floating blade next to it does not. */
+      artPath('M101,22 L89,8 L96,6 L107,21 Z', ART.metal),      // upper fin
+      artPath('M101,36 L89,50 L96,52 L107,37 Z', ART.metal),    // lower fin
+      artRect(16, 20, 80, 18, ART.metalMid, 6),                 // launch tube
+      artPath('M10,10 L24,20 L24,38 L10,48 Z', ART.metalDark),  // rear flare
+      artRect(86, 21, 12, 16, ART.metalDark, 2),                // exposed rocket body + collar
+      artPath('M96,13 L120,29 L96,45 Z', ART.accent),           // warhead cone
+      artRect(58, 10, 9, 11, ART.metal, 2),                     // optical sight
+      artPath('M42,38 L56,38 L52,58 L38,58 Z', ART.metalDark)   // aiming grip
+    ],
+    /* 연료통 2개 + 호스 + 노즐 + 점화구 */
+    flame: () => [
+      artRect(6, 12, 22, 40, ART.metalMid, 10),                 // fuel tank A
+      artRect(26, 15, 18, 34, ART.metalDark, 8),                // fuel tank B
+      artPath('M44,27 C58,13 62,43 76,29 L76,37 C62,51 58,21 44,35 Z', ART.dark),   // hose
+      artRect(70, 23, 30, 12, ART.metal, 5),                    // nozzle
+      artRect(96, 20, 10, 18, ART.metalDark, 3),                // muzzle ring
+      artPath('M74,35 L88,35 L84,53 L70,53 Z', ART.metalMid),   // grip
+      artPath('M106,29 C114,22 112,12 109,6 C120,14 120,34 106,37 Z', ART.accent),  // pilot flame
+      artPath('M108,30 C112,25 111,19 110,15 C117,21 116,31 108,34 Z', ART.hot)
+    ],
+    /* 기폭 장치 상자 + 플런저 + 안테나 */
+    collapse: () => [
+      artRect(36, 2, 38, 9, ART.accent, 4),                     // plunger handle
+      artRect(51, 9, 8, 16, ART.metalMid),                      // plunger shaft
+      artRect(22, 23, 68, 29, ART.metalDark, 5),                // detonator box
+      artRect(26, 27, 60, 9, ART.dark, 3),                      // label plate
+      artCircle(38, 44, 6, ART.metal), artCircle(56, 44, 6, ART.metalMid),   // dials
+      artRect(74, 41, 12, 6, ART.accent, 2),                    // armed lamp
+      artRect(18, 50, 76, 7, ART.dark, 3),                      // feet
+      artPath('M22,44 C12,44 8,34 2,36 L2,42 C6,41 8,50 22,50 Z', ART.dark),   // firing lead
+      artRect(100, 6, 5, 30, ART.metal, 2), artCircle(102, 4, 5, ART.accent) // antenna
+    ]
+  };
+
+  /* weaponArt(id, size) → a fresh <svg>. `size` is the WIDTH in px; the 2:1 viewBox fixes the height.
+   * Unknown ids fall back to the hammer so a caller can never get null back. */
+  function weaponArt(id, size) {
+    const build = WEAPON_ART[id] || WEAPON_ART.hammer;
+    const w = Math.max(8, +size || 24), h = w / 2;
+    const svg = svgNode('svg', {
+      viewBox: '0 0 120 60', width: String(w), height: String(h),
+      fill: 'none', focusable: 'false', 'aria-hidden': 'true',
+      class: 'crs-art', 'data-crs': '1'
+    });
+    svg.style.width = px(w); svg.style.height = px(h); svg.style.display = 'block';
+    svg.style.overflow = 'visible';
+    for (const node of build()) svg.append(node);
+    return svg;
+  }
+  const weaponArtIds = () => Object.keys(WEAPON_ART);
+
+  /* ── v1.5 §1 / §3.3: the same picture in the HUD grid and the ammo panel ──
+   * The HUD lives in a shadow root with its own constructed stylesheet, so the
+   * sizes are set through node.style (CSSOM only — the literal style ATTRIBUTE
+   * is banned on hostile pages) and src/45-hud.js needs no edit at all. `weaponArt: 'emoji'` simply shows the
+   * original emoji span again and hides the svg. */
+  const wpnOpts = { weaponArt: 'svg', viewmodel: true, loaded: false };
+  const WEAPON_ART_MODES = ['svg', 'emoji'];
+
+  function statLine(W) {
+    const pct = Math.round((W.critChance == null ? 0.1 : W.critChance) * 100);
+    const swap = (swapMsOf(W.id) / 1000).toFixed(2).replace(/0$/, '');
+    return msg('hudDamage') + ' ' + weaponLabel(W) + ' · ' + msg('statCrit') + ' ' + pct + '% · ' + msg('statSwap') + ' ' + swap + msg('unitSec');
+  }
+  /* One <span class="wart"> per weapon button, built once and kept; the emoji span stays in the DOM so the
+   * option can flip back without rebuilding anything. Also (re)writes title / aria-label with §3.3's stats. */
+  function syncWeaponArt() {
+    if (!hudEls.weaponBtns) return;
+    const svgMode = wpnOpts.weaponArt !== 'emoji';
+    if (!hudEls.weaponArts) hudEls.weaponArts = {};
+    try {
+      for (const id of WEAPON_IDS) {
+        const b = hudEls.weaponBtns[id];
+        if (!b) continue;
+        let art = hudEls.weaponArts[id];
+        if (!art || !art.isConnected) {
+          art = doc.createElement('span');
+          art.className = 'wart';
+          art.style.display = 'inline-flex';
+          art.style.alignItems = 'center';
+          art.style.justifyContent = 'center';
+          art.append(weaponArt(id, 26));
+          const em = b.querySelector('.em');
+          if (em) b.insertBefore(art, em); else b.append(art);
+          hudEls.weaponArts[id] = art;
+        }
+        art.style.display = svgMode ? 'inline-flex' : 'none';
+        const em = b.querySelector('.em');
+        if (em) em.style.display = svgMode ? 'none' : '';
+        const W = WEAPONS[id];
+        const t = slotKey(slotOf(id)) + ' · ' + msg(W.name) + ' · ' + statLine(W);
+        b.title = t; b.setAttribute('aria-label', t);
+      }
+      syncAmmoArt();
+    } catch (e) { /* ignore */ }
+  }
+  /* The ammo panel shows the weapon in hand at 28 px, left of the round count. */
+  function syncAmmoArt() {
+    if (!hudEls.ammo || !hudEls.aEmoji) return;
+    const svgMode = wpnOpts.weaponArt !== 'emoji';
+    try {
+      if (!hudEls.aArt || !hudEls.aArt.isConnected) {
+        const holder = doc.createElement('span');
+        holder.className = 'aart';
+        holder.style.display = 'inline-flex';
+        holder.style.alignItems = 'center';
+        hudEls.aArt = holder;
+        hudEls.aEmoji.parentNode.insertBefore(holder, hudEls.aEmoji);
+        hudEls.aArtFor = null;
+      }
+      if (hudEls.aArtFor !== state.weapon) {
+        hudEls.aArtFor = state.weapon;
+        while (hudEls.aArt.firstChild) hudEls.aArt.removeChild(hudEls.aArt.firstChild);
+        hudEls.aArt.append(weaponArt(state.weapon, 28));
+      }
+      hudEls.aArt.style.display = svgMode ? 'inline-flex' : 'none';
+      hudEls.aEmoji.style.display = svgMode ? 'none' : '';
+    } catch (e) { /* ignore */ }
+  }
+
 // ── 45-hud.js ──
   /* ===================================================================== */
   /* 6. HUD (shadow DOM, constructed stylesheet)                            */
@@ -1066,6 +1295,347 @@
       if (state.combo >= 2) hudEls.combo.classList.add('pop');
     } catch (e) { /* ignore */ }
   }
+
+// ── 46-viewmodel.js ──
+// ── v1.5 §2: first-person weapon viewmodel — draw / holster / idle / recoil / swing / reload / dry-fire / ADS ──
+  /* ===================================================================== */
+  /* 6b. Viewmodel (v1.5 §2)                                                */
+  /*                                                                        */
+  /* One glass-root layer, `div.crs-viewmodel`, holding the same SVG the HUD */
+  /* uses (§1) mirrored and tilted so the muzzle points into the screen. All */
+  /* motion is WAAPI on the CONTAINER's transform; the inner holder owns the */
+  /* static mirror, so an animation never has to re-state it. Every          */
+  /* animation goes through trackAnim(), and the one infinite animation (the */
+  /* idle bob) is cancelled explicitly by clearViewmodel() — restore() and   */
+  /* deactivate() must leave zero live animations behind.                    */
+  /*                                                                        */
+  /* content.css declares the layer's geometry with !important but leaves    */
+  /* `transform` and `opacity` plain: content.css is injected at USER origin */
+  /* and a user-origin !important outranks Web Animations, so marking either */
+  /* of those would silently freeze the whole viewmodel.                     */
+  /* ===================================================================== */
+  /* The layer is 200 × 100 (§2); the picture is drawn WIDER than the layer and allowed to overflow it, because
+   * a weapon that only fills the middle band of its own 120 × 60 viewBox reads as a distant toy at 1:1. */
+  const VM_W = 268;
+  const vm = {
+    node: null, holder: null, mag: null, shot: null,
+    weapon: null, want: null, phase: 'hidden', phaseUntil: 0, idle: null, seq: 0, timer: 0, hidden: false, lastFireAt: 0
+  };
+  const VM_BASE = 'translate(0px, 0px) rotate(0deg)';
+  const VM_SETTLE = 30;   // ms between a one-shot's last frame and the idle bob picking the weapon back up
+
+  function vmEnabled() { return !!(wpnOpts.viewmodel && state.active && root); }
+  /* §2.1: reduced motion keeps the cue but halves it. 0.45 rather than a bare 0.5 so the reduced amplitude is
+   * provably BELOW half of the full-motion one even when a sampler catches the full-motion peak a few ms late. */
+  function vmAmp() { return reducedMotion() ? 0.45 : 1; }
+  /* stats().viewmodel — 'idle' | 'draw' | 'fire' | 'reload' | 'hidden' (§4).
+   * The label is derived from a DEADLINE, not from a timer having fired: every one-shot records when it is due
+   * to end, so a dropped timer (restore() clears every tracked timer at once) can never strand the viewmodel in
+   * 'draw' or 'reload' forever. Finding the deadline passed also COMPLETES the transition — a caller that polls
+   * for 'idle' must never be told the weapon is at rest while it is still frozen mid-animation. */
+  function viewmodelPhase() {
+    if (!vm.node || !vm.node.isConnected) return 'hidden';
+    if (vm.hidden) return 'hidden';
+    if (vm.phase !== 'idle' && now() >= vm.phaseUntil) vmIdle();
+    return vm.phase;
+  }
+  function vmWantVisible() { return !state.scoped && !state.ko; }   // ADS has the scope circle; KO has the overlay
+
+  /* The idle bob and the one-shots coexist deliberately: WAAPI gives the LAST-started animation on a property
+   * priority, so a one-shot simply covers the bob while it runs and hands the property back — with the bob's
+   * phase intact — the moment it ends. Cancelling the bob instead would restart its sine from zero and make a
+   * weapon visibly jump after every shot. Only the previous ONE-SHOT is cancelled here. */
+  function vmCancelShot() {
+    const a = vm.shot;
+    vm.shot = null;
+    if (a) { try { a.cancel(); } catch (e) { /* ignore */ } state.anims.delete(a); }
+  }
+  function vmCancel() {
+    vmCancelShot();
+    if (vm.idle) { try { vm.idle.cancel(); } catch (e) { /* ignore */ } state.anims.delete(vm.idle); vm.idle = null; }
+    if (vm.node) cancelAnimsOf(vm.node);
+  }
+  function vmDropMag() {
+    const m = vm.mag;
+    vm.mag = null;
+    if (!m) return;
+    try { cancelAnimsOf(m); m.remove(); } catch (e) { /* ignore */ }
+  }
+  function clearViewmodel() {
+    untrack(vm.timer); vm.timer = 0;
+    vm.seq++;
+    vmCancel();
+    vmDropMag();
+    const n = vm.node;
+    vm.node = null; vm.holder = null; vm.weapon = null; vm.want = null; vm.shot = null; vm.phase = 'hidden'; vm.phaseUntil = 0; vm.hidden = false; vm.lastFireAt = 0;
+    if (n) { try { n.remove(); } catch (e) { /* ignore */ } }
+    if (hudEls.ammo) { try { hudEls.ammo.style.bottom = ''; } catch (e) { /* ignore */ } }
+  }
+  /* The ammo panel sits at bottom: 24px (v1.3 §2.1) and the viewmodel fills exactly that corner, so the panel
+   * moves up — only while the layer actually exists, so `viewmodel: false` restores the v1.3 layout byte for byte. */
+  function vmLiftAmmo(on) {
+    if (!hudEls.ammo) return;
+    try { hudEls.ammo.style.bottom = on ? '118px' : ''; } catch (e) { /* ignore */ }
+  }
+  function buildViewmodel() {
+    const n = mk('div', 'crs-viewmodel');
+    const holder = mk('div', 'crs-viewmodel-art');
+    n.append(holder);
+    n.style.transform = VM_BASE;
+    n.style.opacity = '1';
+    root.append(n);
+    vm.node = n; vm.holder = holder; vm.weapon = null; vm.want = null; vm.phase = 'idle'; vm.phaseUntil = 0; vm.hidden = false;
+    vmLiftAmmo(true);
+  }
+  function vmSetArt(id) {
+    if (!vm.holder) return;
+    vm.weapon = id;
+    try {
+      while (vm.holder.firstChild) vm.holder.removeChild(vm.holder.firstChild);
+      vm.holder.append(weaponArt(id, VM_W));
+    } catch (e) { /* ignore */ }
+  }
+  function vmIdle() {
+    if (!vm.node || vm.hidden) return;
+    vm.phase = 'idle'; vm.phaseUntil = 0;
+    if (vm.idle) {
+      const st = vm.idle.playState;
+      if (st === 'running') return;
+      if (st === 'paused') { try { vm.idle.play(); } catch (e) { /* ignore */ } return; }   // resumed where it left off
+      try { vm.idle.cancel(); } catch (e) { /* ignore */ }
+      state.anims.delete(vm.idle); vm.idle = null;
+    }
+    if (reducedMotion()) { try { vm.node.style.transform = VM_BASE; } catch (e) { /* ignore */ } return; }
+    try {
+      vm.idle = trackAnim(vm.node.animate([
+        { transform: 'translate(0px, -3px) rotate(1.2deg)' },
+        { transform: 'translate(0px, 3px) rotate(-1.2deg)' },
+        { transform: 'translate(0px, -3px) rotate(1.2deg)' }
+      ], { duration: 2600, iterations: Infinity, easing: 'ease-in-out' }));
+    } catch (e) { vm.idle = null; }
+  }
+  /* A one-shot runs ON TOP of the bob (see vmCancelShot) and ends with fill: 'none', so the base pose is never
+   * left filled in. The phase is restored by a tracked timer AND, independently, by viewmodelPhase()'s
+   * deadline — the animation's own `finish` event is not usable, because it never arrives when the animation
+   * is cancelled by the next one. */
+  function vmPlay(frames, ms, easing, phase) {
+    if (!vm.node || vm.hidden) return 0;
+    const seq = ++vm.seq;
+    vmCancelShot();
+    /* The bob is PAUSED, not cancelled, for the length of the one-shot: the weapon then comes back to exactly
+     * the pose it left (the bob's sine does not keep advancing underneath), and a 200 ms recoil cannot smuggle
+     * in 5 px of unrelated drift. */
+    if (vm.idle && vm.idle.playState === 'running') { try { vm.idle.pause(); } catch (e) { /* ignore */ } }
+    /* VM_SETTLE: the bob is resumed a beat AFTER the one-shot's last frame, never on the same tick. A caller
+     * that polls for 'idle' then always samples a weapon the bob is driving again, instead of catching the
+     * single frame where the finished one-shot still pins it to the base pose. */
+    const dur = Math.max(1, ms), tail = dur + VM_SETTLE;
+    vm.phase = phase; vm.phaseUntil = now() + tail;
+    try { vm.shot = trackAnim(vm.node.animate(frames, { duration: dur, easing: easing || 'ease-out', fill: 'none' })); } catch (e) { vm.shot = null; }
+    untrack(vm.timer);
+    vm.timer = later(() => { vm.timer = 0; if (vm.seq === seq && vm.node) { vm.shot = null; vmIdle(); } }, tail);
+    return seq;
+  }
+  /* 꺼내기 (§2.1): the swap reads as holster → draw inside ONE swapMs window, because swapMs is also exactly how
+   * long firing is blocked — a draw that outlasted the block would leave the player shooting an invisible gun.
+   * With nothing in hand yet (first mount) the whole window is the draw. */
+  function vmDraw(id, ms) {
+    if (!vm.node) return;
+    vm.want = id;
+    const amp = vmAmp();
+    const down = 'translate(0px, ' + px(90 * amp) + ') rotate(' + (-18 * amp).toFixed(2) + 'deg)';
+    const had = !!vm.weapon;
+    const total = Math.max(60, ms || swapMsOf(id));
+    const f = had ? 0.45 : 0;   // holster for the first 45 % of the swap, draw for the rest (nothing in hand: all draw)
+    /* ONE animation with fill: 'none' for the whole swap. An earlier version ran the holster as its own
+     * fill: 'forwards' animation and relied on a timer to start the draw — and a timer that was cleared out
+     * from under it (restore() clears every tracked timer) left the weapon filled off the bottom of the
+     * screen for good. Nothing here depends on a timer for correctness any more; the art swap below is the
+     * only timed part, and vmSync() repairs that on the next HUD update. */
+    const frames = f > 0
+      ? [{ transform: VM_BASE, easing: 'cubic-bezier(.4,0,1,1)', offset: 0 },
+         { transform: down, easing: 'cubic-bezier(.35,0,.2,1)', offset: f },
+         { transform: VM_BASE, offset: 1 }]
+      : [{ transform: down, easing: 'cubic-bezier(.35,0,.2,1)', offset: 0 },
+         { transform: VM_BASE, offset: 1 }];
+    const seq = vmPlay(frames, total, 'linear', 'draw');
+    if (!seq) { vmSetArt(id); return; }   // hidden: no animation to run, just put the new weapon in hand
+    if (f > 0) later(() => { if (vm.seq === seq) vmSetArt(id); }, total * f);
+    else vmSetArt(id);
+  }
+  /* 사격 반동 / 근접 휘두르기 (§2.1). Melee weapons swing across the screen instead of kicking back, so a hammer
+   * blow and a pistol shot can never be confused at a glance. */
+  function vmFire(id) {
+    if (!vm.node || vm.hidden) return;
+    const busy = viewmodelPhase();   // not vm.phase: an expired one-shot must not keep swallowing shots
+    if (busy === 'draw' || busy === 'reload') return;
+    const t = now();
+    if (t - vm.lastFireAt < 60) return;   // sustained fire: one kick per 60 ms, not one per 50 ms tick
+    vm.lastFireAt = t;
+    const W = WEAPONS[id || state.weapon];
+    const amp = vmAmp();
+    if (isMelee(id)) {
+      const a = 55 * amp, d = 70 * amp;
+      vmPlay([
+        { transform: VM_BASE },
+        { transform: 'rotate(' + (-a).toFixed(1) + 'deg) translateX(' + px(-d) + ')', offset: 0.45 },
+        { transform: VM_BASE }
+      ], 220, 'ease-in-out', 'fire');
+      return;
+    }
+    const r = (W && W.recoil > 0 ? W.recoil : 1) * amp;
+    vmPlay([
+      { transform: VM_BASE },
+      { transform: 'translate(' + px(10 * r) + ', ' + px(-14 * r) + ') rotate(' + (-7 * r).toFixed(1) + 'deg)', offset: 0.35 },
+      { transform: VM_BASE }
+    ], 200, 'ease-out', 'fire');
+  }
+  /* 재장전 (§2.1): tilt down for the first fifth, hold while the magazine falls and a fresh one rises, come back
+   * up for the last fifth — three segments stretched across whatever reloadMs the weapon has. */
+  function vmReload(ms) {
+    if (!vm.node || vm.hidden) return;
+    const total = Math.max(120, ms || 600), amp = vmAmp();
+    const tilt = 'translate(0px, ' + px(14 * amp) + ') rotate(' + (45 * amp).toFixed(1) + 'deg)';
+    const seq = vmPlay([
+      { transform: VM_BASE, offset: 0 },
+      { transform: tilt, offset: 0.2 },
+      { transform: tilt, offset: 0.8 },
+      { transform: VM_BASE, offset: 1 }
+    ], total, 'ease-in-out', 'reload');
+    if (!seq || reducedMotion()) return;
+    vmDropMag();
+    const m = mk('div', 'crs-viewmodel-mag');
+    m.style.transform = 'translate(0px, 0px)';
+    vm.node.append(m);
+    vm.mag = m;
+    try {
+      trackAnim(m.animate([
+        { transform: 'translate(0px, 0px)', opacity: 1, offset: 0 },
+        { transform: 'translate(0px, 0px)', opacity: 1, offset: 0.2 },
+        { transform: 'translate(-6px, 70px)', opacity: 0, offset: 0.5 },
+        { transform: 'translate(0px, 70px)', opacity: 0, offset: 0.62 },
+        { transform: 'translate(0px, 0px)', opacity: 1, offset: 0.85 },
+        { transform: 'translate(0px, 0px)', opacity: 1, offset: 1 }
+      ], { duration: total, easing: 'ease-in-out', fill: 'none' }));
+    } catch (e) { /* ignore */ }
+    later(() => { if (vm.mag === m) vmDropMag(); }, total + 60);
+  }
+  /* 빈 탄창 격발 (§2.1): two short sideways shakes, no phase change — the weapon is still "idle", it just refused. */
+  function vmDry() {
+    if (!vm.node || vm.hidden) return;
+    const busy = viewmodelPhase();
+    if (busy === 'draw' || busy === 'reload') return;
+    const d = 6 * vmAmp();
+    vmPlay([
+      { transform: 'translate(0px, 0px) rotate(0deg)' },
+      { transform: 'translate(' + px(-d) + ', 0px) rotate(0deg)' },
+      { transform: 'translate(' + px(d) + ', 0px) rotate(0deg)' },
+      { transform: 'translate(' + px(-d * 0.6) + ', 0px) rotate(0deg)' },
+      { transform: 'translate(0px, 0px) rotate(0deg)' }
+    ], 120, 'linear', busy === 'fire' ? 'fire' : 'idle');
+  }
+  /* 조준 / KO (§2.1): fade out, and while hidden every other animation is skipped so nothing runs unseen. */
+  function vmVisibility() {
+    if (!vm.node) return;
+    const want = vmWantVisible(), hidden = !want;
+    if (hidden === vm.hidden) {
+      // Self-heal: the inline opacity is the resting value the fade lands on, so it must always agree with
+      // the state even if an earlier fade was cancelled midway.
+      try { const o = hidden ? '0' : '1'; if (vm.node.style.opacity !== o) vm.node.style.opacity = o; } catch (e) { /* ignore */ }
+      return;
+    }
+    vm.hidden = hidden;
+    const ms = state.ko ? 150 : 120;
+    untrack(vm.timer); vm.timer = 0;
+    vmCancel();        // drops the bob AND any one-shot, and forgets both handles so vmIdle() can rebuild
+    vmDropMag();
+    vm.phase = hidden ? 'hidden' : 'idle'; vm.phaseUntil = 0;
+    try {
+      vm.node.style.transform = VM_BASE;
+      vm.node.style.opacity = hidden ? '0' : '1';
+      trackAnim(vm.node.animate([{ opacity: hidden ? 1 : 0 }, { opacity: hidden ? 0 : 1 }], { duration: ms, easing: 'ease-out', fill: 'none' }));
+    } catch (e) { /* ignore */ }
+    if (!hidden) vmIdle();
+  }
+  /* The one entry point: creates / destroys the layer per the option, keeps the art on the weapon in hand and
+   * fires the draw whenever setWeapon() opened a swap window. Called from updateHud() (wrapped below), so a
+   * weapon change, a restore and a KO all reach it without src/45-hud.js or src/99-api.js knowing about it. */
+  function vmSync() {
+    if (!vmEnabled()) { if (vm.node) clearViewmodel(); return; }
+    if (!vm.node || !vm.node.isConnected) { clearViewmodel(); buildViewmodel(); }
+    vmLiftAmmo(true);
+    vmVisibility();
+    /* `vm.want` is the weapon the swap is FOR; `vm.weapon` is the art actually on screen, which the draw only
+     * swaps at its midpoint. Keeping them apart means a reload or a shot that lands mid-draw (emptying a
+     * magazine during the swap window, say) is not undone by the next updateHud() restarting the draw. */
+    const id = state.weapon;
+    if (vm.want !== id) {
+      vm.want = id;
+      const left = state.swapUntil - now();
+      if (left > 30 && !vm.hidden && viewmodelPhase() !== 'reload') vmDraw(id, Math.min(left, swapMsOf(id)));
+      else { vmSetArt(id); if (!vm.hidden && !vm.timer) vmIdle(); }
+    } else if (vm.weapon !== id && viewmodelPhase() !== 'draw') vmSetArt(id);   // a pre-empted draw: put the right art up
+    if (!vm.hidden && !vm.idle && viewmodelPhase() === 'idle') vmIdle();   // self-heal: the bob is always running at rest
+  }
+  function ensureViewmodel() { try { vmSync(); } catch (e) { /* ignore */ } }
+
+  /* ── v1.5: options (weaponArt / viewmodel) ────────────────────────────────
+   * There is no options page in this build yet (spec B2), so the two switches
+   * live in chrome.storage.sync beside crsWeapon / crsMuted and are reachable
+   * through api.setOption(). Read once per activation, from this module, so
+   * loadPrefs() in src/99-api.js stays untouched. */
+  function applyWeaponOpts() {
+    try { syncWeaponArt(); } catch (e) { /* ignore */ }
+    ensureViewmodel();
+  }
+  function loadWeaponOpts() {
+    if (wpnOpts.loaded) return;
+    wpnOpts.loaded = true;
+    safeThen(() => chrome.storage.sync.get(['crsWeaponArt', 'crsViewmodel']), (res) => {
+      if (!res || !state.active) return;
+      if (WEAPON_ART_MODES.includes(res.crsWeaponArt)) wpnOpts.weaponArt = res.crsWeaponArt;
+      if (typeof res.crsViewmodel === 'boolean') wpnOpts.viewmodel = res.crsViewmodel;
+      applyWeaponOpts();
+    });
+  }
+  function setWeaponOption(name, value) {
+    if (name === 'weaponArt') {
+      if (!WEAPON_ART_MODES.includes(value)) return false;
+      wpnOpts.weaponArt = value;
+      safe(() => chrome.storage.sync.set({ crsWeaponArt: value }));
+    } else if (name === 'viewmodel') {
+      wpnOpts.viewmodel = !!value;
+      safe(() => chrome.storage.sync.set({ crsViewmodel: wpnOpts.viewmodel }));
+    } else return false;
+    applyWeaponOpts();
+    return true;
+  }
+  function weaponOptions() { return { weaponArt: wpnOpts.weaponArt, viewmodel: wpnOpts.viewmodel }; }
+  /* debug.vmInfo(): the viewmodel's own bookkeeping, for diagnosing a viewmodel that is on screen but not
+   * moving. A function, so api.debug's flag-copying helpers skip it. */
+  debug.vmInfo = () => ({
+    phase: vm.phase, reported: viewmodelPhase(), left: Math.round(vm.phaseUntil - now()),
+    weapon: vm.weapon, want: vm.want, hidden: vm.hidden, connected: !!(vm.node && vm.node.isConnected),
+    idle: !!vm.idle, idleState: vm.idle ? vm.idle.playState : null, shot: vm.shot ? vm.shot.playState : null,
+    anims: vm.node ? vm.node.getAnimations().length : -1, reduced: reducedMotion(),
+    opacity: vm.node ? vm.node.style.opacity : null, enabled: vmEnabled(), opts: weaponOptions()
+  });
+
+  /* ── v1.5: the two HUD hooks ──────────────────────────────────────────────
+   * src/45-hud.js belongs to no single v1.5 workstream, so instead of editing
+   * updateHud() this wraps its binding: the generated bundle is one function
+   * scope, and a function declaration's binding is writable. The art refresh is
+   * signature-gated because updateHud() also runs once per frame on hot paths. */
+  const updateHudBase = updateHud;
+  updateHud = function () {
+    updateHudBase();
+    try {
+      const sig = state.weapon + '|' + state.loadout.join(',') + '|' + wpnOpts.weaponArt;
+      if (hudEls.artSig !== sig) { hudEls.artSig = sig; syncWeaponArt(); }
+    } catch (e) { /* ignore */ }
+    ensureViewmodel();
+    loadWeaponOpts();
+  };
 
 // ── 50-target.js ──
   /* ===================================================================== */
@@ -1946,12 +2516,143 @@
   /* ===================================================================== */
   /* 12. Weapons (v1.1): damage roll, hit feedback, the nine fire() entries, actions   */
   /* ===================================================================== */
-  function rollCrit() { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < 0.1); }
-  function rollSniperCrit(scoped) { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < (scoped ? 0.25 : 0.1)); }   // 헤드샷 (v1.2 §2)
-  function rollDamage(base, crit) { return Math.max(1, Math.round(base * (crit ? 2 : 1))); }   // v1.3 §1: the power multiplier is gone
+
+  /* ── v1.5 §3: per-weapon stats ─────────────────────────────────────────────
+   * Merged INTO the WEAPONS table rather than written into 00-prelude.js, so the
+   * one-line-per-weapon table there stays exactly as it was. Every value below is
+   * read by real play code — nothing here is decoration:
+   *   swapMs    draw time; firing is blocked for it (replaces the flat SWAP_MS)
+   *   recoil    viewmodel kick AND the aim punch added to the next shot's spread
+   *   bloom     px of spread added per sustained shot (cap bloom × 10)
+   *   critChance   replaces the old flat 10 % (`critChanceScoped`: sniper ADS)
+   *   knockback    debris velocity multiplier (velocityFor)
+   *   moveSpeed    drone movement multiplier — NO drone avatar exists in this
+   *                build, so it is carried and reported but not yet wired (see
+   *                scratchpad/v15-handoff.md)
+   *   falloff   damage × (1 − falloff × min(dist, 900) / 900) from the aim origin
+   *   pierce    extra elements hit down the same stack, ×0.6 damage per layer
+   *   aoeIgnoresCover   blasts sample by radius, so depth never shields (§10.3)
+   * Melee-ness is NOT a new field: `kind === 'hammer'` already means hammer / axe
+   * / sword, and that is what the viewmodel swing and the no-spread rule read. */
+  /* 붕괴's pierce is "전부" (all). A sentinel integer, not Infinity: Infinity does not survive the structured
+   * clone / JSON hop that api.weapons() takes to reach an extension page or a test harness. */
+  const PIERCE_ALL = 999;
+  const WEAPON_STATS = {
+    hammer:   { swapMs: 220, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 1.00, falloff: 0,    pierce: 0 },
+    pistol:   { swapMs: 150, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.10, falloff: 0.25, pierce: 0 },
+    smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40, pierce: 0 },
+    sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.75, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
+    axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0,    pierce: 0 },
+    sword:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
+    bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
+    rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
+    flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55, pierce: 0 },
+    collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0,    pierce: PIERCE_ALL, aoeIgnoresCover: true }
+  };
+  for (const id of WEAPON_IDS) Object.assign(WEAPONS[id], WEAPON_STATS[id]);
+  /* v1.5 §4: three more determinism switches. noBloom / noRecoil are the two halves of noSpread that a test may
+   * want to disable separately; noFalloff is independent of all three — noSpread is about WHERE a shot lands,
+   * falloff about how much it hurts once it has landed, so disabling one must not silently disable the other. */
+  Object.assign(debug, { noFalloff: false, noBloom: false, noRecoil: false });
+
+  function isMelee(id) { const W = WEAPONS[id || state.weapon]; return !!(W && W.kind === 'hammer'); }
+  function swapMsOf(id) { const W = WEAPONS[id]; return (W && W.swapMs > 0) ? W.swapMs : SWAP_MS; }
+  function critChanceOf(id, scoped) {
+    const W = WEAPONS[id] || WEAPONS[state.weapon];
+    if (!W) return 0.1;
+    if (scoped && W.critChanceScoped != null) return W.critChanceScoped;
+    return W.critChance == null ? 0.1 : W.critChance;
+  }
+  /* v1.5 §3: the flat 10 % is gone — every weapon rolls its own critChance. `id` defaults to the weapon in hand,
+   * which is what every caller means (a hold window, an AoE plan and a slash all belong to the current weapon). */
+  function rollCrit(id) { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < critChanceOf(id || state.weapon, false)); }
+  function rollSniperCrit(scoped) { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < critChanceOf('sniper', scoped)); }   // 헤드샷 (v1.2 §2, v1.5 §3)
+  /* v1.3 §1: the power multiplier is gone. v1.5 §3: `mul` carries distance falloff and pierce attenuation. */
+  function rollDamage(base, crit, mul) { return Math.max(1, Math.round(base * (crit ? 2 : 1) * (mul == null ? 1 : mul))); }
   function reducedMotion() { try { return win.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
   function weaponBtn(id) { return (hudEls.weaponBtns && hudEls.weaponBtns[id]) || null; }
   function willBreak(el, dmg) { if (!el) return false; const r = state.hp.get(el); return (r ? r.hp : hpMax(el)) - dmg <= 0; }
+
+  /* ── v1.5 §3.2: recoil kick + bloom, one timer-free ledger ─────────────────
+   * Both decay purely as a function of (now − lastShotAt), so there is nothing to
+   * tick, nothing to cancel on deactivate and nothing to drift: `aim.kick` /
+   * `aim.bloom` are the values AT `aim.at`, and every read extrapolates. */
+  const aim = { at: 0, kick: 0, bloom: 0 };
+  function resetAim() { aim.at = 0; aim.kick = 0; aim.bloom = 0; }
+  function recoilKickNow(t) {
+    if (!aim.at || debug.noSpread || debug.noRecoil) return 0;
+    return aim.kick * (1 - clamp((t - aim.at) / 250, 0, 1));
+  }
+  function bloomNow(t) {
+    if (!aim.at || debug.noSpread || debug.noBloom) return 0;
+    const idle = (t - aim.at) - 400;            // 0.4 s of quiet before recovery starts
+    return idle <= 0 ? aim.bloom : Math.max(0, aim.bloom - 40 * idle / 1000);   // then 40 px/s
+  }
+  /* Called by each hitscan shot AFTER its aim point was computed: this shot's kick lands on the NEXT one. */
+  function noteShot(id) {
+    const W = WEAPONS[id] || WEAPONS[state.weapon];
+    if (!W) return;
+    const t = now(), b = W.bloom || 0;
+    aim.bloom = Math.min(b * 10, bloomNow(t) + b);
+    aim.kick = (W.recoil || 0) * 6;
+    aim.at = t;
+  }
+  /* spreadPx = (weapon.spread || 0) + recoilKick + bloomNow. Zero while the sniper is scoped (v1.2 A4 keeps
+   * ADS exact) and zero under debug.noSpread. */
+  function spreadNow(id) {
+    const W = WEAPONS[id || state.weapon];
+    if (!W || debug.noSpread) return 0;
+    if (W.scope && state.scoped) return 0;
+    const t = now();
+    return (W.spread || 0) + recoilKickNow(t) + bloomNow(t);
+  }
+  /* Box–Muller, one sample. Guarded against u === 0 (log(0) → −Infinity). */
+  function gauss(sd) {
+    if (!(sd > 0)) return 0;
+    let u = Math.random();
+    if (u < 1e-9) u = 1e-9;
+    return sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+  }
+  /* NOTE: named shotPoint, not aimPoint — src/91-combat-feedback.js already declares an aimPoint() in this
+   * same (concatenated) function scope, and the later declaration would silently win. */
+  function shotPoint(x, y, id) {
+    const s = spreadNow(id);
+    if (!(s > 0)) return { x, y };
+    return { x: clamp(x + gauss(s), 0, viewW()), y: clamp(y + gauss(s), 0, viewH()) };
+  }
+
+  /* ── v1.5 §3: distance falloff ─────────────────────────────────────────────
+   * Origin = the screen centre, or the survival drone once one exists (the other
+   * v1.5 workstream owns the avatar; `state.drone` is simply absent here, and the
+   * guard below starts working the day it lands). */
+  function aimOrigin() {
+    const d = state.drone;
+    if (d && isFinite(d.x) && isFinite(d.y)) return { x: d.x, y: d.y };
+    return { x: viewW() / 2, y: viewH() / 2 };
+  }
+  function falloffMul(id, x, y) {
+    const W = WEAPONS[id || state.weapon];
+    const f = W ? (W.falloff || 0) : 0;
+    if (!(f > 0) || debug.noFalloff) return 1;
+    const o = aimOrigin();
+    return 1 - f * Math.min(Math.hypot(x - o.x, y - o.y), 900) / 900;
+  }
+
+  /* ── v1.5 §3: knockback ────────────────────────────────────────────────────
+   * velocityFor() lives in src/65-pieces.js, which this workstream does not own,
+   * so the multiplier is applied by wrapping the binding here instead of editing
+   * it there. Every producer of debris — breakElement, word splitting, bullet
+   * chips — goes through this one function, so one wrapper covers them all.
+   * Spin scales at half rate: a rocket that throws debris twice as far should not
+   * also make it spin twice as fast, or the pieces read as confetti. */
+  const velocityForBase = velocityFor;
+  velocityFor = function (mode, ix, iy, cx, cy, opts) {
+    const v = velocityForBase(mode, ix, iy, cx, cy, opts);
+    const W = WEAPONS[state.weapon];
+    const k = (W && W.knockback > 0) ? W.knockback : 1;
+    if (k !== 1) { v.vx *= k; v.vy *= k; v.vr *= 1 + (k - 1) * 0.5; }
+    return v;
+  };
 
 // ── 73-hit-resolution.js ──
 // ── hit resolution: floating damage numbers (v1.3 §3.5: opts.size), hit tint, hold-window aggregation, applyHit, bullet chips, AoE candidates/falloff ──
@@ -2078,7 +2779,7 @@
     if (w && t - w.at >= HOLD_WINDOW) { flushWindow(el, w); w = null; }
     if (!w) {
       const rec = hpOf(el);
-      const crit = rollCrit();
+      const crit = rollCrit();   // v1.5 §3: defaults to the weapon in hand — a hold window always belongs to it
       if (crit) { state.crits++; sfx('crit', { gain: 0.7 }); }   // one audible cue per crit window (A4); the per-tick gun sound stays plain
       rec.side = rec.side === 1 ? -1 : 1;
       w = { el, at: t, sum: 0, crit, side: rec.side, node: null };
@@ -2163,18 +2864,26 @@
    * drop its descendants AND its ancestors (the centre is the only candidate on its chain, exactly as v1
    * bombCandidates — where the blast point itself fed the ancestor filter), then the v1 ancestor filter over the
    * remaining samples; sort by edge distance, keep maxTargets. */
-  function aoeCandidates(x, y, R, maxTargets, rings) {
+  function aoeCandidates(x, y, R, maxTargets, rings, ignoreCover) {
     const seen = new Set(), list = [], cache = new Map();
     const centre = pickTarget(x, y, cache);
     const vw = viewW(), vh = viewH();
+    /* v1.5 / combat-v2 §10.3-3: `aoeIgnoresCover` weapons sample THROUGH the topmost element at each probe,
+     * so an element hiding behind a card is still inside the blast. The ancestor / descendant rules below are
+     * unchanged, so the centre's own container still never becomes a candidate (A7). */
+    const add = (el) => {
+      if (!el || el === centre || seen.has(el)) return;
+      if (centre && (centre.contains(el) || el.contains(centre))) return;
+      seen.add(el); list.push(el);
+    };
+    if (ignoreCover) for (const b of pierceTargets(x, y, centre, 2)) add(b);
     for (const r of rings) {
       for (let k = 0; k < 8; k++) {
         const a = k * Math.PI / 4, pxv = x + Math.cos(a) * r, pyv = y + Math.sin(a) * r;
         if (pxv < 0 || pyv < 0 || pxv > vw || pyv > vh) continue;
         const el = pickTarget(pxv, pyv, cache);
-        if (!el || el === centre || seen.has(el)) continue;
-        if (centre && (centre.contains(el) || el.contains(centre))) continue;
-        seen.add(el); list.push(el);
+        add(el);
+        if (ignoreCover) for (const b of pierceTargets(pxv, pyv, el, 2)) add(b);
       }
     }
     const filtered = list.filter((el) => !list.some((o) => o !== el && el.contains(o)));
@@ -2191,14 +2900,98 @@
   /* Falloff damage round(centre · (1 − 0.73·t)), t = edgeDist / R → centre 100 %, edge 27 %; stagger edgeDist / 4 ms. */
   function aoeHit(x, y, W) {
     const R = W.radius;
-    const cands = aoeCandidates(x, y, R, W.maxTargets, W.rings);
-    const plan = cands.map((c, i) => { const crit = rollCrit(); return { c, i, crit, dmg: rollDamage(Math.round(W.damage * (1 - 0.73 * clamp(c.d / R, 0, 1))), crit) }; });
+    const cands = aoeCandidates(x, y, R, W.maxTargets, W.rings, !!W.aoeIgnoresCover);
+    const plan = cands.map((c, i) => { const crit = rollCrit(W.id); return { c, i, crit, dmg: rollDamage(Math.round(W.damage * (1 - 0.73 * clamp(c.d / R, 0, 1))), crit) }; });   // v1.5 §3: the blast rolls the WEAPON's critChance
     if (plan.some((p) => p.crit)) sfx('crit', { gain: 0.9 });   // the blast sound has already played; add the ×1.5 sparkle once (A4)
     for (const { c, i, crit, dmg } of plan) {
       const fire = () => { if (state.active && c.el.isConnected) applyHit(c.el, dmg, 'bomb', x, y, { textSplit: i === 0, aoe: true, crit, radius: R, toward: { x, y } }); scheduleHud(); };
       const delay = c.d / 4;
       if (delay < 1) fire(); else later(fire, delay);
     }
+  }
+
+  /* ── v1.5 §3 / SPEC-combat-v2 §10.3-2: pierce ─────────────────────────────
+   * A hitscan weapon with `pierce` > 0 keeps going after the front-most target:
+   * it walks the SAME element stack down, hits up to `pierce` further qualifying
+   * elements and attenuates by ×0.6 per layer (60 %, 36 %). Anything on the
+   * chain already hit — the front target, its ancestors, its descendants — is
+   * skipped, so one card never takes two helpings of the same bullet. */
+  function piercedAlready(el, hit) {
+    for (const o of hit) {
+      if (o === el) return true;
+      try { if (o.contains(el) || el.contains(o)) return true; } catch (e) { return true; }
+    }
+    return false;
+  }
+  /* pickTarget()'s own walk-up rules, applied to one raw elementsFromPoint candidate: promote past boxes too
+   * small to aim at and past inline wrappers, and let a hostile component answer for its descendants. Kept
+   * here rather than in src/50-target.js (another workstream's file) — the rules are the same five lines. */
+  function normaliseBehind(el, hit) {
+    const mag = scopeMag(), mag2 = mag * mag;
+    const body = doc.body;
+    for (let guard = 0; guard < 40 && el; guard++) {
+      const p = parentOf(el);
+      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
+      const r = rectOf(el); if (!r) break;
+      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
+      const s = gcs(el);
+      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) { el = p; continue; }
+      break;
+    }
+    if (!el || el === doc.body || el === docEl) return null;
+    if (state.hostiles.size) { for (const h of state.hostiles.keys()) { if (h !== el && h.contains(el) && !piercedAlready(h, hit)) { el = h; break; } } }
+    const r = rectOf(el);
+    if (!r || r.width * r.height > 0.8 * viewW() * viewH() * mag2) return null;
+    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
+    return piercedAlready(el, hit) ? null : el;
+  }
+  function pierceTargets(x, y, front, n) {
+    const out = [], hit = front ? [front] : [];
+    if (!(n > 0)) return out;
+    let list;
+    try { list = doc.elementsFromPoint(x, y); } catch (e) { return out; }
+    const env = { vw: viewW(), vh: viewH(), op: new Map() };
+    for (const c of list) {
+      if (out.length >= n) break;
+      if (!visibleCandidate(c, env) || isOverlay(c, env)) continue;
+      if (piercedAlready(c, hit)) continue;
+      const el = normaliseBehind(c, hit);
+      if (!el) continue;
+      out.push(el); hit.push(el);
+    }
+    return out;
+  }
+  /* A thin white line across each pierced element for 0.2 s — without it the extra damage is invisible. */
+  function pierceMark(el, y) {
+    if (!root) return;
+    const r = rectOf(el);
+    if (!r || r.width < 2) return;
+    const n = mk('div', 'crs-pierce');
+    n.style.left = px(r.left + 4);
+    n.style.top = px(clamp(y, r.top + 1, r.bottom - 1) - 1);
+    n.style.width = px(Math.max(8, r.width - 8));
+    root.append(n);
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+    try { const a = trackAnim(n.animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 200, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+    later(kill, 600);
+  }
+  /* Called by a hitscan fire() right after its own applyHit. `front` may be null (the shot missed everything
+   * pickable) — the layers behind are still eligible, which is what makes pierce feel like a through-shot. */
+  function applyPierce(x, y, front, kind, id) {
+    const W = WEAPONS[id];
+    if (!W || !(W.pierce > 0)) return 0;
+    const n = Math.min(W.pierce, 8);   // `전부` (collapse) is a sentinel, not a reason to walk a whole page
+    const targets = pierceTargets(x, y, front, n);
+    const fall = falloffMul(id, x, y);
+    let k = 0;
+    for (const el of targets) {
+      k++;
+      const crit = rollCrit(id);
+      const dmg = rollDamage(W.damage, crit, Math.pow(0.6, k) * fall);
+      pierceMark(el, y);
+      applyHit(el, dmg, kind, x, y, { crit, pierce: k });
+    }
+    return k;
   }
 
 // ── 76-weapon-fire.js ──
@@ -2208,8 +3001,8 @@
     state.shots++;
     if (interceptOrb(x, y)) return null;   // v1.2 A9: an orb within 18 px absorbs the blow, the page is untouched
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
-    const dmg = rollDamage(WEAPONS.hammer.damage, crit);
+    const crit = el ? rollCrit('hammer') : false;
+    const dmg = rollDamage(WEAPONS.hammer.damage, crit, falloffMul('hammer', x, y));
     sfx(!el || willBreak(el, dmg) ? 'hammer' : 'thump', { crit });   // thump only when merely dented (A24)
     flash(x, y, 'hammer'); shake('hammer', { amp: crit ? 8.4 : 6 });
     drawCrack(x, y, 'hammer', { ink: 1 });
@@ -2218,15 +3011,21 @@
   }
   function firePistol(x, y) {
     state.shots++;
+    // v1.5 §3.2: the aim point is shaken by spread + the previous shot's recoil kick + bloom, then this shot's
+    // own kick is recorded for the next one. §3: damage falls off with distance from the aim origin.
+    const p = shotPoint(x, y, 'pistol');
+    x = p.x; y = p.y;
+    noteShot('pistol');
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
-    const dmg = rollDamage(WEAPONS.pistol.damage, crit);
+    const crit = el ? rollCrit('pistol') : false;
+    const dmg = rollDamage(WEAPONS.pistol.damage, crit, falloffMul('pistol', x, y));
     sfx('gun', { crit });
     flash(x, y, 'gun'); shake('gun', { amp: crit ? 2.8 : 2 });
     drawCrack(x, y, 'gun', { ink: 0.25 });
     spawnChips(x, y, randInt(3, 5));
     if (el) applyHit(el, dmg, 'gun', x, y, { crit });
+    applyPierce(x, y, el, 'gun', 'pistol');
     return el;
   }
   function fireSmg(x, y, c) {
@@ -2234,12 +3033,15 @@
     const h = (c && c.hold && c.h) || null;
     const n = h ? h.tick : 1;
     x += rand(-9, 9); y += rand(-9, 9);
+    const sp = shotPoint(x, y, 'smg');   // v1.5 §3.2: recoil kick + bloom on top of the mechanical ±9 px
+    x = sp.x; y = sp.y;
+    noteShot('smg');
     if (interceptOrb(x, y)) return null;   // v1.2 A9: the tick is consumed by the orb
     const el = pickTarget(x, y, h ? h.cache : undefined);
     let dmg = 0, crit = false, win = null;
     if (el) {
-      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit();
-      dmg = rollDamage(WEAPONS.smg.damage, crit);
+      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('smg');
+      dmg = rollDamage(WEAPONS.smg.damage, crit, falloffMul('smg', x, y));
     }
     if (!h || n % 2 === 1) sfx('gun', { gain: 0.6, crit: !h && crit });   // one sound per 2 shots; a hold window's crit cue comes from holdWindow()
     flash(x, y, 'gun', { size: 32, dur: 100 });
@@ -2252,7 +3054,7 @@
     state.shots++;
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
+    const crit = el ? rollCrit('axe') : false;
     const dmg = rollDamage(WEAPONS.axe.damage, crit);
     sfx(!el || willBreak(el, dmg) ? 'hammer' : 'thump', { crit, pitch: 0.75, gain: 1.15 });
     flash(x, y, 'hammer', { size: 190, dur: 300 }); shake('hammer', { amp: crit ? 9.8 : 7 });
@@ -2265,7 +3067,7 @@
     state.shots++;
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
+    const crit = el ? rollCrit('sword') : false;
     const dmg = rollDamage(WEAPONS.sword.damage, crit);
     sfx('swish', { crit });
     flash(x, y, 'hammer', { size: 90, dur: 200 }); shake('hammer', { amp: crit ? 4.2 : 3 });
@@ -2322,7 +3124,7 @@
     }
     interceptOrbsAlong(x1, y1, x2, y2, 18);   // v1.2 A9: orbs within 18 px of the segment pop; the page is still hit
     // roll every element's crit before any sound / effect (A4) so the swish can carry the crit sparkle
-    const plan = hits.map((el) => { const crit = rollCrit(); return { el, crit, dmg: rollDamage(WEAPONS.sword.damage, crit) }; });
+    const plan = hits.map((el) => { const crit = rollCrit('sword'); return { el, crit, dmg: rollDamage(WEAPONS.sword.damage, crit) }; });
     sfx('swish', { crit: plan.some((p) => p.crit) });
     slashFx(x1, y1, x2, y2);
     drawSlash(x1, y1, x2, y2);
@@ -2405,12 +3207,15 @@
     state.shots++;
     const h = (c && c.hold && c.h) || null;
     const n = h ? h.tick : 1;
+    const fp = shotPoint(x, y, 'flame');   // v1.5 §3.2: bloom widens the cone the longer the trigger is held
+    x = fp.x; y = fp.y;
+    noteShot('flame');
     if (interceptOrb(x, y)) return null;   // v1.2 A9: a flame tick that intercepts is consumed
     const el = pickTarget(x, y, h ? h.cache : undefined);
     let crit = false, win = null, dmg = 0;
     if (el) {   // roll before any sound / effect (A4)
-      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit();
-      dmg = rollDamage(WEAPONS.flame.damage, crit);
+      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('flame');
+      dmg = rollDamage(WEAPONS.flame.damage, crit, falloffMul('flame', x, y));
     }
     spawnFire(x, y, 2);
     if (!h || n % 4 === 0) { scorchDab(x, y, 24, 0.08); state.scorch++; }   // the glass blackens over time; no crack (A3/A9)
@@ -2525,6 +3330,7 @@
     swingCursor();
     let out = null;
     try { out = run(); } catch (e) { state.lastError = String((e && e.stack) || e); }
+    vmFire(id);   // ── v1.5 §2.1: recoil (guns) or the melee swing — only for an attack that was NOT rejected ──
     flushPendingReload();   // A5: the emptying round reloads right after it was fired (A4: scoped shots stay exact)
     updateHud();
     updateAmmoHud();
@@ -2596,6 +3402,7 @@
     h.tick++;
     let hit = null;
     try { hit = WEAPONS[h.id].fire(state.hoverX, state.hoverY, { hold: true, h }) || null; } catch (e) { state.lastError = String((e && e.stack) || e); }
+    vmFire(h.id);   // ── v1.5 §2.1: sustained fire kicks too (vmFire throttles itself to one per 60 ms) ──
     flushPendingReload();
     if (state.hold !== h) return;   // the tick itself ended the hold (deactivate from a page handler)
     for (const el of Array.from(h.tintEls)) if (el !== hit) { fadeTint(el); h.tintEls.delete(el); }
@@ -2669,12 +3476,12 @@
   function slotOf(id) { return state.loadout.indexOf(id) + 1; }
 
   /* --- ammo (A5): state.ammo[id] rounds, reserve ∞, later()-chained reload, swap delay --- */
-  function initAmmo() { state.pendingReload = null; for (const id of WEAPON_IDS) state.ammo[id] = WEAPONS[id].mag == null ? null : WEAPONS[id].mag; }
+  function initAmmo() { state.pendingReload = null; resetAim(); for (const id of WEAPON_IDS) state.ammo[id] = WEAPONS[id].mag == null ? null : WEAPONS[id].mag; }   // v1.5 §3.2: recoil kick / bloom reset with the magazines
   function isReloading(id) { return !!(state.reload && state.reload.id === id); }
   function swapActive() { return !debug.noCooldown && now() < state.swapUntil; }
   function emptyClick() {   // at most once per 300 ms
     const t = now();
-    if (t - state.lastEmptyAt >= 300) { state.lastEmptyAt = t; sfx('empty'); }
+    if (t - state.lastEmptyAt >= 300) { state.lastEmptyAt = t; sfx('empty'); vmDry(); }   // v1.5 §2.1: 빈 탄창 격발 — two short shakes
   }
   function spend(id) {
     const W = WEAPONS[id];
@@ -2702,6 +3509,7 @@
     const ms = debug.fastReload ? 30 : W.reloadMs;
     const rec = { id, startedAt: now(), ms, timer: 0, magTimer: 0 };
     state.reload = rec;
+    vmReload(ms);   // ── v1.5 §2.1: tilt down, drop the magazine, bring a fresh one up, across the whole reloadMs ──
     sfx('magout');
     rec.magTimer = later(() => { rec.magTimer = 0; if (state.reload === rec) sfx('magin'); }, Math.round(ms * 0.8));
     rec.timer = later(() => {
@@ -2756,6 +3564,7 @@
   function updateAmmoHud() {
     const a = hudEls.ammo;
     if (!a) return;
+    syncAmmoArt();   // ── v1.5 §1: the 28 px weapon picture left of the round count follows the weapon in hand ──
     try {
       const id = state.weapon, W = WEAPONS[id], size = W.mag;
       hudEls.aEmoji.textContent = W.emoji;
@@ -2841,6 +3650,7 @@
     } catch (e) { sc.magnified = false; }
     scopeStep(now());
     placeSelf();   // v1.3 §3.1: ADS drops the player ring to 20 % so it cannot cover the reticle
+    vmVisibility();   // ── v1.5 §2.1: the scope picture replaces the weapon — fade the viewmodel out ──
     scheduleAura();   // A3: every page rect just changed under the 2× transform — hostile auras must follow
     sfx('scopeIn');
     kick();
@@ -2861,7 +3671,7 @@
       } catch (e) { /* ignore */ }
     }
     sc.magnified = false; sc.saved = null;
-    if (state.active) { placeSelf(); scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras
+    if (state.active) { placeSelf(); vmVisibility(); scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras; v1.5 §2.1: the viewmodel comes back
     return true;
   }
   /* RMB (chord model) OR Shift (after its 120 ms delay) want the scope while the sniper is selected. */
@@ -2908,7 +3718,13 @@
     state.shots++;
     const scoped = state.scoped, S = WEAPONS.sniper.spread;
     let ix = x, iy = y;
-    if (!scoped && !debug.noSpread) { ix += rand(-S, S); iy += rand(-S, S); }
+    /* v1.2 A4 / v1.5 §3.2: scoped is exact; unscoped the shot is shaken by spread (25) + the last shot's
+     * recoil kick + bloom. The ±S box is kept as the hard envelope so lastShot.offset stays inside ±25. */
+    if (!scoped && !debug.noSpread) {
+      const p = shotPoint(x, y, 'sniper');
+      ix = x + clamp(p.x - x, -S, S); iy = y + clamp(p.y - y, -S, S);
+    }
+    noteShot('sniper');
     ix = clamp(ix, 0, viewW()); iy = clamp(iy, 0, viewH());
     state.lastShot = { x: ix, y: iy, offsetX: ix - x, offsetY: iy - y, scoped };   // recorded hit or miss, before interception
     if (scoped) state.scope.recoilAt = now();
@@ -2917,12 +3733,13 @@
     if (interceptOrb(ix, iy)) { sfx('sniper'); return null; }
     const el = pickTarget(ix, iy);
     const crit = el ? rollSniperCrit(scoped) : false;
-    const dmg = rollDamage(WEAPONS.sniper.damage, crit);
+    const dmg = rollDamage(WEAPONS.sniper.damage, crit, falloffMul('sniper', ix, iy));
     sfx('sniper', { crit });
     flash(ix, iy, 'gun', { size: 90, dur: 160 }); shake('gun', { amp: crit ? 8 : 6 });
     drawCrack(ix, iy, 'gun', { rays: [6, 9], len: [30, 70], ink: 0.5 });
     spawnChips(ix, iy, randInt(4, 7));
     if (el) applyHit(el, dmg, 'gun', ix, iy, { crit, headshot: true });
+    applyPierce(ix, iy, el, 'gun', 'sniper');   // v1.5 §3 / combat-v2 §10.3-2: two more layers at ×0.6, ×0.36
     return el;
   }
 
@@ -4269,7 +5086,7 @@
     state.pieces.length = 0; state.gpuSum = 0;
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -4311,9 +5128,10 @@
     if (!silent) {
       stopReload();
       scopeOff();
-      state.swapUntil = now() + SWAP_MS;
+      const swapMs = swapMsOf(id);   // v1.5 §3: per-weapon draw time replaces the flat SWAP_MS
+      state.swapUntil = now() + swapMs;
       untrack(state.swapTimer); state.swapTimer = 0;
-      if (!debug.noCooldown) state.swapTimer = later(() => { state.swapTimer = 0; updateAmmoHud(); }, SWAP_MS + 5);   // clears the 교체 중 readout
+      if (!debug.noCooldown) state.swapTimer = later(() => { state.swapTimer = 0; updateAmmoHud(); }, swapMs + 5);   // clears the 교체 중 readout
     }
     state.weapon = id;
     if (!silent) state.weaponTouched = true;
@@ -4401,6 +5219,8 @@
     if (state.auraRaf) { caf(state.auraRaf); state.auraRaf = 0; }
     state.animating = false;
     try { restore(); } catch (e) { /* ignore */ }
+    try { clearViewmodel(); } catch (e) { /* ignore */ }   // v1.5 §2: restore() rebuilt it — the infinite idle animation must not outlive deactivate
+    wpnOpts.loaded = false;                                 // v1.5: re-read weaponArt / viewmodel on the next activation
     try { scopeOff(); } catch (e) { /* ignore */ }   // belt and braces: the body transform never outlives us
     clearTimers();   // restore() re-armed the combat grace while still active; nothing may outlive deactivate
     unbindEvents();
@@ -4439,7 +5259,9 @@
       paused: state.paused, ko: state.ko, loadout: state.loadout.slice(), preset: state.preset,
       // v1.3 §5: the player marker, the "who is aiming at me" lines, and the graze counter
       selfRing: selfRingInfo(), aimlines: state.aimlines.length, nearMisses: state.nearMisses,
-      hitstop: now() < state.hitstopUntil
+      hitstop: now() < state.hitstopUntil,
+      // ── v1.5 §4: the live aim cone and what the viewmodel is doing ──
+      spreadNow: spreadNow(id), bloomNow: bloomNow(now()), viewmodel: viewmodelPhase()
     };
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
@@ -4447,7 +5269,11 @@
     return state.loadout.map((id, i) => {
       const W = WEAPONS[id];
       return { id, slot: i + 1, key: slotKey(i + 1), emoji: W.emoji, name: msg(W.name), kind: W.kind, damage: W.damage, cooldownMs: W.cooldownMs, radius: W.radius, hold: W.hold, input: W.input, label: weaponLabel(W),
-        mag: W.mag == null ? null : W.mag, reloadMs: W.reloadMs == null ? null : W.reloadMs, spread: W.spread || null, scope: !!W.scope };
+        mag: W.mag == null ? null : W.mag, reloadMs: W.reloadMs == null ? null : W.reloadMs, spread: W.spread || null, scope: !!W.scope,
+        // ── v1.5 §3.1 / §4: the per-weapon stat block (붕괴's pierce is the PIERCE_ALL sentinel) ──
+        swapMs: swapMsOf(id), recoil: W.recoil || 0, bloom: W.bloom || 0, critChance: critChanceOf(id, false),
+        knockback: W.knockback == null ? 1 : W.knockback, moveSpeed: W.moveSpeed == null ? 1 : W.moveSpeed,
+        falloff: W.falloff || 0, pierce: W.pierce || 0, aoeIgnoresCover: !!W.aoeIgnoresCover };
     });
   }
 
@@ -4476,7 +5302,9 @@
     ammo: ammoInfo, reload: reloadNow,
     loadout: () => state.loadout.slice(), setLoadout: (ids) => setLoadout(ids), applyPreset,
     scope: (on) => { if (on) scopeOn(); else scopeOff(); return state.scoped; },
-    player: playerInfo, setCombat: (v) => setCombat(v)
+    player: playerInfo, setCombat: (v) => setCombat(v),
+    // ── v1.5: the weapon picture (§1) and the two switches that have no options page yet (§1 / §2) ──
+    weaponArt: (id, size) => weaponArt(id, size), options: weaponOptions, setOption: setWeaponOption
   };
   window.__crashScreen = api;
   try {

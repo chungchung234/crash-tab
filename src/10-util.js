@@ -66,7 +66,9 @@
     toastCombatOn: '⚔️ 전투 모드: 큰 요소들이 반격해요 (H로 끄기)', toastCombatOff: '전투 모드 꺼짐', toastReload: '재장전', labelSwapping: '교체 중',
     // v1.3 (§2 / §3.4): the dodge call-out next to the player ring
     dodgeLabel: '회피!',
-    unitSec: '초'
+    unitSec: '초',
+    // v1.5 (§3.3): the two extra stats in the weapon-button tooltip
+    statCrit: '치명', statSwap: '교체'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));

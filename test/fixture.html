@@ -130,6 +130,21 @@
   <h2 class="section-title">보스 영역</h2>
   <section id="boss"><p class="boss-caption">저격총·조준경·전투 모드(레이저) 테스트용 보스 영역입니다. 약 1052 × 420 픽셀, 체력 253.</p></section>
 
+  <!-- v1.5: deliberately overlapping card pair for the SPEC-weapons §6 pierce tests (items 5/6) and the
+       SPEC-combat-v2 §10 depth-tier tests — #pierce-back is painted first (so it sits BEHIND in the same
+       stacking context, no z-index needed) and #pierce-front is offset 60px down-right, overlapping it. -->
+  <h2 class="section-title">관통 / 깊이 테스트 영역</h2>
+  <section id="pierce-stack" class="pierce-stack">
+    <div id="pierce-back" class="pierce-card pierce-card-back">
+      <h3>뒤 카드</h3>
+      <p>앞 카드에 가려진 뒤쪽 카드입니다. 관통·엄폐 테스트용.</p>
+    </div>
+    <div id="pierce-front" class="pierce-card pierce-card-front">
+      <h3>앞 카드</h3>
+      <p>뒤 카드를 가리는 앞쪽 카드입니다.</p>
+    </div>
+  </section>
+
   <footer id="nav">화면부수기 데모 · 이 영역은 링크의 목적지입니다.</footer>
 </main>
 </body>

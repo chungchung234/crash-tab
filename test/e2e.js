@@ -50,6 +50,25 @@ const PRESETS = {
 };
 const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: '저격총', axe: '도끼', sword: '검', bomb: '폭탄', rocket: '로켓', flame: '화염', collapse: '붕괴' };
 
+// v1.5 per-weapon stats (SPEC-weapons §3.1) read back from api.weapons(); sniper critChance is the
+// UNSCOPED base value (0.10 — the 0.25-while-aiming bonus is behavioural, not a static field, and is not
+// asserted here). collapse.pierce is "전부" (all) — represented as Infinity by convention; a product that
+// instead uses a large sentinel integer or the literal string 'all' is accepted (see PIERCE_ALL below).
+const SPEC_STATS = {
+  hammer:   { swapMs: 220, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 1.00, falloff: 0 },
+  pistol:   { swapMs: 150, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.10, falloff: 0.25 },
+  smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40 },
+  sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, knockback: 1.3, moveSpeed: 0.75, falloff: 0 },
+  axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0 },
+  sword:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0 },
+  bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0, aoeIgnoresCover: true },
+  rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0, aoeIgnoresCover: true },
+  flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55 },
+  collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0 },
+};
+const SPEC_PIERCE = { hammer: 0, pistol: 0, smg: 0, sniper: 2, axe: 0, sword: 0, bomb: 0, rocket: 0, flame: 0, collapse: Infinity };
+const pierceMatches = (got, want) => (want === Infinity ? (got === Infinity || got === 'all' || (typeof got === 'number' && got >= 999)) : got === want);
+
 // ---------------------------------------------------------------------------
 // puppeteer resolution
 // ---------------------------------------------------------------------------
@@ -435,6 +454,38 @@ const api = {
       cur: ((sh.querySelector('.cur') || {}).textContent || '').trim(),
     };
   }),
+  // ── v1.5: weapon art / viewmodel / pierce test helpers (SPEC-weapons §1-§4, SPEC-combat-v2 §10.3/§10.6) ──
+  // window.__crashScreen.weaponArt(id, size) → an <svg>; a DOM node cannot cross page.evaluate's JSON
+  // serialization boundary, so this extracts just what the assertions need (tag, child/path counts, a
+  // signature string of every path's "d" attribute so two weapons can be compared for distinctness).
+  weaponArtInfo: (page, id, size) => page.evaluate((i, s) => {
+    const a = window.__crashScreen;
+    if (!a || typeof a.weaponArt !== 'function') return 'missing:weaponArt';
+    let node;
+    try { node = a.weaponArt(i, s); } catch (e) { return 'threw:' + String(e && e.message || e); }
+    if (!node || typeof node !== 'object' || typeof node.tagName !== 'string') return { ok: false, got: String(node) };
+    const tag = node.tagName.toLowerCase();
+    if (tag !== 'svg') return { ok: false, tag };
+    const paths = [...node.querySelectorAll('path')].map((p) => p.getAttribute('d') || '');
+    return { ok: true, tag, childCount: node.children.length, viewBox: node.getAttribute('viewBox') || '', pathCount: paths.length, pathSig: paths.join('|') };
+  }, id, size),
+  // `.crs-viewmodel` presence/shape, plus its live computed transform decomposed into translateX/Y (px) and
+  // rotation (deg) via DOMMatrix — robust to whatever transform functions the implementation composes
+  // (translate + rotate, a single matrix(), etc.), since items 4/5/14 only care about the net displacement.
+  viewmodelXform: (page) => page.evaluate(() => {
+    const el = document.querySelector('.crs-viewmodel');
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    let tx = 0, ty = 0, angle = 0;
+    try { const m = new DOMMatrix(cs.transform); tx = m.m41; ty = m.m42; angle = Math.atan2(m.b, m.a) * 180 / Math.PI; } catch (e) { /* identity */ }
+    const svgCount = el.querySelectorAll('svg').length;
+    const visible = cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.05 && !el.hidden;
+    return { raw: cs.transform, tx, ty, angle, opacity: parseFloat(cs.opacity), visibility: cs.visibility, hidden: !!el.hidden, visible, svgCount, dataCrs: el.hasAttribute('data-crs'), count: document.querySelectorAll('.crs-viewmodel').length };
+  }),
+  // currently-running Web Animations API animations (document.getAnimations() only counts ones whose target
+  // is still in the document — once deactivate() removes the glass root, any WAAPI animation on it drops
+  // out on its own, independent of the setTimeout/RAF ledger).
+  animCount: (page) => page.evaluate(() => (document.getAnimations ? document.getAnimations().length : -1)),
 };
 
 // Click until the element reports data-crs-broken (hp-aware), at most `max` clicks.
@@ -531,7 +582,12 @@ async function suiteA(browser, origin, contentCss, contentJs) {
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0 && r.left < boss.right && r.right > boss.left && r.top < boss.bottom && r.bottom > boss.top;
     }).map((el) => el.tagName + (el.id ? '#' + el.id : '')) : ['no #boss'];
-    const bossAfterArena = !!(arenaEl && bossEl && (arenaEl.compareDocumentPosition(bossEl) & Node.DOCUMENT_POSITION_FOLLOWING) && boss.top >= arena.bottom && bossEl.nextElementSibling && bossEl.nextElementSibling.id === 'nav');
+    // v1.5: a pierce/depth fixture section was appended between #boss and footer#nav (shared-file rule:
+    // additions go at the end, before the footer), so #boss's nextElementSibling is no longer literally
+    // footer#nav — only that nav still comes somewhere AFTER boss in document order, which is all this
+    // check ever meant to guarantee (boss is the last of the "weapon test arenas", nav is the page footer).
+    const navEl = document.getElementById('nav');
+    const bossAfterArena = !!(arenaEl && bossEl && navEl && (arenaEl.compareDocumentPosition(bossEl) & Node.DOCUMENT_POSITION_FOLLOWING) && boss.top >= arena.bottom && (bossEl.compareDocumentPosition(navEl) & Node.DOCUMENT_POSITION_FOLLOWING));
     const figR = document.getElementById('figure').getBoundingClientRect();
     const imgR = document.getElementById('demo-img').getBoundingClientRect();
     return {
@@ -568,10 +624,14 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     return !!(h && h.shadowRoot);
   }));
   check('A.inject: crash:state active:true message sent', await page.evaluate(() => (window.__crsMessages || []).some((m) => m && m.type === 'crash:state' && m.active === true)));
-  // v1.1 / v1.2 setup (A16 / A13): deterministic damage, no cooldowns, no spread, no hostile attacks, fast reloads
+  // v1.1 / v1.2 setup (A16 / A13): deterministic damage, no cooldowns, no spread, no hostile attacks, fast reloads.
+  // v1.5: distance falloff (SPEC-weapons §3) is live by default and deliberately NOT coupled to noSpread —
+  // it has its own switch, debug.noFalloff — so every exact-damage assertion before the v1.5 block (which
+  // predates falloff and expects the flat, unreduced numbers) needs it off too; only SPEC-weapons §6 item 11
+  // and the SPEC-combat-v2 §10.6 pierce block turn it back on locally to measure the real formula.
   let dbg = null;
-  try { dbg = await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false }); } catch (e) { dbg = String(e && e.message || e); }
-  check('A.inject: api.debug noCrit / noCooldown / noSpread / noAttacks / fastReload set for the suite', dbg && dbg.noCrit === true && dbg.noCooldown === true && dbg.noSpread === true && dbg.noAttacks === true && dbg.fastReload === true, dbg);
+  try { dbg = await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true }); } catch (e) { dbg = String(e && e.message || e); }
+  check('A.inject: api.debug noCrit / noCooldown / noSpread / noAttacks / fastReload / noFalloff set for the suite', dbg && dbg.noCrit === true && dbg.noCooldown === true && dbg.noSpread === true && dbg.noAttacks === true && dbg.fastReload === true && dbg.noFalloff === true, dbg);
 
   // --- weapon table / HUD contract (§5, §6, A2) -----------------------------------------------
   const W = await weaponTable(page);
@@ -1420,6 +1480,440 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await settleRaf(page);
   check('A.toggle: zero live animation frames after off (RAF ledger)', (await api.pendingRaf(page)) === 0, await api.pendingRaf(page));
 
+  // =============================================================================================
+  // v1.5 — weapon art / viewmodel / per-weapon stats / pierce (SPEC-weapons §6 items 1-14; SPEC-combat-v2
+  // §10.6 items 5-6). Wrapped in its own block so locals (W, DMG, near, …) don't collide with same-named
+  // consts already bound earlier in this function. Content.js was left INACTIVE by the "A.toggle" block
+  // right above (the r2/r3 sequence) — reactivate first, run everything active, and end on the §6 item 13
+  // Escape test so the suite-closing console/CSP checks below find exactly the same (inactive, 0 nodes)
+  // state those checks already relied on before this block existed.
+  // =============================================================================================
+  {
+    const near = (a, b, tol) => Math.abs(a - b) <= tol;
+    // A flat sleep() assumes the draw/holster WAAPI one-shot has already handed back to the idle bob by
+    // the time it elapses; under this suite's cumulative load (~90 s of DOM/animation work by the time this
+    // block runs) that is not always true within the nominal swapMs window. Polling the actual phase is the
+    // robust version of the same wait — same pattern item 3 already uses for its own draw/idle checks.
+    const waitViewmodelIdle = (timeout) => poll(async () => { const s = await api.stats(page); return s.viewmodel === 'idle' ? s : null; }, timeout || 800, 20);
+    const rOnV15 = await page.evaluate(contentJs);
+    check('A.weapons 0: content.js reactivated for the v1.5 weapon/viewmodel/pierce block', rOnV15 === 'on', rOnV15);
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
+    await api.applyPreset(page, 'default');
+    await api.setWeapon(page, 'hammer');
+    await api.restore(page);
+    await sleep(100);
+    const W = await weaponTable(page);
+    const DMG = W.dmg;
+
+    // ---- (1) weaponArt(id, size): an <svg> per weapon, 10 distinct silhouettes, no innerHTML anywhere ----
+    const WEAPON_SVG_IDS = WEAPON_IDS;   // the same 10 ids, default-preset order
+    const artInfos = {};
+    for (const id of WEAPON_SVG_IDS) artInfos[id] = await api.weaponArtInfo(page, id, 120);
+    const artOk = WEAPON_SVG_IDS.every((id) => artInfos[id] && artInfos[id].ok === true && artInfos[id].childCount >= 3);
+    check('A.weapons 1: weaponArt(id, 120) returns an <svg> with ≥ 3 child nodes for all 10 weapons', artOk, artInfos);
+    const sigs = WEAPON_SVG_IDS.map((id) => artInfos[id] && artInfos[id].pathSig).filter((s) => typeof s === 'string' && s.length);
+    check('A.weapons 1: all 10 weapons render a distinct set of path shapes (silhouettes differ)', artOk && new Set(sigs).size === WEAPON_SVG_IDS.length, sigs.map((s) => s.length));
+    // static grep (SPEC §6 item 1): the weapon-art/viewmodel/weapon modules never use innerHTML / outerHTML /
+    // insertAdjacentHTML / document.write / eval( / new Function / setAttribute('style' — same patterns
+    // tools/validate.js's FORBIDDEN_INJECTED rule enforces repo-wide; re-checked here, scoped to the modules
+    // this v1.5 task owns, so this assertion stands on its own even before `node tools/validate.js` runs.
+    const V15_SRC_FILES = ['44-weapon-art.js', '46-viewmodel.js', '71-weapon-helpers.js', '73-hit-resolution.js', '76-weapon-fire.js', '79-weapon-actions.js', '82-ammo-reload.js', '83-scope.js', '84-sniper.js'];
+    const BANNED_PATTERNS = [
+      { label: 'innerHTML', re: /\binnerHTML\b/ },
+      { label: 'outerHTML', re: /\bouterHTML\b/ },
+      { label: 'insertAdjacentHTML', re: /\binsertAdjacentHTML\b/ },
+      { label: 'document.write', re: /\bdocument\s*\.\s*write\b/ },
+      { label: 'eval(', re: /\beval\s*\(/ },
+      { label: 'new Function', re: /\bnew\s+Function\b/ },
+      { label: "setAttribute('style'", re: /setAttribute\s*\(\s*['"]style['"]/ },
+    ];
+    // Comment-aware strip (string literals are left intact — the setAttribute('style') pattern needs its
+    // quoted argument to still match) so an explanatory comment that merely NAMES a banned call (e.g.
+    // "never setAttribute('style')", written as prose) can't trip this as a false positive — only
+    // non-comment text is matched. Not a full JS parser (a regex literal containing "//" is the one known
+    // blind spot), but good enough for this codebase's style.
+    function stripJsComments(src) {
+      let out = '', mode = null;
+      for (let i = 0; i < src.length; i++) {
+        const c = src[i], c2 = src[i + 1];
+        if (mode === 'line') { if (c === '\n') { mode = null; out += c; } continue; }
+        if (mode === 'block') { if (c === '*' && c2 === '/') { mode = null; i++; } continue; }
+        if (mode === 'sq' || mode === 'dq' || mode === 'tpl') {
+          out += c;
+          if (c === '\\') { out += src[i + 1] || ''; i++; continue; }
+          if ((mode === 'sq' && c === "'") || (mode === 'dq' && c === '"') || (mode === 'tpl' && c === '`')) mode = null;
+          continue;
+        }
+        if (c === '/' && c2 === '/') { mode = 'line'; i++; continue; }
+        if (c === '/' && c2 === '*') { mode = 'block'; i++; continue; }
+        if (c === "'") { mode = 'sq'; out += c; continue; }
+        if (c === '"') { mode = 'dq'; out += c; continue; }
+        if (c === '`') { mode = 'tpl'; out += c; continue; }
+        out += c;
+      }
+      return out;
+    }
+    const srcDirV15 = path.join(ROOT, 'src');
+    const presentFiles = V15_SRC_FILES.filter((f) => fs.existsSync(path.join(srcDirV15, f)));
+    const bannedHits = [];
+    for (const f of presentFiles) {
+      const code = stripJsComments(fs.readFileSync(path.join(srcDirV15, f), 'utf8'));
+      for (const pat of BANNED_PATTERNS) if (pat.re.test(code)) bannedHits.push(`${f}: ${pat.label}`);
+    }
+    if (presentFiles.length === 0) info('A.weapons 1: static grep skipped — none of the v1.5 weapon modules exist in src/ yet (product not implemented in this worktree snapshot)');
+    check('A.weapons 1: static grep — no innerHTML/outerHTML/insertAdjacentHTML/document.write/eval/new Function/setAttribute("style") in the weapon-art/viewmodel/weapon modules that exist so far', bannedHits.length === 0, presentFiles.length ? bannedHits : 'no v1.5 src files present yet');
+
+    // ---- api.weapons() stat-table contract (SPEC §3.1): swapMs/recoil/bloom/critChance/knockback/moveSpeed/
+    // falloff/pierce/aoeIgnoresCover for all 10 weapons. moveSpeed is checked as a STAT VALUE ONLY — the
+    // `survival`-mode drone avatar it is meant to drive does not exist in this worktree yet (see
+    // v15-handoff.md), so §6 item 12's movement-DISTANCE assertion is deliberately not written here.
+    const statFields = ['swapMs', 'recoil', 'bloom', 'critChance', 'knockback', 'moveSpeed', 'falloff'];
+    const statMismatches = [];
+    for (const id of WEAPON_IDS) {
+      const got = W.byId[id] || {};
+      const want = SPEC_STATS[id];
+      for (const f of statFields) if (!(typeof got[f] === 'number' && Math.abs(got[f] - want[f]) < 0.005)) statMismatches.push(`${id}.${f}: got ${got[f]}, want ${want[f]}`);
+      if (!pierceMatches(got.pierce, SPEC_PIERCE[id])) statMismatches.push(`${id}.pierce: got ${got.pierce}, want ${SPEC_PIERCE[id] === Infinity ? "'all'" : SPEC_PIERCE[id]}`);
+    }
+    check('A.weapons 1/3.1: api.weapons() exposes swapMs/recoil/bloom/critChance/knockback/moveSpeed/falloff/pierce matching SPEC-weapons §3.1 for all 10 weapons (moveSpeed: stat value only, not yet wired to movement)', statMismatches.length === 0, statMismatches);
+    check('A.weapons 3.1: api.weapons() marks rocket and bomb aoeIgnoresCover === true (explosions ignore cover/depth per SPEC-combat-v2 §10.3-3)', (W.byId.rocket && W.byId.rocket.aoeIgnoresCover === true) && (W.byId.bomb && W.byId.bomb.aoeIgnoresCover === true), { rocket: W.byId.rocket && W.byId.rocket.aoeIgnoresCover, bomb: W.byId.bomb && W.byId.bomb.aoeIgnoresCover });
+
+    // ---- (2) viewmodel existence: default (true) → exactly 1 .crs-viewmodel with 1 <svg>; off → 0 -----------
+    // No options page exists in this worktree yet (SPEC-weapons §3.3's comparison table is a later addition),
+    // so the `viewmodel: bool` option is reached the same way every other boolean setting in this codebase
+    // is reached pre-options-page: a chrome.storage.sync key read once at content.js's first-ever injection
+    // on a page. Assumed key name `crsViewmodel` (camelCase `crs<Thing>`, matching crsWeapon/crsMode/crsPower/
+    // crsMuted/crsLoadout/crsLoadoutPreset/crsCombat already in content.js) — flagged here since the spec
+    // itself doesn't name a storage key; a differently-named key is a TEST-SIDE fix once the product exists.
+    // Run on throwaway pages (fresh goto + chrome shim + first injection) so the main suite page's live
+    // content-script instance (settings read once, not on toggle) is never disturbed.
+    async function bootViewmodelPage(viewmodelOff) {
+      const p2 = await browser.newPage();
+      await p2.setViewport(VIEWPORT);
+      await p2.goto(`${origin}/`, { waitUntil: 'load' });
+      const c2 = await injectCss(p2, contentCss);
+      await p2.evaluate(TIMER_LEDGER);
+      await p2.evaluate(CHROME_SHIM);
+      if (viewmodelOff) await p2.evaluate(() => { window.__crsStore.crsViewmodel = false; });
+      const onRet = await p2.evaluate(contentJs);
+      await sleep(350);   // let the draw-in animation settle into steady idle
+      const info2 = await p2.evaluate(() => {
+        const nodes = document.querySelectorAll('.crs-viewmodel');
+        const svgs = nodes.length === 1 ? nodes[0].querySelectorAll('svg').length : -1;
+        return { count: nodes.length, svgCount: svgs };
+      });
+      try { await c2.detach(); } catch (e) { /* ignore */ }
+      await p2.close();
+      return { on: onRet, count: info2.count, svgCount: info2.svgCount };
+    }
+    const vmDefault = await bootViewmodelPage(false);
+    check('A.weapons 2: default settings (viewmodel: true) → exactly one .crs-viewmodel containing exactly one <svg>', vmDefault.on === 'on' && vmDefault.count === 1 && vmDefault.svgCount === 1, vmDefault);
+    const vmOff = await bootViewmodelPage(true);
+    check('A.weapons 2: viewmodel option off (crsViewmodel: false in storage, assumed key — see note above) → zero .crs-viewmodel nodes', vmOff.on === 'on' && vmOff.count === 0, vmOff);
+
+    // ---- (3) draw: switching weapon → viewmodel "draw" within 150 ms, smashAt() false meanwhile, "idle"
+    //     again once swapMs has elapsed -------------------------------------------------------------------
+    // The swap/draw gate (swapActive()) is itself wired to debug.noCooldown ("!debug.noCooldown && now() <
+    // state.swapUntil" — the same flag also used for the ordinary post-shot cooldown), so the suite's
+    // baseline noCooldown:true would silently bypass it and let smashAt() fire immediately regardless of
+    // the draw. Turn it off for just this gate check, restore the baseline after.
+    await api.debug(page, { noCooldown: false });
+    await api.restore(page);
+    await api.setWeapon(page, 'hammer');
+    await sleep(600);
+    const rocketSwapMs = (W.byId.rocket && typeof W.byId.rocket.swapMs === 'number') ? W.byId.rocket.swapMs : SPEC_STATS.rocket.swapMs;
+    await api.setWeapon(page, 'rocket');
+    const drawState = await poll(async () => { const s = await api.stats(page); return s.viewmodel === 'draw' ? s : null; }, 150, 10);
+    check('A.weapons 3: switching weapon enters stats().viewmodel === "draw" within 150 ms', !!drawState, drawState);
+    const pt3 = await arenaPt(page);
+    const duringDraw = await api.smashAt(page, pt3.x, pt3.y, null);
+    check('A.weapons 3: smashAt() returns false while still drawing (cannot fire during the swap)', duringDraw === false, duringDraw);
+    await sleep(rocketSwapMs + 80);
+    const idleAfterDraw = await poll(async () => { const s = await api.stats(page); return s.viewmodel === 'idle' ? s : null; }, 300, 20);
+    check(`A.weapons 3: once swapMs (${rocketSwapMs} ms) has elapsed, stats().viewmodel returns to "idle"`, !!idleAfterDraw, idleAfterDraw);
+    await api.debug(page, { noCooldown: true });
+
+    // ---- (4) recoil: firing → viewmodel "fire" + transform differs from idle; 200 ms later, back within
+    //     ±2 px ---------------------------------------------------------------------------------------------
+    await api.restore(page);
+    await api.setWeapon(page, 'pistol');
+    const settled4 = await waitViewmodelIdle();
+    check('A.weapons 4 setup: viewmodel reaches "idle" after the pistol draw (precondition for the recoil measurement below)', !!settled4, settled4);
+    const base4 = await api.viewmodelXform(page);
+    const pt4 = await arenaPt(page);
+    await page.mouse.click(pt4.x, pt4.y);
+    const fireState4 = await poll(async () => { const s = await api.stats(page); return s.viewmodel === 'fire' ? s : null; }, 150, 5);
+    const duringFire4 = await api.viewmodelXform(page);
+    const moved4 = !!(base4 && duringFire4 && (Math.abs(duringFire4.tx - base4.tx) > 1 || Math.abs(duringFire4.ty - base4.ty) > 1 || Math.abs(duringFire4.angle - base4.angle) > 1));
+    check('A.weapons 4: firing → stats().viewmodel === "fire" and the viewmodel transform differs from its pre-fire pose', !!fireState4 && moved4, { fireState4, base4, duringFire4 });
+    await waitViewmodelIdle();
+    const after4 = await api.viewmodelXform(page);
+    check('A.weapons 4: 200 ms after the shot, the viewmodel is back within ±2 px of its pre-fire translate', !!after4 && near(after4.tx, base4.tx, 2) && near(after4.ty, base4.ty, 2), { base4, after4 });
+
+    // ---- (5) melee swing: a hammer shot rotates the viewmodel past 30° at some frame (the swing, not the
+    //     ~7° gun recoil) ----------------------------------------------------------------------------------
+    await api.restore(page);
+    await api.setWeapon(page, 'hammer');
+    await waitViewmodelIdle();
+    const pt5 = await arenaPt(page);
+    await page.mouse.click(pt5.x, pt5.y);
+    let maxAngle5 = 0;
+    const t5 = Date.now();
+    while (Date.now() - t5 < 260) {
+      const x = await api.viewmodelXform(page);
+      if (x) maxAngle5 = Math.max(maxAngle5, Math.abs(x.angle));
+      await sleep(15);
+    }
+    check('A.weapons 5: a hammer hit rotates the viewmodel past 30° at some sampled frame (melee swing, well beyond the ~7° gun-recoil rotation)', maxAngle5 > 30, { maxAngle5 });
+
+    // ---- (6) reload: emptying the pistol's magazine → viewmodel "reload" during the reload, "idle" once
+    //     it finishes ------------------------------------------------------------------------------------
+    await api.debug(page, { fastReload: false, infiniteAmmo: false });
+    await api.restore(page);
+    await api.setWeapon(page, 'pistol');
+    await api.reload(page);
+    await poll(async () => { const m = await api.ammo(page); return m && m.mag === 12 && !m.reloading; }, 1200, 20);
+    const pt6 = await arenaPt(page);
+    // The 12th shot's spend() → startReload() → vmReload() chain is fully synchronous (confirmed by reading
+    // stats().viewmodel back inside this SAME evaluate call), so phase 'reload' is already set by the time
+    // this promise resolves; the poll below exists only as a safety margin against CDP round-trip jitter.
+    const loopResult6 = await page.evaluate((p) => { const a = window.__crashScreen; for (let i = 0; i < 12; i++) a.smashAt(p.x, p.y); return { ammo: a.ammo(), viewmodel: a.stats().viewmodel }; }, pt6);
+    const reloadState6 = await poll(async () => { const s = await api.stats(page); return s.viewmodel === 'reload' ? s : null; }, 400, 15);
+    check('A.weapons 6: emptying the pistol magazine triggers an auto-reload during which stats().viewmodel === "reload"', !!reloadState6, { reloadState6, loopResult6 });
+    const idleAfterReload6 = await poll(async () => { const m = await api.ammo(page); const s = await api.stats(page); return (m && m.mag === 12 && !m.reloading && s.viewmodel === 'idle') ? { m, s } : null; }, 1300, 20);
+    check('A.weapons 6: once the reload finishes (magazine full again), stats().viewmodel returns to "idle"', !!idleAfterReload6, idleAfterReload6);
+    await api.debug(page, { fastReload: true });
+
+    // ---- (7) scope: scoping in with the sniper hides the viewmodel; scoping out shows it again -----------
+    await api.restore(page);
+    await api.setWeapon(page, 'sniper');
+    await waitViewmodelIdle();
+    const beforeScope7 = await api.viewmodelXform(page);
+    await api.scope(page, true);
+    const scopedHidden7 = await poll(async () => {
+      const s = await api.stats(page); const x = await api.viewmodelXform(page);
+      return (s.viewmodel === 'hidden' || (x && (x.hidden || x.opacity <= 0.05 || x.visibility === 'hidden'))) ? { s, x } : null;
+    }, 500, 15);
+    check('A.weapons 7: scoping in with the sniper hides .crs-viewmodel (stats().viewmodel === "hidden", or opacity 0 / [hidden]) within ~500 ms', !!scopedHidden7, { beforeScope7, scopedHidden7 });
+    await api.scope(page, false);
+    const unscopedVisible7 = await poll(async () => { const x = await api.viewmodelXform(page); return (x && !x.hidden && x.opacity > 0.5 && x.visibility !== 'hidden') ? x : null; }, 500, 15);
+    check('A.weapons 7: scoping back out shows the viewmodel again', !!unscopedVisible7, unscopedVisible7);
+
+    // ---- (8) swapMs: switching to rocket (480 ms) takes ≥ 250 ms longer to become shootable than switching
+    //     to pistol (150 ms) ------------------------------------------------------------------------------
+    async function timeToFirable(weaponId, pt) {
+      await api.setWeapon(page, weaponId);
+      const t0 = Date.now();
+      for (;;) {
+        const ok = await api.smashAt(page, pt.x, pt.y, null);
+        if (ok) return Date.now() - t0;
+        if (Date.now() - t0 > 1200) return null;
+        await sleep(8);
+      }
+    }
+    // Same swapActive()/debug.noCooldown coupling as item 3 — off for the measurement, back on after.
+    await api.debug(page, { noCooldown: false });
+    await api.restore(page);
+    const pt8 = await arenaPt(page);
+    await api.setWeapon(page, 'hammer'); await sleep(50);
+    const tPistol8 = await timeToFirable('pistol', pt8);
+    await sleep(300);
+    await api.setWeapon(page, 'hammer'); await sleep(50);
+    const tRocket8 = await timeToFirable('rocket', pt8);
+    const diff8 = (tRocket8 != null && tPistol8 != null) ? tRocket8 - tPistol8 : null;
+    check('A.weapons 8: swapMs — time-to-first-shot after switching to rocket (480 ms) is at least 250 ms longer than switching to pistol (150 ms)', tPistol8 != null && tRocket8 != null && diff8 >= 250, { tPistol8, tRocket8, diff8 });
+    await api.debug(page, { noCooldown: true });
+
+    // ---- (9) spread/bloom: holding the smg → bloomNow rises and caps at bloom×10, then decays to ~0 after
+    //     resting; a scoped sniper reads spreadNow === 0 ---------------------------------------------------
+    await api.debug(page, { noSpread: false });
+    await api.restore(page);
+    await api.setWeapon(page, 'smg');
+    await sleep(300);
+    const pt9 = await arenaPt(page);
+    await page.mouse.move(pt9.x, pt9.y);
+    await page.mouse.down();
+    const bloomSamples9 = [];
+    for (let i = 0; i < 20; i++) { await sleep(75); bloomSamples9.push((await api.stats(page)).bloomNow); }
+    await page.mouse.up();
+    const smgBloom = (W.byId.smg && typeof W.byId.smg.bloom === 'number') ? W.byId.smg.bloom : SPEC_STATS.smg.bloom;
+    const bloomCap9 = smgBloom * 10;
+    const nonDecreasing9 = bloomSamples9.every((v, i) => i === 0 || typeof v !== 'number' || typeof bloomSamples9[i - 1] !== 'number' || v >= bloomSamples9[i - 1] - 0.01);
+    const peak9 = Math.max(...bloomSamples9.filter((v) => typeof v === 'number'));
+    check('A.weapons 9: holding the smg → stats().bloomNow rises (non-decreasing) and caps at bloom × 10', nonDecreasing9 && peak9 > 0 && peak9 <= bloomCap9 + 0.5, { bloomSamples9, bloomCap9, peak9 });
+    await sleep(2200);   // > 0.4 s grace + time to decay bloom×10 px at 40 px/s
+    const restedBloom9 = (await api.stats(page)).bloomNow;
+    check('A.weapons 9: after resting well past the 0.4 s grace, bloomNow has decayed back to ~0', typeof restedBloom9 === 'number' && restedBloom9 <= 2, restedBloom9);
+    await api.setWeapon(page, 'sniper');
+    await sleep(500);
+    await api.scope(page, true);
+    await poll(async () => (await api.stats(page)).scoped === true, 300, 15);
+    const sniperSpreadNow9 = (await api.stats(page)).spreadNow;
+    check('A.weapons 9: a scoped sniper reads stats().spreadNow === 0', sniperSpreadNow9 === 0, sniperSpreadNow9);
+    await api.scope(page, false);
+    await api.debug(page, { noSpread: true });
+
+    // ---- (10) crit rate: 200 sword hits (seeded RNG override of Math.random, so a failure reproduces) land
+    //     a critChance 0.20 ± 0.08 fraction of crits ------------------------------------------------------
+    await api.debug(page, { noCrit: false, forceCrit: false });
+    await api.setWeapon(page, 'sword');
+    const pt10 = await arenaPt(page);
+    const CRIT_SEED = 0xA53F9021;
+    info(`A.weapons 10: crit-rate seed = 0x${CRIT_SEED.toString(16)} (200 sword hits on #arena, restored fresh each hit) — reproduce a failure by rerunning with the same seed`);
+    // restore() zeroes state.crits (it is a per-session counter, reset for every fresh target along with
+    // shots/damageDealt/etc.), so a naive before/after read across the WHOLE loop would only ever see the
+    // last iteration's 0-or-1 — each hit's crit flag is read and accumulated BEFORE the next restore() wipes it.
+    const crit10 = await page.evaluate((seed, pt) => {
+      const a = window.__crashScreen;
+      let s = (seed >>> 0) || 1;
+      const realRandom = Math.random;
+      Math.random = function () {
+        s ^= s << 13; s >>>= 0;
+        s ^= s >>> 17;
+        s ^= s << 5; s >>>= 0;
+        return (s >>> 0) / 4294967296;
+      };
+      let hits = 0;
+      for (let i = 0; i < 200; i++) {
+        a.restore();
+        a.smashAt(pt.x, pt.y);
+        hits += a.stats().crits;   // 0 or 1 — restore() hasn't run again yet, so this iteration's flag is still intact
+      }
+      Math.random = realRandom;
+      return { hits };
+    }, CRIT_SEED, pt10);
+    const swordCritChance = (W.byId.sword && typeof W.byId.sword.critChance === 'number') ? W.byId.sword.critChance : SPEC_STATS.sword.critChance;
+    const critRate10 = crit10.hits / 200;
+    check(`A.weapons 10: sword crit rate over 200 hits (seeded RNG, no debug.forceCrit) is ${swordCritChance.toFixed(2)} ± 0.08`, Math.abs(critRate10 - swordCritChance) <= 0.08, { seed: '0x' + CRIT_SEED.toString(16), crit10, critRate10, swordCritChance });
+    await api.debug(page, { noCrit: true, forceCrit: false });
+    await api.restore(page);
+
+    // ---- (11) falloff: pistol hit near screen-centre vs far from it does different damage (±1 of the
+    //     1 − falloff·min(dist,900)/900 formula); hammer (falloff 0) is identical at both distances.
+    //     Falloff is origin-gated by BOTH debug.noSpread and debug.noFalloff (either one forces mult 1), so
+    //     the suite's baseline noSpread:true — which would otherwise silently zero this whole test — is
+    //     turned off for just this block. Pistol's own `spread` stat is unset (0) and each hit is taken via
+    //     hitFresh() on a freshly-restored target (no prior shot to leave a recoilKick behind), so the aim
+    //     still lands exactly on the clicked point even with noSpread off. -----------------------------------
+    await api.debug(page, { infiniteAmmo: true, noSpread: false, noFalloff: false });
+    const rArena11 = await api.rect(page, '#arena');
+    const viewDims11 = await page.evaluate(() => ({ w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }));
+    const centreX11 = viewDims11.w / 2, centreY11 = viewDims11.h / 2;
+    const nearPt11 = { x: rArena11.cx, y: rArena11.cy };
+    const farPt11 = { x: rArena11.left + 20, y: rArena11.cy };
+    const distNear11 = Math.hypot(nearPt11.x - centreX11, nearPt11.y - centreY11);
+    const distFar11 = Math.hypot(farPt11.x - centreX11, farPt11.y - centreY11);
+    const falloffMult = (f, d) => 1 - f * Math.min(d, 900) / 900;
+    const pistolFalloff11 = (W.byId.pistol && typeof W.byId.pistol.falloff === 'number') ? W.byId.pistol.falloff : SPEC_STATS.pistol.falloff;
+    const pistolDmg11 = DMG('pistol');
+    const expNear11 = Math.round(pistolDmg11 * falloffMult(pistolFalloff11, distNear11));
+    const expFar11 = Math.round(pistolDmg11 * falloffMult(pistolFalloff11, distFar11));
+    const hitNearP11 = await hitFresh(page, 'pistol', nearPt11, '#arena');
+    const hitFarP11 = await hitFresh(page, 'pistol', farPt11, '#arena');
+    const dmgNearP11 = hitNearP11.max - hitNearP11.hp;
+    const dmgFarP11 = hitFarP11.max - hitFarP11.hp;
+    check('A.weapons 11: pistol falloff — a far-from-centre hit does less damage than a near-centre hit, both within ±1 of the 1 − falloff·min(dist,900)/900 formula', dmgFarP11 < dmgNearP11 && Math.abs(dmgNearP11 - expNear11) <= 1 && Math.abs(dmgFarP11 - expFar11) <= 1, { dmgNearP11, dmgFarP11, expNear11, expFar11, distNear11, distFar11, pistolFalloff11 });
+    const hammerFalloff11 = (W.byId.hammer && typeof W.byId.hammer.falloff === 'number') ? W.byId.hammer.falloff : SPEC_STATS.hammer.falloff;
+    const hitNearH11 = await hitFresh(page, 'hammer', nearPt11, '#arena');
+    const hitFarH11 = await hitFresh(page, 'hammer', farPt11, '#arena');
+    const dmgNearH11 = hitNearH11.max - hitNearH11.hp;
+    const dmgFarH11 = hitFarH11.max - hitFarH11.hp;
+    check('A.weapons 11: hammer (falloff 0) deals identical damage near and far from centre', hammerFalloff11 === 0 && dmgNearH11 === dmgFarH11, { dmgNearH11, dmgFarH11, hammerFalloff11 });
+    await api.debug(page, { infiniteAmmo: false, noSpread: true, noFalloff: true });
+
+    // ---- (12) moveSpeed — already asserted as a STAT above (see the api.weapons() stat-table check); the
+    //     §6 item 12 movement-DISTANCE ratio (rocket 0.80 vs sword 1.15, holding "D" 400 ms) needs the
+    //     `survival`-mode drone avatar, which this worktree does not have yet (owned by the parallel combat
+    //     workstream) — see v15-handoff.md. Leaving this as an explicit, honest gap rather than a fake pass.
+    info('A.weapons 12: movement-distance ratio test deferred — no survival-mode drone avatar exists in this worktree yet (moveSpeed stat values are covered by the api.weapons() table check above; see v15-handoff.md)');
+
+    // =============================================================================================
+    // SPEC-combat-v2 §10.6 items 5-6 — pierce / "explosions ignore cover" on the new overlapping
+    // #pierce-front / #pierce-back fixture pair (test/fixture.html).
+    // =============================================================================================
+    await api.debug(page, { noCrit: true, infiniteAmmo: true, noCooldown: true, noSpread: true });
+    await api.restore(page);
+    const rFrontP = await api.rect(page, '#pierce-front');
+    const rBackP = await api.rectNoScroll(page, '#pierce-back');
+    const ovLeft = Math.max(rFrontP.left, rBackP.left), ovRight = Math.min(rFrontP.right, rBackP.right);
+    const ovTop = Math.max(rFrontP.top, rBackP.top), ovBottom = Math.min(rFrontP.bottom, rBackP.bottom);
+    const ovPt = { x: (ovLeft + ovRight) / 2, y: (ovTop + ovBottom) / 2 };
+    check('A.pierce setup: #pierce-front and #pierce-back genuinely overlap on screen (positive-area overlap rect)', ovRight > ovLeft && ovBottom > ovTop, { rFrontP, rBackP, ovPt });
+
+    const sniperDmg56 = DMG('sniper');
+    const hitFrontSniper56 = await hitFresh(page, 'sniper', ovPt, '#pierce-front');
+    const hitBackSniper56 = await hitFresh(page, 'sniper', ovPt, '#pierce-back');
+    const dmgFrontSniper56 = hitFrontSniper56.max - hitFrontSniper56.hp;
+    const dmgBackSniper56 = hitBackSniper56.max - hitBackSniper56.hp;
+    const expectedBackSniper56 = Math.round(sniperDmg56 * 0.6);
+    check('A.combat-v2 §10.6-5: sniper (pierce 2) at the overlap point → front card takes full damage, back card takes ~60% (pierce layer 1, ×0.6)', dmgFrontSniper56 === sniperDmg56 && Math.abs(dmgBackSniper56 - expectedBackSniper56) <= 1, { dmgFrontSniper56, dmgBackSniper56, sniperDmg56, expectedBackSniper56 });
+
+    const pistolDmg56 = DMG('pistol');
+    const hitFrontPistol56 = await hitFresh(page, 'pistol', ovPt, '#pierce-front');
+    const hitBackPistol56 = await hitFresh(page, 'pistol', ovPt, '#pierce-back');
+    const dmgFrontPistol56 = hitFrontPistol56.max - hitFrontPistol56.hp;
+    const dmgBackPistol56 = hitBackPistol56.max - hitBackPistol56.hp;
+    check('A.combat-v2 §10.6-5: pistol (pierce 0) at the same overlap point → front still takes full damage, back takes 0 (no pierce)', dmgFrontPistol56 === pistolDmg56 && dmgBackPistol56 === 0, { dmgFrontPistol56, dmgBackPistol56, pistolDmg56 });
+
+    const hitBackRocket56 = await hitFresh(page, 'rocket', ovPt, '#pierce-back');
+    const dmgBackRocket56 = hitBackRocket56.max - hitBackRocket56.hp;
+    const hitFrontRocket56 = await hitFresh(page, 'rocket', ovPt, '#pierce-front');
+    const dmgFrontRocket56 = hitFrontRocket56.max - hitFrontRocket56.hp;
+    check('A.combat-v2 §10.6-6: a rocket aimed at the overlap point damages the occluded back card (AoE ignores cover/depth — aoeIgnoresCover)', dmgBackRocket56 > 0, hitBackRocket56);
+    check('A.combat-v2 §10.6-6: the same rocket also damages the unoccluded front card at that point', dmgFrontRocket56 > 0, hitFrontRocket56);
+    await api.debug(page, { infiniteAmmo: false, noSpread: true, noFalloff: true });
+
+    // ---- (14) motion reduced: no idle wobble; recoil amplitude ≤ half of normal-motion recoil (still non-
+    //     zero — information must still read) --------------------------------------------------------------
+    await api.restore(page);
+    await api.setWeapon(page, 'pistol');
+    await waitViewmodelIdle();
+    const idleSamplesNormal14 = [];
+    for (let i = 0; i < 8; i++) { idleSamplesNormal14.push(await api.viewmodelXform(page)); await sleep(150); }
+    const idleRangeNormal14 = Math.max(...idleSamplesNormal14.map((s) => s.ty)) - Math.min(...idleSamplesNormal14.map((s) => s.ty));
+    const baseIdle14 = await api.viewmodelXform(page);
+    const ptFire14 = await arenaPt(page);
+    await page.mouse.click(ptFire14.x, ptFire14.y);
+    let maxDevNormal14 = 0;
+    const tN14 = Date.now();
+    while (Date.now() - tN14 < 220) { const x = await api.viewmodelXform(page); if (x && baseIdle14) maxDevNormal14 = Math.max(maxDevNormal14, Math.hypot(x.tx - baseIdle14.tx, x.ty - baseIdle14.ty)); await sleep(12); }
+    await sleep(250);
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await api.restore(page);
+    await api.setWeapon(page, 'pistol');
+    await waitViewmodelIdle();
+    const idleSamplesRM14 = [];
+    for (let i = 0; i < 8; i++) { idleSamplesRM14.push(await api.viewmodelXform(page)); await sleep(150); }
+    const idleRangeRM14 = Math.max(...idleSamplesRM14.map((s) => s.ty)) - Math.min(...idleSamplesRM14.map((s) => s.ty));
+    check('A.weapons 14: prefers-reduced-motion → idle wobble suppressed (viewmodel Y stays flat) vs the normal idle sine sweep', idleRangeRM14 <= 0.5 && idleRangeNormal14 > 0.5, { idleRangeNormal14, idleRangeRM14 });
+    const baseIdleRM14 = await api.viewmodelXform(page);
+    await page.mouse.click(ptFire14.x, ptFire14.y);
+    let maxDevRM14 = 0;
+    const tR14 = Date.now();
+    while (Date.now() - tR14 < 220) { const x = await api.viewmodelXform(page); if (x && baseIdleRM14) maxDevRM14 = Math.max(maxDevRM14, Math.hypot(x.tx - baseIdleRM14.tx, x.ty - baseIdleRM14.ty)); await sleep(12); }
+    check('A.weapons 14: prefers-reduced-motion → recoil is still present but its amplitude is at most half of normal motion\'s', maxDevRM14 > 0 && maxDevRM14 <= maxDevNormal14 * 0.5 + 0.5, { maxDevNormal14, maxDevRM14 });
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+
+    // ---- (13) traceless: Escape while the viewmodel idle animation is running → inactive, zero [data-crs]
+    //     nodes, zero live timers/RAF, zero running WAAPI animations (this is the LAST test in this block —
+    //     it leaves the page inactive, matching the state the "A.toggle"/"console/CSP" checks below already
+    //     expect) -----------------------------------------------------------------------------------------
+    await api.restore(page);
+    await api.setWeapon(page, 'pistol');
+    await waitViewmodelIdle();
+    const vmBefore13 = await api.has(page, '.crs-viewmodel');
+    const animsBefore13 = await api.animCount(page);
+    check('A.weapons 13: before Escape, the viewmodel idle wobble is a live WAAPI animation (.crs-viewmodel present, ≥ 1 running animation)', vmBefore13 === true && animsBefore13 >= 1, { vmBefore13, animsBefore13 });
+    await page.keyboard.press('Escape');
+    const inactive13 = await poll(async () => !(await api.active(page)), 1500, 20);
+    const nodes13 = await api.count(page, '[data-crs]');
+    await settleRaf(page);
+    const pend13 = await api.pending(page);
+    const raf13 = await api.pendingRaf(page);
+    const anims13 = await api.animCount(page);
+    check('A.weapons 13: Escape during the viewmodel idle animation → inactive, zero [data-crs] nodes, zero live timers/RAF frames, zero running animations', inactive13 === true && nodes13 === 0 && pend13 === 0 && raf13 === 0 && anims13 === 0, { inactive13, nodes13, pend13, raf13, anims13 });
+  }
+
   // --- console / CSP -----------------------------------------------------------------------------
   const v = await violations(page);
   check('A.console: zero error-level console messages', log.consoleErrors.length === 0, log.consoleErrors[0]);
@@ -1518,7 +2012,13 @@ async function suiteA12(page, log, contentJs) {
   await api.debug(page, { infiniteAmmo: false });
   const ammoHudPistol = await api.hudQ(page, '.crs-ammo');
   check('A.ammo 1: .crs-ammo HUD (HUD shadow root, bottom-right) shows "12 / ∞" for a full pistol', !!ammoHudPistol && ammoHudPistol.visible && /12\s*\/\s*∞/.test(ammoHudPistol.text), ammoHudPistol);
-  check('A.ammo 1: .crs-ammo sits bottom-right (right: 24px; bottom: 24px — v1.3 §2 widened the margin)', !!ammoHudPistol && near(ammoHudPistol.right, ammoHudPistol.vw - 24, 4) && near(ammoHudPistol.bottom, ammoHudPistol.vh - 24, 4), ammoHudPistol && { right: ammoHudPistol.right, bottom: ammoHudPistol.bottom, vw: ammoHudPistol.vw, vh: ammoHudPistol.vh });
+  // v1.5 §2 (last bullet): the viewmodel layer and the ammo plate occupy the same bottom-right corner, so
+  // while `.crs-viewmodel` exists (the default) the plate is lifted to bottom: 118px instead of the v1.3
+  // 24px — only while the layer exists, so `viewmodel: false` restores the v1.3 24px exactly (vmLiftAmmo()).
+  // right: 24px is unchanged either way.
+  const hasViewmodelForAmmo = await api.has(page, '.crs-viewmodel');
+  const expectedAmmoBottomMargin = hasViewmodelForAmmo ? 118 : 24;
+  check('A.ammo 1: .crs-ammo sits bottom-right (right: 24px always; bottom: 118px while the viewmodel layer exists, else the v1.3 24px)', !!ammoHudPistol && near(ammoHudPistol.right, ammoHudPistol.vw - 24, 4) && near(ammoHudPistol.bottom, ammoHudPistol.vh - expectedAmmoBottomMargin, 4), ammoHudPistol && { right: ammoHudPistol.right, bottom: ammoHudPistol.bottom, vw: ammoHudPistol.vw, vh: ammoHudPistol.vh, hasViewmodelForAmmo, expectedAmmoBottomMargin });
   await api.setWeapon(page, 'hammer');
   const ammoHudHammer = await poll(async () => { const q = await api.hudQ(page, '.crs-ammo'); return q && /∞/.test(q.text) && !/\d+\s*\/\s*∞/.test(q.text) ? q : null; }, 500, 20);
   check('A.ammo 1: .crs-ammo shows "∞" (no "n / ∞") for the hammer (melee)', !!ammoHudHammer, await api.hudQ(page, '.crs-ammo'));

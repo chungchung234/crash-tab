@@ -122,7 +122,7 @@
     if (w && t - w.at >= HOLD_WINDOW) { flushWindow(el, w); w = null; }
     if (!w) {
       const rec = hpOf(el);
-      const crit = rollCrit();
+      const crit = rollCrit();   // v1.5 §3: defaults to the weapon in hand — a hold window always belongs to it
       if (crit) { state.crits++; sfx('crit', { gain: 0.7 }); }   // one audible cue per crit window (A4); the per-tick gun sound stays plain
       rec.side = rec.side === 1 ? -1 : 1;
       w = { el, at: t, sum: 0, crit, side: rec.side, node: null };
@@ -207,18 +207,26 @@
    * drop its descendants AND its ancestors (the centre is the only candidate on its chain, exactly as v1
    * bombCandidates — where the blast point itself fed the ancestor filter), then the v1 ancestor filter over the
    * remaining samples; sort by edge distance, keep maxTargets. */
-  function aoeCandidates(x, y, R, maxTargets, rings) {
+  function aoeCandidates(x, y, R, maxTargets, rings, ignoreCover) {
     const seen = new Set(), list = [], cache = new Map();
     const centre = pickTarget(x, y, cache);
     const vw = viewW(), vh = viewH();
+    /* v1.5 / combat-v2 §10.3-3: `aoeIgnoresCover` weapons sample THROUGH the topmost element at each probe,
+     * so an element hiding behind a card is still inside the blast. The ancestor / descendant rules below are
+     * unchanged, so the centre's own container still never becomes a candidate (A7). */
+    const add = (el) => {
+      if (!el || el === centre || seen.has(el)) return;
+      if (centre && (centre.contains(el) || el.contains(centre))) return;
+      seen.add(el); list.push(el);
+    };
+    if (ignoreCover) for (const b of pierceTargets(x, y, centre, 2)) add(b);
     for (const r of rings) {
       for (let k = 0; k < 8; k++) {
         const a = k * Math.PI / 4, pxv = x + Math.cos(a) * r, pyv = y + Math.sin(a) * r;
         if (pxv < 0 || pyv < 0 || pxv > vw || pyv > vh) continue;
         const el = pickTarget(pxv, pyv, cache);
-        if (!el || el === centre || seen.has(el)) continue;
-        if (centre && (centre.contains(el) || el.contains(centre))) continue;
-        seen.add(el); list.push(el);
+        add(el);
+        if (ignoreCover) for (const b of pierceTargets(pxv, pyv, el, 2)) add(b);
       }
     }
     const filtered = list.filter((el) => !list.some((o) => o !== el && el.contains(o)));
@@ -235,12 +243,96 @@
   /* Falloff damage round(centre · (1 − 0.73·t)), t = edgeDist / R → centre 100 %, edge 27 %; stagger edgeDist / 4 ms. */
   function aoeHit(x, y, W) {
     const R = W.radius;
-    const cands = aoeCandidates(x, y, R, W.maxTargets, W.rings);
-    const plan = cands.map((c, i) => { const crit = rollCrit(); return { c, i, crit, dmg: rollDamage(Math.round(W.damage * (1 - 0.73 * clamp(c.d / R, 0, 1))), crit) }; });
+    const cands = aoeCandidates(x, y, R, W.maxTargets, W.rings, !!W.aoeIgnoresCover);
+    const plan = cands.map((c, i) => { const crit = rollCrit(W.id); return { c, i, crit, dmg: rollDamage(Math.round(W.damage * (1 - 0.73 * clamp(c.d / R, 0, 1))), crit) }; });   // v1.5 §3: the blast rolls the WEAPON's critChance
     if (plan.some((p) => p.crit)) sfx('crit', { gain: 0.9 });   // the blast sound has already played; add the ×1.5 sparkle once (A4)
     for (const { c, i, crit, dmg } of plan) {
       const fire = () => { if (state.active && c.el.isConnected) applyHit(c.el, dmg, 'bomb', x, y, { textSplit: i === 0, aoe: true, crit, radius: R, toward: { x, y } }); scheduleHud(); };
       const delay = c.d / 4;
       if (delay < 1) fire(); else later(fire, delay);
     }
+  }
+
+  /* ── v1.5 §3 / SPEC-combat-v2 §10.3-2: pierce ─────────────────────────────
+   * A hitscan weapon with `pierce` > 0 keeps going after the front-most target:
+   * it walks the SAME element stack down, hits up to `pierce` further qualifying
+   * elements and attenuates by ×0.6 per layer (60 %, 36 %). Anything on the
+   * chain already hit — the front target, its ancestors, its descendants — is
+   * skipped, so one card never takes two helpings of the same bullet. */
+  function piercedAlready(el, hit) {
+    for (const o of hit) {
+      if (o === el) return true;
+      try { if (o.contains(el) || el.contains(o)) return true; } catch (e) { return true; }
+    }
+    return false;
+  }
+  /* pickTarget()'s own walk-up rules, applied to one raw elementsFromPoint candidate: promote past boxes too
+   * small to aim at and past inline wrappers, and let a hostile component answer for its descendants. Kept
+   * here rather than in src/50-target.js (another workstream's file) — the rules are the same five lines. */
+  function normaliseBehind(el, hit) {
+    const mag = scopeMag(), mag2 = mag * mag;
+    const body = doc.body;
+    for (let guard = 0; guard < 40 && el; guard++) {
+      const p = parentOf(el);
+      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
+      const r = rectOf(el); if (!r) break;
+      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
+      const s = gcs(el);
+      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) { el = p; continue; }
+      break;
+    }
+    if (!el || el === doc.body || el === docEl) return null;
+    if (state.hostiles.size) { for (const h of state.hostiles.keys()) { if (h !== el && h.contains(el) && !piercedAlready(h, hit)) { el = h; break; } } }
+    const r = rectOf(el);
+    if (!r || r.width * r.height > 0.8 * viewW() * viewH() * mag2) return null;
+    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
+    return piercedAlready(el, hit) ? null : el;
+  }
+  function pierceTargets(x, y, front, n) {
+    const out = [], hit = front ? [front] : [];
+    if (!(n > 0)) return out;
+    let list;
+    try { list = doc.elementsFromPoint(x, y); } catch (e) { return out; }
+    const env = { vw: viewW(), vh: viewH(), op: new Map() };
+    for (const c of list) {
+      if (out.length >= n) break;
+      if (!visibleCandidate(c, env) || isOverlay(c, env)) continue;
+      if (piercedAlready(c, hit)) continue;
+      const el = normaliseBehind(c, hit);
+      if (!el) continue;
+      out.push(el); hit.push(el);
+    }
+    return out;
+  }
+  /* A thin white line across each pierced element for 0.2 s — without it the extra damage is invisible. */
+  function pierceMark(el, y) {
+    if (!root) return;
+    const r = rectOf(el);
+    if (!r || r.width < 2) return;
+    const n = mk('div', 'crs-pierce');
+    n.style.left = px(r.left + 4);
+    n.style.top = px(clamp(y, r.top + 1, r.bottom - 1) - 1);
+    n.style.width = px(Math.max(8, r.width - 8));
+    root.append(n);
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+    try { const a = trackAnim(n.animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 200, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+    later(kill, 600);
+  }
+  /* Called by a hitscan fire() right after its own applyHit. `front` may be null (the shot missed everything
+   * pickable) — the layers behind are still eligible, which is what makes pierce feel like a through-shot. */
+  function applyPierce(x, y, front, kind, id) {
+    const W = WEAPONS[id];
+    if (!W || !(W.pierce > 0)) return 0;
+    const n = Math.min(W.pierce, 8);   // `전부` (collapse) is a sentinel, not a reason to walk a whole page
+    const targets = pierceTargets(x, y, front, n);
+    const fall = falloffMul(id, x, y);
+    let k = 0;
+    for (const el of targets) {
+      k++;
+      const crit = rollCrit(id);
+      const dmg = rollDamage(W.damage, crit, Math.pow(0.6, k) * fall);
+      pierceMark(el, y);
+      applyHit(el, dmg, kind, x, y, { crit, pierce: k });
+    }
+    return k;
   }

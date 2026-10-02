@@ -40,7 +40,7 @@
     state.pieces.length = 0; state.gpuSum = 0;
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -82,9 +82,10 @@
     if (!silent) {
       stopReload();
       scopeOff();
-      state.swapUntil = now() + SWAP_MS;
+      const swapMs = swapMsOf(id);   // v1.5 §3: per-weapon draw time replaces the flat SWAP_MS
+      state.swapUntil = now() + swapMs;
       untrack(state.swapTimer); state.swapTimer = 0;
-      if (!debug.noCooldown) state.swapTimer = later(() => { state.swapTimer = 0; updateAmmoHud(); }, SWAP_MS + 5);   // clears the 교체 중 readout
+      if (!debug.noCooldown) state.swapTimer = later(() => { state.swapTimer = 0; updateAmmoHud(); }, swapMs + 5);   // clears the 교체 중 readout
     }
     state.weapon = id;
     if (!silent) state.weaponTouched = true;
@@ -172,6 +173,8 @@
     if (state.auraRaf) { caf(state.auraRaf); state.auraRaf = 0; }
     state.animating = false;
     try { restore(); } catch (e) { /* ignore */ }
+    try { clearViewmodel(); } catch (e) { /* ignore */ }   // v1.5 §2: restore() rebuilt it — the infinite idle animation must not outlive deactivate
+    wpnOpts.loaded = false;                                 // v1.5: re-read weaponArt / viewmodel on the next activation
     try { scopeOff(); } catch (e) { /* ignore */ }   // belt and braces: the body transform never outlives us
     clearTimers();   // restore() re-armed the combat grace while still active; nothing may outlive deactivate
     unbindEvents();
@@ -210,7 +213,9 @@
       paused: state.paused, ko: state.ko, loadout: state.loadout.slice(), preset: state.preset,
       // v1.3 §5: the player marker, the "who is aiming at me" lines, and the graze counter
       selfRing: selfRingInfo(), aimlines: state.aimlines.length, nearMisses: state.nearMisses,
-      hitstop: now() < state.hitstopUntil
+      hitstop: now() < state.hitstopUntil,
+      // ── v1.5 §4: the live aim cone and what the viewmodel is doing ──
+      spreadNow: spreadNow(id), bloomNow: bloomNow(now()), viewmodel: viewmodelPhase()
     };
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
@@ -218,7 +223,11 @@
     return state.loadout.map((id, i) => {
       const W = WEAPONS[id];
       return { id, slot: i + 1, key: slotKey(i + 1), emoji: W.emoji, name: msg(W.name), kind: W.kind, damage: W.damage, cooldownMs: W.cooldownMs, radius: W.radius, hold: W.hold, input: W.input, label: weaponLabel(W),
-        mag: W.mag == null ? null : W.mag, reloadMs: W.reloadMs == null ? null : W.reloadMs, spread: W.spread || null, scope: !!W.scope };
+        mag: W.mag == null ? null : W.mag, reloadMs: W.reloadMs == null ? null : W.reloadMs, spread: W.spread || null, scope: !!W.scope,
+        // ── v1.5 §3.1 / §4: the per-weapon stat block (붕괴's pierce is the PIERCE_ALL sentinel) ──
+        swapMs: swapMsOf(id), recoil: W.recoil || 0, bloom: W.bloom || 0, critChance: critChanceOf(id, false),
+        knockback: W.knockback == null ? 1 : W.knockback, moveSpeed: W.moveSpeed == null ? 1 : W.moveSpeed,
+        falloff: W.falloff || 0, pierce: W.pierce || 0, aoeIgnoresCover: !!W.aoeIgnoresCover };
     });
   }
 
@@ -247,7 +256,9 @@
     ammo: ammoInfo, reload: reloadNow,
     loadout: () => state.loadout.slice(), setLoadout: (ids) => setLoadout(ids), applyPreset,
     scope: (on) => { if (on) scopeOn(); else scopeOff(); return state.scoped; },
-    player: playerInfo, setCombat: (v) => setCombat(v)
+    player: playerInfo, setCombat: (v) => setCombat(v),
+    // ── v1.5: the weapon picture (§1) and the two switches that have no options page yet (§1 / §2) ──
+    weaponArt: (id, size) => weaponArt(id, size), options: weaponOptions, setOption: setWeaponOption
   };
   window.__crashScreen = api;
   try {

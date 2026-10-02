@@ -16,7 +16,13 @@
     state.shots++;
     const scoped = state.scoped, S = WEAPONS.sniper.spread;
     let ix = x, iy = y;
-    if (!scoped && !debug.noSpread) { ix += rand(-S, S); iy += rand(-S, S); }
+    /* v1.2 A4 / v1.5 §3.2: scoped is exact; unscoped the shot is shaken by spread (25) + the last shot's
+     * recoil kick + bloom. The ±S box is kept as the hard envelope so lastShot.offset stays inside ±25. */
+    if (!scoped && !debug.noSpread) {
+      const p = shotPoint(x, y, 'sniper');
+      ix = x + clamp(p.x - x, -S, S); iy = y + clamp(p.y - y, -S, S);
+    }
+    noteShot('sniper');
     ix = clamp(ix, 0, viewW()); iy = clamp(iy, 0, viewH());
     state.lastShot = { x: ix, y: iy, offsetX: ix - x, offsetY: iy - y, scoped };   // recorded hit or miss, before interception
     if (scoped) state.scope.recoilAt = now();
@@ -25,11 +31,12 @@
     if (interceptOrb(ix, iy)) { sfx('sniper'); return null; }
     const el = pickTarget(ix, iy);
     const crit = el ? rollSniperCrit(scoped) : false;
-    const dmg = rollDamage(WEAPONS.sniper.damage, crit);
+    const dmg = rollDamage(WEAPONS.sniper.damage, crit, falloffMul('sniper', ix, iy));
     sfx('sniper', { crit });
     flash(ix, iy, 'gun', { size: 90, dur: 160 }); shake('gun', { amp: crit ? 8 : 6 });
     drawCrack(ix, iy, 'gun', { rays: [6, 9], len: [30, 70], ink: 0.5 });
     spawnChips(ix, iy, randInt(4, 7));
     if (el) applyHit(el, dmg, 'gun', ix, iy, { crit, headshot: true });
+    applyPierce(ix, iy, el, 'gun', 'sniper');   // v1.5 §3 / combat-v2 §10.3-2: two more layers at ×0.6, ×0.36
     return el;
   }

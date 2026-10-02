@@ -534,3 +534,95 @@ crs-hud:popover-open {
   pointer-events: auto !important;
   box-sizing: border-box !important;
 }
+
+/* v1.5 */
+/* ---- first-person weapon viewmodel (SPEC-weapons §2) + pierce marks (§3 / combat-v2 §10.3).
+ *      CASCADE NOTE: this sheet is injected at USER origin, where !important outranks both inline
+ *      styles and Web Animations. `transform` and `opacity` on .crs-viewmodel / .crs-viewmodel-mag
+ *      are therefore declared WITHOUT !important — the draw, recoil, swing, reload and ADS fade all
+ *      animate exactly those two properties. ---- */
+.crs-viewmodel {
+  position: fixed !important;
+  right: 8px !important;
+  bottom: -8px !important;
+  left: auto !important;
+  top: auto !important;
+  width: 200px !important;
+  height: 100px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  z-index: 3 !important;
+  transform-origin: 85% 110% !important;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .55)) !important;
+  transform: translate(0px, 0px) rotate(0deg);
+  opacity: 1;
+}
+.crs-viewmodel-art {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: center !important;
+  transform-origin: 50% 70% !important;
+  /* the art faces right; mirror it, then tilt so the muzzle points up into the screen */
+  transform: rotate(-14deg) scaleX(-1) !important;
+}
+.crs-viewmodel-art .crs-art {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+}
+.crs-viewmodel-mag {
+  position: absolute !important;
+  left: 96px !important;
+  bottom: 18px !important;
+  right: auto !important;
+  top: auto !important;
+  width: 16px !important;
+  height: 26px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 3px !important;
+  /* NOT the grip's own #4a5361: the dropped magazine starts out overlapping the grip, and a piece that
+   * matches the weapon it falls out of simply reads as part of the weapon. Lighter body + a dark rim. */
+  background: #8c96a6 !important;
+  box-shadow: 0 0 0 1.5px rgba(18, 24, 32, .85), 0 2px 5px rgba(0, 0, 0, .55) !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  z-index: 1 !important;
+  transform: translate(0px, 0px);
+  opacity: 1;
+}
+/* a pierced element keeps a thin white line for 0.2 s so the extra hits are visible (combat-v2 §10.3) */
+.crs-pierce {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  height: 2px !important;
+  background: rgba(255, 255, 255, .92) !important;
+  box-shadow: 0 0 0 1px rgba(15, 25, 35, .5), 0 0 6px rgba(255, 255, 255, .8) !important;
+  border-radius: 1px !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  z-index: 4 !important;
+  opacity: 1;
+}

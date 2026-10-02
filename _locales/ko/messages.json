@@ -53,5 +53,7 @@
   "toastCombatOff": {"message": "전투 모드 꺼짐", "description": "Toast when combat mode is turned off"},
   "toastReload": {"message": "재장전", "description": "Reload label (ammo HUD prompt and manual reload toast)"},
   "labelSwapping": {"message": "교체 중", "description": "Ammo HUD text during the weapon swap delay"},
-  "dodgeLabel": {"message": "회피!", "description": "Near-miss call-out next to the player ring"}
+  "dodgeLabel": {"message": "회피!", "description": "Near-miss call-out next to the player ring"},
+  "statCrit": {"message": "치명", "description": "Weapon tooltip: critical-hit chance label"},
+  "statSwap": {"message": "교체", "description": "Weapon tooltip: swap (draw) time label"}
 }

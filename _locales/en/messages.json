@@ -53,5 +53,7 @@
   "toastCombatOff": {"message": "Combat mode off", "description": "Toast when combat mode is turned off"},
   "toastReload": {"message": "Reload", "description": "Reload label (ammo HUD prompt and manual reload toast)"},
   "labelSwapping": {"message": "Swapping", "description": "Ammo HUD text during the weapon swap delay"},
-  "dodgeLabel": {"message": "Dodge!", "description": "Near-miss call-out next to the player ring"}
+  "dodgeLabel": {"message": "Dodge!", "description": "Near-miss call-out next to the player ring"},
+  "statCrit": {"message": "Crit", "description": "Weapon tooltip: critical-hit chance label"},
+  "statSwap": {"message": "Swap", "description": "Weapon tooltip: swap (draw) time label"}
 }

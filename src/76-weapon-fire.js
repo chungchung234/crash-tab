@@ -4,8 +4,8 @@
     state.shots++;
     if (interceptOrb(x, y)) return null;   // v1.2 A9: an orb within 18 px absorbs the blow, the page is untouched
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
-    const dmg = rollDamage(WEAPONS.hammer.damage, crit);
+    const crit = el ? rollCrit('hammer') : false;
+    const dmg = rollDamage(WEAPONS.hammer.damage, crit, falloffMul('hammer', x, y));
     sfx(!el || willBreak(el, dmg) ? 'hammer' : 'thump', { crit });   // thump only when merely dented (A24)
     flash(x, y, 'hammer'); shake('hammer', { amp: crit ? 8.4 : 6 });
     drawCrack(x, y, 'hammer', { ink: 1 });
@@ -14,15 +14,21 @@
   }
   function firePistol(x, y) {
     state.shots++;
+    // v1.5 §3.2: the aim point is shaken by spread + the previous shot's recoil kick + bloom, then this shot's
+    // own kick is recorded for the next one. §3: damage falls off with distance from the aim origin.
+    const p = shotPoint(x, y, 'pistol');
+    x = p.x; y = p.y;
+    noteShot('pistol');
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
-    const dmg = rollDamage(WEAPONS.pistol.damage, crit);
+    const crit = el ? rollCrit('pistol') : false;
+    const dmg = rollDamage(WEAPONS.pistol.damage, crit, falloffMul('pistol', x, y));
     sfx('gun', { crit });
     flash(x, y, 'gun'); shake('gun', { amp: crit ? 2.8 : 2 });
     drawCrack(x, y, 'gun', { ink: 0.25 });
     spawnChips(x, y, randInt(3, 5));
     if (el) applyHit(el, dmg, 'gun', x, y, { crit });
+    applyPierce(x, y, el, 'gun', 'pistol');
     return el;
   }
   function fireSmg(x, y, c) {
@@ -30,12 +36,15 @@
     const h = (c && c.hold && c.h) || null;
     const n = h ? h.tick : 1;
     x += rand(-9, 9); y += rand(-9, 9);
+    const sp = shotPoint(x, y, 'smg');   // v1.5 §3.2: recoil kick + bloom on top of the mechanical ±9 px
+    x = sp.x; y = sp.y;
+    noteShot('smg');
     if (interceptOrb(x, y)) return null;   // v1.2 A9: the tick is consumed by the orb
     const el = pickTarget(x, y, h ? h.cache : undefined);
     let dmg = 0, crit = false, win = null;
     if (el) {
-      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit();
-      dmg = rollDamage(WEAPONS.smg.damage, crit);
+      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('smg');
+      dmg = rollDamage(WEAPONS.smg.damage, crit, falloffMul('smg', x, y));
     }
     if (!h || n % 2 === 1) sfx('gun', { gain: 0.6, crit: !h && crit });   // one sound per 2 shots; a hold window's crit cue comes from holdWindow()
     flash(x, y, 'gun', { size: 32, dur: 100 });
@@ -48,7 +57,7 @@
     state.shots++;
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
+    const crit = el ? rollCrit('axe') : false;
     const dmg = rollDamage(WEAPONS.axe.damage, crit);
     sfx(!el || willBreak(el, dmg) ? 'hammer' : 'thump', { crit, pitch: 0.75, gain: 1.15 });
     flash(x, y, 'hammer', { size: 190, dur: 300 }); shake('hammer', { amp: crit ? 9.8 : 7 });
@@ -61,7 +70,7 @@
     state.shots++;
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit() : false;
+    const crit = el ? rollCrit('sword') : false;
     const dmg = rollDamage(WEAPONS.sword.damage, crit);
     sfx('swish', { crit });
     flash(x, y, 'hammer', { size: 90, dur: 200 }); shake('hammer', { amp: crit ? 4.2 : 3 });
@@ -118,7 +127,7 @@
     }
     interceptOrbsAlong(x1, y1, x2, y2, 18);   // v1.2 A9: orbs within 18 px of the segment pop; the page is still hit
     // roll every element's crit before any sound / effect (A4) so the swish can carry the crit sparkle
-    const plan = hits.map((el) => { const crit = rollCrit(); return { el, crit, dmg: rollDamage(WEAPONS.sword.damage, crit) }; });
+    const plan = hits.map((el) => { const crit = rollCrit('sword'); return { el, crit, dmg: rollDamage(WEAPONS.sword.damage, crit) }; });
     sfx('swish', { crit: plan.some((p) => p.crit) });
     slashFx(x1, y1, x2, y2);
     drawSlash(x1, y1, x2, y2);
@@ -201,12 +210,15 @@
     state.shots++;
     const h = (c && c.hold && c.h) || null;
     const n = h ? h.tick : 1;
+    const fp = shotPoint(x, y, 'flame');   // v1.5 §3.2: bloom widens the cone the longer the trigger is held
+    x = fp.x; y = fp.y;
+    noteShot('flame');
     if (interceptOrb(x, y)) return null;   // v1.2 A9: a flame tick that intercepts is consumed
     const el = pickTarget(x, y, h ? h.cache : undefined);
     let crit = false, win = null, dmg = 0;
     if (el) {   // roll before any sound / effect (A4)
-      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit();
-      dmg = rollDamage(WEAPONS.flame.damage, crit);
+      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('flame');
+      dmg = rollDamage(WEAPONS.flame.damage, crit, falloffMul('flame', x, y));
     }
     spawnFire(x, y, 2);
     if (!h || n % 4 === 0) { scorchDab(x, y, 24, 0.08); state.scorch++; }   // the glass blackens over time; no crack (A3/A9)

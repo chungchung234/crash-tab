@@ -157,3 +157,30 @@ iframe { width: 320px; height: 120px; border: 1px solid #c9d0de; border-radius: 
 #boss { width: 100%; min-height: 420px; padding: 24px; background: #fff8ec; border: 1px solid #f0dcc0; border-radius: 12px; display: flex; align-items: flex-end; margin-bottom: 28px; }
 .boss-caption { margin: 0; font-size: 13px; color: #8a6a3a; }
 footer { padding: 20px; color: #6a7389; font-size: 13px; border-top: 1px solid #dde2ec; }
+/* v1.5: deliberately overlapping card pair for the pierce / depth-tier tests (SPEC-weapons §6, SPEC-combat-v2
+   §10.6). #pierce-back is first in DOM / painted first (no z-index on either — plain stacking order inside
+   the same context), #pierce-front is offset down-right so the two rects overlap by ~640 × 620 px.
+   700 × 680 (area ≈ 476 000) puts each card's max HP (size-based: 20 + 0.35·√area, clamped [10,400]) at
+   ≈ 261 — comfortably above both the sniper's full 200 damage and its 60 %-pierce 120, so a hp-delta
+   measurement never clips against 0 from simple overkill and can actually tell "full" from "~60 %" apart. */
+.pierce-stack { position: relative; width: 760px; height: 740px; margin-bottom: 28px; }
+.pierce-card {
+  position: absolute;
+  width: 700px;
+  height: 680px;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #dde2ec;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(20, 30, 60, 0.08);
+}
+.pierce-card h3 { margin: 0 0 8px; }
+.pierce-card p { margin: 0; }
+/* The pierce/depth e2e tests click the geometric centre of the two cards' overlap, which (depending on
+   text reflow) can land on the heading/paragraph rather than empty card background. elementsFromPoint()
+   honours pointer-events, so excluding the text from hit-testing makes the whole card area resolve to the
+   card <div> itself every time — exactly like the rest of this fixture's "click the padding to hit the
+   card" convention (see #big-card's own note), without having to hand-tune pixel geometry. */
+.pierce-card h3, .pierce-card p { pointer-events: none; }
+.pierce-card-back { left: 0; top: 0; background: #eef7f0; }
+.pierce-card-front { left: 60px; top: 60px; background: #fff; }
