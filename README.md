@@ -334,4 +334,8 @@ test/fixture.html/.css/.js e2e용 데모 페이지
 
 ## 라이선스
 
-MIT
+Apache License 2.0. 전문은 [LICENSE](LICENSE)를 참고하세요.
+
+## 저장소
+
+https://github.com/chungchung234/crash-tab
