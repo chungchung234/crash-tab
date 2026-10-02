@@ -66,7 +66,14 @@
     toastCombatOn: '⚔️ 전투 모드: 큰 요소들이 반격해요 (H로 끄기)', toastCombatOff: '전투 모드 꺼짐', toastReload: '재장전', labelSwapping: '교체 중',
     // v1.3 (§2 / §3.4): the dodge call-out next to the player ring
     dodgeLabel: '회피!',
-    unitSec: '초'
+    unitSec: '초',
+    // ── v1.4: the three modes, the lock-on, the repair meter, the depth tags and the control card ──
+    modeRampage: '램페이지', modeQuickdraw: '퀵드로우', modeSurvival: '서바이벌',
+    modeRampageDesc: '적 없이 부수기', modeQuickdrawDesc: '먼저 쏘아 끊기', modeSurvivalDesc: '피하며 버티기',
+    lockBlocked: '차단!', labelRatio: '파괴율', labelDominating: '제압!',
+    hintCovered: '가려짐', hintPierce: '관통 가능', hintEnemyBehind: '뒤에 적',
+    helpMove: '이동', helpDash: '대시', helpAim: '마우스로 조준',
+    setDebrisLife: '파편이 사라지는 시간'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));

@@ -53,5 +53,21 @@
   "toastCombatOff": {"message": "전투 모드 꺼짐", "description": "Toast when combat mode is turned off"},
   "toastReload": {"message": "재장전", "description": "Reload label (ammo HUD prompt and manual reload toast)"},
   "labelSwapping": {"message": "교체 중", "description": "Ammo HUD text during the weapon swap delay"},
-  "dodgeLabel": {"message": "회피!", "description": "Near-miss call-out next to the player ring"}
+  "dodgeLabel": {"message": "회피!", "description": "Near-miss call-out next to the player ring"},
+  "modeRampage": {"message": "램페이지", "description": "Mode name: rampage (no enemies)"},
+  "modeQuickdraw": {"message": "퀵드로우", "description": "Mode name: quickdraw (shoot the lock-on)"},
+  "modeSurvival": {"message": "서바이벌", "description": "Mode name: survival (fly the drone and dodge)"},
+  "modeRampageDesc": {"message": "적 없이 부수기", "description": "One-line description of the rampage mode"},
+  "modeQuickdrawDesc": {"message": "먼저 쏘아 끊기", "description": "One-line description of the quickdraw mode"},
+  "modeSurvivalDesc": {"message": "피하며 버티기", "description": "One-line description of the survival mode"},
+  "lockBlocked": {"message": "차단!", "description": "Call-out when a lock-on is cancelled by damaging the enemy"},
+  "labelRatio": {"message": "파괴율", "description": "Destruction-ratio meter label"},
+  "labelDominating": {"message": "제압!", "description": "Shown on the destruction-ratio meter at 80% or more"},
+  "hintCovered": {"message": "가려짐", "description": "Lock-on frame tag: this enemy is behind cover and cannot be shot"},
+  "hintPierce": {"message": "관통 가능", "description": "Lock-on frame tag: the weapon in hand can shoot through the cover"},
+  "hintEnemyBehind": {"message": "뒤에 적", "description": "Target box tag: N hostile elements are hidden behind this one"},
+  "helpMove": {"message": "이동", "description": "Control card: WASD move"},
+  "helpDash": {"message": "대시", "description": "Control card: Space dash"},
+  "helpAim": {"message": "마우스로 조준", "description": "Control card: aim with the mouse"},
+  "setDebrisLife": {"message": "파편이 사라지는 시간", "description": "Setting label: how long debris stays before it fades"}
 }

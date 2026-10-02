@@ -9,7 +9,11 @@
     state.timers.clear();
     state.comboTimer = 0; state.lastHitTimer = 0; state.swingTimer = 0;
     state.combatTimer = 0; state.clockTimer = 0; state.regenTimer = 0; state.toastTimer = 0; state.swapTimer = 0; state.scope.shiftTimer = 0;
-    for (const rec of state.hostiles.values()) rec.timer = 0;
+    // ── v1.4: the depth refresh, the ratio refresh, the debris sweep and every per-enemy repair timer ──
+    state.depthTimer = 0; state.ratioTimer = 0; state.debrisTimer = 0;
+    for (const rec of state.hostiles.values()) { rec.timer = 0; rec.repairTimer = 0; }
+    for (const rp of state.repairs) rp.timer = 0;
+    for (const lk of state.locks) lk.timer = 0;
     if (state.reload) { state.reload.timer = 0; state.reload.magTimer = 0; state.reload = null; }
   }
   function cancelAnims() {
@@ -34,13 +38,14 @@
     state.rafId = 0; state.animating = false; state.tickErrors = 0;
     clearCombatNodes();   // hostiles / orbs / beams / warn rings / aim lines (no kills, no score) — v1.2 A8
     clearSelf(); clearLowVignette();   // v1.3 §3: the player marker and the low-HP vignette are rebuilt by updatePlayerHud()
+    clearAvatar(); clearHelp();        // ── v1.4 §1: the drone and its one-time control card ──
     cancelAnims();
     // debris + fx nodes
     for (const p of state.pieces) { try { p.node.remove(); } catch (e) { /* ignore */ } }
     state.pieces.length = 0; state.gpuSum = 0;
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-lock, .crs-repair, .crs-repair-ghost, .crs-avatar, .crs-avatar-ghost, .crs-help, .crs-pierce'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -60,6 +65,11 @@
     // v1.2: magazines refilled, player reset, KO / toast hidden
     initAmmo(); state.swapUntil = 0; state.lastEmptyAt = 0; state.lastShot = null;
     state.nearMisses = 0; state.nearShown.length = 0; state.hitstopUntil = 0; state.hpRatio = 1;
+    // ── v1.4: locks, repairs and the ratio meter all reset with the page ──
+    state.locks.length = 0; state.repairs.length = 0; state.locksBroken = 0; state.repaired = 0; state.ratio = 0;
+    state.ratioDirty = true; state.ratioAt = 0; state.bossMode = false;
+    state.dashUntil = 0; state.dashReadyAt = 0; state.invulUntil = 0; state.dashVx = 0; state.dashVy = 0;
+    state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
     resetPlayer(); hideKo(); hideToast();
     clearCanvas();
     try { if (docEl.classList.contains('crs-swing')) docEl.classList.remove('crs-swing'); } catch (e) { /* ignore */ }
@@ -67,6 +77,7 @@
     updateHud();
     updateAmmoHud();
     updatePlayerHud();
+    updateModeHud(); updateRatioHud();   // ── v1.4 ──
     refreshHover();
     armCombat();   // END: the grace restarts while active with combat on (A8)
   }
@@ -103,7 +114,9 @@
     safe(() => chrome.storage.sync.set({ crsMuted: state.muted }));
   }
   function loadPrefs() {
-    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat']), (res) => {
+    // ── v1.4 §5: crsSeenCombatHelp is a LOCAL flag (the control card is shown once per machine, not synced) ──
+    safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
+    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife']), (res) => {
       if (!res || !state.active) return;
       if (!state.loadoutTouched && isPermutation(res.crsLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
@@ -116,10 +129,18 @@
       }
       if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
       if (typeof res.crsMuted === 'boolean') state.muted = res.crsMuted;
-      if (!state.combatTouched && typeof res.crsCombat === 'boolean' && res.crsCombat !== state.combat) setCombat(res.crsCombat, { silent: true });
+      /* ── v1.4 §0.5 ──
+       * `crsMode` is the real setting now. A stored v1.3 `crsCombat: true` migrates to QUICKDRAW, not survival:
+       * it came from someone who only ever played with the cursor, and quickdraw is the mode that keeps the
+       * cursor as the player. (`crsMode` here is the combat mode; the legacy weapon alias is `crsWeapon`.) */
+      if (!state.combatTouched) { const m = modeFromPrefs(res); if (m && m !== state.mode) setPlayMode(m, { silent: true }); }
+      // §9.2: crsDebrisLifeMs is the setting; crsDebrisLife is read too so an early build's key still loads
+      const dl = (typeof res.crsDebrisLifeMs === 'number') ? res.crsDebrisLifeMs : res.crsDebrisLife;
+      if (typeof dl === 'number' && dl >= 0) state.debrisLifeMs = dl;
       updateHud();
       updateAmmoHud();
       updatePlayerHud();
+      updateModeHud(); updateRatioHud();
     });
   }
   function sweepLeftovers() {
@@ -185,6 +206,11 @@
     state.paused = false; state.ko = false; state.scope.rmb = false; state.scope.shiftDown = false; state.scope.shiftWant = false;
     state.hostiles.clear(); state.orbs.length = 0; state.beams.length = 0; state.warns.length = 0;
     state.self = null; state.lowVig = null; state.aimlines.length = 0; state.hitstopUntil = 0;
+    // ── v1.4: drone, locks, repair beams, the ratio meter and the control card are all gone with the hosts ──
+    state.avatar = null; state.help = null; state.ratioNodes = null;
+    state.locks.length = 0; state.repairs.length = 0; state.ratio = 0;
+    state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
+    state.dashUntil = 0; state.invulUntil = 0; state.depthTimer = 0; state.ratioTimer = 0; state.debrisTimer = 0;
     if (wasActive) sendState(false);
   }
   function toggle() {
@@ -194,7 +220,7 @@
   function stats() {
     const id = state.weapon;
     return {
-      active: state.active, weapon: state.weapon, mode: state.weapon,
+      active: state.active, weapon: state.weapon,
       cracks: state.cracks, debris: debrisCount(), broken: state.broken.length,
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
@@ -210,7 +236,16 @@
       paused: state.paused, ko: state.ko, loadout: state.loadout.slice(), preset: state.preset,
       // v1.3 §5: the player marker, the "who is aiming at me" lines, and the graze counter
       selfRing: selfRingInfo(), aimlines: state.aimlines.length, nearMisses: state.nearMisses,
-      hitstop: now() < state.hitstopUntil
+      hitstop: now() < state.hitstopUntil,
+      /* ── v1.4 §5 / §10.5 ──
+       * `mode` is the combat mode from here on (rampage | quickdraw | survival). The v1 alias that used to sit
+       * on this key — the weapon id — is still readable as stats().weapon and as api.mode / api.setMode. */
+      mode: state.mode, weaponMode: state.weapon,
+      locks: state.locks.length, locksBroken: state.locksBroken,
+      repairs: state.repairs.length, repaired: state.repaired,
+      destroyRatio: ratioNow(), hostilesByTier: hostilesByTier(),
+      avatar: state.avatar ? avatarInfo() : null, debrisLifeMs: state.debrisLifeMs,
+      dashReadyAt: dashReadyWallClock()
     };
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
@@ -247,7 +282,21 @@
     ammo: ammoInfo, reload: reloadNow,
     loadout: () => state.loadout.slice(), setLoadout: (ids) => setLoadout(ids), applyPreset,
     scope: (on) => { if (on) scopeOn(); else scopeOff(); return state.scoped; },
-    player: playerInfo, setCombat: (v) => setCombat(v)
+    player: playerInfo, setCombat: (v) => setCombat(v),
+    // ── v1.4 §0.5 / §9.2: the mode setting and the debris lifetime ──
+    // (api.mode / api.setMode stay the v1 WEAPON alias; the combat mode has its own pair.)
+    get combatMode() { return state.mode; },
+    setCombatMode: (id) => setPlayMode(id),
+    cycleMode,
+    setDebrisLife: (ms) => {
+      ms = +ms;
+      if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;
+      state.debrisLifeMs = ms;
+      for (const p of state.pieces) if (p.resting) p.expireAt = ms > 0 ? now() + ms + rand(-DEBRIS_JITTER, DEBRIS_JITTER) : 0;
+      scheduleDebrisSweep();
+      safe(() => chrome.storage.sync.set({ crsDebrisLifeMs: ms, crsDebrisLife: ms }));
+      return state.debrisLifeMs;
+    }
   };
   window.__crashScreen = api;
   try {

@@ -84,3 +84,21 @@
   }
   function clearBeams() { for (const b of state.beams.slice()) removeBeam(b); }
   function clearWarns() { for (const n of state.warns) { try { n.remove(); } catch (e) { /* ignore */ } } state.warns.length = 0; }
+
+  // ── v1.4 §4: T3 now draws a lock frame instead of a laser, so the sweep is kept for the boss's third phase ──
+  /* The laser code above is unchanged and still reachable: §4 moves it onto the boss (phase 3, "레이저 쓸기")
+   * rather than deleting it. Until the boss lands, this hook is how the sweep is exercised. */
+  debug.forceLaser = (el) => {
+    if (!state.active || !modeHasEnemies() || state.paused || state.ko) return null;
+    bringIntoView(el);
+    const existing = state.hostiles.get(el) || null;
+    let rec = existing;
+    if (!rec) { const area = hostileArea(el); if (area == null) return null; rec = markHostile(el, area); }
+    if (!rec) return null;
+    const r = rectOf(rec.el);
+    if (!r) return null;
+    untrack(rec.timer); rec.timer = 0;
+    clearPhase(rec);
+    attackLaser(rec, r);
+    return 'laser';
+  };

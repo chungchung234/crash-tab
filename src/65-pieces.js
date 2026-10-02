@@ -20,6 +20,7 @@
     if (opts && opts.word) { const k = 1 + 0.6 * (1 - Math.min(dist, 200) / 200); vx *= k; vy *= k; }
     return { vx, vy, vr, dist };
   }
+  let pieceSeq = 0;   // v1.4 §9.3: per-session piece ids for debug.pieceBoxes() below
   function debrisCount() {
     let n = 0;
     for (const p of state.pieces) if (!p.chip) n++;
@@ -29,6 +30,7 @@
     const t = now();
     const dpr = Math.min(win.devicePixelRatio || 1, 2);
     p.node = node; p.x = 0; p.y = 0; p.rot = 0; p.resting = false; p.grounded = false;
+    p.pid = ++pieceSeq;   // v1.4 §9.3: stable identity, so a test can follow ONE piece across an eviction
     p.bornAt = t; if (p.launchAt == null) p.launchAt = t;
     p.tilt = rand(-12, 12);
     p.gpu = p.w * p.h * dpr * dpr;
@@ -47,7 +49,10 @@
     try {
       trackAnim(node.animate([{ filter: (shadow ? shadow + ' ' : '') + 'brightness(1.7)' }, { filter: (shadow ? shadow + ' ' : '') + 'brightness(1)' }], { duration: 90, easing: 'ease-out' }));
     } catch (e) { /* ignore */ }
+    // v1.4 §9.1: a piece that is still flying has no lifetime; the hard cut-off only stops one escaping forever
+    p.expireAt = 0; p.restedFirstAt = 0; p.jitter = null; p.hardExpireAt = t + DEBRIS_HARD_MS;
     state.pieces.push(p); state.gpuSum += p.gpu;
+    scheduleDebrisSweep();
     return p;
   }
   function applyTransform(p) {
@@ -58,14 +63,81 @@
     p.rot = Math.round(p.rot / 180) * 180 + p.tilt;
     applyTransform(p);
     p.node.style.willChange = 'auto'; p.node.style.contain = 'strict';
+    /* v1.4 §9.1: the clock starts the moment the piece FIRST settles, jittered so a whole wall does not blink
+      * out at once. First, not latest: §9.3 wakes whatever was stacked on a piece that just despawned, and
+      * restarting the clock on every re-settle would make a tall pile take a multiple of the lifetime to clear. */
+    const life = debrisLife();
+    if (!p.restedFirstAt) p.restedFirstAt = now();
+    if (p.jitter == null) p.jitter = rand(-DEBRIS_JITTER, DEBRIS_JITTER);
+    p.expireAt = life > 0 ? p.restedFirstAt + life + p.jitter : 0;
+    scheduleDebrisSweep();
   }
   function wakePiece(p) {
     if (!p.resting) return;
     p.resting = false; p.grounded = false; p.vy = 0;
+    p.expireAt = 0;   // v1.4 §9.1: knocked loose again, so it is flying again and its lifetime is off
     p.node.style.willChange = p.big ? 'auto' : 'transform'; p.node.style.contain = 'layout paint';
   }
-  function evictPieces(victims, silent) {
+  /* ── v1.4 §9.3: the support relation, read in the product's own geometry ──
+   * restPiece() snaps a chip to a random ±12° tilt, so its DOM bounding box is the axis-aligned hull of a
+   * rotated rectangle — several pixels taller than the chip itself. Asking "is B resting on A?" from
+   * getBoundingClientRect() therefore misses real pairs at random. evictPieces() wakes a piece from
+   * p.ox/p.x/p.bb, and this hook hands a test exactly those numbers plus a stable per-piece id, so the
+   * §9.4.4 check can follow one identified piece across the eviction of the piece under it. */
+  debug.pieceBoxes = () => state.pieces.map((p) => ({
+    pid: p.pid,
+    resting: !!p.resting,
+    l: p.ox + p.x + p.bb.minX,
+    r: p.ox + p.x + p.bb.maxX,
+    top: p.oy + p.y + p.bb.minY,
+    bottom: p.oy + p.y + p.bb.maxY,
+  }));
+  /* Retire ONE identified piece on the next sweep, as if its §9.1 lifetime had just run out. §9.4.1 already
+   * covers the clock; this is how §9.3's "wake whatever was stacked on it" is checked without the pieces above
+   * expiring in the very same batch. */
+  debug.expirePiece = (pid) => {
+    for (const p of state.pieces) {
+      if (p.pid !== pid) continue;
+      p.expireAt = now() - 1;
+      p.hardExpireAt = p.expireAt;
+      scheduleDebrisSweep();
+      return pid;
+    }
+    return null;
+  };
+  /* ── v1.4 §9: debris stops piling up ──
+   * The floor used to fill with debris that only the 160-piece cap or a manual restore ever cleared. Now a piece
+   * that has come to rest fades out after `debrisLifeMs` (0 = the old behaviour), while the original stays hidden
+   * — the page is NOT put back, only the litter is taken away. Under memory pressure a lifetime of "forever" is
+   * still capped, because that is exactly when the floor is fullest. */
+  function debrisLife() {
+    const pressure = state.pieces.length > CAP * 0.75 || state.gpuSum > GPU_BUDGET * 0.75;
+    const want = state.debrisLifeMs;
+    if (pressure) return want > 0 ? Math.min(want, DEBRIS_PERF_MS) : DEBRIS_PERF_MS;
+    return want;
+  }
+  function scheduleDebrisSweep() {
+    if (state.debrisTimer || !state.active) return;
+    state.debrisTimer = later(debrisSweep, DEBRIS_SWEEP_MS);
+  }
+  function debrisSweep() {
+    state.debrisTimer = 0;
+    if (!state.active || !state.pieces.length) return;
+    const t = now();
+    const victims = [];
+    for (const p of state.pieces) {
+      if (victims.length >= DEBRIS_BATCH) break;   // §9.1: at most twelve at a time, so no frame carries them all
+      if ((p.expireAt && t >= p.expireAt) || (p.hardExpireAt && t >= p.hardExpireAt)) victims.push(p);
+    }
+    if (victims.length) evictPieces(victims, false, { dur: DEBRIS_FADE_MS, shrink: true });
+    scheduleDebrisSweep();
+  }
+  /* opts (v1.4 §9.1): { dur, shrink } — a lifetime expiry fades over 500 ms AND shrinks to 0.88. The scale is a
+   * separate composite:'add' animation so it stacks onto the inline translate/rotate instead of replacing it. */
+  function evictPieces(victims, silent, opts) {
     if (!victims.length) return;
+    const dur = (opts && opts.dur) || 350;
+    const shrink = !!(opts && opts.shrink);
     const evictedBoxes = [];
     for (const p of victims) {
       const i = state.pieces.indexOf(p); if (i >= 0) state.pieces.splice(i, 1);
@@ -77,10 +149,11 @@
       let done = false;
       const kill = () => { if (done) return; done = true; try { node.remove(); } catch (e) { /* ignore */ } };
       try {
-        const a = node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, easing: 'ease-in', fill: 'forwards' });
+        const a = node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: dur, easing: 'ease-in', fill: 'forwards' });
         trackAnim(a); a.addEventListener('finish', kill); a.addEventListener('cancel', kill);
+        if (shrink && !reducedMotion()) trackAnim(node.animate([{ transform: 'scale(1)' }, { transform: 'scale(.88)' }], { duration: dur, easing: 'ease-in', fill: 'forwards', composite: 'add' }));
       } catch (e) { /* ignore */ }
-      later(kill, 500);
+      later(kill, dur + 150);
     }
     // wake resting pieces that were supported by an evicted piece (A1)
     for (const q of state.pieces) {

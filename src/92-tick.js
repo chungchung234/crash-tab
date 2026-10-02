@@ -19,7 +19,7 @@
     catch (e) {
       state.lastError = String((e && e.stack) || e);
       state.tickErrors++;
-      busy = state.tickErrors < 120 && !!(state.pieces.length || state.orbs.length || state.beams.length || state.fxQueue.length || state.scoped);
+      busy = state.tickErrors < 120 && !!(state.pieces.length || state.orbs.length || state.beams.length || state.fxQueue.length || state.scoped || state.avatar || state.locks.length || state.repairs.length);
     }
     if (busy && state.active) state.rafId = raf(tick); else state.animating = false;
   }
@@ -79,6 +79,13 @@
     if (state.orbs.length) { orbStep(t, dt); busy = busy || state.orbs.length > 0; }
     if (state.beams.length) { beamStep(); busy = true; }
     if (state.scoped) { scopeStep(t); busy = true; }
+    /* ── v1.4 ──
+     * The drone (§1), the lock frames (§2) and the repair beams (§3) all ride THIS loop too. A PARKED drone does
+     * not keep the loop awake — keydown and startDash() both kick() it, and scheduleHover()'s existing move frame
+     * carries the nose — so standing still costs no frames at all, exactly like v1.3. */
+    if (state.avatar) { avatarStep(t, dt); if (avatarMoving()) busy = true; }
+    if (state.locks.length) { stepLocks(t); busy = true; }
+    if (state.repairs.length) { stepRepairs(); busy = true; }
     // v1.3 §3.1 / §3.2: the player ring rides this loop (and scheduleHover()'s RAF) — it never owns one
     if (state.self) selfStep();
     if (state.aimlines.length) { stepAimLines(); busy = true; }
@@ -103,6 +110,12 @@
       }
       refreshHover();
       scheduleAura();
+      if (state.avatar) {   // v1.4 §1.2: the drone lives in screen space, so a resize re-clamps it
+        const p = state.player;
+        p.x = clamp(p.x, AV_MARGIN, Math.max(AV_MARGIN, W - AV_MARGIN));
+        p.y = clamp(p.y, AV_MARGIN, Math.max(AV_MARGIN, H - AV_MARGIN));
+        placeAvatar(); placeSelf();
+      }
       kick();
     });
   }

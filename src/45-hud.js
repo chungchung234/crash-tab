@@ -76,7 +76,20 @@
     '.crs-ko .kt{font-size:30px;font-weight:800;letter-spacing:.3px}',
     '.crs-ko .ks{font-size:15px;color:rgba(255,255,255,.85)}',
     '.crs-ko .kb{display:flex;gap:10px;margin-top:8px}',
-    '.crs-ko button{flex:none;height:38px;padding:0 18px;font-size:14px;background:rgba(255,255,255,.12)}'
+    '.crs-ko button{flex:none;height:38px;padding:0 18px;font-size:14px;background:rgba(255,255,255,.12)}',
+    // ── v1.4: the three-way mode control (§0.5), the destruction-ratio meter (§3.2) and the dash dot (§1.2) ──
+    '.modes{display:flex;align-items:center;gap:3px;margin-top:6px}',
+    '.modes .mlabel{flex:none;font-size:11.5px;color:rgba(255,255,255,.7);white-space:nowrap;margin-right:2px}',
+    '.modes button{flex:1 1 0;min-width:0;height:26px;padding:0 4px;font-size:11.5px;border-radius:7px}',
+    '.modes button[aria-pressed="true"]{background:#e5484d;border-color:#e5484d}',
+    '.mdesc{margin-top:4px;font-size:11px;color:rgba(255,255,255,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.crs-progress{position:fixed;left:50%;top:52px;transform:translate(-50%,0);pointer-events:none;display:none;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff;z-index:4}',
+    '.crs-progress.on{display:block}',
+    '.crs-progress .rlabel{display:block;font-size:13px;font-weight:700;text-align:center;margin-bottom:4px;white-space:nowrap}',
+    '.crs-progress .rbar{width:220px;height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}',
+    '.crs-progress .rfill{height:100%;width:0;background:#e5484d;border-radius:5px}',
+    '.crs-player .pdash{display:none;width:10px;height:10px;margin-left:8px;border-radius:50%;vertical-align:-1px;background:rgba(255,255,255,.22);box-shadow:0 0 0 1px rgba(255,255,255,.35) inset}',
+    '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}'
   ].join('\n');
 
   function hudButton(label, title, onClick) {
@@ -243,6 +256,39 @@
     const endDrag = (e) => { if (!drag) return; drag = null; try { title.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ } };
     title.addEventListener('pointerup', endDrag);
     title.addEventListener('pointercancel', endDrag);
+
+    // ── v1.4 §0.5: the three-way mode control replaces the single 전투 ON/OFF button ──
+    /* The old button is kept alive but taken out of the row, so every v1.3 line that still writes to it keeps
+     * working untouched while the player sees one segmented control listing rampage · quickdraw · survival. */
+    const modes = doc.createElement('div'); modes.className = 'modes';
+    const mlabel = doc.createElement('span'); mlabel.className = 'mlabel'; mlabel.textContent = msg('labelCombat');
+    modes.append(mlabel);
+    hudEls.modeBtns = {};
+    for (const id of MODES) {
+      const mb = hudButton(modeLabel(id), modeLabel(id) + ' · ' + modeDesc(id) + ' (H)', () => setPlayMode(id));
+      mb.setAttribute('data-mode', id);
+      mb.setAttribute('aria-pressed', 'false');
+      hudEls.modeBtns[id] = mb;
+      modes.append(mb);
+    }
+    hudEls.modes = modes;
+    hudEls.modeDesc = doc.createElement('div'); hudEls.modeDesc.className = 'mdesc';
+    try { panel.insertBefore(modes, actions); panel.insertBefore(hudEls.modeDesc, actions); } catch (err) { panel.append(modes, hudEls.modeDesc); }
+    try { if (hudEls.combatBtn && hudEls.combatBtn.parentNode) hudEls.combatBtn.parentNode.removeChild(hudEls.combatBtn); } catch (err) { /* ignore */ }
+
+    // ── v1.4 §3.2: the destruction-ratio meter, top centre under the toast ──
+    const prog = mk('div', 'crs-progress');
+    const rlabel = doc.createElement('span'); rlabel.className = 'rlabel crs-num';
+    const rbar = doc.createElement('div'); rbar.className = 'rbar';
+    const rfill = doc.createElement('div'); rfill.className = 'rfill';
+    rbar.append(rfill);
+    prog.append(rlabel, rbar);
+    mountPoint.append(prog);
+    state.ratioNodes = { box: prog, label: rlabel, fill: rfill };
+
+    // ── v1.4 §1.2: one dash-cooldown dot on the health panel ──
+    hudEls.dashDot = doc.createElement('span'); hudEls.dashDot.className = 'pdash';
+    try { hudEls.pStats.append(hudEls.dashDot); } catch (err) { /* ignore */ }
     return host;
   }
   function hudFallbackCheck() {
@@ -263,6 +309,15 @@
         if (hudEls.pBar) { const b = hudEls.pBar.style; b.position = 'relative'; b.width = '220px'; b.height = '16px'; b.borderRadius = '8px'; b.overflow = 'hidden'; b.background = 'rgba(255,255,255,.18)'; }
         if (hudEls.pFill) { hudEls.pFill.style.height = '100%'; hudEls.pFill.style.background = '#3fb950'; }
         if (hudEls.toast) { fixed(hudEls.toast, '50%', 'auto', '14px', 'auto'); hudEls.toast.style.transform = 'translate(-50%, 0)'; hudEls.toast.style.display = 'none'; }
+        // v1.4: the ratio meter needs the same minimal fixed placement as the other shadow siblings
+        if (state.ratioNodes && state.ratioNodes.box) {
+          fixed(state.ratioNodes.box, '50%', 'auto', '52px', 'auto');
+          state.ratioNodes.box.style.transform = 'translate(-50%, 0)';
+          state.ratioNodes.box.style.display = 'none';
+          const rb = state.ratioNodes.fill.parentNode;
+          if (rb) { rb.style.width = '220px'; rb.style.height = '10px'; rb.style.background = 'rgba(255,255,255,.2)'; rb.style.borderRadius = '5px'; rb.style.overflow = 'hidden'; }
+          state.ratioNodes.fill.style.height = '100%'; state.ratioNodes.fill.style.background = '#e5484d';
+        }
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
     } catch (e) { /* ignore */ }
@@ -299,6 +354,18 @@
       hudEls.combatBtn.textContent = '⚔️ ' + msg('labelCombat') + ' ' + (state.combat ? 'ON' : 'OFF');
       hudEls.combatBtn.title = msg('labelCombat') + ' ' + (state.combat ? 'ON' : 'OFF') + ' (H)';
       hudEls.combatBtn.setAttribute('aria-pressed', state.combat ? 'true' : 'false');
+      updateModeHud();   // ── v1.4 §0.5 ──
+    } catch (e) { /* ignore */ }
+  }
+  // ── v1.4 §0.5: which of the three is pressed, and the one-line description under them ──
+  function updateModeHud() {
+    if (!hudEls.modeBtns) return;
+    try {
+      for (const id of MODES) {
+        const b = hudEls.modeBtns[id];
+        if (b) b.setAttribute('aria-pressed', state.mode === id ? 'true' : 'false');
+      }
+      if (hudEls.modeDesc) hudEls.modeDesc.textContent = modeDesc(state.mode);
     } catch (e) { /* ignore */ }
   }
   /* Hot paths (hold ticks, staggered AoE hits) refresh the counters at most once per frame (A5 item 4). */

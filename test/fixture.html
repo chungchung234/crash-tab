@@ -131,6 +131,34 @@
   <section id="boss"><p class="boss-caption">저격총·조준경·전투 모드(레이저) 테스트용 보스 영역입니다. 약 1052 × 420 픽셀, 체력 253.</p></section>
 
   <footer id="nav">화면부수기 데모 · 이 영역은 링크의 목적지입니다.</footer>
+
+  <!-- v1.4: depth-of-stack test fixture (SPEC-combat-v2 §10.6) — appended after footer#nav (never moved
+       before it: an existing suite-A check requires #boss's nextElementSibling to be footer#nav). See
+       test/fixture.css for the z-index stacking (depth-front z6 .. depth-back z1, all sharing the same
+       rect so elementsFromPoint at any one of them sees exactly the layers above it in the list below). -->
+  <h2 class="section-title">깊이 테스트</h2>
+  <section id="depth-lab" class="depth-lab">
+    <div id="depth-front" class="depth-card depth-z6">앞 카드</div>
+    <div id="depth-mid" class="depth-card depth-z5">중간 카드 <span id="depth-mid-child">(자식)</span></div>
+    <div id="depth-occ-a" class="depth-occ depth-z4"></div>
+    <div id="depth-occ-b" class="depth-occ depth-z3"></div>
+    <div id="depth-occ-c" class="depth-occ depth-z2"></div>
+    <div id="depth-back" class="depth-card depth-z1">뒤 카드</div>
+  </section>
+
+  <!-- v1.4 (§7.7/§10.6.7): a small breakable element within 600 px of the depth-lab fixture, so the natural
+       repair scheduler on a depth-lab hostile has something in range to restore (§small-card, up near the top
+       of the page, is far more than 600 px away from here). -->
+  <div id="depth-fodder" class="depth-fodder">복구 재료</div>
+
+  <!-- v1.4 (§10.6.5): a second, much larger overlapping pair, used only for the sniper-pierce-damage test.
+       depth-front/-mid are sized for the T1 "shooter" hostile window (and so cap out around ~94 hp generic),
+       too little to tell "took 100 %" apart from "took 60 % of 200" once either clamps at death — both would
+       read the same. This pair is sized so neither hp cap gets in the way of comparing the two damage amounts. -->
+  <section id="depth-tank-lab" class="depth-tank-lab">
+    <div id="depth-tank-front" class="depth-tank depth-tank-z2">앞 (튼튼)</div>
+    <div id="depth-tank-back" class="depth-tank depth-tank-z1">뒤 (튼튼)</div>
+  </section>
 </main>
 </body>
 </html>
