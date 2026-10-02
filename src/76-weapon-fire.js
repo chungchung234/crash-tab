@@ -28,7 +28,8 @@
     drawCrack(x, y, 'gun', { ink: 0.25 });
     spawnChips(x, y, randInt(3, 5));
     if (el) applyHit(el, dmg, 'gun', x, y, { crit });
-    applyPierce(x, y, el, 'gun', 'pistol');
+    // pierce: nothing to do here — interceptOrb() above already handed the shot to schedulePierce()
+    // (src/87-depth.js), the single entry point into applyPierce(). The pistol's pierce is 0 anyway.
     return el;
   }
   function fireSmg(x, y, c) {

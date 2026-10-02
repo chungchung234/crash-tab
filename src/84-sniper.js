@@ -37,6 +37,9 @@
     drawCrack(ix, iy, 'gun', { rays: [6, 9], len: [30, 70], ink: 0.5 });
     spawnChips(ix, iy, randInt(4, 7));
     if (el) applyHit(el, dmg, 'gun', ix, iy, { crit, headshot: true });
-    applyPierce(ix, iy, el, 'gun', 'sniper');   // v1.5 §3 / combat-v2 §10.3-2: two more layers at ×0.6, ×0.36
+    /* v1.5 §3 / combat-v2 §10.3-2: two more layers at ×0.6, ×0.36 — applied by schedulePierce()
+     * (src/87-depth.js), which interceptOrb(ix, iy) above already armed with this exact impact point and
+     * which defers one task so this shot's own applyHit has resolved first. Calling applyPierce() again
+     * here would pierce the same stack twice. */
     return el;
   }

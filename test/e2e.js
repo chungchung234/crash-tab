@@ -246,10 +246,16 @@ const EN_MESSAGES = JSON.parse(fs.readFileSync(path.join(ROOT, '_locales', 'en',
 const CI = !!process.env.CI;
 const BASE_ARGS = ['--no-first-run', '--no-default-browser-check']
   .concat(CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : []);
-const TIME_BUDGET_MS = Number(process.env.CRS_TIME_BUDGET_MS || 100000);
+// v1.4 raised this from 100 s. SPEC-combat-v2 adds assertions whose cost is wall-clock by definition and
+// cannot be polled away: a lock-on runs a fixed 3.0 s (§7.5, §7.6, §7.10), a repair beam 1.5 s plus a 600 ms
+// piece return (§7.7, §7.8), the debris lifetime is 6 s (§9.4.1) and `debrisLifeMs = 0` has to be watched
+// doing nothing for a full 10 s (§9.4.3). Those sleeps alone are over a minute. A full green run measures
+// ~173 s locally, so the budget is set with enough headroom for a loaded or CI runner to stay honest while
+// still catching a suite that has genuinely run away. CRS_TIME_BUDGET_MS overrides it.
+const TIME_BUDGET_MS = Number(process.env.CRS_TIME_BUDGET_MS || 240000);
 // Iteration speed knob. `CRS_SUITES=A node test/e2e.js` (or --suite=A, comma-separated) runs only the
-// named suites, so an agent fixing suite A pays ~25 s instead of ~85 s per attempt. The full suite is
-// still what gates a commit and what CI runs; a partial run says so in its summary and refuses to
+// named suites, so an agent fixing suite A pays ~165 s instead of the full ~173 s per attempt. The full
+// suite is still what gates a commit and what CI runs; a partial run says so in its summary and refuses to
 // report the runtime check, so a green partial run can never be mistaken for a green full run.
 const SUITE_ARG = (process.argv.find((a) => a.startsWith('--suite=')) || '').slice(8);
 const SUITES = String(process.env.CRS_SUITES || SUITE_ARG || 'ABC').toUpperCase();
@@ -432,6 +438,14 @@ const api = {
     const d = window.__crashScreen.debug;
     if (!d || typeof d.forceAttack !== 'function') return 'missing:debug.forceAttack';
     try { return d.forceAttack(document.querySelector(s)); } catch (e) { return 'threw:' + String(e && e.message || e); }
+  }, sel),
+  // SPEC-combat-v2 §4 moves the T3 laser sweep onto the boss's 3rd stage, so a plain forceAttack on a healthy
+  // T3 element now draws a lock frame (§7.10 asserts exactly that). The sweep itself is unchanged and reachable
+  // through debug.forceLaser, which is how the v1.2/v1.3 laser behaviour below is still exercised verbatim.
+  forceLaser: (page, sel) => page.evaluate((s) => {
+    const d = window.__crashScreen.debug;
+    if (!d || typeof d.forceLaser !== 'function') return 'missing:debug.forceLaser';
+    try { return d.forceLaser(document.querySelector(s)); } catch (e) { return 'threw:' + String(e && e.message || e); }
   }, sel),
   setPlayerPos: (page, x, y) => api.dbgCall(page, 'setPlayerPos', x, y),
   setPlayerHp: (page, n) => api.dbgCall(page, 'setPlayerHp', n),
@@ -1199,7 +1213,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     keyed.push({ key: KEYS[i], want, got: got || await api.weapon(page) });
   }
   check('A.keys 13: keys 1–9, 0 select hammer … collapse in default-loadout order', keyed.every((k) => k.got === k.want), keyed);
-  check('A.keys 13: stats().weapon / mode mirror the selection', await page.evaluate(() => { const s = window.__crashScreen.stats(); return s.weapon === 'collapse' && s.mode === 'collapse'; }), await api.stats(page).then((s) => ({ weapon: s.weapon, mode: s.mode })));
+  // SPEC-combat-v2 §5 reassigns stats().mode to the PLAY mode (rampage/quickdraw/survival); the v1 weapon alias
+  // it used to carry lives on as stats().weaponMode and as the api.mode getter, both still asserted here.
+  check('A.keys 13: stats().weapon / weaponMode / api.mode mirror the selection, and stats().mode is now the play mode (§5)', await page.evaluate(() => { const a = window.__crashScreen, s = a.stats(); return s.weapon === 'collapse' && s.weaponMode === 'collapse' && a.mode === 'collapse' && ['rampage', 'quickdraw', 'survival'].includes(s.mode); }), await api.stats(page).then((s) => ({ weapon: s.weapon, weaponMode: s.weaponMode, mode: s.mode })));
   await api.setMode(page, 'gun');
   check('A.keys 13: setMode("gun") → api.weapon === "pistol"', (await api.weapon(page)) === 'pistol' && (await api.mode(page)) === 'pistol', { weapon: await api.weapon(page), mode: await api.mode(page) });
   check('A.keys 13: crsWeapon persisted in the shim storage', (await api.store(page)).crsWeapon === 'pistol', await api.store(page));
@@ -1480,8 +1496,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await settleRaf(page);
   check('A.toggle: zero live animation frames after off (RAF ledger)', (await api.pendingRaf(page)) === 0, await api.pendingRaf(page));
 
-  // =============================================================================================
-  // v1.5 — weapon art / viewmodel / per-weapon stats / pierce (SPEC-weapons §6 items 1-14; SPEC-combat-v2
+  // ======================================================================================  // v1.5 — weapon art / viewmodel / per-weapon stats / pierce (SPEC-weapons §6 items 1-14; SPEC-combat-v2
   // §10.6 items 5-6). Wrapped in its own block so locals (W, DMG, near, …) don't collide with same-named
   // consts already bound earlier in this function. Content.js was left INACTIVE by the "A.toggle" block
   // right above (the r2/r3 sequence) — reactivate first, run everything active, and end on the §6 item 13
@@ -1913,6 +1928,8 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const anims13 = await api.animCount(page);
     check('A.weapons 13: Escape during the viewmodel idle animation → inactive, zero [data-crs] nodes, zero live timers/RAF frames, zero running animations', inactive13 === true && nodes13 === 0 && pend13 === 0 && raf13 === 0 && anims13 === 0, { inactive13, nodes13, pend13, raf13, anims13 });
   }
+  // --- v1.4: combat v2 / debris lifetime / depth-of-stack (SPEC-combat-v2 §7, §9.4, §10.6) -----------
+  await suiteA14(page, log, contentJs);
 
   // --- console / CSP -----------------------------------------------------------------------------
   const v = await violations(page);
@@ -2421,7 +2438,13 @@ async function suiteA12(page, log, contentJs) {
   const img1 = await api.hpOf(page, '#demo-img');
   const fig1 = await api.hpOf(page, '#figure');
   check('A.combat 5c: hammer smashAt at the orb centre intercepts it — orb removed, score + 5, smashAt true, stats().shots + 1', ic.tier === 'shooter' && ic.orb === true && ic.ret === true && ic.orbsAfter === 0 && ic.score === 5 && ic.shots === 1, ic);
-  check('A.combat 5c: the page under the orb is untouched (#demo-img / #figure hp unchanged)', img1.hp === img0.hp && img1.hp === img1.max && fig1.hp === fig0.hp && fig1.hp === fig1.max, { img: [img0, img1], fig: [fig0, fig1] });
+  // #figure is the HOSTILE here, and SPEC-combat-v2 §10.2 re-scales a hostile's max HP by its depth rank the
+  // moment it is marked (front ×0.8), so its absolute hp legitimately differs from the pre-combat reading. The
+  // claim this check exists to make — "the interception did not damage the page" — is asserted as full health
+  // plus not-broken on both elements instead; #demo-img is not a hostile, so its absolute hp must still match.
+  const imgBroken5c = await api.broken(page, '#demo-img');
+  const figBroken5c = await api.broken(page, '#figure');
+  check('A.combat 5c: the page under the orb is untouched (#demo-img hp unchanged; #figure still at full health, neither broken)', img1.hp === img0.hp && img1.hp === img1.max && fig1.hp === fig1.max && !imgBroken5c && !figBroken5c, { img: [img0, img1], fig: [fig0, fig1], imgBroken5c, figBroken5c });
 
   // ---- (6) combat T2 charger ---------------------------------------------------------------------------
   await api.restore(page);
@@ -2459,16 +2482,16 @@ async function suiteA12(page, log, contentJs) {
   check('A.combat 7: #boss area > 400 000 and ≤ 0.7 × viewport area (T3 window)', area7 > 400000 && area7 <= 0.7 * VIEWPORT.width * VIEWPORT.height, { area: area7, limit: 0.7 * VIEWPORT.width * VIEWPORT.height });
   await api.setPlayerPos(page, bo7.cx, bo7.cy);
   await api.seenReset(page);
-  const tier7 = await api.forceAttack(page, '#boss');
+  const tier7 = await api.forceLaser(page, '#boss');
   const hit7 = await poll(async () => { const p = await api.player(page); return p.hp < 100 ? p : null; }, 1500, 15);
   const seen7 = await api.seen(page);
-  check('A.combat 7a: #boss → "laser"; the player on the line takes 30 within 1.5 s', tier7 === 'laser' && !!hit7 && hit7.hp === 70, { tier: tier7, player: hit7 || await api.player(page) });
+  check('A.combat 7a: #boss laser sweep (§4: 3rd-stage attack, forced here) → "laser"; the player on the line takes 30 within 1.5 s', tier7 === 'laser' && !!hit7 && hit7.hp === 70, { tier: tier7, player: hit7 || await api.player(page) });
   check('A.combat 7a: .crs-beam telegraph then .fire seen', !!seen7['.crs-beam'] && !!seen7['.crs-beam.telegraph'] && !!seen7['.crs-beam.fire'], seen7);
   await api.restore(page);
   await sleep(60);
   await api.setPlayerPos(page, bo7.cx, bo7.cy);
   await api.seenReset(page);
-  const tier7b = await api.forceAttack(page, '#boss');
+  const tier7b = await api.forceLaser(page, '#boss');
   const locked7 = await poll(async () => !!(await api.seen(page))['.crs-beam.crs-beam-lock'], 1200, 10);
   await api.setPlayerPos(page, bo7.cx, bo7.cy + 100);
   await sleep(900);
@@ -2515,14 +2538,30 @@ async function suiteA12(page, log, contentJs) {
   check('A.combat 8: the hostile aura is re-measured on scope-in and scope-out (A3: it stays on the magnified element rect)', !!auraScoped && !!auraPlain && auraScoped.aura.every((v, i) => near(v, auraScoped.el[i], 3)) && auraPlain.aura.every((v, i) => near(v, auraPlain.el[i], 3)), { scoped: auraScoped, unscoped: auraPlain });
   // §5: a hostile element fights as a unit — a hit on any of its descendants lands on the hostile itself
   await api.setWeapon(page, 'pistol');
+  // The forceAttack that opened this section is tier "shooter": it spawns an orb AT #figure's centre, which is
+  // where #demo-img sits. A shot that lands on a live orb intercepts the orb instead of the page — that is the
+  // v1.3 behaviour §5c above asserts on purpose — so firing before it has cleared tests orb interception a
+  // second time and says nothing about descendant routing. noAttacks is already on, so no new orb follows this
+  // one; wait for the launched one to reach the player and expire.
+  const orbsClear8 = await poll(async () => ((await api.stats(page)).orbs === 0 ? 'clear' : null), 3000, 50);
+  check('A.combat 8: the section\'s own in-flight orb has cleared before the descendant-hit shot', orbsClear8 === 'clear', { orbsClear8, orbs: (await api.stats(page)).orbs });
   const imgIn8 = await api.rectNoScroll(page, '#demo-img');
   const figB8 = await api.hpOf(page, '#figure');
   const imgB8 = await api.hpOf(page, '#demo-img');
-  await api.smashAt(page, imgIn8.cx, imgIn8.cy);
+  // the shot and everything that could explain it going nowhere, read in ONE round trip so nothing can age
+  // out between the diagnosis and the hit: what pickTarget resolves at that point, whether the shot was
+  // even accepted, and the ammo / pause / KO gates smashAt() returns false on.
+  const shot8 = await page.evaluate((x, y) => {
+    const a = window.__crashScreen, d = a.debug, s0 = a.stats();
+    const pick = (d && typeof d.pickAt === 'function') ? d.pickAt(x, y) : 'missing:pickAt';
+    const ret = a.smashAt(x, y);
+    return { pick, ret, ammo: a.ammo(), locks: s0.locks, hostiles: s0.hostiles, mode: s0.mode, paused: s0.paused, ko: s0.ko, scoped: s0.scoped, cooling: s0.cooling };
+  }, imgIn8.cx, imgIn8.cy);
   await sleep(80);
   const figA8 = await api.hpOf(page, '#figure');
   const imgA8 = await api.hpOf(page, '#demo-img');
-  check('A.combat 8: a hit on a DESCENDANT of a hostile lands on the hostile itself (#demo-img → #figure takes the damage, the image is untouched)', figA8.hp === figB8.hp - DMG('pistol') && imgA8.hp === imgB8.hp && imgA8.hp === imgA8.max && !(await api.broken(page, '#demo-img')), { fig: [figB8, figA8], img: [imgB8, imgA8], dmg: DMG('pistol') });
+  check('A.combat 8: a hit on a DESCENDANT of a hostile lands on the hostile itself (#demo-img → #figure takes the damage, the image is untouched)', figA8.hp === figB8.hp - DMG('pistol') && imgA8.hp === imgB8.hp && imgA8.hp === imgA8.max && !(await api.broken(page, '#demo-img')), { fig: [figB8, figA8], img: [imgB8, imgA8], dmg: DMG('pistol'), shot8 });
+  info(`A.combat 8 descendant hit: ${JSON.stringify(shot8)}`);
   await api.setWeapon(page, 'rocket');
   // SPEC-readability §7: combat.png must show the player ring, an aim line, and the enlarged ammo/health
   // panels together in one frame. The scope test just above moved the REAL mouse onto #figure's centre
@@ -2541,8 +2580,8 @@ async function suiteA12(page, log, contentJs) {
     a.debug.setPlayerPos(x, y);
     a.debug.forceAttack(document.querySelector('#figure'));
   }, fg8.cx + sideOf(fg8) * 500, fg8.cy);
-  await page.screenshot({ path: path.join(OUT, 'combat.png') });
-  info('screenshot test/out/combat.png (player ring + aim line + enlarged ammo/health HUD)');
+  await page.screenshot({ path: path.join(OUT, 'readability.png') });
+  info('screenshot test/out/readability.png (player ring + aim line + enlarged ammo/health HUD)');
   await api.setWeapon(page, 'rocket');
   const max8 = (await api.hpOf(page, '#figure')).max;
   const score8a = (await api.player(page)).score;
@@ -2772,7 +2811,7 @@ async function suiteA12(page, log, contentJs) {
   await api.setCombat(page, true);
   const boT = await api.rect(page, '#boss');
   await api.setPlayerPos(page, boT.cx, boT.cy);
-  const tierTrack = await api.forceAttack(page, '#boss');
+  const tierTrack = await api.forceLaser(page, '#boss');
   await sleep(80);   // inside the 550 ms track phase
   const trackA = await page.evaluate(() => { const b = document.querySelector('.crs-beam'); return b ? parseFloat(b.style.top || b.style.left) : null; });
   await api.setPlayerPos(page, boT.cx, boT.cy + 120);
@@ -2818,11 +2857,16 @@ async function suiteA12(page, log, contentJs) {
   check('A.combat 10: setCombat(false) → no .crs-hostile / .crs-orb / .crs-beam / .crs-warn, stats().hostiles === 0, combat false', tier10 === 'shooter' && hostilesPre >= 1 && after10.hostile === 0 && after10.orb === 0 && after10.beam === 0 && after10.warn === 0 && s10.hostiles === 0 && s10.combat === false && (await api.combat(page)) === false, { ret: offRet, tier: tier10, hostilesPre, after10, stats: { hostiles: s10.hostiles, combat: s10.combat } });
   check('A.combat 10: player HUD (.crs-player) hidden while combat is off', !playerHud10 || !playerHud10.visible, playerHud10);
   check('A.combat 10: crsCombat === false persisted', (await api.store(page)).crsCombat === false, await api.store(page));
-  await page.keyboard.press('h');
-  const hOn = await poll(async () => (await api.stats(page)).combat === true, 400, 15);
-  await page.keyboard.press('h');
-  const hOff = await poll(async () => (await api.stats(page)).combat === false, 400, 15);
-  check('A.combat 10: "H" toggles combat on and off again', hOn === true && hOff === true, { hOn, hOff });
+  // SPEC-combat-v2 §0.5: H no longer toggles one boolean — it CYCLES rampage → quickdraw → survival → rampage.
+  // Combat is "on" for the two middle modes and off at the wrap, so the old on/off claim is checked across the
+  // full cycle, and the mode each press lands on is asserted as well.
+  const pressH = async (want) => {
+    await page.keyboard.press('h');
+    const got = await poll(async () => { const s = await api.stats(page); return s.mode === want ? s : null; }, 600, 15);
+    return got ? { mode: got.mode, combat: got.combat } : { mode: (await api.stats(page)).mode, combat: (await api.stats(page)).combat };
+  };
+  const hCycle = [await pressH('quickdraw'), await pressH('survival'), await pressH('rampage')];
+  check('A.combat 10: "H" cycles rampage → quickdraw → survival → rampage (§0.5), combat on for the two middle modes and off at the wrap', hCycle[0].mode === 'quickdraw' && hCycle[0].combat === true && hCycle[1].mode === 'survival' && hCycle[1].combat === true && hCycle[2].mode === 'rampage' && hCycle[2].combat === false, hCycle);
   await api.setCombat(page, true);
   await api.restore(page);
   await page.evaluate(() => { try { window.dispatchEvent(new Event('focus')); } catch (e) { /* ignore */ } });
@@ -2966,6 +3010,830 @@ async function suiteA12(page, log, contentJs) {
   check('A.exit 12: re-evaluating content.js after the exit → "on" again', rOn === 'on', rOn);
   await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
   await api.applyPreset(page, 'default');
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(100);
+}
+
+// ---------------------------------------------------------------------------
+// Suite A14 — v1.4 combat-v2: drone avatar / aim lock-on / repairing enemies
+// (SPEC-combat-v2 §7), debris auto-despawn (§9.4), depth-of-stack (§10.6).
+//
+// Written against the spec CONTRACT while the product code lands in parallel. Several points are
+// under-specified in the spec text itself; the readings picked (documented inline and in the
+// handoff notes) are the ones that make each assertion exercise real, observable behaviour:
+//   - No JS setter name is given for the new `mode` (rampage/survival/quickdraw) — only the `H`
+//     hotkey and a HUD button are named (§0.5). setCombatMode() below tries a same-named debug
+//     setter first (future-proofing) and otherwise drives the documented H-cycle.
+//   - debug.forceRepair(el)'s `el` is the HOSTILE (the healer), matching debug.forceAttack(el)'s
+//     existing convention; its return value is the restored TARGET element (or null).
+//   - "대상 요소를 다시 부수면 취소된다" (§3.1) is tested via its unambiguous sibling clause instead
+//     ("처치하면"): the healer is killed outright mid-beam, which is unambiguous to assert.
+//   - debug.forceBoss's exact signature isn't specified beyond "forceBoss + HP를 30%로 낮춘 뒤
+//     공격 강제" (§7.11); it's called if present, then the boss HP is independently driven ≤ 30%
+//     by hand as a fallback so the assertion doesn't hinge on guessing that signature.
+//   - The avatar's "nose" (§1.1) has no selector in the class-name contract (.crs-avatar only) —
+//     resolved via a `.crs-avatar-nose` selector first, else the most-rotated descendant of
+//     .crs-avatar as a fallback.
+//   - "dash afterimages absent under reduced motion" (§7.14) is approximated by asserting the
+//     .crs-avatar node count stays exactly 1 through a dash (no extra same-class ghost copies),
+//     since no afterimage class name is in the contract either.
+// ---------------------------------------------------------------------------
+async function suiteA14(page, log, contentJs) {
+  console.log('--- v1.4: combat v2 — drone avatar / aim lock-on / repairing enemies (SPEC-combat-v2 §7), debris lifetime (§9.4), depth-of-stack (§10.6) ---');
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+  const norm360 = (a) => ((a % 360) + 360) % 360;
+  const angDist = (a, b) => { const d = Math.abs(norm360(a) - norm360(b)) % 360; return d > 180 ? 360 - d : d; };
+  const W14 = await weaponTable(page);
+  const DMG14 = W14.dmg;
+
+  const onV14 = await page.evaluate(contentJs);
+  check('A.v2: content.js reactivated for the combat-v2 / debris / depth block', onV14 === 'on', onV14);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await api.restore(page);
+  await sleep(80);
+
+  // Spec §0.5 names only the H hotkey / HUD button to cycle rampage → survival → quickdraw → rampage,
+  // not a JS setter. Try a same-named debug setter first (harmless if absent), then drive the hotkey.
+  async function setCombatMode(target) {
+    try { await page.evaluate((m) => { const a = window.__crashScreen; if (a && typeof a.setCombatMode === 'function') a.setCombatMode(m); }, target); } catch (e) { /* ignore */ }
+    for (let i = 0; i < 4; i++) {
+      const cur = (await api.stats(page)).mode;
+      if (cur === target) return true;
+      await page.keyboard.press('h');
+      await sleep(100);
+    }
+    return (await api.stats(page)).mode === target;
+  }
+  async function resetScene(x, y) {
+    await api.restore(page);
+    await sleep(80);
+    await page.evaluate((px, py) => { const a = window.__crashScreen; a.debug.setPlayerHp(100); if (typeof a.debug.setAvatarPos === 'function') a.debug.setAvatarPos(px, py); }, x, y);
+  }
+  const force = (sel, fn) => page.evaluate((s, f) => { const el = document.querySelector(s); const d = window.__crashScreen.debug; return typeof d[f] === 'function' ? d[f](el) : 'missing:' + f; }, sel, fn);
+  // Guards every NEW v1.4 debug hook the same way `force` guards the element-taking ones: while the product
+  // lands incrementally, a hook that is not wired up yet must fail the assertion that reads it, not crash the
+  // whole suite with a TypeError and take every later assertion down with it.
+  const debugCall = (fn, ...args) => page.evaluate((f, a) => {
+    const d = window.__crashScreen && window.__crashScreen.debug;
+    return (d && typeof d[f] === 'function') ? d[f](...a) : 'missing:' + f;
+  }, fn, args);
+  // hostileAttack() (90-combat.js) refuses an off-screen element outright (debug.forceAttack then returns
+  // null, indistinguishable from "no scheduler for this tier"), and depthOf()/hpOf().depth read the element's
+  // live viewport rect — so §10.6's depth-lab fixture (way below the fold) must be scrolled into view before
+  // every forceAttack/forceLock/depthOf/hpOf-tier read on it, not just once at the top of that section.
+  const scrollToDepthLab = () => api.rect(page, '#depth-front');
+
+  // =======================================================================================
+  // §7 — combat v2 (avatar / lock-on / repair) suite A tests 1–14
+  // =======================================================================================
+
+  // ---- (1) avatar presence + spawn position (§7.1) ----
+  await setCombatMode('rampage');
+  await sleep(100);
+  check('A.v2 7.1: rampage (no enemies) → zero .crs-avatar', (await api.count(page, '.crs-avatar')) === 0, await api.count(page, '.crs-avatar'));
+  const survivalOn1 = await setCombatMode('survival');
+  await sleep(200);
+  const avatarCount1 = await api.count(page, '.crs-avatar');
+  const spawn1 = await page.evaluate(() => {
+    const n = document.querySelector('.crs-avatar');
+    if (!n) return null;
+    const r = n.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, vw: innerWidth, vh: innerHeight };
+  });
+  check('A.v2 7.1: survival mode → exactly one .crs-avatar', survivalOn1 === true && avatarCount1 === 1, { survivalOn1, avatarCount1 });
+  check('A.v2 7.1: avatar spawns at viewport centre-bottom (x ≈ vw/2, y ≈ 0.72·vh, ±20 px)', !!spawn1 && near(spawn1.cx, spawn1.vw / 2, 20) && near(spawn1.cy, 0.72 * spawn1.vh, 20), spawn1);
+
+  // ---- (2) WASD movement, friction stop, boundary clamp (§7.2) ----
+  await resetScene(200, 400);
+  const p0_72 = await api.player(page);
+  await page.keyboard.down('d');
+  // a little over the spec's 400 ms to absorb CDP round-trip slop in a loaded test run (the ≥ 100 px bar
+  // itself is unchanged — this just protects against losing a handful of ms off the held duration).
+  await sleep(480);
+  await page.keyboard.up('d');
+  const p1_72 = await api.player(page);
+  // friction is evaluated on velocity, not a fixed-position snapshot: §1.2's 0.86/frame decay still covers a
+  // measurable distance before fully stopping, so "stopped" means vx settled near 0, not "didn't move at all".
+  const settleStart72 = Date.now();
+  const vxSettled72 = await poll(async () => { const p = await api.player(page); return Math.abs(p.vx) <= 5 ? p : null; }, 2000, 60);
+  check('A.v2 7.2: holding D for ~450 ms moves the avatar ≥ 100 px right', !!p0_72 && !!p1_72 && (p1_72.x - p0_72.x) >= 100, { before: p0_72 && p0_72.x, after: p1_72 && p1_72.x });
+  check('A.v2 7.2: releasing D lets friction bring vx back to ~0 within 2 s (no need to hold D to stay stopped)', !!vxSettled72, { vxAfterRelease: p1_72 && p1_72.vx, msToSettle: Date.now() - settleStart72, settled: vxSettled72 });
+  await resetScene(200, 400);
+  await page.keyboard.down('d');
+  await sleep(2600);
+  await page.keyboard.up('d');
+  await sleep(400);
+  const pEdge72 = await api.player(page);
+  check('A.v2 7.2: the avatar cannot be driven past the 20 px viewport margin (x ≤ innerWidth − 20)', !!pEdge72 && pEdge72.x <= VIEWPORT.width - 20 + 1, pEdge72 && pEdge72.x);
+
+  // ---- (3) the avatar's nose rotates toward the cursor (§7.3) ----
+  await resetScene(500, 500);
+  const readNoseAngle = () => page.evaluate(() => {
+    const decode = (t) => {
+      if (!t || t === 'none') return null;
+      const m = t.match(/matrix\(([^)]+)\)/);
+      if (m) { const p = m[1].split(',').map(Number); return Math.atan2(p[1], p[0]) * 180 / Math.PI; }
+      const r = t.match(/rotate\(([-\d.]+)deg\)/);
+      return r ? parseFloat(r[1]) : null;
+    };
+    const avatar = document.querySelector('.crs-avatar');
+    if (!avatar) return null;
+    let nose = avatar.querySelector('.crs-avatar-nose');
+    if (!nose) {
+      let best = null, bestMag = -1;
+      const walk = (el) => { for (const c of el.children) { const a = decode(getComputedStyle(c).transform); if (a != null && Math.abs(a) > bestMag) { bestMag = Math.abs(a); best = c; } walk(c); } };
+      walk(avatar);
+      nose = best;
+    }
+    return nose ? decode(getComputedStyle(nose).transform) : null;
+  });
+  // re-dispatch the move a few times rather than trust one fixed sleep: the nose only repaints on the physics
+  // tick that follows the pointermove, and a loaded test run can occasionally miss one frame's window.
+  let noseAngle3 = null;
+  for (let i = 0; i < 6 && (noseAngle3 == null || angDist(noseAngle3, 180) > 20); i++) {
+    await page.mouse.move(500 - 300, 500 + (i % 2));   // the +1/-0 jiggle guarantees a genuinely new coordinate each try
+    await sleep(150);
+    noseAngle3 = await readNoseAngle();
+  }
+  check('A.v2 7.3: pointing the mouse to the avatar\'s LEFT rotates its nose to ≈180° (±20°) — see notes on the .crs-avatar-nose assumption', noseAngle3 != null && angDist(noseAngle3, 180) <= 20, noseAngle3);
+
+  // ---- (4) dash: displacement, i-frames, dashReadyAt, cooldown gate (§7.4) ----
+  await resetScene(300, 400);
+  await debugCall('dashReady');
+  const dashBefore4 = await api.player(page);
+  await page.keyboard.press('Space');
+  await sleep(180);
+  const dashAfter4 = await api.player(page);
+  const dashDist4 = (dashBefore4 && dashAfter4) ? Math.hypot(dashAfter4.x - dashBefore4.x, dashAfter4.y - dashBefore4.y) : null;
+  check('A.v2 7.4: Space dashes the avatar ≈ 180 px within ~160 ms (±30 px)', dashDist4 != null && near(dashDist4, 180, 30), { dashBefore4, dashAfter4, dashDist4 });
+  check('A.v2 7.4: dashReadyAt is set to a future timestamp right after dashing', !!dashAfter4 && typeof dashAfter4.dashReadyAt === 'number' && dashAfter4.dashReadyAt > Date.now() - 50, dashAfter4 && dashAfter4.dashReadyAt);
+  const lockRet4 = await force('#figure', 'forceLock');
+  await sleep(2820);   // just shy of the 3.0 s lock resolve
+  const hpBeforeResolve4 = (await api.player(page)).hp;
+  await page.keyboard.press('Space');   // dash now straddles the resolve instant with its 220 ms i-frames
+  await sleep(500);
+  const hpAfterResolve4 = (await api.player(page)).hp;
+  check('A.v2 7.4: a lock-on resolving during the dash\'s 220 ms invulnerability window deals zero damage', !!lockRet4 && hpAfterResolve4 === hpBeforeResolve4, { lockRet4, hpBeforeResolve4, hpAfterResolve4 });
+  const posAtSecondSpace4 = await api.player(page);
+  await page.keyboard.press('Space');   // still on the 1.5 s cooldown
+  await sleep(180);
+  const posAfterIgnored4 = await api.player(page);
+  check('A.v2 7.4: a second Space during the 1.5 s cooldown is ignored (no extra displacement)', !!posAtSecondSpace4 && !!posAfterIgnored4 && Math.hypot(posAfterIgnored4.x - posAtSecondSpace4.x, posAfterIgnored4.y - posAtSecondSpace4.y) <= 5, { posAtSecondSpace4, posAfterIgnored4 });
+  await sleep(600);
+
+  // ---- (5) lock-on bracket shrinks monotonically across its three stages; tracks before 1.5 s, fixed after (§7.5) ----
+  await resetScene(400, 400);
+  const lockId5 = await force('#figure', 'forceLock');
+  const sizeAt5 = async (ms) => { await sleep(ms); return page.evaluate(() => { const n = document.querySelector('.crs-lock'); if (!n) return null; const r = n.getBoundingClientRect(); return r.width + r.height; }); };
+  const s05_5 = await sizeAt5(500);
+  const s18_5 = await sizeAt5(1300);   // cumulative 1.8 s
+  const s27_5 = await sizeAt5(900);    // cumulative 2.7 s — a null here (already resolved/removed) still honours
+                                        // "shrinks monotonically to nothing", so it is accepted, just not a size that grew back
+  check('A.v2 7.5: debug.forceLock produces a .crs-lock node and its bracket size shrinks monotonically (0.5 s > 1.8 s > 2.7 s or gone)', !!lockId5 && s05_5 != null && s18_5 != null && s05_5 > s18_5 && (s27_5 == null || s18_5 > s27_5), { lockId5, s05_5, s18_5, s27_5 });
+  await sleep(500);
+  await resetScene(400, 400);
+  const lockId5b = await force('#figure', 'forceLock');
+  await sleep(600);   // before 1.2 s: still tracking
+  await debugCall('setAvatarPos', 700, 400);
+  await sleep(200);
+  const centerTracking5 = await page.evaluate(() => { const n = document.querySelector('.crs-lock'); if (!n) return null; const r = n.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; });
+  await sleep(900);   // now past 1.5 s: fixed phase
+  const beforeMoveFixed5 = await page.evaluate(() => { const n = document.querySelector('.crs-lock'); if (!n) return null; const r = n.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; });
+  await debugCall('setAvatarPos', 900, 400);
+  await sleep(200);
+  const afterMoveFixed5 = await page.evaluate(() => { const n = document.querySelector('.crs-lock'); if (!n) return null; const r = n.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; });
+  check('A.v2 7.5: before 1.5 s the lock-on frame (over the avatar in survival) re-centres as the avatar moves (centre reaches ≈ 700,400)', !!lockId5b && !!centerTracking5 && near(centerTracking5.cx, 700, 50), { lockId5b, centerTracking5 });
+  check('A.v2 7.5: after 1.5 s the lock-on frame is fixed — moving the avatar again does not move it', !!beforeMoveFixed5 && !!afterMoveFixed5 && near(beforeMoveFixed5.cx, afterMoveFixed5.cx, 2) && near(beforeMoveFixed5.cy, afterMoveFixed5.cy, 2), { beforeMoveFixed5, afterMoveFixed5 });
+  await sleep(1100);
+
+  // ---- (6) lock-on hit vs. evade (§7.6) ----
+  await resetScene(400, 400);
+  await force('#figure', 'forceLock');
+  const hpBefore76 = (await api.player(page)).hp;
+  await sleep(3300);
+  const hpAfter76 = (await api.player(page)).hp;
+  const lockGone76 = (await api.count(page, '.crs-lock')) === 0;
+  check('A.v2 7.6: standing still through the full 3.0 s lock → health decreases and the .crs-lock node disappears', hpAfter76 < hpBefore76 && lockGone76, { hpBefore76, hpAfter76, lockGone76 });
+  await resetScene(400, 400);
+  const nearBefore76 = (await api.stats(page)).nearMisses;
+  await force('#figure', 'forceLock');
+  await sleep(1600);   // past the 1.5 s fixed-phase threshold
+  await debugCall('setAvatarPos', 650, 400);   // ≥ 100 px away
+  await sleep(1700);
+  const hpAfterDodge76 = (await api.player(page)).hp;
+  const nearAfter76 = (await api.stats(page)).nearMisses;
+  check('A.v2 7.6: stepping ≥ 100 px away after the 1.5 s fixed phase avoids the hit (hp unchanged) and bumps stats().nearMisses', hpAfterDodge76 === 100 && nearAfter76 === nearBefore76 + 1, { hpAfterDodge76, nearBefore76, nearAfter76 });
+
+  // ---- (7) repair restores a nearby broken original (§7.7) ----
+  await resetScene(400, 400);
+  await api.setWeapon(page, 'hammer');
+  const sc7 = await api.rect(page, '#small-card');
+  await clickUntilBroken(page, '#small-card', sc7.cx, sc7.cy, 3);
+  check('A.v2 7.7: #small-card is broken before the repair test', await api.broken(page, '#small-card'));
+  await force('#figure', 'forceAttack');
+  const scoreBefore7 = (await api.player(page)).score;
+  const repairTarget7 = await page.evaluate((sel) => {
+    const d = window.__crashScreen.debug;
+    if (typeof d.forceRepair !== 'function') return 'missing:forceRepair';
+    const el = d.forceRepair(document.querySelector(sel));
+    return el ? (el.id || el.tagName) : null;
+  }, '#figure');
+  const beamSeen7 = await poll(() => api.has(page, '.crs-repair'), 500);
+  check('A.v2 7.7: debug.forceRepair(#figure) picks the broken #small-card within 600 px and starts a .crs-repair beam', repairTarget7 === 'small-card' && beamSeen7 === true, { repairTarget7, beamSeen7 });
+  // §3.1 step 3: the 1.5 s beam is followed by a further 600 ms piece-return animation before the original is
+  // actually un-hidden, so this polls out to ~2.3 s rather than stopping right at the beam's own 1.5 s.
+  const broken7after = await poll(async () => (await api.broken(page, '#small-card')) === false ? false : null, 2300, 80);
+  const vis7after = await api.visibility(page, '#small-card');
+  const repaired7 = (await api.stats(page)).repaired;
+  const scoreAfter7 = (await api.player(page)).score;
+  check('A.v2 7.7: #small-card is un-broken, visible again, stats().repaired === 1 and the score dropped (allowing the 600 ms piece-return animation after the 1.5 s beam)', broken7after === false && vis7after !== 'hidden' && repaired7 === 1 && scoreAfter7 < scoreBefore7, { broken7after, vis7after, repaired7, scoreBefore7, scoreAfter7 });
+
+  // ---- (8) killing the healer mid-beam cancels the repair (§7.8) ----
+  await resetScene(400, 400);
+  await api.setWeapon(page, 'hammer');
+  const sc8 = await api.rect(page, '#small-card');
+  await clickUntilBroken(page, '#small-card', sc8.cx, sc8.cy, 3);
+  await force('#figure', 'forceAttack');
+  await force('#figure', 'forceRepair');
+  const beamSeen8 = await poll(() => api.has(page, '.crs-repair'), 500);
+  await api.setWeapon(page, 'rocket');
+  const fg8 = await api.rect(page, '#figure');
+  await smashUntil(page, () => api.broken(page, '#figure'), fg8.left + 6, fg8.top + 6, 6);
+  await sleep(1700);
+  const scStillBroken8 = await api.broken(page, '#small-card');
+  check('A.v2 7.8: killing the repairing hostile mid-beam cancels the repair — #small-card is still broken 1.5+ s later', beamSeen8 === true && scStillBroken8 === true, { beamSeen8, scStillBroken8 });
+  await api.setWeapon(page, 'hammer');
+
+  // ---- (9) destroy ratio tracks broken vs. repaired area (§7.9) ----
+  // §3.2: the meter refreshes every 2 s, not on every break/repair — every read below polls for that tick
+  // rather than sampling immediately, which would just catch the stale previous value.
+  await resetScene(400, 400);
+  const ratio0_9 = (await api.stats(page)).destroyRatio;
+  check('A.v2 7.9: stats().destroyRatio === 0 with nothing broken', ratio0_9 === 0, ratio0_9);
+  const bc9 = await api.rect(page, '#big-card');
+  await smashUntil(page, () => api.broken(page, '#big-card'), bc9.cx, bc9.cy, 6);
+  const ratio1_9 = await poll(async () => { const r = (await api.stats(page)).destroyRatio; return r > 0 ? r : null; }, 2600, 100);
+  check('A.v2 7.9: breaking a large element raises stats().destroyRatio above 0 (within the 2 s refresh)', ratio1_9 > 0, ratio1_9);
+  await force('#figure', 'forceAttack');
+  await force('#figure', 'forceRepair');
+  await sleep(1700);   // the 1.5 s repair beam completing
+  const ratio2_9 = await poll(async () => { const r = (await api.stats(page)).destroyRatio; return r < ratio1_9 ? r : null; }, 2600, 100);
+  check('A.v2 7.9: a completed repair brings stats().destroyRatio back down (within the next 2 s refresh)', ratio2_9 != null && ratio2_9 < ratio1_9, { ratio1_9, ratio2_9: ratio2_9 != null ? ratio2_9 : (await api.stats(page)).destroyRatio });
+
+  // ---- (10) T3 uses the lock-on instead of the laser (§7.10) ----
+  await resetScene(400, 400);
+  await api.rect(page, '#boss');   // hostileAttack() requires the element on-screen — scroll it into view first
+  const tier10 = await force('#boss', 'forceAttack');
+  await sleep(150);
+  check('A.v2 7.10: debug.forceAttack(#boss) now returns "lock", not "laser"', tier10 === 'lock', tier10);
+  check('A.v2 7.10: no .crs-beam appears for a T3 attack any more (replaced by .crs-lock)', (await api.count(page, '.crs-beam')) === 0 && (await api.count(page, '.crs-lock')) >= 1, { beams: await api.count(page, '.crs-beam'), locks: await api.count(page, '.crs-lock') });
+  await sleep(3200);
+
+  // ---- (11) boss stage 3 regains the laser sweep (§7.11) ----
+  await resetScene(400, 400);
+  let forceBoss11 = null;
+  try { forceBoss11 = await page.evaluate(() => (window.__crashScreen.debug && typeof window.__crashScreen.debug.forceBoss === 'function') ? window.__crashScreen.debug.forceBoss(0.3) : 'missing:debug.forceBoss'); } catch (e) { forceBoss11 = 'threw:' + String(e && e.message || e); }
+  // Land in a (20%, 35%] window rather than firing until hp crosses 30%: a single high-damage hit (rocket)
+  // can overshoot straight past 30% to 0 (killing the boss outright, which makes forceAttack refuse for an
+  // unrelated reason — "already broken" — not the 3rd-phase laser logic this test means to exercise). Pistol's
+  // damage is known, small and precise, so the exact hit count needed is computed instead of polled for.
+  await api.setWeapon(page, 'pistol');
+  const W11 = await weaponTable(page);
+  const bossMax11 = (await api.hpOf(page, '#boss')).max;
+  const hp0_11 = (await api.hpOf(page, '#boss')).hp;
+  const target11 = 0.275 * bossMax11;   // the middle of (20%, 35%]
+  const need11 = hp0_11 > target11 ? Math.round((hp0_11 - target11) / W11.dmg('pistol')) : 0;
+  for (let i = 0; i < need11; i++) {
+    const bo11 = await api.rect(page, '#boss');
+    await api.smashAt(page, bo11.left + 6, bo11.top + 6);
+    await poll(async () => (await api.hpOf(page, '#boss')).hp < hp0_11 - i * W11.dmg('pistol'), 400, 20);
+  }
+  const bossHp11 = await api.hpOf(page, '#boss');
+  await api.setWeapon(page, 'hammer');
+  const tier11 = await force('#boss', 'forceAttack');
+  const beamSeen11 = await poll(() => api.has(page, '.crs-beam'), 800);
+  check('A.v2 7.11: boss weakened to ~20–35% hp (3rd stage), still alive, regains the laser sweep — debug.forceAttack(#boss) → "laser" or a .crs-beam appears (debug.forceBoss result recorded, see notes)', bossHp11.hp > 0 && bossHp11.hp <= 0.351 * bossHp11.max && (tier11 === 'laser' || beamSeen11 === true), { forceBoss11, bossHp11, tier11, beamSeen11 });
+  await sleep(1700);
+
+  // ---- (12) Escape with avatar + lock + repair all live → fully traceless (§7.12) ----
+  await resetScene(400, 400);
+  await api.setWeapon(page, 'hammer');
+  const sc12 = await api.rect(page, '#small-card');
+  await clickUntilBroken(page, '#small-card', sc12.cx, sc12.cy, 3);
+  await force('#figure', 'forceAttack');
+  await force('#figure', 'forceLock');
+  await force('#figure', 'forceRepair');
+  await sleep(300);
+  const liveBefore12 = { avatar: await api.count(page, '.crs-avatar'), lock: await api.count(page, '.crs-lock'), repair: await api.count(page, '.crs-repair') };
+  check('A.v2 7.12: avatar, lock-on and repair beam are all present right before Escape', liveBefore12.avatar >= 1 && liveBefore12.lock >= 1 && liveBefore12.repair >= 1, liveBefore12);
+  await page.keyboard.press('Escape');
+  const inactive12v2 = await poll(async () => !(await api.active(page)), 1500, 20);
+  const nodes12v2 = await api.count(page, '[data-crs]');
+  const pend12v2 = await api.pending(page);
+  await settleRaf(page);
+  const raf12v2 = await api.pendingRaf(page);
+  check('A.v2 7.12: Escape with avatar/lock/repair all live → inactive, zero [data-crs] nodes, zero timers, zero animation frames', inactive12v2 === true && nodes12v2 === 0 && pend12v2 === 0 && raf12v2 === 0, { inactive12v2, nodes12v2, pend12v2, raf12v2 });
+  const rOn12v2 = await page.evaluate(contentJs);
+  check('A.v2 7.12: content.js reactivates cleanly afterwards', rOn12v2 === 'on', rOn12v2);
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (13) rampage mode has none of the combat-v2 UI; WASD reaches page inputs (§7.13) ----
+  await setCombatMode('rampage');
+  await sleep(200);
+  const offNodes13 = { avatar: await api.count(page, '.crs-avatar'), lock: await api.count(page, '.crs-lock'), repair: await api.count(page, '.crs-repair'), progress: await api.count(page, '.crs-progress') };
+  check('A.v2 7.13: rampage mode → zero .crs-avatar / .crs-lock / .crs-repair / .crs-progress nodes', Object.values(offNodes13).every((n) => n === 0), offNodes13);
+  await page.evaluate(() => { const i = document.getElementById('text-input'); i.value = ''; i.focus(); });
+  await page.keyboard.type('wasd');
+  const typed13 = await page.evaluate(() => document.getElementById('text-input').value);
+  check('A.v2 7.13: with a page input focused, WASD still types normally (not captured as avatar movement) in rampage mode', typed13 === 'wasd', typed13);
+  await page.evaluate(() => { const i = document.getElementById('text-input'); i.blur(); i.value = '안녕하세요 화면부수기 테스트 입력값'; });
+
+  // ---- (14) reduced motion: no rotor jitter / dash afterimages, lock-on snaps in discrete steps (§7.14) ----
+  // The rotor's wobble animation is only ever (re)started when the avatar is (re)built (avatarWobble() checks
+  // reducedMotion() once, at that point) — so the media feature must be flipped BEFORE the avatar exists, same
+  // as a real user who already has the OS setting on, not toggled under an avatar that is already spinning.
+  await setCombatMode('rampage');
+  await sleep(150);
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  await sleep(100);
+  await setCombatMode('survival');
+  await sleep(200);
+  const rotorAnims14 = await page.evaluate(() => { const a = document.querySelector('.crs-avatar'); if (!a) return -1; let n = 0; for (const el of a.querySelectorAll('*')) n += el.getAnimations ? el.getAnimations().length : 0; return n; });
+  check('A.v2 7.14: prefers-reduced-motion → no running Web Animations inside .crs-avatar (rotor jitter stopped)', rotorAnims14 === 0, rotorAnims14);
+  await page.evaluate(() => { window.__crashScreen.debug.setPlayerHp(100); });
+  await debugCall('setAvatarPos', 400, 400);
+  const ghostsBefore14 = await api.count(page, '.crs-avatar');
+  await debugCall('dashReady');
+  await page.keyboard.press('Space');
+  await sleep(250);
+  const ghostsAfter14 = await api.count(page, '.crs-avatar');
+  check('A.v2 7.14: reduced motion leaves no dash afterimage copies (still exactly one .crs-avatar node — assumes afterimages would otherwise share this class, see notes)', ghostsBefore14 === 1 && ghostsAfter14 === 1, { ghostsBefore14, ghostsAfter14 });
+  await api.rect(page, '#figure');   // §7.13 focused a form input further down the page, auto-scrolling it into view
+  await force('#figure', 'forceLock');
+  const snapSize14 = async (ms) => { await sleep(ms); return page.evaluate(() => { const n = document.querySelector('.crs-lock'); if (!n) return null; const r = n.getBoundingClientRect(); return Math.round((r.width + r.height) / 2); }); };
+  const snapA1_14 = await snapSize14(300);
+  const snapA2_14 = await snapSize14(400);   // cumulative 0.7 s — still inside the warning stage
+  const snapB1_14 = await snapSize14(700);   // cumulative 1.4 s — into the shrink stage
+  check('A.v2 7.14: under reduced motion the lock-on bracket snaps between discrete sizes instead of animating continuously (two samples inside the same stage read identical; a later stage differs)', snapA1_14 != null && snapA1_14 === snapA2_14 && snapB1_14 != null && snapB1_14 !== snapA1_14, { snapA1_14, snapA2_14, snapB1_14 });
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+  await sleep(1700);
+
+  // =======================================================================================
+  // §9.4 — debris auto-despawn (SPEC-combat-v2 §9)
+  // =======================================================================================
+  await setCombatMode('rampage');
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (1) default debrisLifeMs (6000): pieces vanish ~6 s after resting; the original stays broken + hidden (§9.4.1) ----
+  // #small-card (2 hits, a handful of pieces) rather than #big-card (29+ pieces): fewer fragments settle in a
+  // single clean pass, instead of occasionally nudging each other back out of "resting" as late arrivals land,
+  // which — since each piece's own debrisLifeMs clock only starts once IT individually rests — can otherwise
+  // push the group's last piece's own expiry well past a window sized for one clean settle.
+  await api.setWeapon(page, 'hammer');
+  const sc941 = await api.rect(page, '#small-card');
+  const broke941 = await smashUntil(page, () => api.broken(page, '#small-card'), sc941.cx, sc941.cy, 4);
+  const debrisLifeAt941 = (await api.stats(page)).debrisLifeMs;
+  check('A.v2 9.4.1: #small-card actually broke (smashUntil succeeded)', broke941 > 0, { broke941, debrisLifeAt941, hp: await api.hpOf(page, '#small-card') });
+  const restedAt941 = await poll(async () => {
+    const s = await api.stats(page);
+    return (s.pieceCount > 0 && s.pieces.every((p) => p.resting)) ? Date.now() : null;
+  }, 4000, 60);
+  check('A.v2 9.4.1: #small-card produces resting pieces', !!restedAt941 && (await api.stats(page)).pieceCount > 0, restedAt941);
+  const stillBrokenMidway941 = await api.broken(page, '#small-card');
+  const stillHiddenMidway941 = await api.visibility(page, '#small-card');
+  // ceiling padded well past 6000 (debrisLifeMs) + 400 (±jitter) + 500 (fade): a loaded suite run can lose a
+  // few hundred ms of wall-clock margin to CDP round trips between polls.
+  const gone941 = await poll(async () => (await api.count(page, '.crs-piece')) === 0 && (await api.count(page, '.crs-word')) === 0, 12000, 100);
+  const elapsed941 = restedAt941 ? Date.now() - restedAt941 : null;
+  check('A.v2 9.4.1: from the resting moment, all .crs-piece/.crs-word are gone within 6 s – 12 s (default debrisLifeMs 6000 + fade/jitter)', gone941 === true && elapsed941 != null && elapsed941 >= 5800 && elapsed941 <= 12000, { elapsed941, debrisLifeAt941 });
+  check('A.v2 9.4.1: the original stayed data-crs-broken and hidden the whole time the pieces were alive', stillBrokenMidway941 === true && stillHiddenMidway941 === 'hidden', { stillBrokenMidway941, stillHiddenMidway941 });
+
+  // ---- (2) restore() after the pieces are already gone still revives the original (§9.4.2) ----
+  check('A.v2 9.4.2: #small-card is still marked broken once its pieces have despawned', await api.broken(page, '#small-card'));
+  await api.restore(page);
+  await sleep(80);
+  check('A.v2 9.4.2: restore() after pieces have despawned brings the original back (not broken, visible)', !(await api.broken(page, '#small-card')) && (await api.visibility(page, '#small-card')) !== 'hidden', { broken: await api.broken(page, '#small-card'), vis: await api.visibility(page, '#small-card') });
+
+  // ---- (3) debrisLifeMs = 0 → unlimited lifetime (§9.4.3) ----
+  await page.evaluate(() => { window.__crsStore.crsDebrisLifeMs = 0; });
+  const off943 = await page.evaluate(contentJs);
+  const on943 = await page.evaluate(contentJs);
+  check('A.v2 9.4.3: toggled off/on after setting crsDebrisLifeMs = 0 in storage so loadPrefs() re-reads it', off943 === 'off' && on943 === 'on', { off943, on943 });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true });
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'hammer');
+  const bc943 = await api.rect(page, '#big-card');
+  await smashUntil(page, () => api.broken(page, '#big-card'), bc943.cx, bc943.cy, 6);
+  await poll(async () => { const s = await api.stats(page); return (s.pieceCount > 0 && s.pieces.every((p) => p.resting)) ? s : null; }, 4000, 60);
+  const countAt0_943 = await api.count(page, '.crs-piece');
+  await sleep(10000);
+  const countAfter10s_943 = await api.count(page, '.crs-piece');
+  check('A.v2 9.4.3: debrisLifeMs = 0 → the piece count does not shrink over the next 10 s (unlimited lifetime)', countAt0_943 > 0 && countAfter10s_943 >= countAt0_943, { countAt0_943, countAfter10s_943 });
+  await page.evaluate(() => { window.__crsStore.crsDebrisLifeMs = 6000; });
+  await page.evaluate(contentJs);
+  await page.evaluate(contentJs);
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (4) a piece resting atop another re-falls once the piece beneath it despawns (§9.4.4) ----
+  // Two things made the first cut of this check flaky, both measurement, neither product:
+  //   * it scanned `.crs-piece` only, and the #stack blocks are TEXT — most of their debris is `.crs-word`
+  //     (§9.1 gives word chips the same lifetime), so it was reading three big shards and calling that a pile;
+  //   * it compared getBoundingClientRect()s, and restPiece() snaps every chip to a random ±12° tilt, so the
+  //     DOM box is the axis-aligned hull of a rotated rectangle — taller than the chip, which pushed real
+  //     pairs outside the gap tolerance at random.
+  // debug.pieceBoxes() hands back the geometry evictPieces() itself wakes from (p.ox/p.x/p.bb) plus a stable
+  // per-piece id, so the pair is found with the product's own support rule and ONE piece is followed across
+  // the eviction by id rather than by a DOM index that shifts the moment a node is removed.
+  // debug.expirePiece() retires just the supporting piece: at the default 6 s lifetime a whole freshly-rested
+  // pile expires inside one sweep, which would take the piece above along with the one beneath it.
+  await api.setWeapon(page, 'hammer');
+  const st1_944 = await api.rect(page, '#stack-1');
+  const sx944 = st1_944.cx;
+  await clickUntilBroken(page, '#stack-1', sx944, st1_944.cy);
+  await poll(async () => { const s = await api.stats(page); return (Array.isArray(s.pieces) && s.pieces.length > 0 && s.pieces.every((p) => p.resting)) ? s : null; }, 4000, 80);
+  const st2_944 = await api.rectNoScroll(page, '#stack-2');
+  const st3_944 = await api.rectNoScroll(page, '#stack-3');
+  await clickUntilBroken(page, '#stack-2', sx944, st2_944.cy);
+  await clickUntilBroken(page, '#stack-3', sx944, st3_944.cy);
+  await poll(async () => { const s = await api.stats(page); return (Array.isArray(s.pieces) && s.pieces.length > 0 && s.pieces.every((p) => p.resting)) ? s : null; }, 4000, 80);
+  const pieceBoxes944 = () => page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    return (d && typeof d.pieceBoxes === 'function') ? d.pieceBoxes() : null;
+  });
+  // the same relation evictPieces() uses to decide what an eviction knocks loose: ≥ 40 % horizontal overlap
+  // with the supporting piece, and a bottom edge at or above that piece's top.
+  const findPair944 = (boxes) => {
+    if (!Array.isArray(boxes)) return null;
+    for (const lower of boxes) {
+      if (!lower.resting) continue;
+      for (const upper of boxes) {
+        if (upper === lower || !upper.resting) continue;
+        const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
+        if (ov < 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l)) continue;
+        if (upper.bottom <= lower.top + 1) return { lower: lower.pid, upper: upper.pid, upperTop: upper.top };
+      }
+    }
+    return null;
+  };
+  let pairInfo944 = null;
+  for (let i = 0; i < 4 && !pairInfo944; i++) { pairInfo944 = findPair944(await pieceBoxes944()); if (!pairInfo944) await sleep(250); }
+  check('A.v2 9.4.4: found a vertically-stacked resting pair among the #stack debris to test re-falling', !!pairInfo944, pairInfo944 || { boxes: (await pieceBoxes944() || []).length });
+  if (pairInfo944) {
+    const expired944 = await page.evaluate((pid) => window.__crashScreen.debug.expirePiece(pid), pairInfo944.lower);
+    const rose944 = await poll(async () => {
+      const boxes = await pieceBoxes944();
+      const up = Array.isArray(boxes) ? boxes.find((b) => b.pid === pairInfo944.upper) : null;
+      if (!up) return null;
+      return (up.top - pairInfo944.upperTop > 3) ? up.top : null;
+    }, 6000, 100);
+    const lowerGone944 = await poll(async () => {
+      const boxes = await pieceBoxes944();
+      return (Array.isArray(boxes) && !boxes.some((b) => b.pid === pairInfo944.lower)) ? true : null;
+    }, 2000, 80);
+    check('A.v2 9.4.4: a piece resting on top of another re-falls once the piece underneath it despawns', expired944 === pairInfo944.lower && lowerGone944 === true && !!rose944, { pair: pairInfo944, expired944, lowerGone944, after: rose944 });
+  }
+
+  // ---- (5) in-flight pieces do not count toward the debris lifetime (§9.4.5) ----
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'bomb');
+  const spot945 = await api.rect(page, '#bomb-spot');
+  await api.smashAt(page, spot945.cx, spot945.cy);
+  await sleep(200);
+  const countJustAfter945 = await api.count(page, '.crs-piece');
+  const flightCheck945 = await poll(async () => {
+    const s = await api.stats(page);
+    return (Array.isArray(s.pieces) && s.pieces.some((p) => p.resting === false)) ? true : null;
+  }, 6800, 100);
+  const countAt7s945 = await api.count(page, '.crs-piece');
+  check('A.v2 9.4.5: 7 s after a bomb blast, any piece still in flight (resting === false) has not been removed by the debris timer', countJustAfter945 > 0 && (flightCheck945 !== true || countAt7s945 > 0), { countJustAfter945, stillFlying7s: flightCheck945, countAt7s945 });
+  await sleep(1000);
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'hammer');
+
+  // ---- (6) traceless while despawn fade animations are in flight (§9.4.6) ----
+  const bc946 = await api.rect(page, '#big-card');
+  await smashUntil(page, () => api.broken(page, '#big-card'), bc946.cx, bc946.cy, 6);
+  const restedAt946 = await poll(async () => { const s = await api.stats(page); return (s.pieceCount > 0 && s.pieces.every((p) => p.resting)) ? Date.now() : null; }, 4000, 60);
+  await sleep(Math.max(0, (restedAt946 ? 6200 - (Date.now() - restedAt946) : 6200)));   // land inside the ~500 ms fade window
+  const fadingSeen946 = await api.count(page, '.crs-fading');
+  await page.keyboard.press('Escape');
+  const inactive946 = await poll(async () => !(await api.active(page)), 1500, 20);
+  const nodes946 = await api.count(page, '[data-crs]');
+  const pend946 = await api.pending(page);
+  await settleRaf(page);
+  const raf946 = await api.pendingRaf(page);
+  check('A.v2 9.4.6: Escape while debris fade-out animations are in flight still leaves zero [data-crs] nodes, timers and animation frames', inactive946 === true && nodes946 === 0 && pend946 === 0 && raf946 === 0, { fadingSeenBefore: fadingSeen946, inactive946, nodes946, pend946, raf946 });
+  const rOn946 = await page.evaluate(contentJs);
+  check('A.v2 9.4.6: content.js reactivates cleanly afterwards', rOn946 === 'on', rOn946);
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true });
+  await api.restore(page);
+  await sleep(80);
+
+  // =======================================================================================
+  // §10.6 — depth-of-stack affects combat (SPEC-combat-v2 §10)
+  // =======================================================================================
+  await setCombatMode('survival');
+  await sleep(200);
+  await resetScene(400, 400);
+
+  // ---- (1) a front card over a mid-or-deeper card (§10.6.1) ----
+  await scrollToDepthLab();
+  const tierFront1_106 = await page.evaluate((s) => window.__crashScreen.hpOf(document.querySelector(s)).tier, '#depth-front');
+  const tierMid1_106 = await page.evaluate((s) => window.__crashScreen.hpOf(document.querySelector(s)).tier, '#depth-mid');
+  check('A.v2 10.6.1: the topmost of two overlapping cards reads tier "front"; the one underneath reads "mid" or deeper', tierFront1_106 === 'front' && (tierMid1_106 === 'mid' || tierMid1_106 === 'back'), { tierFront1_106, tierMid1_106 });
+
+  // ---- (2) a sticky header scrolled over content still measures depth 0 / tier front (§10.6.2) ----
+  await page.evaluate(() => window.scrollTo(0, 400));
+  await sleep(150);
+  const stickyInfo2_106 = await page.evaluate(() => { const r = window.__crashScreen.hpOf(document.querySelector('#site-header')); return { depth: r.depth, tier: r.tier }; });
+  check('A.v2 10.6.2: a position:sticky header scrolled over page content → depth === 0 and tier === "front" regardless of what is under it', !!stickyInfo2_106 && stickyInfo2_106.depth === 0 && stickyInfo2_106.tier === 'front', stickyInfo2_106);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await sleep(100);
+
+  // ---- (3) a child element's own depth is not inflated by its ancestor (§10.6.3) ----
+  await scrollToDepthLab();
+  const depthMidParent3_106 = await force('#depth-mid', 'depthOf');
+  const depthMidChild3_106 = await force('#depth-mid-child', 'depthOf');
+  check('A.v2 10.6.3: a child\'s depthOf() equals its parent\'s (ancestor/descendant exclusion keeps the parent from counting as "in front of" its own child)', depthMidParent3_106 != null && depthMidChild3_106 === depthMidParent3_106, { depthMidParent3_106, depthMidChild3_106 });
+
+  // ---- (4) an occluded element cannot be hit until its occluder is destroyed (§10.6.4) ----
+  await api.restore(page);
+  await sleep(80);
+  const overlapPt4_106 = await api.rect(page, '#depth-front');
+  const frontHp4a_106 = await api.hpOf(page, '#depth-front');
+  const midHp4a_106 = await api.hpOf(page, '#depth-mid');
+  await api.setWeapon(page, 'hammer');
+  await api.smashAt(page, overlapPt4_106.cx, overlapPt4_106.cy);
+  const frontHp4b_106 = await api.hpOf(page, '#depth-front');
+  const midHp4b_106 = await api.hpOf(page, '#depth-mid');
+  check('A.v2 10.6.4: a hit at the overlap point damages only the occluder (#depth-front); #depth-mid underneath is untouched', frontHp4b_106.hp < frontHp4a_106.hp && midHp4b_106.hp === midHp4a_106.hp, { front: [frontHp4a_106, frontHp4b_106], mid: [midHp4a_106, midHp4b_106] });
+  await smashUntil(page, () => api.broken(page, '#depth-front'), overlapPt4_106.cx, overlapPt4_106.cy, 6);
+  const midHp4c_106 = await api.hpOf(page, '#depth-mid');
+  await api.smashAt(page, overlapPt4_106.cx, overlapPt4_106.cy);
+  const midHp4d_106 = await api.hpOf(page, '#depth-mid');
+  check('A.v2 10.6.4: once #depth-front is broken, the same point now reaches #depth-mid underneath', midHp4d_106.hp < midHp4c_106.hp, { midHp4c_106, midHp4d_106 });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (5) sniper pierce vs. pistol no-pierce through the overlap (§10.6.5) ----
+  // depth-front/-mid are sized for the T1 hostile window (~94 hp generic) — too little to tell "100 %" apart
+  // from "60 % of 200", since either one dies in a single hit and the dealt amount just clamps at its own hp.
+  // depth-tank-front/-back is a second, much larger overlapping pair that exists solely so the two damage
+  // AMOUNTS stay comparable without either side's hp cap getting in the way.
+  const overlapPt5_106 = await api.rect(page, '#depth-tank-front');
+  await api.setWeapon(page, 'sniper');
+  const frontHp5a_106 = await api.hpOf(page, '#depth-tank-front');
+  const midHp5a_106 = await api.hpOf(page, '#depth-tank-back');
+  await api.smashAt(page, overlapPt5_106.cx, overlapPt5_106.cy);
+  const frontHp5b_106 = await api.hpOf(page, '#depth-tank-front');
+  const midHp5b_106 = await api.hpOf(page, '#depth-tank-back');
+  const frontDmg5_106 = frontHp5a_106.hp - frontHp5b_106.hp;
+  const midDmg5_106 = midHp5a_106.hp - midHp5b_106.hp;
+  const sniperDmg5_106 = DMG14('sniper');
+  const expectedMid5_106 = Math.round(sniperDmg5_106 * 0.6);
+  check('A.v2 10.6.5: a sniper shot through the overlap deals full damage to the front card and ≈ 60% to the one behind it (pierce = 2)', near(frontDmg5_106, sniperDmg5_106, 1) && midDmg5_106 > 0 && near(midDmg5_106, expectedMid5_106, Math.max(2, Math.round(sniperDmg5_106 * 0.1))), { frontDmg5_106, midDmg5_106, sniperDmg5_106, expectedMid5_106, frontHp5a_106, midHp5a_106 });
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'pistol');
+  const frontHp5c_106 = await api.hpOf(page, '#depth-tank-front');
+  const midHp5c_106 = await api.hpOf(page, '#depth-tank-back');
+  await api.smashAt(page, overlapPt5_106.cx, overlapPt5_106.cy);
+  const frontHp5d_106 = await api.hpOf(page, '#depth-tank-front');
+  const midHp5d_106 = await api.hpOf(page, '#depth-tank-back');
+  check('A.v2 10.6.5: the same shot with a pistol (pierce = 0) hits only the front card; the one behind takes zero damage', frontHp5d_106.hp < frontHp5c_106.hp && midHp5d_106.hp === midHp5c_106.hp, { front: [frontHp5c_106, frontHp5d_106], mid: [midHp5c_106, midHp5d_106] });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (6) an explosive ignores stacking depth entirely (§10.6.6) ----
+  await api.setWeapon(page, 'rocket');
+  const overlapPt6_106 = await api.rect(page, '#depth-back');
+  const backHp6a_106 = await api.hpOf(page, '#depth-back');
+  await api.smashAt(page, overlapPt6_106.cx + 4, overlapPt6_106.cy + 4);
+  // the explosion has its own brief travel/detonation animation (same as every other AoE hit elsewhere in this
+  // suite) — reading hp immediately would just catch the "nothing landed yet" instant.
+  const backHp6b_106 = await poll(async () => { const h = await api.hpOf(page, '#depth-back'); return h.hp < backHp6a_106.hp ? h : null; }, 1500, 40) || await api.hpOf(page, '#depth-back');
+  check('A.v2 10.6.6: a rocket blast damages the fully-occluded #depth-back (5 layers above it) regardless of depth', backHp6b_106.hp < backHp6a_106.hp, { backHp6a_106, backHp6b_106 });
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'hammer');
+
+  // ---- (7) a "back" hostile never attacks, and repairs faster than a "mid" one (§10.6.7) ----
+  await resetScene(400, 400);
+  await scrollToDepthLab();
+  const backTier7_106 = await page.evaluate((s) => window.__crashScreen.hpOf(document.querySelector(s)).tier, '#depth-back');
+  const attackRet7_106 = await force('#depth-back', 'forceAttack');
+  const hostileSeen7_106 = await poll(() => api.has(page, '.crs-hostile'), 500);
+  check('A.v2 10.6.7: #depth-back measures tier "back" and debug.forceAttack on it returns null (no attack scheduler for back-tier hostiles)', backTier7_106 === 'back' && attackRet7_106 === null && hostileSeen7_106 === true, { backTier7_106, attackRet7_106, hostileSeen7_106 });
+  await api.restore(page);
+  await sleep(80);
+  await api.debug(page, { noRepair: false });
+  // small-card is up near the top of the page — over 600 px from the depth-lab fixture, so it is never a
+  // candidate for THESE hostiles' repair (§3.1 step 1 skips the turn with nothing in range). depth-fodder sits
+  // right next to depth-lab instead.
+  let fodder7_106 = await api.rect(page, '#depth-fodder');
+  await clickUntilBroken(page, '#depth-fodder', fodder7_106.cx, fodder7_106.cy, 4);
+  await scrollToDepthLab();
+  await force('#depth-back', 'forceAttack');
+  const backBeamSeen7_106 = await poll(() => api.has(page, '.crs-repair'), 4300, 80);
+  check('A.v2 10.6.7: the back-tier hostile starts its own natural repair beam well before the mid-tier ~6 s baseline (×0.6 ≈ 3.6 s)', backBeamSeen7_106 === true, backBeamSeen7_106);
+  await api.restore(page);
+  await sleep(80);
+  fodder7_106 = await api.rect(page, '#depth-fodder');
+  await clickUntilBroken(page, '#depth-fodder', fodder7_106.cx, fodder7_106.cy, 4);
+  await scrollToDepthLab();
+  await force('#depth-mid', 'forceAttack');
+  const midBeamEarly7_106 = await poll(() => api.has(page, '.crs-repair'), 4300, 80);
+  check('A.v2 10.6.7: ...while the mid-tier hostile has NOT started its repair beam yet at that same 4.3 s mark', midBeamEarly7_106 === false, midBeamEarly7_106);
+  const midBeamLater7_106 = await poll(() => api.has(page, '.crs-repair'), 2600, 80);
+  check('A.v2 10.6.7: ...but the mid-tier hostile does start it by the ~6 s baseline', midBeamLater7_106 === true, midBeamLater7_106);
+  await api.debug(page, { noRepair: true });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (8) a "front" hostile has less max HP than a same-area "mid" one (§10.6.8) ----
+  await scrollToDepthLab();
+  await force('#depth-front', 'forceAttack');
+  await force('#depth-mid', 'forceAttack');
+  const frontHp8_106 = await page.evaluate((s) => window.__crashScreen.hpOf(document.querySelector(s)), '#depth-front');
+  const midHp8_106 = await page.evaluate((s) => window.__crashScreen.hpOf(document.querySelector(s)), '#depth-mid');
+  check('A.v2 10.6.8: a "front" hostile\'s max HP is ≈ 0.8× a same-area "mid" hostile\'s (±2)', frontHp8_106.tier === 'front' && midHp8_106.tier === 'mid' && near(frontHp8_106.max, midHp8_106.max * 0.8, 2), { frontHp8_106, midHp8_106 });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (9) the hostile aura label carries a depth marker: ▲ / ▲▲ / ▲▲▲ (§10.6.9) ----
+  const markerFor106 = async (sel) => {
+    await api.restore(page);
+    await sleep(80);
+    await scrollToDepthLab();
+    await force(sel, 'forceAttack');
+    await sleep(100);
+    return page.evaluate(() => { const a = document.querySelector('.crs-hostile'); return a ? (a.textContent || '').trim() : null; });
+  };
+  const labelFront9_106 = await markerFor106('#depth-front');
+  const labelMid9_106 = await markerFor106('#depth-mid');
+  const labelBack9_106 = await markerFor106('#depth-back');
+  check('A.v2 10.6.9: the hostile aura label shows ▲ for front, ▲▲ for mid and ▲▲▲ for back', /▲(?!▲)/.test(labelFront9_106 || '') && /▲▲(?!▲)/.test(labelMid9_106 || '') && /▲▲▲/.test(labelBack9_106 || ''), { labelFront9_106, labelMid9_106, labelBack9_106 });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- (10) an occluded hostile's lock-on frame is dashed and labelled 가려짐 / 관통 가능 (§10.6.10) ----
+  // §2.1/§10.4: the "covered" tag is only ever written in quickdraw (modeLockOnEnemy() gates it) — in survival
+  // the frame sits over the drone instead and lockCoverTag() returns immediately, leaving it blank. Dashed
+  // styling toggles the `crs-lock-covered` class on the frame itself; the text lives on its `.crs-lock-tag` child.
+  await setCombatMode('quickdraw');
+  await sleep(200);
+  await resetScene(400, 400);
+  await scrollToDepthLab();
+  await api.setWeapon(page, 'hammer');
+  const lockBackId10_106 = await force('#depth-back', 'forceLock');
+  await sleep(150);
+  const lockInfo10a_106 = await page.evaluate(() => {
+    const n = document.querySelector('.crs-lock');
+    if (!n) return null;
+    const tag = n.querySelector('.crs-lock-tag');
+    return { covered: n.classList.contains('crs-lock-covered'), text: tag ? (tag.textContent || '').trim() : '' };
+  });
+  check('A.v2 10.6.10: a fully-occluded hostile\'s lock-on frame is drawn dashed (.crs-lock-covered) and labelled 가려짐', !!lockInfo10a_106 && !!lockBackId10_106 && lockInfo10a_106.covered === true && /가려짐/.test(lockInfo10a_106.text), { lockBackId10_106, lockInfo10a_106 });
+  await api.setWeapon(page, 'sniper');
+  await sleep(250);
+  const lockInfo10b_106 = await page.evaluate(() => { const tag = document.querySelector('.crs-lock .crs-lock-tag'); return tag ? (tag.textContent || '').trim() : null; });
+  check('A.v2 10.6.10: switching to a piercing weapon (sniper) relabels it 관통 가능 instead of 가려짐', !!lockInfo10b_106 && /관통 가능/.test(lockInfo10b_106) && !/가려짐/.test(lockInfo10b_106), lockInfo10b_106);
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(80);
+  await setCombatMode('survival');
+  await sleep(150);
+
+  // ---- (11) §2.2 lock-frame aim assist: only where the frame actually sits ON the enemy ----
+  // "락온 틀 안을 클릭하면 자식 요소가 아니라 그 적대 요소가 대상이 된다" — a shot inside the closing brackets
+  // counts as a shot on the locked enemy, which is what makes "shoot the lock to break it" playable when the
+  // brackets still stand 70 px clear of the enemy's own rect. §2.1 puts that frame on the ENEMY in quickdraw;
+  // §2.3 puts it on the DRONE in survival, where the same rule would mean clicking near your own avatar damages
+  // an enemy somewhere else entirely — survival gets shoot-or-dodge (§2.3) instead of this assist.
+  await setCombatMode('quickdraw');
+  await sleep(150);
+  await resetScene(400, 400);
+  await api.setWeapon(page, 'pistol');
+  const lockAssistId = await force('#figure', 'forceLock');
+  await sleep(150);
+  const assistGeom = await page.evaluate(() => {
+    const n = document.querySelector('.crs-lock'); const el = document.querySelector('#figure');
+    if (!n || !el) return null;
+    const lr = n.getBoundingClientRect(), er = el.getBoundingClientRect();
+    return { lock: { left: lr.left, top: lr.top, right: lr.right, bottom: lr.bottom }, el: { left: er.left, top: er.top, right: er.right, bottom: er.bottom } };
+  });
+  // a point inside the brackets but clear of the enemy's own rect — the gap the assist exists to cover
+  const assistPt = assistGeom ? { x: (assistGeom.el.left + assistGeom.el.right) / 2, y: (assistGeom.lock.top + assistGeom.el.top) / 2 } : null;
+  const assistOutside = !!(assistGeom && assistPt && assistPt.y < assistGeom.el.top - 2 && assistPt.y > assistGeom.lock.top);
+  const figAssistB = await api.hpOf(page, '#figure');
+  if (assistPt) await api.smashAt(page, assistPt.x, assistPt.y);
+  await sleep(120);
+  const figAssistA = await api.hpOf(page, '#figure');
+  check('A.v2 §2.2: in quickdraw a shot inside the lock brackets but outside the enemy rect still damages that enemy', !!lockAssistId && assistOutside === true && figAssistA.hp === figAssistB.hp - DMG14('pistol'), { lockAssistId, assistGeom, assistPt, before: figAssistB, after: figAssistA, dmg: DMG14('pistol') });
+
+  await api.restore(page);
+  await sleep(80);
+  await setCombatMode('survival');
+  await sleep(150);
+  await resetScene(400, 400);
+  await api.setWeapon(page, 'pistol');
+  const lockDroneId = await force('#figure', 'forceLock');
+  await sleep(150);
+  // in survival the frame rides the drone, which resetScene parked at (400, 400) — well clear of #figure
+  const droneFrame = await page.evaluate(() => {
+    const n = document.querySelector('.crs-lock'); const el = document.querySelector('#figure');
+    if (!n || !el) return null;
+    const lr = n.getBoundingClientRect(), er = el.getBoundingClientRect();
+    const clear = lr.right < er.left || lr.left > er.right || lr.bottom < er.top || lr.top > er.bottom;
+    return { cx: lr.left + lr.width / 2, cy: lr.top + lr.height / 2, clear, lock: { left: lr.left, top: lr.top, width: lr.width, height: lr.height }, el: { left: er.left, top: er.top, width: er.width, height: er.height } };
+  });
+  const figDroneB = await api.hpOf(page, '#figure');
+  if (droneFrame) await api.smashAt(page, droneFrame.cx, droneFrame.cy);
+  await sleep(120);
+  const figDroneA = await api.hpOf(page, '#figure');
+  check('A.v2 §2.3: in survival the lock frame rides the drone, so a shot inside it does NOT reach the locked enemy across the page', !!lockDroneId && !!droneFrame && droneFrame.clear === true && figDroneA.hp === figDroneB.hp, { lockDroneId, droneFrame, before: figDroneB, after: figDroneA });
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- combat.png: SPEC-combat-v2 §8 wants the drone, its health ring, the lock-on brackets, a repair beam
+  // and the destruction-ratio meter in ONE frame, and SPEC-readability §7 wants the player ring, an aim line
+  // and the enlarged ammo/health panels. Survival is the only mode where all of that can coexist (§0.5: no
+  // avatar outside survival), and the v1.3 frame keeps its own artifact as readability.png.
+  // Staging notes, all of them timing:
+  //   * the §3.2 meter runs on a 2 s clock, so the breaks have to land a refresh BEFORE the capture or the
+  //     label still reads the pre-break number;
+  //   * the lock-on is captured 1.6 s in — the §2.1 shrink stage, orange and steady. The warning stage is
+  //     white at 70 % and barely reads; the imminent stage blinks on a 0.2 s cycle and may be caught dark;
+  //   * the repair beam only lives 1.5 s (§3.1), so it is started inside that window, not before it.
+  await setCombatMode('survival');
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true });
+  await api.restore(page);
+  await sleep(80);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await api.setWeapon(page, 'hammer');
+  const scShot = await api.rect(page, '#small-card');
+  await clickUntilBroken(page, '#small-card', scShot.cx, scShot.cy, 4);
+  const bcShot = await api.rectNoScroll(page, '#big-card');
+  await clickUntilBroken(page, '#big-card', bcShot.cx, bcShot.cy, 5);
+  await api.rect(page, '#figure');
+  await sleep(2300);
+  await page.evaluate((x, y) => {
+    const a = window.__crashScreen, d = a.debug;
+    d.setPlayerHp(60);
+    a.setWeapon('pistol');
+    a.smashAt(2, 2); a.smashAt(2, 2); a.smashAt(2, 2);   // burn the magazine down so the ammo panel reads low
+    d.setAvatarPos(x, y);
+    d.forceLock(document.querySelector('#figure'));
+  }, 470, 640);
+  await sleep(1150);
+  await force('#figure', 'forceRepair');
+  await sleep(450);
+  const shotNodes = await page.evaluate(() => {
+    const hud = document.querySelector('crs-hud, .crs-hud-host');
+    const sr = hud && hud.shadowRoot;
+    const prog = sr && sr.querySelector('.crs-progress');
+    const vis = (n) => { if (!n) return false; const r = n.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight; };
+    const modeOn = sr ? [...sr.querySelectorAll('[aria-pressed="true"]')].map((n) => (n.textContent || '').trim()) : [];
+    const av = document.querySelector('.crs-avatar');
+    const ring = document.querySelector('.crs-self');   // §1.1: the v1.3 conic-gradient ring, re-anchored to the drone
+    const avR = av && av.getBoundingClientRect(), rgR = ring && ring.getBoundingClientRect();
+    return {
+      avatar: vis(document.querySelector('.crs-avatar-body')),   // .crs-avatar itself is a 0×0 anchor; the 34 px body is the drone
+      ring: vis(ring),
+      // §1.1 anchors the ring ON the drone: their centres must coincide, not merely both be on screen
+      ringOnAvatar: !!(avR && rgR) && Math.abs((avR.left + avR.width / 2) - (rgR.left + rgR.width / 2)) <= 6 && Math.abs((avR.top + avR.height / 2) - (rgR.top + rgR.height / 2)) <= 6,
+      lock: vis(document.querySelector('.crs-lock')),
+      repair: vis(document.querySelector('.crs-repair')),
+      meter: !!(prog && prog.classList.contains('on')) && vis(prog),
+      meterText: prog ? (prog.textContent || '').trim() : null,
+      modeControl: !!(sr && sr.querySelector('.modes')) && modeOn.length > 0,
+      modeOn,
+      aimline: vis(document.querySelector('.crs-aimline')),
+      ammo: vis(sr && sr.querySelector('.crs-ammo')),
+      health: vis(sr && sr.querySelector('.crs-player')),
+    };
+  });
+  await page.screenshot({ path: path.join(OUT, 'combat.png') });
+  info(`screenshot test/out/combat.png (${JSON.stringify(shotNodes)})`);
+  check('A.v2 §8: combat.png frame carries the drone + its health ring, the lock-on brackets, a live repair beam, the destruction-ratio meter and the mode control all at once', shotNodes.avatar === true && shotNodes.ring === true && shotNodes.ringOnAvatar === true && shotNodes.lock === true && shotNodes.repair === true && shotNodes.meter === true && /%/.test(shotNodes.meterText || '') && shotNodes.modeControl === true, shotNodes);
+  check('A.v2 §8 / readability §7: the same frame also keeps the aim line and the enlarged ammo + health panels on screen', shotNodes.aimline === true && shotNodes.ammo === true && shotNodes.health === true, shotNodes);
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- tidy up: back to the suite's baseline mode/weapon/debug flags ----
+  await setCombatMode('rampage');
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: false });
   await api.setWeapon(page, 'hammer');
   await api.restore(page);
   await sleep(100);
@@ -3241,7 +4109,7 @@ async function suiteC(puppeteer, origin) {
 // ---------------------------------------------------------------------------
 (async () => {
   const guard = setTimeout(() => {
-    console.log('FAIL runtime budget exceeded (100 s)');
+    console.log(`FAIL runtime budget exceeded (${Math.round(TIME_BUDGET_MS / 1000)} s)`);
     console.log(`SUMMARY: ${results.filter((r) => r.ok).length} passed, ${results.filter((r) => !r.ok).length + 1} failed (timeout)`);
     process.exit(1);
   }, TIME_BUDGET_MS + 20000);

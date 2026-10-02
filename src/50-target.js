@@ -50,8 +50,21 @@
     }
     return null;
   }
-  function pickTarget(x, y, cache) {
+  /* opts.noLock (v1.4): skip the lock-frame aim assist below. isCovered() asks that, because it needs the raw
+   * answer "what would a click here really hit?" — with the assist on, a locked enemy would always look clear. */
+  function pickTarget(x, y, cache, opts) {
     const env = { vw: viewW(), vh: viewH(), op: cache || new Map() };
+    /* v1.4 §2.2 aim assist: a click inside a closing lock frame is a click on THAT enemy, not on a child of it.
+     * Only for a frame that is actually drawn ON the enemy (quickdraw, lk.onEnemy). In survival the frame rides
+     * the DRONE and then freezes wherever the drone was, so the same rule would teleport damage to an enemy the
+     * player never aimed at — §2.2's wording ("자식 요소가 아니라 그 적대 요소") presumes the frame sits on the
+     * enemy, and §2.3 gives survival shoot-or-dodge instead of this assist. */
+    if (!(opts && opts.noLock) && state.locks.length) {
+      const lk = lockAt(x, y);
+      if (lk && lk.onEnemy && lk.rec && lk.rec.el && lk.rec.el.isConnected) {
+        try { if (!lk.rec.el.hasAttribute('data-crs-broken')) return lk.rec.el; } catch (e) { /* ignore */ }
+      }
+    }
     let list;
     try { list = doc.elementsFromPoint(x, y); } catch (e) { return null; }
     let el = pickFromList(list, null, x, y, env, 0);
@@ -113,7 +126,10 @@
   function hpOfPublic(el) {
     if (!el || el.nodeType !== 1) return null;
     const rec = hpOf(el);
-    return { hp: Math.max(0, rec.hp), max: rec.max };
+    // v1.4 §10.5: depth comes from the live hostile record when there is one, else it is measured on the spot
+    const h = state.hostiles.get(el);
+    const depth = h ? h.depth : depthOf(el);
+    return { hp: Math.max(0, rec.hp), max: rec.max, depth, tier: h ? h.dtier : depthTier(depth) };
   }
   function fillColor(ratio) { return ratio > 0.6 ? '#3fb950' : (ratio > 0.3 ? '#e3b341' : '#e5484d'); }
   function showTarget(el) {
@@ -126,7 +142,9 @@
     targetBox.style.width = px(r.width); targetBox.style.height = px(r.height);
     const rec = hpOf(el);
     const hp = Math.max(0, rec.hp), ratio = rec.max > 0 ? clamp(hp / rec.max, 0, 1) : 0;
-    targetLabel.textContent = tagOf(el).toUpperCase() + ' ' + hp + '/' + rec.max;
+    // v1.4 §10.4: when the thing under the cursor is COVER, say how much is hiding behind it
+    const behind = modeHasEnemies() ? hostilesBehind(el) : 0;
+    targetLabel.textContent = tagOf(el).toUpperCase() + ' ' + hp + '/' + rec.max + (behind ? ' · ' + msg('hintEnemyBehind') + ' ' + behind : '');
     if (targetFill) { targetFill.style.width = (100 * ratio).toFixed(1) + '%'; targetFill.style.background = fillColor(ratio); }
   }
   /* Crit landed on the hovered element: the fill flashes white for 80 ms (A4). */
@@ -142,7 +160,8 @@
   function scheduleHover() {
     if (state.moveRaf) return;
     // v1.3 §3.1: the player ring is repositioned on the frame the pointer move already schedules
-    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); if (state.self) selfStep(); });
+    // v1.4: and the drone's nose, which tracks the crosshair even while the drone itself is parked
+    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); if (state.self) selfStep(); if (state.avatar) placeAvatar(); });
   }
   function pulseTarget() {
     if (!targetBox || targetBox.style.display === 'none') return;
@@ -151,3 +170,23 @@
       trackAnim(targetLabel.animate([{ transform: 'scale(1.4)' }, { transform: 'scale(1)' }], { duration: 150, easing: 'ease-out' }));
     } catch (e) { /* ignore */ }
   }
+
+  /* ── v1.4: what would a click at this point actually hit? ──
+   * pickTarget() is where the hostile-unit rule (§5), the §2.2 lock aim assist and the §10 depth/occlusion
+   * rules all land, so "the shot went nowhere" has several possible causes that look identical from outside.
+   * This reports the resolved element without firing anything, so a failing assertion can say which rule ran. */
+  debug.pickAt = (x, y) => {
+    const el = pickTarget(+x, +y);
+    if (!el) return null;
+    const r = rectOf(el) || { left: 0, top: 0, width: 0, height: 0 };
+    let cls = '';
+    try { cls = typeof el.className === 'string' ? el.className : ''; } catch (e) { cls = ''; }
+    return {
+      tag: tagOf(el).toUpperCase(),
+      id: el.id || null,
+      cls: cls.slice(0, 60),
+      hostile: state.hostiles.has(el),
+      broken: el.hasAttribute('data-crs-broken'),
+      rect: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
+    };
+  };

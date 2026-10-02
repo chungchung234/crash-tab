@@ -68,7 +68,14 @@
     dodgeLabel: '회피!',
     unitSec: '초',
     // v1.5 (§3.3): the two extra stats in the weapon-button tooltip
-    statCrit: '치명', statSwap: '교체'
+    statCrit: '치명', statSwap: '교체',
+    // ── v1.4: the three modes, the lock-on, the repair meter, the depth tags and the control card ──
+    modeRampage: '램페이지', modeQuickdraw: '퀵드로우', modeSurvival: '서바이벌',
+    modeRampageDesc: '적 없이 부수기', modeQuickdrawDesc: '먼저 쏘아 끊기', modeSurvivalDesc: '피하며 버티기',
+    lockBlocked: '차단!', labelRatio: '파괴율', labelDominating: '제압!',
+    hintCovered: '가려짐', hintPierce: '관통 가능', hintEnemyBehind: '뒤에 적',
+    helpMove: '이동', helpDash: '대시', helpAim: '마우스로 조준',
+    setDebrisLife: '파편이 사라지는 시간'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));

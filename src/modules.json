@@ -23,11 +23,15 @@
     "83-scope.js",
     "84-sniper.js",
     "85-loadout.js",
+    "86-modes.js",
+    "87-depth.js",
     "88-toast.js",
     "89-beams.js",
     "90-combat.js",
     "91-combat-feedback.js",
     "92-tick.js",
+    "93-lock.js",
+    "94-repair.js",
     "95-events.js",
     "99-api.js"
   ]

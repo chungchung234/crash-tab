@@ -9,15 +9,22 @@
   }
   function maxHostiles() { return combatElapsed() >= 60000 ? 5 : 3; }
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
-  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000); }
+  /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0). */
+  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1); }
   function resetPlayer() {
     const p = state.player;
     p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
+    // v1.4 §1.2: in survival the player IS the drone, so a reset parks it centre-bottom with no momentum
+    state.dashUntil = 0; state.dashReadyAt = 0; state.invulUntil = 0; state.dashVx = 0; state.dashVy = 0;
+    p.vx = 0; p.vy = 0;
+    if (modeHasAvatar()) avatarStart();
   }
   function playerInfo() {
     const p = state.player;
     return { hp: Math.max(0, Math.round(p.hp)), max: p.max, score: p.score, kills: p.kills, alive: p.alive, elapsedMs: Math.round(combatElapsed()), x: p.x, y: p.y,
-      lastHitFrom: p.lastHitFrom ? { x: p.lastHitFrom.x, y: p.lastHitFrom.y } : null };   // v1.3 §5: where the last hit came from
+      lastHitFrom: p.lastHitFrom ? { x: p.lastHitFrom.x, y: p.lastHitFrom.y } : null,   // v1.3 §5: where the last hit came from
+      // v1.4 §5: x / y are now the DRONE's centre in survival; the velocity and dash cooldown come with them
+      vx: p.vx || 0, vy: p.vy || 0, dashReadyAt: dashReadyWallClock(), hitRadius: AV_HIT_R, mode: state.mode };
   }
   function hostileSkip(el) {
     if (state.hostiles.has(el)) return true;
@@ -45,6 +52,9 @@
     state.graceUntil = now() + GRACE_MS;
     state.combatTimer = later(selectTick, GRACE_MS);
     state.clockTimer = later(clockTick, 1000);
+    armDepthTick();          // v1.4 §10.1
+    syncRatioMeter(false);   // v1.4 §3.2
+    if (modeHasAvatar()) ensureAvatar();   // v1.4 §1
   }
   /* The 생존 counter is a visible clock: the 1.5 s selection tick alone leaves it frozen through the whole
    * grace and then skips seconds, so the player HUD gets its own 1 s refresh chain (never setInterval). */
@@ -105,16 +115,26 @@
     if (!tier) return null;
     const aura = mk('div', 'crs-hostile');
     const label = mk('span', 'crs-hostile-label');
-    label.textContent = '👿 ' + tagOf(el).toUpperCase();
+    label.textContent = '👿 ' + tagOf(el).toUpperCase();   // recomposed with the ▲ depth mark below
     aura.append(label);
     root.append(aura);
-    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, aim: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now() };
+    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, aim: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now(),
+      // v1.4: depth role (§10), the lock frame it owns (§2) and its repair schedule (§3)
+      depth: 0, dtier: 'mid', depthAt: 0, lock: null, lockReadyAt: 0, repairTimer: 0 };
     state.hostiles.set(el, rec);
+    measureDepth(rec);           // v1.4 §10.1: once on selection, then every 2 s
+    applyDepthLook(rec);
+    /* v1.4 §10.2: front ×0.8, mid ×1.0, back ×1.2. Applied whenever an element becomes hostile — an element's
+     * depth role IS part of what it is as an enemy, and it has to hold whether or not the element happened to be
+     * hovered first (a hover caches HP too, so keying this off "first contact" made the role come and go). */
     hpOf(el);   // page-space max HP cached now (scope never runs the picker)
+    applyDepthHp(el, rec.dtier);
     placeAura(rec);
     setAuraPulse(rec, 900);
     scheduleAttack(rec, attackInterval(rec));
+    scheduleRepair(rec);         // v1.4 §3.1
     scheduleAura();
+    armDepthTick();
     updatePlayerHud();
     kick();
     return rec;
@@ -126,6 +146,7 @@
   }
   function clearPhase(rec) {   // telegraph / beam / warn / lock-mark nodes of this hostile; pulse back to idle
     dropAimLine(rec);   // v1.3 §3.2: the "aiming at you" line never outlives the wind-up it belongs to
+    dropLock(rec);      // v1.4 §2: so does the lock frame
     for (const n of rec.nodes) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } const i = state.warns.indexOf(n); if (i >= 0) state.warns.splice(i, 1); }
     rec.nodes.length = 0;
     if (rec.beam) { removeBeam(rec.beam); rec.beam = null; }
@@ -137,6 +158,8 @@
     if (!rec) return;
     state.hostiles.delete(el);
     untrack(rec.timer); rec.timer = 0;
+    untrack(rec.repairTimer); rec.repairTimer = 0;   // v1.4 §3.1
+    dropRepairsOf(rec);                              // a beam cannot outlive the enemy casting it
     clearPhase(rec);
     dropAimLine(rec, true);   // the hostile itself is going — its line cannot linger
     try { if (rec.pulse) { rec.pulse.cancel(); state.anims.delete(rec.pulse); } } catch (e) { /* ignore */ }
@@ -159,8 +182,11 @@
   function clearCombatNodes() {
     for (const el of Array.from(state.hostiles.keys())) releaseHostile(el);
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
+    clearLocks(); clearRepairs();   // v1.4 §2 / §3
   }
-  /* true only when one of the three attacks actually started (debug.forceAttack reports the tier off this). */
+  /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
+   * reports exactly that. v1.4 §4: quickdraw enemies only ever lock on, T3 everywhere is a lock instead of the
+   * laser, and §10.2 silences the back rank entirely. */
   function hostileAttack(rec, forced) {
     if (!state.active || !state.combat || state.hostiles.get(rec.el) !== rec || state.paused || state.ko) return false;
     const el = rec.el;
@@ -175,13 +201,27 @@
       return false;
     }
     rec.offscreenSince = 0;
-    if (!forced && (debug.noAttacks || !state.player.inWindow || !state.player.alive)) { scheduleAttack(rec, attackInterval(rec)); return false; }
+    // v1.4 §1.2: the drone stays whether or not the pointer is in the window, so inWindow no longer gates it
+    const awake = modeHasAvatar() ? state.player.alive : (state.player.inWindow && state.player.alive);
+    if (!forced && (debug.noAttacks || !awake)) { scheduleAttack(rec, attackInterval(rec)); return false; }
     if (forced) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
     scheduleAura();
+    // §10.2: the back rank is support — it repairs, it never shoots
+    if (!depthAttackMul(rec)) { if (!forced) scheduleAttack(rec, attackInterval(rec)); return false; }
+    /* §4 boss: 1st stage orbs, 2nd adds the slam, 3rd brings back the T3 LASER SWEEP (89-beams.js, kept for
+     * exactly this). A boss locks on as well — the sweep is what the third stage ADDS, not what it replaces. */
+    if (isBoss(rec) && modeHasProjectiles()) {
+      const phase = bossPhase(rec);
+      if (phase >= 3) { attackLaser(rec, r); return 'laser'; }
+      if (phase >= 2 && Math.random() < 0.5) { attackCharger(rec, r); return 'charger'; }
+      if (Math.random() < 0.6) { attackShooter(rec, r, forced); return 'shooter'; }
+      return startLock(rec, forced) ? 'lock' : false;
+    }
+    // §4: orbs and slams are survival-only; everything else (and every T3) draws a lock instead
+    if (!modeHasProjectiles() || rec.tier === 'laser') return startLock(rec, forced) ? 'lock' : false;
     if (rec.tier === 'shooter') attackShooter(rec, r, forced);
-    else if (rec.tier === 'charger') attackCharger(rec, r);
-    else attackLaser(rec, r);
-    return true;
+    else attackCharger(rec, r);
+    return rec.tier;
   }
   /* T1 shooter: wind-up 250 ms at the element centre (forced: none), then an orb toward the player at 520 px/s. */
   function attackShooter(rec, r, forced) {
@@ -249,15 +289,20 @@
     updatePlayerHud(); scheduleHud();
   }
   function interceptOrb(x, y) {
+    hitRepairBeams(x, y, 14);   // v1.4 §3.1: a shot across a repair beam delays it 0.4 s — it never absorbs the shot
     for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= 18) { popOrb(o); return true; } }
+    schedulePierce(x, y);       // v1.4 §10.3: the shot reaches the page, so it can also go THROUGH it
     return false;
   }
   function interceptOrbsWithin(x, y, R) {
+    hitRepairBeamsWithin(x, y, R);      // v1.4 §3.1
+    scheduleBlastThroughCover(x, y, R); // v1.4 §10.3: a blast reaches what is hiding behind cover
     let n = 0;
     for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R) { popOrb(o); n++; } }
     return n;
   }
   function interceptOrbsAlong(x1, y1, x2, y2, R) {
+    hitRepairBeamsAlong(x1, y1, x2, y2, R);   // v1.4 §3.1
     let n = 0;
     for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R) { popOrb(o); n++; } }
     return n;
@@ -330,6 +375,7 @@
     updatePlayerHud();
   }
   function showKo() {
+    if (!modeHasHealth()) return;   // v1.4 §0.5: quickdraw and rampage have no health, so no KO
     const p = state.player;
     p.alive = false; state.ko = true;
     resetChord(); scopeOff(); stopHold(); cancelSlash();
@@ -368,26 +414,7 @@
     restore();   // player reset + grace (A8)
     return true;
   }
-  function setCombat(v, opts) {
-    const silent = !!(opts && opts.silent);
-    const on = !!v, changed = on !== state.combat;
-    state.combat = on;
-    if (!silent) state.combatTouched = true;
-    if (!on) {
-      untrack(state.combatTimer); state.combatTimer = 0;
-      untrack(state.clockTimer); state.clockTimer = 0;
-      untrack(state.regenTimer); state.regenTimer = 0;
-      clearCombatNodes();   // auras / orbs / beams / warn rings go, the score stays
-      if (silent) hideToast(false); else if (changed) toast(msg('toastCombatOff'));
-    } else {
-      if (changed || !state.combatTimer) armCombat();
-      if (!silent && changed) toast(msg('toastCombatOn'));
-      if (state.player.hp < state.player.max) startRegen();
-    }
-    if (!silent) safe(() => chrome.storage.sync.set({ crsCombat: on }));
-    updateHud(); updatePlayerHud();
-    return on;
-  }
+  /* setCombat() / setMode() live in 86-modes.js from v1.4 on — one mode switch, one place. */
   /* Pause (A7): blur / hidden → cancel every combat timer, drop in-flight orbs / beams / rings, freeze the clock. */
   function pauseCombat() {
     if (state.paused) return;
@@ -396,8 +423,11 @@
     untrack(state.combatTimer); state.combatTimer = 0;
     untrack(state.clockTimer); state.clockTimer = 0;
     untrack(state.regenTimer); state.regenTimer = 0;
-    for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
+    untrack(state.depthTimer); state.depthTimer = 0;
+    untrack(state.ratioTimer); state.ratioTimer = 0;
+    for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; untrack(rec.repairTimer); rec.repairTimer = 0; clearPhase(rec); }
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
+    clearLocks(); clearRepairs();   // v1.4 §2 / §3
   }
   function resumeCombat() {
     if (!state.paused) return;
@@ -406,7 +436,9 @@
     if (!state.active || !state.combat) return;
     state.combatTimer = later(selectTick, Math.max(1000, state.graceUntil - now()));
     untrack(state.clockTimer); state.clockTimer = later(clockTick, 1000);
-    for (const rec of state.hostiles.values()) scheduleAttack(rec, Math.max(1000, attackInterval(rec)));
+    for (const rec of state.hostiles.values()) { scheduleAttack(rec, Math.max(1000, attackInterval(rec))); scheduleRepair(rec); }
+    armDepthTick(); armRatioTick();   // v1.4 §10.1 / §3.2
+    if (modeHasAvatar()) ensureAvatar();
     if (state.player.hp < state.player.max) startRegen();
   }
   /* --- debug hooks (§5) --- */
@@ -429,13 +461,91 @@
     if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; placeSelf(); }
     return { x: state.player.x, y: state.player.y };
   };
+  /* v1.4: the forced hooks bring a target that has been scrolled away back into view first. The picker only ever
+   * chooses on-screen elements, so this is the one place an off-screen element is a legitimate subject, and
+   * scrolling to the thing you asked about is what a reader of the hook means. */
+  function bringIntoView(el) {
+    if (!el || el.nodeType !== 1) return;
+    const r = rectOf(el);
+    if (r && r.right > 0 && r.bottom > 0 && r.left < viewW() && r.top < viewH()) return;
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    scheduleAura();
+  }
   debug.forceAttack = (el) => {   // same eligibility as the picker; works under noAttacks, null while paused / KO
     if (!state.active || !state.combat || state.paused || state.ko || !state.player.alive) return null;
+    bringIntoView(el);
     const existing = state.hostiles.get(el) || null;
     let rec = existing;
     if (!rec) { const area = hostileArea(el); if (area == null) return null; rec = markHostile(el, area); }
     if (!rec) return null;
     const ran = hostileAttack(rec, true);
-    if (!ran && !existing && state.hostiles.get(el) === rec) releaseHostile(el);   // a no-op must not consume a hostile slot
-    return ran ? rec.tier : null;
+    /* A no-op must not consume a hostile slot — EXCEPT for the back rank, whose "no-op" is the whole point of
+     * §10.2: it is a real hostile that simply never attacks, and its aura has to stay up. */
+    if (!ran && !existing && depthAttackMul(rec) && state.hostiles.get(el) === rec) releaseHostile(el);
+    return ran || null;   // v1.4: 'shooter' | 'charger' | 'lock' | 'laser'
   };
+  /* §5: the caller lives in wall-clock time, the engine in performance.now() time. */
+  function dashReadyWallClock() {
+    if (!state.dashReadyAt) return 0;
+    return Date.now() + Math.round(state.dashReadyAt - now());
+  }
+  /* §4 boss stages, read straight off its remaining HP. debug.forceBoss() takes an element (that one becomes a
+   * boss) or a number (every T3 hostile does), so a test can reach the third stage without guessing a signature. */
+  function isBoss(rec) { return !!(rec && (rec.boss || (state.bossMode && rec.tier === 'laser'))); }
+  function bossPhase(rec) {
+    const h = state.hp.get(rec.el);
+    const ratio = (h && h.max > 0) ? clamp(h.hp / h.max, 0, 1) : 1;
+    return ratio > 0.66 ? 1 : (ratio > 0.33 ? 2 : 3);
+  }
+  /* The biggest T3-sized element on the page, viewport or not — the thing a reader of forceBoss() means by
+   * "the boss". Capped scan, and only ever run from a debug hook. */
+  function biggestBossCandidate() {
+    let best = null, bestArea = 0, seen = 0;
+    let all = [];
+    try { all = doc.body.getElementsByTagName('*'); } catch (e) { return null; }
+    for (const el of all) {
+      if (++seen > 3000) break;
+      if (isOurs(el) || SKIP_WALK_TAGS.has(tagOf(el))) continue;
+      if ((el.offsetWidth || 0) < 300 || (el.offsetHeight || 0) < 200) continue;
+      const r = rectOf(el);
+      if (!r) continue;
+      const area = r.width * r.height;
+      if (tierFor(area) !== 'laser' || area > 0.7 * viewW() * viewH()) continue;
+      if (area > bestArea) { bestArea = area; best = el; }
+    }
+    return best;
+  }
+  function makeBoss(el, ratio) {
+    if (!el) return null;
+    bringIntoView(el);
+    const area = hostileArea(el);
+    const rec = state.hostiles.get(el) || (area != null ? markHostile(el, area) : null);
+    if (!rec) return null;
+    rec.boss = true;
+    state.bossMode = true;
+    if (ratio != null && isFinite(ratio) && ratio >= 0 && ratio <= 1) {
+      const h = hpOf(el);
+      // floor, so the caller's "drive it to 30 %" loop sees a value that is already AT or BELOW the threshold
+      h.hp = Math.max(1, Math.floor(h.max * ratio));
+      refreshHover(); scheduleHud();
+    }
+    return rec;
+  }
+  /* forceBoss(el) makes that element a boss; forceBoss(0.3) makes the page's biggest T3 element a boss already
+   * down to 30 % HP — its third stage (§4), where the laser sweep comes back. */
+  debug.forceBoss = (arg) => {
+    if (arg && arg.nodeType === 1) return makeBoss(arg, null) ? true : null;
+    const ratio = (typeof arg === 'number' && isFinite(arg)) ? arg : null;
+    const rec = makeBoss(biggestBossCandidate(), ratio);
+    if (rec) return true;
+    state.bossMode = true;   // nothing eligible on screen: every T3 hostile still fights as a boss
+    for (const r of state.hostiles.values()) if (r.tier === 'laser') r.boss = true;
+    return true;
+  };
+  debug.setAvatarPos = (x, y) => {
+    x = +x; y = +y;
+    const p = state.player;
+    if (isFinite(x) && isFinite(y)) { p.x = x; p.y = y; p.vx = 0; p.vy = 0; p.inWindow = true; placeAvatar(); placeSelf(); }
+    return { x: p.x, y: p.y };
+  };
+  debug.dashReady = () => { state.dashReadyAt = 0; updateDashDot(); return true; };

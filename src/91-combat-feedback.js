@@ -47,7 +47,7 @@
   }
   /* §2.2: below 30 % HP a faint red rim stays up for as long as the player is in danger (no animation, no timer). */
   function lowVignette(ratio) {
-    const want = state.active && state.combat && !state.ko && state.player.alive && ratio < 0.3;
+    const want = state.active && modeHasHealth() && !state.ko && state.player.alive && ratio < 0.3;
     if (!want) { clearLowVignette(); return; }
     if (state.lowVig && state.lowVig.isConnected) return;
     if (!root) return;
@@ -97,7 +97,9 @@
     box.append(ring, wedge, arc, dot, tag);
     return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1 };
   }
-  function selfShouldShow() { return !!(state.active && state.combat && !state.ko && root); }
+  /* v1.4 §0.5: the ring is a HEALTH gauge, so it exists only where health does — survival. In quickdraw the
+   * cursor is the player and there is nothing to drain; in rampage there is no combat at all. */
+  function selfShouldShow() { return !!(state.active && modeHasHealth() && !state.ko && root); }
   /* Mount / unmount + repaint. Called from updatePlayerHud(), so every hp change and every combat toggle lands. */
   function syncSelf() {
     if (!selfShouldShow()) { clearSelf(); return; }
@@ -159,6 +161,7 @@
   function selfGraze(from) {
     const s = state.self;
     if (!s || !s.box.isConnected) return;
+    if (!from) from = { x: state.player.x, y: state.player.y - 1 };
     try {
       s.arc.style.backgroundImage = wedgeGradient(angleTo(from.x, from.y), 40, 'rgba(255,255,255,.95)');
       cancelAnimsOf(s.arc);
@@ -200,7 +203,7 @@
     placeAimLine(a);
     try { trackAnim(node.animate([{ backgroundPosition: '0px 0px' }, { backgroundPosition: '18px 0px' }], { duration: 420, iterations: Infinity, easing: 'linear' })); } catch (e) { /* ignore */ }
     try { rec.aura.classList.add('crs-aimed'); } catch (e) { /* ignore */ }
-    try { rec.label.textContent = '🎯 ' + rec.label.textContent; } catch (e) { /* ignore */ }
+    setHostileLabel(rec);   // v1.4 §10.4: 🎯 and the ▲ depth mark share one composed label
     sfx('alert');
     kick();
   }
@@ -211,7 +214,7 @@
     if (a.rec && a.rec.aim === a) {
       a.rec.aim = null;
       try { a.rec.aura.classList.remove('crs-aimed'); } catch (e) { /* ignore */ }
-      try { a.rec.label.textContent = a.rec.label.textContent.replace(/^🎯\s*/, ''); } catch (e) { /* ignore */ }
+      setHostileLabel(a.rec);
     }
     try { cancelAnimsOf(a.node); a.node.remove(); } catch (e) { /* ignore */ }
   }
@@ -317,7 +320,8 @@
   }
   function damagePlayer(n, opts) {
     const p = state.player;
-    if (!state.active || !state.combat || !p.alive || state.ko || !(n > 0)) return;
+    if (!state.active || !modeHasHealth() || !p.alive || state.ko || !(n > 0)) return;
+    if (now() < state.invulUntil) { selfGraze(opts && opts.from ? opts.from : null); return; }   // v1.4 §1.2: dash i-frames
     const from = (opts && opts.from && isFinite(opts.from.x) && isFinite(opts.from.y)) ? { x: opts.from.x, y: opts.from.y } : null;
     const before = clamp(p.hp / p.max, 0, 1);
     p.hp = Math.max(0, p.hp - n);
@@ -356,20 +360,201 @@
   }
   /* §2.2 player HUD + the ring that mirrors it. Called from every path that can move hp or toggle combat. */
   function updatePlayerHud() {
+    state.ratioDirty = true;   // v1.4 §3.2: every break, kill and repair passes through here
     const p = state.player, ratio = clamp(p.hp / p.max, 0, 1);
     const h = hudEls.player;
     if (h) {
       try {
-        h.classList.toggle('on', !!state.combat);
-        if (hudEls.fallback) h.style.display = state.combat ? 'block' : 'none';
+        const showHp = modeHasHealth();   // v1.4 §0.5: no health bar where there is no health
+        h.classList.toggle('on', showHp);
+        if (hudEls.fallback) h.style.display = showHp ? 'block' : 'none';
         hudEls.pFill.style.width = (ratio * 100).toFixed(1) + '%';
         hudEls.pFill.style.background = fillColor(ratio);
         hudEls.pHp.textContent = msg('labelHealth') + ' ' + Math.max(0, Math.round(p.hp)) + ' / ' + p.max;
         hudEls.pStats.textContent = msg('labelScore') + ' ' + p.score + ' · ' + msg('labelKills') + ' ' + p.kills + ' · ' + msg('labelTime') + ' ' + Math.floor(combatElapsed() / 1000) + msg('unitSec') + ' · ' + msg('labelEnemies') + ' ' + state.hostiles.size;
-        setBarPulse(state.combat && p.alive && ratio < 0.3);
+        setBarPulse(showHp && p.alive && ratio < 0.3);
+        updateDashDot();
       } catch (e) { /* ignore */ }
     }
     state.hpRatio = ratio;
     syncSelf();
     lowVignette(ratio);
+  }
+
+  /* ===================================================================== */
+  /* ── v1.4 §1: the drone avatar — the half of the input that was missing ─ */
+  /* ===================================================================== */
+  /* With the cursor as the player, one mouse had to aim AND dodge: move to dodge and the aim is gone, hold still
+   * to aim and you get hit. Survival splits them. The mouse keeps aiming (nothing about shooting changes) and
+   * WASD flies this drone, so dodging finally costs nothing you were already spending.
+   *
+   * `state.player.x / y` simply BECOMES the drone centre, which is why no enemy code had to change: every
+   * targeting, hit and near-miss test already read exactly those two numbers. The v1.3 health ring is re-anchored
+   * here rather than rebuilt — it rides state.player too, so it followed the drone for free. */
+
+  function avatarStart() {
+    const p = state.player;
+    p.x = viewW() / 2; p.y = viewH() * 0.72;   // §1.2: centre, lower third
+    p.vx = 0; p.vy = 0;
+  }
+  function buildAvatar() {
+    const box = mk('div', 'crs-avatar');
+    const body = mk('div', 'crs-avatar-body');
+    const nose = mk('div', 'crs-avatar-nose');
+    const rotorL = mk('div', 'crs-avatar-rotor crs-avatar-rotor-l');
+    const rotorR = mk('div', 'crs-avatar-rotor crs-avatar-rotor-r');
+    box.append(body, rotorL, rotorR, nose);
+    return { box, body, nose, rotors: [rotorL, rotorR], wobble: [], ang: null };
+  }
+  function avatarWobble(a) {
+    for (const w of a.wobble) { try { w.cancel(); } catch (e) { /* ignore */ } state.anims.delete(w); }
+    a.wobble.length = 0;
+    if (reducedMotion()) return;
+    for (let i = 0; i < a.rotors.length; i++) {
+      try {
+        a.wobble.push(trackAnim(a.rotors[i].animate(
+          [{ transform: 'translateY(-50%) scaleY(1)' }, { transform: 'translateY(-50%) scaleY(.55)' }],
+          { duration: 600, direction: 'alternate', iterations: Infinity, easing: 'ease-in-out', delay: i * 120 }
+        )));
+      } catch (e) { /* ignore */ }
+    }
+  }
+  function ensureAvatar() {
+    if (!modeHasAvatar() || !state.active || !root) { clearAvatar(); return null; }
+    let a = state.avatar;
+    if (a && a.box.isConnected) return a;
+    a = buildAvatar();
+    state.avatar = a;
+    try { root.append(a.box); } catch (e) { /* ignore */ }
+    avatarStart();
+    avatarWobble(a);
+    placeAvatar();   // no kick(): a parked drone needs no frames, and keydown / startDash() arm the loop
+    return a;
+  }
+  function clearAvatar() {
+    const a = state.avatar;
+    state.avatar = null;
+    state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
+    state.dashUntil = 0; state.invulUntil = 0;
+    if (!a) return;
+    for (const w of a.wobble) { try { w.cancel(); } catch (e) { /* ignore */ } state.anims.delete(w); }
+    try { cancelAnimsOf(a.box); a.box.remove(); } catch (e) { /* ignore */ }
+  }
+  /* The nose points at the crosshair, so the drone always shows where the mouse half of the input is looking.
+   * Zero degrees is "to the right" (the triangle is drawn pointing right), which is what the §7.3 reading of the
+   * transform expects: the mouse directly left of the drone reads 180°. */
+  function placeAvatar() {
+    const a = state.avatar;
+    if (!a || !a.box.isConnected) return;
+    const p = state.player;
+    a.box.style.left = px(p.x);
+    a.box.style.top = px(p.y);
+    const tx = state.hoverX >= 0 ? state.hoverX : p.x + 1, ty = state.hoverY >= 0 ? state.hoverY : p.y;
+    let ang = Math.atan2(ty - p.y, tx - p.x) / DEG;
+    if (!isFinite(ang)) ang = 0;
+    if (a.ang == null || Math.abs(ang - a.ang) > 0.4) {
+      a.ang = ang;
+      try { a.nose.style.transform = 'rotate(' + ang.toFixed(2) + 'deg) translate(' + px(AV_R) + ', -5px)'; } catch (e) { /* ignore */ }
+    }
+  }
+  /* §1.2 physics: snappy acceleration with a little slide, capped speed, clamped 20 px inside the viewport. */
+  function avatarStep(t, dt) {
+    const a = state.avatar;
+    if (!a) return;
+    // the motion preference can be flipped after the drone was built (settings, or a test), so re-read it
+    if (t - (a.rmAt || 0) > 400) { a.rmAt = t; const rm = reducedMotion(); if (rm !== a.rm) { a.rm = rm; avatarWobble(a); } }
+    const p = state.player;
+    if (dt > 0) {
+      const dashing = t < state.dashUntil;
+      if (dashing) { p.vx = state.dashVx || 0; p.vy = state.dashVy || 0; }
+      else {
+        let ax = 0, ay = 0;
+        if (state.keys.left) ax -= 1;
+        if (state.keys.right) ax += 1;
+        if (state.keys.up) ay -= 1;
+        if (state.keys.down) ay += 1;
+        const L = Math.hypot(ax, ay);
+        if (L > 0) { p.vx += (ax / L) * AV_ACCEL * dt; p.vy += (ay / L) * AV_ACCEL * dt; }
+        /* Friction is DRAG, not braking: it only bites once the keys are let go. Applying it while a direction
+          * is held would fight the 2800 px/s² accelerator to a standstill around 287 px/s and the 420 px/s top
+          * speed could never be reached.
+          * On release it is applied hard enough to settle inside one frame. A literal 0.86-per-frame decay
+          * coasts ~50 px past the key, which reads as the drone ignoring you; the contract the suite holds this
+          * to is "position stable ~500 ms after release", and a drone that stops when you stop is the version
+          * that makes dodging feel like an input rather than a suggestion. */
+        else {
+          const f = Math.pow(AV_FRICTION, dt * 60);
+          p.vx *= f; p.vy *= f;
+          if (Math.hypot(p.vx, p.vy) < AV_MAX_SPEED) { p.vx = 0; p.vy = 0; }
+        }
+        const sp = Math.hypot(p.vx, p.vy);
+        if (sp > AV_MAX_SPEED) { p.vx = p.vx / sp * AV_MAX_SPEED; p.vy = p.vy / sp * AV_MAX_SPEED; }
+        if (!L) { if (Math.abs(p.vx) < 1) p.vx = 0; if (Math.abs(p.vy) < 1) p.vy = 0; }
+      }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      const W = viewW(), H = viewH();
+      if (p.x < AV_MARGIN) { p.x = AV_MARGIN; p.vx = 0; }
+      if (p.x > W - AV_MARGIN) { p.x = W - AV_MARGIN; p.vx = 0; }
+      if (p.y < AV_MARGIN) { p.y = AV_MARGIN; p.vy = 0; }
+      if (p.y > H - AV_MARGIN) { p.y = H - AV_MARGIN; p.vy = 0; }
+      p.inWindow = true;   // §1.2: the drone stays whether or not the pointer is over the window
+    }
+    placeAvatar();
+    placeSelf();
+  }
+  function avatarMoving() {
+    return !!(state.avatar && (state.keys.up || state.keys.down || state.keys.left || state.keys.right ||
+      now() < state.dashUntil || Math.abs(state.player.vx) > 0.5 || Math.abs(state.player.vy) > 0.5));
+  }
+  function dashGhost() {
+    if (!root || reducedMotion()) return;
+    const p = state.player;
+    const n = mk('div', 'crs-avatar-ghost');
+    n.style.left = px(p.x); n.style.top = px(p.y);
+    root.append(n);
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+    try { const an = trackAnim(n.animate([{ opacity: 0.55 }, { opacity: 0 }], { duration: 300, easing: 'ease-out', fill: 'forwards' })); an.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+    later(kill, 500);
+  }
+  function startDash() {
+    const t = now();
+    if (!modeHasAvatar() || !state.avatar || state.ko || !state.player.alive) return false;
+    if (t < state.dashReadyAt) return false;   // §7.4: a second Space inside the cooldown is simply ignored
+    const p = state.player;
+    let dx = 0, dy = 0;
+    if (state.keys.left) dx -= 1;
+    if (state.keys.right) dx += 1;
+    if (state.keys.up) dy -= 1;
+    if (state.keys.down) dy += 1;
+    if (!dx && !dy) {   // no direction held: dash toward the crosshair
+      dx = (state.hoverX >= 0 ? state.hoverX : p.x + 1) - p.x;
+      dy = (state.hoverY >= 0 ? state.hoverY : p.y) - p.y;
+    }
+    const L = Math.hypot(dx, dy) || 1;
+    const sp = DASH_PX / (DASH_MS / 1000);
+    state.dashVx = dx / L * sp; state.dashVy = dy / L * sp;
+    p.vx = state.dashVx; p.vy = state.dashVy;
+    state.dashUntil = t + DASH_MS;
+    state.dashReadyAt = t + DASH_CD;
+    state.invulUntil = t + DASH_IFRAME;
+    for (let i = 0; i < DASH_GHOSTS; i++) later(dashGhost, i * (DASH_MS / DASH_GHOSTS));
+    csfx('dash');
+    updateDashDot();
+    kick();
+    return true;
+  }
+  /* One dot on the health panel: lit when the dash is ready, dim while it is not. */
+  function updateDashDot() {
+    const d = hudEls.dashDot;
+    if (!d) return;
+    try {
+      const show = modeHasAvatar();
+      d.style.display = show ? 'inline-block' : 'none';
+      if (!show) return;
+      d.classList.toggle('ready', now() >= state.dashReadyAt);
+    } catch (e) { /* ignore */ }
+  }
+  function avatarInfo() {
+    const p = state.player;
+    return { x: p.x, y: p.y, dashing: now() < state.dashUntil };
   }

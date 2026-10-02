@@ -304,9 +304,12 @@
     }
     return out;
   }
-  /* A thin white line across each pierced element for 0.2 s — without it the extra damage is invisible. */
+  /* A thin white line across each pierced element for 0.2 s — without it the extra damage is invisible.
+   * MERGED (v1.4 + v1.5): src/87-depth.js used to declare a second pierceMark() of its own. There is one
+   * now, here, and it keeps the v1.4 copy's prefers-reduced-motion guard — a decorative fade, handled the
+   * same way as every other one in this build (beamFx, toastFx, lockPop …). */
   function pierceMark(el, y) {
-    if (!root) return;
+    if (!root || reducedMotion()) return;
     const r = rectOf(el);
     if (!r || r.width < 2) return;
     const n = mk('div', 'crs-pierce');
@@ -318,21 +321,39 @@
     try { const a = trackAnim(n.animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 200, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
     later(kill, 600);
   }
-  /* Called by a hitscan fire() right after its own applyHit. `front` may be null (the shot missed everything
-   * pickable) — the layers behind are still eligible, which is what makes pierce feel like a through-shot. */
+  /* ── the ONE pierce entry point (SPEC-combat-v2 §10.3-2 + SPEC-weapons §3, merged) ─────────────────
+   * src/87-depth.js used to declare a SECOND applyPierce() with a different signature
+   * (x, y, front, layerCount, baseDamage). Every src/ fragment shares one closure and 87 is concatenated
+   * after 73, so that one won and the v1.5 call sites were feeding it `'gun'` as the layer count and
+   * `'sniper'` as the base damage — Math.round('sniper' * 0.6) is NaN, so every layer behind a pistol or
+   * sniper shot had its hp silently set to NaN instead of taking 60 %. One declaration each now; the
+   * depth module keeps `pierceOf()` (the stat reader) and `schedulePierce()` (the single caller).
+   *   layer count  pierceOf(id) reads WEAPONS[id].pierce. 붕괴's PIERCE_ALL (999) is a sentinel, not a
+   *                reason to walk a whole page, so it is clamped to PIERCE_MAX_LAYERS.
+   *   targets      pierceTargets() walks the SAME elementsFromPoint stack the bullet went through, under
+   *                pickTarget()'s own walk-up rules, skipping anything already on the front target's chain.
+   *   damage       the firing weapon's own roll — its critChance and its distance falloff — attenuated
+   *                ×0.6 compounding per layer (60 %, 36 %, …).
+   * `front` may be null (the shot missed everything pickable); the layers behind are still eligible, which
+   * is what makes pierce feel like a through-shot. Returns the number of layers actually hit. */
+  const PIERCE_MAX_LAYERS = 8;
   function applyPierce(x, y, front, kind, id) {
-    const W = WEAPONS[id];
-    if (!W || !(W.pierce > 0)) return 0;
-    const n = Math.min(W.pierce, 8);   // `전부` (collapse) is a sentinel, not a reason to walk a whole page
+    if (!state.active) return 0;
+    const wid = id || state.weapon;
+    const W = WEAPONS[wid];
+    if (!W || !(W.damage > 0) || !isFinite(W.damage)) return 0;   // 붕괴's Infinity never reaches here (doCollapse breaks outright)
+    const n = Math.min(pierceOf(wid), PIERCE_MAX_LAYERS);
+    if (!(n > 0)) return 0;
     const targets = pierceTargets(x, y, front, n);
-    const fall = falloffMul(id, x, y);
+    const fall = falloffMul(wid, x, y);
+    const mode = kind || W.kind;
     let k = 0;
     for (const el of targets) {
       k++;
-      const crit = rollCrit(id);
+      const crit = rollCrit(wid);
       const dmg = rollDamage(W.damage, crit, Math.pow(0.6, k) * fall);
       pierceMark(el, y);
-      applyHit(el, dmg, kind, x, y, { crit, pierce: k });
+      applyHit(el, dmg, mode, x, y, { crit, pierce: k });
     }
     return k;
   }

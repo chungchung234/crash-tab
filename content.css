@@ -610,7 +610,263 @@ crs-hud:popover-open {
   transform: translate(0px, 0px);
   opacity: 1;
 }
-/* a pierced element keeps a thin white line for 0.2 s so the extra hits are visible (combat-v2 §10.3) */
+
+/* =====================================================================
+ * v1.4 — drone avatar (§1), Virtua-Cop lock frame (§2), repair beams and
+ * the destruction-ratio meter (§3), depth tiers (§10), control card (§1.3).
+ *
+ * CASCADE NOTE (same trap as v1.3): this sheet is injected with USER origin,
+ * so a user !important outranks BOTH an inline style and a Web Animation.
+ * Anything written from JS or animated below is therefore declared WITHOUT
+ * !important — left/top/width/height, transform, opacity, border-color,
+ * background-position and filter on these nodes are all JS-driven.
+ * ===================================================================== */
+.crs-avatar,
+.crs-avatar-ghost,
+.crs-lock,
+.crs-repair,
+.crs-repair-ghost,
+.crs-help {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+}
+
+/* ---- §1.1 the drone: a 0 × 0 anchor at the drone centre, everything hung off it ---- */
+.crs-avatar {
+  width: 0 !important;
+  height: 0 !important;
+  z-index: 5 !important;
+  background: transparent !important;
+  /* NOT !important: placeAvatar() writes left / top every frame */
+  left: 0;
+  top: 0;
+}
+.crs-avatar-body,
+.crs-avatar-nose,
+.crs-avatar-rotor {
+  position: absolute !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+}
+.crs-avatar-body {
+  left: -17px !important;
+  top: -17px !important;
+  width: 34px !important;
+  height: 34px !important;
+  border: 2px solid rgba(255, 255, 255, .85) !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle at 35% 30%, #cfe3ff, #5b7fb4 70%, #2b3a55) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .5) !important;
+}
+/* the nose points at the crosshair; 0deg is "to the right", so the triangle is drawn pointing right */
+.crs-avatar-nose {
+  left: 0 !important;
+  top: 0 !important;
+  width: 10px !important;
+  height: 10px !important;
+  border: 0 !important;
+  background: rgba(255, 255, 255, .92) !important;
+  clip-path: polygon(0 0, 100% 50%, 0 100%) !important;
+  transform-origin: 0 0 !important;
+  /* NOT !important: placeAvatar() rewrites the rotation */
+  transform: rotate(0deg) translate(17px, -5px);
+}
+.crs-avatar-rotor {
+  top: 0 !important;
+  width: 4px !important;
+  height: 10px !important;
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: rgba(220, 235, 255, .85) !important;
+  /* NOT !important: the 0.6 s wobble animates this transform */
+  transform: translateY(-50%);
+}
+.crs-avatar-rotor-l { left: -22px !important; }
+.crs-avatar-rotor-r { left: 18px !important; }
+.crs-avatar-ghost {
+  width: 34px !important;
+  height: 34px !important;
+  margin-left: -17px !important;
+  margin-top: -17px !important;
+  border-radius: 50% !important;
+  z-index: 4 !important;
+  background: rgba(140, 180, 240, .55) !important;
+  /* NOT !important: the ghost fade animates opacity */
+  opacity: 0;
+}
+
+/* ---- §2.1 the lock frame: four corner brackets plus a thin ring ---- */
+.crs-lock {
+  z-index: 5 !important;
+  background: transparent !important;
+  /* NOT !important: stepLocks() writes the box, the blink writes opacity, the break animates transform */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 1;
+  transform: none;
+}
+.crs-lock-bracket {
+  position: absolute !important;
+  width: 20px !important;
+  height: 20px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  background: transparent !important;
+  border-style: solid !important;
+  border-width: 0 !important;
+  /* NOT !important: the phase colour is written per frame */
+  border-color: rgba(255, 255, 255, .7);
+}
+.crs-lock-tl { left: 0 !important; top: 0 !important; border-top-width: 3px !important; border-left-width: 3px !important; }
+.crs-lock-tr { right: 0 !important; top: 0 !important; border-top-width: 3px !important; border-right-width: 3px !important; }
+.crs-lock-bl { left: 0 !important; bottom: 0 !important; border-bottom-width: 3px !important; border-left-width: 3px !important; }
+.crs-lock-br { right: 0 !important; bottom: 0 !important; border-bottom-width: 3px !important; border-right-width: 3px !important; }
+.crs-lock-ring {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-style: solid !important;
+  border-width: 1px !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  /* NOT !important: the phase colour is written per frame */
+  border-color: rgba(255, 255, 255, .7);
+}
+/* §10.4: an enemy you cannot actually shoot gets a dashed frame and a word for why */
+.crs-lock.crs-lock-covered { outline: 1px dashed rgba(255, 255, 255, .45) !important; outline-offset: 0 !important; }
+.crs-lock.crs-lock-covered .crs-lock-bracket { border-style: dashed !important; }
+.crs-lock.crs-lock-covered .crs-lock-ring { border-style: dashed !important; }
+.crs-lock-tag {
+  position: absolute !important;
+  left: 50% !important;
+  top: -18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  font: 700 11px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  color: #fff !important;
+  background: transparent !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .95) !important;
+  white-space: nowrap !important;
+  transform: translateX(-50%) !important;
+  pointer-events: none !important;
+  display: block !important;
+}
+/* §2.3: quickdraw has no health bar to flash, so a failed lock flashes the screen edge instead */
+.crs-vignette.crs-vignette-edge {
+  box-shadow: inset 0 0 60px 18px rgba(229, 72, 77, .85) !important;
+  background-color: transparent !important;
+}
+
+/* ---- §3.1 the repair beam and the dotted outline it is rebuilding ---- */
+.crs-repair {
+  z-index: 4 !important;
+  transform-origin: 0 50% !important;
+  background-color: transparent !important;
+  background-repeat: repeat !important;
+  background-image: repeating-linear-gradient(90deg, rgba(73, 199, 214, .95) 0 10px, rgba(73, 199, 214, 0) 10px 20px) !important;
+  box-shadow: 0 0 10px 2px rgba(73, 199, 214, .45) !important;
+  /* NOT !important: placeRepairBeam() writes the box and the rotation, and the dash flow animates the position */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 3px;
+  transform: none;
+  background-position: 0 0;
+  filter: none;
+}
+.crs-repair-ghost {
+  z-index: 3 !important;
+  border: 2px dashed rgba(73, 199, 214, .8) !important;
+  border-radius: 4px !important;
+  background: rgba(73, 199, 214, .08) !important;
+  /* NOT !important: placeRepairBeam() writes the box */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
+/* ---- §10.4 depth, read off the aura ---- */
+.crs-hostile.crs-depth-back {
+  filter: blur(0.6px) saturate(.75);
+  outline-style: dashed !important;
+}
+/* a back-rank enemy that is actively repairing drops the blur and brightens: it has to be worth the trip */
+.crs-hostile.crs-repairing {
+  filter: none;
+  outline-color: rgba(73, 199, 214, .95) !important;
+  box-shadow: inset 0 0 30px rgba(73, 199, 214, .5) !important;
+}
+/* §2.1 imminent: the aura of the enemy about to fire doubles in brightness */
+.crs-hostile.crs-lock-imminent { filter: brightness(2); }
+
+/* ---- §1.3 the one-time control card ---- */
+.crs-help {
+  left: 50% !important;
+  top: 38% !important;
+  z-index: 6 !important;
+  padding: 14px 20px !important;
+  border-radius: 16px !important;
+  background: rgba(12, 12, 16, .82) !important;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .55) !important;
+  transform: translate(-50%, -50%) !important;
+  /* NOT !important: the 3 s show/hide animates opacity */
+  opacity: 0;
+}
+.crs-help-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+}
+.crs-help-key {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 26px !important;
+  height: 28px !important;
+  margin: 0 !important;
+  padding: 0 6px !important;
+  border: 1.5px solid rgba(255, 255, 255, .9) !important;
+  border-radius: 6px !important;
+  font: 800 15px/1 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  color: #fff !important;
+  background: transparent !important;
+}
+.crs-help-text {
+  margin: 0 8px 0 2px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  font: 600 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", sans-serif !important;
+  color: rgba(255, 255, 255, .92) !important;
+  background: transparent !important;
+  white-space: nowrap !important;
+}
+/* §10.3 item 2: the thin white streak a piercing shot leaves across each layer it went through */
 .crs-pierce {
   position: fixed !important;
   margin: 0 !important;
@@ -624,5 +880,12 @@ crs-hud:popover-open {
   box-sizing: border-box !important;
   display: block !important;
   z-index: 4 !important;
+  background: rgba(255, 255, 255, .9) !important;
+  box-shadow: 0 0 6px 1px rgba(255, 255, 255, .6) !important;
+  /* NOT !important: pierceMark() writes the box and animates the fade */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 2px;
   opacity: 1;
 }

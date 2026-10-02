@@ -179,7 +179,14 @@
     dodgeLabel: '회피!',
     unitSec: '초',
     // v1.5 (§3.3): the two extra stats in the weapon-button tooltip
-    statCrit: '치명', statSwap: '교체'
+    statCrit: '치명', statSwap: '교체',
+    // ── v1.4: the three modes, the lock-on, the repair meter, the depth tags and the control card ──
+    modeRampage: '램페이지', modeQuickdraw: '퀵드로우', modeSurvival: '서바이벌',
+    modeRampageDesc: '적 없이 부수기', modeQuickdrawDesc: '먼저 쏘아 끊기', modeSurvivalDesc: '피하며 버티기',
+    lockBlocked: '차단!', labelRatio: '파괴율', labelDominating: '제압!',
+    hintCovered: '가려짐', hintPierce: '관통 가능', hintEnemyBehind: '뒤에 적',
+    helpMove: '이동', helpDash: '대시', helpAim: '마우스로 조준',
+    setDebrisLife: '파편이 사라지는 시간'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));
@@ -210,13 +217,34 @@
     loadout: PRESETS.default.slice(), preset: 'default', loadoutTouched: false,
     // v1.2: scope (A2–A4)
     scoped: false, scope: { node: null, reticle: null, lines: [], cx: 0, cy: 0, startedAt: 0, recoilAt: 0, magnified: false, saved: null, rmb: false, shiftDown: false, shiftWant: false, shiftTimer: 0, hot: false },
-    // v1.2: combat (A7–A10)
-    combat: true, combatTouched: false, combatTimer: 0, clockTimer: 0, regenTimer: 0, toastTimer: 0, auraRaf: 0,
+    // v1.2: combat (A7–A10) — v1.4 §0.5: the `combat` BOOLEAN is now derived from `mode` (see below)
+    combatTouched: false, combatTimer: 0, clockTimer: 0, regenTimer: 0, toastTimer: 0, auraRaf: 0,
     hostiles: new Map(), orbs: [], beams: [], warns: [], paused: false, ko: false, graceUntil: 0,
     // v1.3: player marker / aim lines / near-miss / hitstop (§3)
     self: null, aimlines: [], nearMisses: 0, nearShown: [], hitstopUntil: 0, lowVig: null, hpRatio: 1,
-    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null }
+    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null },
+    // ── v1.4 §0.5: three modes (rampage · quickdraw · survival) replace the combat boolean ──
+    mode: 'rampage', lastCombatMode: 'survival',
+    // §1 drone avatar (survival only): keys held, physics, dash window, afterimages
+    avatar: null, keys: { up: false, down: false, left: false, right: false },
+    dashUntil: 0, dashReadyAt: 0, invulUntil: 0, help: null, seenHelp: false,
+    // §2 Virtua-Cop lock-ons, §3 repair beams + destruction-ratio meter
+    locks: [], lockSeq: 0, locksBroken: 0,
+    repairs: [], repaired: 0, ratio: 0, ratioTimer: 0, ratioNodes: null,
+    // §9 debris lifetime (0 = keep until the cap evicts, as before)
+    debrisLifeMs: 6000, debrisTimer: 0,
+    // §10 depth tiers, §4 boss stages, §3.2 ratio freshness
+    depthTimer: 0, bossMode: false, ratioDirty: true, ratioAt: 0, ratioBrokenN: -1
   };
+  /* §0.5: every v1.2/v1.3 call site reads `state.combat` as "are enemies live?". It stays exactly that, derived
+   * from the mode, so none of that code had to change. The setter keeps the legacy boolean writable: true picks
+   * the last combat mode the player actually used (survival unless they chose quickdraw), false is rampage. */
+  Object.defineProperty(state, 'combat', {
+    configurable: true,
+    enumerable: false,
+    get() { return state.mode !== 'rampage'; },
+    set(v) { state.mode = v ? (state.lastCombatMode || 'survival') : 'rampage'; }
+  });
   const handledEvents = new WeakSet();
   const handledKeys = new WeakSet();
 
@@ -1024,7 +1052,20 @@
     '.crs-ko .kt{font-size:30px;font-weight:800;letter-spacing:.3px}',
     '.crs-ko .ks{font-size:15px;color:rgba(255,255,255,.85)}',
     '.crs-ko .kb{display:flex;gap:10px;margin-top:8px}',
-    '.crs-ko button{flex:none;height:38px;padding:0 18px;font-size:14px;background:rgba(255,255,255,.12)}'
+    '.crs-ko button{flex:none;height:38px;padding:0 18px;font-size:14px;background:rgba(255,255,255,.12)}',
+    // ── v1.4: the three-way mode control (§0.5), the destruction-ratio meter (§3.2) and the dash dot (§1.2) ──
+    '.modes{display:flex;align-items:center;gap:3px;margin-top:6px}',
+    '.modes .mlabel{flex:none;font-size:11.5px;color:rgba(255,255,255,.7);white-space:nowrap;margin-right:2px}',
+    '.modes button{flex:1 1 0;min-width:0;height:26px;padding:0 4px;font-size:11.5px;border-radius:7px}',
+    '.modes button[aria-pressed="true"]{background:#e5484d;border-color:#e5484d}',
+    '.mdesc{margin-top:4px;font-size:11px;color:rgba(255,255,255,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.crs-progress{position:fixed;left:50%;top:52px;transform:translate(-50%,0);pointer-events:none;display:none;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff;z-index:4}',
+    '.crs-progress.on{display:block}',
+    '.crs-progress .rlabel{display:block;font-size:13px;font-weight:700;text-align:center;margin-bottom:4px;white-space:nowrap}',
+    '.crs-progress .rbar{width:220px;height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}',
+    '.crs-progress .rfill{height:100%;width:0;background:#e5484d;border-radius:5px}',
+    '.crs-player .pdash{display:none;width:10px;height:10px;margin-left:8px;border-radius:50%;vertical-align:-1px;background:rgba(255,255,255,.22);box-shadow:0 0 0 1px rgba(255,255,255,.35) inset}',
+    '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}'
   ].join('\n');
 
   function hudButton(label, title, onClick) {
@@ -1191,6 +1232,39 @@
     const endDrag = (e) => { if (!drag) return; drag = null; try { title.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ } };
     title.addEventListener('pointerup', endDrag);
     title.addEventListener('pointercancel', endDrag);
+
+    // ── v1.4 §0.5: the three-way mode control replaces the single 전투 ON/OFF button ──
+    /* The old button is kept alive but taken out of the row, so every v1.3 line that still writes to it keeps
+     * working untouched while the player sees one segmented control listing rampage · quickdraw · survival. */
+    const modes = doc.createElement('div'); modes.className = 'modes';
+    const mlabel = doc.createElement('span'); mlabel.className = 'mlabel'; mlabel.textContent = msg('labelCombat');
+    modes.append(mlabel);
+    hudEls.modeBtns = {};
+    for (const id of MODES) {
+      const mb = hudButton(modeLabel(id), modeLabel(id) + ' · ' + modeDesc(id) + ' (H)', () => setPlayMode(id));
+      mb.setAttribute('data-mode', id);
+      mb.setAttribute('aria-pressed', 'false');
+      hudEls.modeBtns[id] = mb;
+      modes.append(mb);
+    }
+    hudEls.modes = modes;
+    hudEls.modeDesc = doc.createElement('div'); hudEls.modeDesc.className = 'mdesc';
+    try { panel.insertBefore(modes, actions); panel.insertBefore(hudEls.modeDesc, actions); } catch (err) { panel.append(modes, hudEls.modeDesc); }
+    try { if (hudEls.combatBtn && hudEls.combatBtn.parentNode) hudEls.combatBtn.parentNode.removeChild(hudEls.combatBtn); } catch (err) { /* ignore */ }
+
+    // ── v1.4 §3.2: the destruction-ratio meter, top centre under the toast ──
+    const prog = mk('div', 'crs-progress');
+    const rlabel = doc.createElement('span'); rlabel.className = 'rlabel crs-num';
+    const rbar = doc.createElement('div'); rbar.className = 'rbar';
+    const rfill = doc.createElement('div'); rfill.className = 'rfill';
+    rbar.append(rfill);
+    prog.append(rlabel, rbar);
+    mountPoint.append(prog);
+    state.ratioNodes = { box: prog, label: rlabel, fill: rfill };
+
+    // ── v1.4 §1.2: one dash-cooldown dot on the health panel ──
+    hudEls.dashDot = doc.createElement('span'); hudEls.dashDot.className = 'pdash';
+    try { hudEls.pStats.append(hudEls.dashDot); } catch (err) { /* ignore */ }
     return host;
   }
   function hudFallbackCheck() {
@@ -1211,6 +1285,15 @@
         if (hudEls.pBar) { const b = hudEls.pBar.style; b.position = 'relative'; b.width = '220px'; b.height = '16px'; b.borderRadius = '8px'; b.overflow = 'hidden'; b.background = 'rgba(255,255,255,.18)'; }
         if (hudEls.pFill) { hudEls.pFill.style.height = '100%'; hudEls.pFill.style.background = '#3fb950'; }
         if (hudEls.toast) { fixed(hudEls.toast, '50%', 'auto', '14px', 'auto'); hudEls.toast.style.transform = 'translate(-50%, 0)'; hudEls.toast.style.display = 'none'; }
+        // v1.4: the ratio meter needs the same minimal fixed placement as the other shadow siblings
+        if (state.ratioNodes && state.ratioNodes.box) {
+          fixed(state.ratioNodes.box, '50%', 'auto', '52px', 'auto');
+          state.ratioNodes.box.style.transform = 'translate(-50%, 0)';
+          state.ratioNodes.box.style.display = 'none';
+          const rb = state.ratioNodes.fill.parentNode;
+          if (rb) { rb.style.width = '220px'; rb.style.height = '10px'; rb.style.background = 'rgba(255,255,255,.2)'; rb.style.borderRadius = '5px'; rb.style.overflow = 'hidden'; }
+          state.ratioNodes.fill.style.height = '100%'; state.ratioNodes.fill.style.background = '#e5484d';
+        }
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
     } catch (e) { /* ignore */ }
@@ -1247,6 +1330,18 @@
       hudEls.combatBtn.textContent = '⚔️ ' + msg('labelCombat') + ' ' + (state.combat ? 'ON' : 'OFF');
       hudEls.combatBtn.title = msg('labelCombat') + ' ' + (state.combat ? 'ON' : 'OFF') + ' (H)';
       hudEls.combatBtn.setAttribute('aria-pressed', state.combat ? 'true' : 'false');
+      updateModeHud();   // ── v1.4 §0.5 ──
+    } catch (e) { /* ignore */ }
+  }
+  // ── v1.4 §0.5: which of the three is pressed, and the one-line description under them ──
+  function updateModeHud() {
+    if (!hudEls.modeBtns) return;
+    try {
+      for (const id of MODES) {
+        const b = hudEls.modeBtns[id];
+        if (b) b.setAttribute('aria-pressed', state.mode === id ? 'true' : 'false');
+      }
+      if (hudEls.modeDesc) hudEls.modeDesc.textContent = modeDesc(state.mode);
     } catch (e) { /* ignore */ }
   }
   /* Hot paths (hold ticks, staggered AoE hits) refresh the counters at most once per frame (A5 item 4). */
@@ -1690,8 +1785,21 @@
     }
     return null;
   }
-  function pickTarget(x, y, cache) {
+  /* opts.noLock (v1.4): skip the lock-frame aim assist below. isCovered() asks that, because it needs the raw
+   * answer "what would a click here really hit?" — with the assist on, a locked enemy would always look clear. */
+  function pickTarget(x, y, cache, opts) {
     const env = { vw: viewW(), vh: viewH(), op: cache || new Map() };
+    /* v1.4 §2.2 aim assist: a click inside a closing lock frame is a click on THAT enemy, not on a child of it.
+     * Only for a frame that is actually drawn ON the enemy (quickdraw, lk.onEnemy). In survival the frame rides
+     * the DRONE and then freezes wherever the drone was, so the same rule would teleport damage to an enemy the
+     * player never aimed at — §2.2's wording ("자식 요소가 아니라 그 적대 요소") presumes the frame sits on the
+     * enemy, and §2.3 gives survival shoot-or-dodge instead of this assist. */
+    if (!(opts && opts.noLock) && state.locks.length) {
+      const lk = lockAt(x, y);
+      if (lk && lk.onEnemy && lk.rec && lk.rec.el && lk.rec.el.isConnected) {
+        try { if (!lk.rec.el.hasAttribute('data-crs-broken')) return lk.rec.el; } catch (e) { /* ignore */ }
+      }
+    }
     let list;
     try { list = doc.elementsFromPoint(x, y); } catch (e) { return null; }
     let el = pickFromList(list, null, x, y, env, 0);
@@ -1753,7 +1861,10 @@
   function hpOfPublic(el) {
     if (!el || el.nodeType !== 1) return null;
     const rec = hpOf(el);
-    return { hp: Math.max(0, rec.hp), max: rec.max };
+    // v1.4 §10.5: depth comes from the live hostile record when there is one, else it is measured on the spot
+    const h = state.hostiles.get(el);
+    const depth = h ? h.depth : depthOf(el);
+    return { hp: Math.max(0, rec.hp), max: rec.max, depth, tier: h ? h.dtier : depthTier(depth) };
   }
   function fillColor(ratio) { return ratio > 0.6 ? '#3fb950' : (ratio > 0.3 ? '#e3b341' : '#e5484d'); }
   function showTarget(el) {
@@ -1766,7 +1877,9 @@
     targetBox.style.width = px(r.width); targetBox.style.height = px(r.height);
     const rec = hpOf(el);
     const hp = Math.max(0, rec.hp), ratio = rec.max > 0 ? clamp(hp / rec.max, 0, 1) : 0;
-    targetLabel.textContent = tagOf(el).toUpperCase() + ' ' + hp + '/' + rec.max;
+    // v1.4 §10.4: when the thing under the cursor is COVER, say how much is hiding behind it
+    const behind = modeHasEnemies() ? hostilesBehind(el) : 0;
+    targetLabel.textContent = tagOf(el).toUpperCase() + ' ' + hp + '/' + rec.max + (behind ? ' · ' + msg('hintEnemyBehind') + ' ' + behind : '');
     if (targetFill) { targetFill.style.width = (100 * ratio).toFixed(1) + '%'; targetFill.style.background = fillColor(ratio); }
   }
   /* Crit landed on the hovered element: the fill flashes white for 80 ms (A4). */
@@ -1782,7 +1895,8 @@
   function scheduleHover() {
     if (state.moveRaf) return;
     // v1.3 §3.1: the player ring is repositioned on the frame the pointer move already schedules
-    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); if (state.self) selfStep(); });
+    // v1.4: and the drone's nose, which tracks the crosshair even while the drone itself is parked
+    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); if (state.self) selfStep(); if (state.avatar) placeAvatar(); });
   }
   function pulseTarget() {
     if (!targetBox || targetBox.style.display === 'none') return;
@@ -1791,6 +1905,26 @@
       trackAnim(targetLabel.animate([{ transform: 'scale(1.4)' }, { transform: 'scale(1)' }], { duration: 150, easing: 'ease-out' }));
     } catch (e) { /* ignore */ }
   }
+
+  /* ── v1.4: what would a click at this point actually hit? ──
+   * pickTarget() is where the hostile-unit rule (§5), the §2.2 lock aim assist and the §10 depth/occlusion
+   * rules all land, so "the shot went nowhere" has several possible causes that look identical from outside.
+   * This reports the resolved element without firing anything, so a failing assertion can say which rule ran. */
+  debug.pickAt = (x, y) => {
+    const el = pickTarget(+x, +y);
+    if (!el) return null;
+    const r = rectOf(el) || { left: 0, top: 0, width: 0, height: 0 };
+    let cls = '';
+    try { cls = typeof el.className === 'string' ? el.className : ''; } catch (e) { cls = ''; }
+    return {
+      tag: tagOf(el).toUpperCase(),
+      id: el.id || null,
+      cls: cls.slice(0, 60),
+      hostile: state.hostiles.has(el),
+      broken: el.hasAttribute('data-crs-broken'),
+      rect: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
+    };
+  };
 
 // ── 55-geometry.js ──
   /* ===================================================================== */
@@ -2054,6 +2188,7 @@
     if (opts && opts.word) { const k = 1 + 0.6 * (1 - Math.min(dist, 200) / 200); vx *= k; vy *= k; }
     return { vx, vy, vr, dist };
   }
+  let pieceSeq = 0;   // v1.4 §9.3: per-session piece ids for debug.pieceBoxes() below
   function debrisCount() {
     let n = 0;
     for (const p of state.pieces) if (!p.chip) n++;
@@ -2063,6 +2198,7 @@
     const t = now();
     const dpr = Math.min(win.devicePixelRatio || 1, 2);
     p.node = node; p.x = 0; p.y = 0; p.rot = 0; p.resting = false; p.grounded = false;
+    p.pid = ++pieceSeq;   // v1.4 §9.3: stable identity, so a test can follow ONE piece across an eviction
     p.bornAt = t; if (p.launchAt == null) p.launchAt = t;
     p.tilt = rand(-12, 12);
     p.gpu = p.w * p.h * dpr * dpr;
@@ -2081,7 +2217,10 @@
     try {
       trackAnim(node.animate([{ filter: (shadow ? shadow + ' ' : '') + 'brightness(1.7)' }, { filter: (shadow ? shadow + ' ' : '') + 'brightness(1)' }], { duration: 90, easing: 'ease-out' }));
     } catch (e) { /* ignore */ }
+    // v1.4 §9.1: a piece that is still flying has no lifetime; the hard cut-off only stops one escaping forever
+    p.expireAt = 0; p.restedFirstAt = 0; p.jitter = null; p.hardExpireAt = t + DEBRIS_HARD_MS;
     state.pieces.push(p); state.gpuSum += p.gpu;
+    scheduleDebrisSweep();
     return p;
   }
   function applyTransform(p) {
@@ -2092,14 +2231,81 @@
     p.rot = Math.round(p.rot / 180) * 180 + p.tilt;
     applyTransform(p);
     p.node.style.willChange = 'auto'; p.node.style.contain = 'strict';
+    /* v1.4 §9.1: the clock starts the moment the piece FIRST settles, jittered so a whole wall does not blink
+      * out at once. First, not latest: §9.3 wakes whatever was stacked on a piece that just despawned, and
+      * restarting the clock on every re-settle would make a tall pile take a multiple of the lifetime to clear. */
+    const life = debrisLife();
+    if (!p.restedFirstAt) p.restedFirstAt = now();
+    if (p.jitter == null) p.jitter = rand(-DEBRIS_JITTER, DEBRIS_JITTER);
+    p.expireAt = life > 0 ? p.restedFirstAt + life + p.jitter : 0;
+    scheduleDebrisSweep();
   }
   function wakePiece(p) {
     if (!p.resting) return;
     p.resting = false; p.grounded = false; p.vy = 0;
+    p.expireAt = 0;   // v1.4 §9.1: knocked loose again, so it is flying again and its lifetime is off
     p.node.style.willChange = p.big ? 'auto' : 'transform'; p.node.style.contain = 'layout paint';
   }
-  function evictPieces(victims, silent) {
+  /* ── v1.4 §9.3: the support relation, read in the product's own geometry ──
+   * restPiece() snaps a chip to a random ±12° tilt, so its DOM bounding box is the axis-aligned hull of a
+   * rotated rectangle — several pixels taller than the chip itself. Asking "is B resting on A?" from
+   * getBoundingClientRect() therefore misses real pairs at random. evictPieces() wakes a piece from
+   * p.ox/p.x/p.bb, and this hook hands a test exactly those numbers plus a stable per-piece id, so the
+   * §9.4.4 check can follow one identified piece across the eviction of the piece under it. */
+  debug.pieceBoxes = () => state.pieces.map((p) => ({
+    pid: p.pid,
+    resting: !!p.resting,
+    l: p.ox + p.x + p.bb.minX,
+    r: p.ox + p.x + p.bb.maxX,
+    top: p.oy + p.y + p.bb.minY,
+    bottom: p.oy + p.y + p.bb.maxY,
+  }));
+  /* Retire ONE identified piece on the next sweep, as if its §9.1 lifetime had just run out. §9.4.1 already
+   * covers the clock; this is how §9.3's "wake whatever was stacked on it" is checked without the pieces above
+   * expiring in the very same batch. */
+  debug.expirePiece = (pid) => {
+    for (const p of state.pieces) {
+      if (p.pid !== pid) continue;
+      p.expireAt = now() - 1;
+      p.hardExpireAt = p.expireAt;
+      scheduleDebrisSweep();
+      return pid;
+    }
+    return null;
+  };
+  /* ── v1.4 §9: debris stops piling up ──
+   * The floor used to fill with debris that only the 160-piece cap or a manual restore ever cleared. Now a piece
+   * that has come to rest fades out after `debrisLifeMs` (0 = the old behaviour), while the original stays hidden
+   * — the page is NOT put back, only the litter is taken away. Under memory pressure a lifetime of "forever" is
+   * still capped, because that is exactly when the floor is fullest. */
+  function debrisLife() {
+    const pressure = state.pieces.length > CAP * 0.75 || state.gpuSum > GPU_BUDGET * 0.75;
+    const want = state.debrisLifeMs;
+    if (pressure) return want > 0 ? Math.min(want, DEBRIS_PERF_MS) : DEBRIS_PERF_MS;
+    return want;
+  }
+  function scheduleDebrisSweep() {
+    if (state.debrisTimer || !state.active) return;
+    state.debrisTimer = later(debrisSweep, DEBRIS_SWEEP_MS);
+  }
+  function debrisSweep() {
+    state.debrisTimer = 0;
+    if (!state.active || !state.pieces.length) return;
+    const t = now();
+    const victims = [];
+    for (const p of state.pieces) {
+      if (victims.length >= DEBRIS_BATCH) break;   // §9.1: at most twelve at a time, so no frame carries them all
+      if ((p.expireAt && t >= p.expireAt) || (p.hardExpireAt && t >= p.hardExpireAt)) victims.push(p);
+    }
+    if (victims.length) evictPieces(victims, false, { dur: DEBRIS_FADE_MS, shrink: true });
+    scheduleDebrisSweep();
+  }
+  /* opts (v1.4 §9.1): { dur, shrink } — a lifetime expiry fades over 500 ms AND shrinks to 0.88. The scale is a
+   * separate composite:'add' animation so it stacks onto the inline translate/rotate instead of replacing it. */
+  function evictPieces(victims, silent, opts) {
     if (!victims.length) return;
+    const dur = (opts && opts.dur) || 350;
+    const shrink = !!(opts && opts.shrink);
     const evictedBoxes = [];
     for (const p of victims) {
       const i = state.pieces.indexOf(p); if (i >= 0) state.pieces.splice(i, 1);
@@ -2111,10 +2317,11 @@
       let done = false;
       const kill = () => { if (done) return; done = true; try { node.remove(); } catch (e) { /* ignore */ } };
       try {
-        const a = node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 350, easing: 'ease-in', fill: 'forwards' });
+        const a = node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: dur, easing: 'ease-in', fill: 'forwards' });
         trackAnim(a); a.addEventListener('finish', kill); a.addEventListener('cancel', kill);
+        if (shrink && !reducedMotion()) trackAnim(node.animate([{ transform: 'scale(1)' }, { transform: 'scale(.88)' }], { duration: dur, easing: 'ease-in', fill: 'forwards', composite: 'add' }));
       } catch (e) { /* ignore */ }
-      later(kill, 500);
+      later(kill, dur + 150);
     }
     // wake resting pieces that were supported by an evicted piece (A1)
     for (const q of state.pieces) {
@@ -2961,9 +3168,12 @@
     }
     return out;
   }
-  /* A thin white line across each pierced element for 0.2 s — without it the extra damage is invisible. */
+  /* A thin white line across each pierced element for 0.2 s — without it the extra damage is invisible.
+   * MERGED (v1.4 + v1.5): src/87-depth.js used to declare a second pierceMark() of its own. There is one
+   * now, here, and it keeps the v1.4 copy's prefers-reduced-motion guard — a decorative fade, handled the
+   * same way as every other one in this build (beamFx, toastFx, lockPop …). */
   function pierceMark(el, y) {
-    if (!root) return;
+    if (!root || reducedMotion()) return;
     const r = rectOf(el);
     if (!r || r.width < 2) return;
     const n = mk('div', 'crs-pierce');
@@ -2975,21 +3185,39 @@
     try { const a = trackAnim(n.animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 200, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
     later(kill, 600);
   }
-  /* Called by a hitscan fire() right after its own applyHit. `front` may be null (the shot missed everything
-   * pickable) — the layers behind are still eligible, which is what makes pierce feel like a through-shot. */
+  /* ── the ONE pierce entry point (SPEC-combat-v2 §10.3-2 + SPEC-weapons §3, merged) ─────────────────
+   * src/87-depth.js used to declare a SECOND applyPierce() with a different signature
+   * (x, y, front, layerCount, baseDamage). Every src/ fragment shares one closure and 87 is concatenated
+   * after 73, so that one won and the v1.5 call sites were feeding it `'gun'` as the layer count and
+   * `'sniper'` as the base damage — Math.round('sniper' * 0.6) is NaN, so every layer behind a pistol or
+   * sniper shot had its hp silently set to NaN instead of taking 60 %. One declaration each now; the
+   * depth module keeps `pierceOf()` (the stat reader) and `schedulePierce()` (the single caller).
+   *   layer count  pierceOf(id) reads WEAPONS[id].pierce. 붕괴's PIERCE_ALL (999) is a sentinel, not a
+   *                reason to walk a whole page, so it is clamped to PIERCE_MAX_LAYERS.
+   *   targets      pierceTargets() walks the SAME elementsFromPoint stack the bullet went through, under
+   *                pickTarget()'s own walk-up rules, skipping anything already on the front target's chain.
+   *   damage       the firing weapon's own roll — its critChance and its distance falloff — attenuated
+   *                ×0.6 compounding per layer (60 %, 36 %, …).
+   * `front` may be null (the shot missed everything pickable); the layers behind are still eligible, which
+   * is what makes pierce feel like a through-shot. Returns the number of layers actually hit. */
+  const PIERCE_MAX_LAYERS = 8;
   function applyPierce(x, y, front, kind, id) {
-    const W = WEAPONS[id];
-    if (!W || !(W.pierce > 0)) return 0;
-    const n = Math.min(W.pierce, 8);   // `전부` (collapse) is a sentinel, not a reason to walk a whole page
+    if (!state.active) return 0;
+    const wid = id || state.weapon;
+    const W = WEAPONS[wid];
+    if (!W || !(W.damage > 0) || !isFinite(W.damage)) return 0;   // 붕괴's Infinity never reaches here (doCollapse breaks outright)
+    const n = Math.min(pierceOf(wid), PIERCE_MAX_LAYERS);
+    if (!(n > 0)) return 0;
     const targets = pierceTargets(x, y, front, n);
-    const fall = falloffMul(id, x, y);
+    const fall = falloffMul(wid, x, y);
+    const mode = kind || W.kind;
     let k = 0;
     for (const el of targets) {
       k++;
-      const crit = rollCrit(id);
+      const crit = rollCrit(wid);
       const dmg = rollDamage(W.damage, crit, Math.pow(0.6, k) * fall);
       pierceMark(el, y);
-      applyHit(el, dmg, kind, x, y, { crit, pierce: k });
+      applyHit(el, dmg, mode, x, y, { crit, pierce: k });
     }
     return k;
   }
@@ -3025,7 +3253,8 @@
     drawCrack(x, y, 'gun', { ink: 0.25 });
     spawnChips(x, y, randInt(3, 5));
     if (el) applyHit(el, dmg, 'gun', x, y, { crit });
-    applyPierce(x, y, el, 'gun', 'pistol');
+    // pierce: nothing to do here — interceptOrb() above already handed the shot to schedulePierce()
+    // (src/87-depth.js), the single entry point into applyPierce(). The pistol's pierce is 0 anyway.
     return el;
   }
   function fireSmg(x, y, c) {
@@ -3739,7 +3968,10 @@
     drawCrack(ix, iy, 'gun', { rays: [6, 9], len: [30, 70], ink: 0.5 });
     spawnChips(ix, iy, randInt(4, 7));
     if (el) applyHit(el, dmg, 'gun', ix, iy, { crit, headshot: true });
-    applyPierce(ix, iy, el, 'gun', 'sniper');   // v1.5 §3 / combat-v2 §10.3-2: two more layers at ×0.6, ×0.36
+    /* v1.5 §3 / combat-v2 §10.3-2: two more layers at ×0.6, ×0.36 — applied by schedulePierce()
+     * (src/87-depth.js), which interceptOrb(ix, iy) above already armed with this exact impact point and
+     * which defers one task so this shot's own applyHit has resolved first. Calling applyPierce() again
+     * here would pierce the same stack twice. */
     return el;
   }
 
@@ -3781,6 +4013,436 @@
   function stepSlot(dir) {
     const n = state.loadout.length, i = state.loadout.indexOf(state.weapon);
     return setWeapon(state.loadout[((((i < 0 ? 0 : i) + dir) % n) + n) % n]);
+  }
+
+// ── 86-modes.js ──
+// ── v1.4 §0.5: the three modes (rampage · quickdraw · survival) and everything that switches between them ──
+  /* v1.3 shipped ONE boolean, `combat`. v1.4 splits it on the axis the player actually feels — how the mouse is
+   * shared between aiming and dodging:
+   *
+   *   rampage    mouse only                      no enemies at all; v1.2's pure demolition tool
+   *   quickdraw  one mouse (the cursor IS you)   enemies only ever lock on; you shoot the lock before it closes
+   *   survival   mouse aims, WASD flies a drone  orbs, slams and locks — and now dodging is a real input
+   *
+   * `state.combat` survives as a derived getter (20-state.js), so the whole v1.2/v1.3 combat body still reads
+   * "are enemies live?" from one place and needed no edit. The per-mode differences are asked here, by name. */
+
+  debug.difficulty = 'normal';   // 'easy' ×1.5 | 'normal' ×1 | 'hard' ×0.7 repair interval (§3.1)
+  const MODES = ['rampage', 'quickdraw', 'survival'];
+  const MODE_NAME = { rampage: 'modeRampage', quickdraw: 'modeQuickdraw', survival: 'modeSurvival' };
+  const MODE_DESC = { rampage: 'modeRampageDesc', quickdraw: 'modeQuickdrawDesc', survival: 'modeSurvivalDesc' };
+
+  /* §1.2 drone avatar */
+  const AV_R = 17;                   // 34 px body
+  const AV_RING_R = 23;              // 46 px health ring (the v1.3 ring, re-anchored)
+  const AV_ACCEL = 2800;             // px/s²
+  const AV_MAX_SPEED = 420;          // px/s
+  const AV_FRICTION = 0.86;          // per frame, applied at 60 fps and time-corrected
+  const AV_MARGIN = 20;              // viewport inset the drone is clamped to
+  const AV_HIT_R = 18;               // enemy hit radius against the drone
+  const DASH_PX = 180, DASH_MS = 160, DASH_CD = 1500, DASH_IFRAME = 220, DASH_GHOSTS = 3;
+  /* §2 Virtua-Cop lock-on */
+  const LOCK_MS = 3000;              // full lock; §10.2 shortens a `front` enemy to 2400
+  const LOCK_MS_FRONT = 2400;
+  const LOCK_P1 = 1 / 3;             // warn → close  (1.0 s of 3.0 s)
+  const LOCK_P2 = 11 / 15;           // close → imminent (2.2 s of 3.0 s)
+  const LOCK_FOLLOW = 1 / 3;         // survival: the frame stops following the drone at 1.0 s
+  const LOCK_GAP0 = 70, LOCK_GAP1 = 24, LOCK_GAP2 = 4;   // bracket size / thickness (20 / 3 px) are in content.css
+  const LOCK_MAX = 3;                // at most three concurrent locks (§2.2)
+  const LOCK_RECOVER_MS = 1500;      // a broken lock cannot re-arm for this long
+  const LOCK_HIT_R = 56;             // survival: how far from the frozen centre still counts as a hit
+  /* §3 repairing enemies + the destruction-ratio meter */
+  const REPAIR_MS = { shooter: 6000, charger: 5000, laser: 4000, boss: 2500 };
+  const REPAIR_BEAM_MS = 1500, REPAIR_RANGE = 600, REPAIR_PIECE_MS = 600;
+  const REPAIR_DELAY_MS = 400, REPAIR_DELAY_MAX = 2, REPAIR_FADE_IN_MS = 400;
+  const RATIO_REFRESH_MS = 2000, RATIO_DOMINATE = 0.8, RATIO_DROP_MS = 400;
+  const DIFF_MUL = { easy: 1.5, normal: 1, hard: 0.7 };
+  /* §9 debris lifetime */
+  const DEBRIS_JITTER = 400, DEBRIS_FADE_MS = 500, DEBRIS_HARD_MS = 20000;
+  const DEBRIS_BATCH = 12, DEBRIS_SWEEP_MS = 250, DEBRIS_PERF_MS = 3000;
+  /* §10 depth */
+  const DEPTH_MIN_AREA = 2000, DEPTH_REFRESH_MS = 2000;
+  const DEPTH_HP = { front: 0.8, mid: 1, back: 1.2 };
+  const DEPTH_ATTACK = { front: 0.7, mid: 1, back: 0 };     // 0 = this tier never attacks
+  const DEPTH_REPAIR = { front: 0, mid: 1, back: 0.6 };     // 0 = this tier never repairs
+
+  /* ---- what exists in which mode (§0.5 / §6) ---- */
+  function modeHasEnemies() { return state.mode !== 'rampage'; }
+  function modeHasAvatar() { return state.mode === 'survival'; }
+  function modeHasHealth() { return state.mode === 'survival'; }     // health HUD, KO, the drone health ring
+  function modeHasProjectiles() { return state.mode === 'survival'; }   // §4: orbs and slams are survival-only
+  function modeHasRepair() { return state.mode !== 'rampage'; }
+  function modeHasRatio() { return state.mode !== 'rampage'; }
+  function modeLockOnEnemy() { return state.mode === 'quickdraw'; }   // the frame sits on the enemy, not the drone
+  /* §3.1 scales the repair interval by difficulty. There is no difficulty setting in this build yet, so the
+   * knob lives on `debug` where it is reachable and documented rather than being silently dead. */
+  function difficultyMul() { return DIFF_MUL[debug.difficulty] || 1; }
+
+  /* ── v1.4 cues ──
+   * The lock beeps (660 / 880 / 1100 Hz), the block chime, the failed shot, the repair hum and the dash whoosh.
+   * Built straight on the existing tone / noise primitives rather than extending sfx()'s chain, so the v1.4
+   * sounds live with the v1.4 code and 40-audio.js keeps exactly the voices it shipped with. */
+  function csfx(kind) {
+    if (state.muted || !audio.ctx) return;
+    const c = audio.ctx;
+    try {
+      if (c.state === 'suspended') safe(() => c.resume());
+      const t = c.currentTime + 0.001;
+      if (kind === 'lockWarn') tone(t, 'square', 660, 660, 0.09, 0.14, 0.1);
+      else if (kind === 'lockClose') tone(t, 'square', 880, 880, 0.09, 0.16, 0.1);
+      else if (kind === 'lockImminent') tone(t, 'square', 1100, 1100, 0.1, 0.18, 0.12);
+      else if (kind === 'lockBreak') { tone(t, 'triangle', 700, 1500, 0.12, 0.24, 0.14); tone(t + 0.06, 'triangle', 1100, 2000, 0.1, 0.18, 0.12); }
+      else if (kind === 'lockFire') { tone(t, 'sawtooth', 300, 90, 0.22, 0.45, 0.24); noiseBurst(t, 0.1, { type: 'lowpass', freq: 500, Q: 0.9 }, 0.35, 0.1); }
+      else if (kind === 'repair') tone(t, 'sine', 420, 620, 0.25, 0.12, 0.28);
+      else if (kind === 'repairDone') { tone(t, 'sine', 620, 320, 0.22, 0.2, 0.26); tone(t + 0.05, 'sine', 420, 220, 0.2, 0.14, 0.22); }
+      else if (kind === 'dash') noiseSweep(t, 0.16, 'bandpass', 600, 3200, 0.28);
+    } catch (e) { /* ignore */ }
+  }
+  function modeLabel(id) { return msg(MODE_NAME[id] || 'modeRampage'); }
+  function modeDesc(id) { return msg(MODE_DESC[id] || 'modeRampageDesc'); }
+
+  /* The single entry point. Everything that only exists in some modes is torn down / stood up from here, so a
+   * mode switch can never leave another mode's machinery running (a lock frame in rampage, a drone in
+   * quickdraw, a health bar where there is no health).
+   * Named setPlayMode, not setMode: `setMode` is taken by the v1 WEAPON alias in 99-api.js, and two function
+   * declarations of one name in this IIFE would silently leave only the last one. */
+  function setPlayMode(id, opts) {
+    if (!MODES.includes(id)) return state.mode;
+    const silent = !!(opts && opts.silent);
+    const prev = state.mode, changed = id !== prev;
+    state.mode = id;
+    if (id !== 'rampage') state.lastCombatMode = id;
+    if (!silent) state.combatTouched = true;
+    if (changed) {
+      clearLocks();
+      clearRepairs();
+      if (id === 'rampage' || prev === 'rampage') clearCombatNodes();
+    }
+    if (!modeHasAvatar()) clearAvatar(); else ensureAvatar();
+    if (!modeHasHealth()) hideKo();
+    if (!modeHasRatio()) clearRatioMeter(); else syncRatioMeter(true);
+    if (id === 'rampage') {
+      untrack(state.combatTimer); state.combatTimer = 0;
+      untrack(state.clockTimer); state.clockTimer = 0;
+      untrack(state.regenTimer); state.regenTimer = 0;
+      untrack(state.depthTimer); state.depthTimer = 0;
+      if (silent) hideToast(false); else if (changed) toast(msg('toastCombatOff'));
+    } else {
+      if (changed || !state.combatTimer) armCombat();
+      if (!silent && changed) toast(modeLabel(id) + ' · ' + modeDesc(id));
+      if (state.player.hp < state.player.max) startRegen();
+      if (modeHasAvatar() && !silent) maybeShowCombatHelp();
+    }
+    if (!silent) persistMode();
+    updateHud(); updateModeHud(); updatePlayerHud(); updateRatioHud();
+    return state.mode;
+  }
+  function cycleMode() { return setPlayMode(MODES[(MODES.indexOf(state.mode) + 1) % MODES.length]); }
+  /* Legacy boolean (api.setCombat / the v1.3 e2e): true means the mode the player last fought in — survival
+   * unless they explicitly chose quickdraw — and false is rampage. The STORED crsCombat migrates differently
+   * (§0.5: true → quickdraw), because a stored pref comes from someone who only ever used the cursor. */
+  function setCombat(v, opts) {
+    setPlayMode(v ? (state.lastCombatMode || 'survival') : 'rampage', opts);
+    return state.combat;
+  }
+  function persistMode() {
+    safe(() => chrome.storage.sync.set({ crsMode: state.mode, crsCombat: state.mode !== 'rampage' }));
+  }
+  /* loadPrefs (99-api.js) hands us whatever was stored; crsMode wins, a legacy crsCombat boolean migrates. */
+  function modeFromPrefs(res) {
+    if (!res) return null;
+    if (MODES.includes(res.crsMode)) return res.crsMode;
+    if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'quickdraw' : 'rampage';
+    return null;
+  }
+
+  /* ---- §1.3 the one-time control overlay (survival only, once per session) ---- */
+  function keycap(text) {
+    const n = mk('span', 'crs-help-key');
+    n.textContent = text;
+    return n;
+  }
+  function maybeShowCombatHelp() {
+    if (state.seenHelp || !root || state.help) return;
+    state.seenHelp = true;
+    safe(() => chrome.storage.local.set({ crsSeenCombatHelp: true }));
+    const box = mk('div', 'crs-help');
+    const row = mk('div', 'crs-help-row');
+    for (const k of ['W', 'A', 'S', 'D']) row.append(keycap(k));
+    const t1 = mk('span', 'crs-help-text'); t1.textContent = msg('helpMove');
+    const sp = keycap('Space');
+    const t2 = mk('span', 'crs-help-text'); t2.textContent = msg('helpDash');
+    const t3 = mk('span', 'crs-help-text'); t3.textContent = msg('helpAim');
+    row.append(t1, sp, t2, t3);
+    box.append(row);
+    root.append(box);
+    state.help = box;
+    const kill = () => { if (state.help === box) state.help = null; try { cancelAnimsOf(box); box.remove(); } catch (e) { /* ignore */ } };
+    try {
+      const a = trackAnim(box.animate([{ opacity: 0 }, { opacity: 1, offset: 0.08 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: 3000, easing: 'linear', fill: 'forwards' }));
+      a.addEventListener('finish', kill);
+    } catch (e) { /* ignore */ }
+    later(kill, 3200);
+  }
+  function clearHelp() {
+    const n = state.help;
+    state.help = null;
+    if (n) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+  }
+
+// ── 87-depth.js ──
+// ── v1.4 §10: reading the page's own depth (stacking order) and turning it into combat roles ──
+  /* A web page already HAS depth: z-index, stacking contexts, overlaps, sticky headers, modals. We never have to
+   * invent it — `document.elementsFromPoint()` returns the whole stack at a point FRONT FIRST, so our element's
+   * index in that list IS its depth. Measured only for hostile elements (five samples, median), so the cost is
+   * five hit tests per hostile every two seconds.
+   *
+   * The roles that fall out of it (§10.2) are the point: the enemy that UNDOES your work sits at the back where
+   * it is hard to reach, and the enemy that hurts you sits at the front where it dies fast. Clearing the front
+   * is how you reach the back — no extra code, that is just what pickTarget already does. */
+
+  function depthSamples(r) {
+    return [
+      { x: r.left + r.width * 0.5, y: r.top + r.height * 0.5 },
+      { x: r.left + r.width * 0.25, y: r.top + r.height * 0.25 },
+      { x: r.left + r.width * 0.75, y: r.top + r.height * 0.25 },
+      { x: r.left + r.width * 0.25, y: r.top + r.height * 0.75 },
+      { x: r.left + r.width * 0.75, y: r.top + r.height * 0.75 }
+    ];
+  }
+  /* One sample: how many qualifying elements are painted in front of `el` at this point, or null when the sample
+   * does not actually land on `el` (clipped away, scrolled out, covered by something that swallowed the hit). */
+  function depthAt(el, x, y) {
+    const vw = viewW(), vh = viewH();
+    if (x < 0 || y < 0 || x > vw || y > vh) return null;
+    let list;
+    try { list = doc.elementsFromPoint(x, y); } catch (e) { return null; }
+    if (!list || !list.length) return null;
+    let n = 0;
+    for (const c of list) {
+      if (c === el) return n;
+      if (!c || c.nodeType !== 1) continue;
+      if (isOurs(c)) continue;                                    // our own glass-root nodes are not page depth
+      try { if (c.contains(el) || el.contains(c)) continue; } catch (e) { continue; }   // ancestors and descendants
+      const cr = rectOf(c);
+      if (!cr || cr.width * cr.height < DEPTH_MIN_AREA) continue;   // decorative slivers are not cover
+      n++;
+    }
+    return null;   // `el` was never reached: this sample missed it
+  }
+  function depthOf(el) {
+    if (!el || el.nodeType !== 1 || !el.isConnected) return 0;
+    const s = gcs(el);
+    // a fixed / sticky element really is drawn on top of the flow it overlaps, whatever the hit test says
+    if (s && (s.position === 'fixed' || s.position === 'sticky')) return 0;
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return 0;
+    const vals = [];
+    for (const p of depthSamples(r)) { const d = depthAt(el, p.x, p.y); if (d != null) vals.push(d); }
+    if (!vals.length) return depthFromStacking(el, 0);   // scrolled out of view: elementsFromPoint cannot help
+    vals.sort((a, b) => a - b);
+    return vals[Math.floor(vals.length / 2)];   // median, so one odd overlay cannot move a whole enemy to the back
+  }
+  /* Fallback when the element is not in the viewport (an API call about something scrolled away). Same question,
+   * asked of the stacking rules instead of the hit test: at each level, how many overlapping siblings paint in
+   * front of us — higher z-index, or equal z-index and later in the document — plus whatever is in front of our
+   * parent. A child with no siblings of its own therefore inherits its parent's depth, which is right: it is
+   * buried exactly as deep as the box it lives in. */
+  function zOf(el) { const s = gcs(el); const z = s ? parseInt(s.zIndex, 10) : NaN; return isFinite(z) ? z : 0; }
+  function frontSiblings(el) {
+    const r = rectOf(el), parent = parentOf(el);
+    if (!r || !parent) return 0;
+    let kids = [];
+    try { kids = Array.from(parent.children); } catch (e) { return 0; }
+    const z = zOf(el);
+    let n = 0;
+    for (const c of kids) {
+      if (c === el || !c || c.nodeType !== 1 || isOurs(c)) continue;
+      try { if (c.contains(el) || el.contains(c)) continue; } catch (e) { continue; }
+      const cr = rectOf(c);
+      if (!cr || cr.width * cr.height < DEPTH_MIN_AREA) continue;
+      if (cr.right <= r.left || cr.left >= r.right || cr.bottom <= r.top || cr.top >= r.bottom) continue;
+      const cz = zOf(c);
+      let later = false;
+      try { later = !!(c.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING); } catch (e) { later = false; }
+      if (cz > z || (cz === z && later)) n++;
+    }
+    return n;
+  }
+  function depthFromStacking(el, guard) {
+    if (!el || el === doc.body || el === docEl || (guard || 0) > 8) return 0;
+    const p = parentOf(el);
+    return frontSiblings(el) + ((p && p !== doc.body && p !== docEl) ? depthFromStacking(p, (guard || 0) + 1) : 0);
+  }
+  function depthTier(d) { return d <= 0 ? 'front' : (d <= 2 ? 'mid' : 'back'); }
+  function depthMark(tier) { return tier === 'front' ? '▲' : (tier === 'back' ? '▲▲▲' : '▲▲'); }
+
+  /* The aura label is composed from parts, never appended to: the 🎯 of an aim line (§3.2) and the ▲ depth mark
+   * both live in it and each is rewritten independently. */
+  function setHostileLabel(rec) {
+    if (!rec || !rec.label) return;
+    try {
+      rec.label.textContent = (rec.aim ? '🎯 ' : '') + '👿 ' + tagOf(rec.el).toUpperCase() + ' ' + depthMark(rec.dtier || 'mid');
+    } catch (e) { /* ignore */ }
+  }
+  /* back enemies read as "further away": blurred, desaturated, dashed. While one is actually repairing (§10.4)
+   * the blur comes OFF and the aura brightens — the enemy undoing your work has to be visible to be worth the trip. */
+  function applyDepthLook(rec) {
+    if (!rec || !rec.aura) return;
+    try {
+      rec.aura.classList.toggle('crs-depth-front', rec.dtier === 'front');
+      rec.aura.classList.toggle('crs-depth-back', rec.dtier === 'back');
+    } catch (e) { /* ignore */ }
+    setHostileLabel(rec);
+  }
+  function measureDepth(rec) {
+    if (!rec || !rec.el) return;
+    rec.depth = depthOf(rec.el);
+    const t = depthTier(rec.depth);
+    if (t !== rec.dtier) { rec.dtier = t; applyDepthLook(rec); }
+    rec.depthAt = now();
+  }
+  /* §10.1 item 6: once on selection, then every two seconds for every live hostile. One later() chain, never a
+   * setInterval, so clearTimers() takes it with everything else. */
+  function depthTick() {
+    state.depthTimer = 0;
+    if (!state.active || !modeHasEnemies() || state.paused) return;
+    for (const rec of state.hostiles.values()) measureDepth(rec);
+    state.depthTimer = later(depthTick, DEPTH_REFRESH_MS);
+  }
+  function armDepthTick() {
+    if (state.depthTimer || !state.active || !modeHasEnemies()) return;
+    state.depthTimer = later(depthTick, DEPTH_REFRESH_MS);
+  }
+  function hostilesByTier() {
+    const out = { front: 0, mid: 0, back: 0 };
+    for (const rec of state.hostiles.values()) out[rec.dtier || 'mid']++;
+    return out;
+  }
+  /* §10.2 role multipliers. A zero means "this tier never does that at all". */
+  function depthAttackMul(rec) { const k = DEPTH_ATTACK[(rec && rec.dtier) || 'mid']; return k == null ? 1 : k; }
+  function depthRepairMul(rec) { const k = DEPTH_REPAIR[(rec && rec.dtier) || 'mid']; return k == null ? 1 : k; }
+  function depthHpMul(tier) { const k = DEPTH_HP[tier || 'mid']; return k == null ? 1 : k; }
+  /* Applied once, when the element becomes hostile: hpOf() may already have cached a plain max from a hover. */
+  function applyDepthHp(el, tier) {
+    const rec = state.hp.get(el);
+    if (!rec || rec.depthScaled === tier) return;
+    const base = rec.baseMax != null ? rec.baseMax : (rec.baseMax = rec.max);
+    const ratio = rec.max > 0 ? clamp(rec.hp / rec.max, 0, 1) : 1;
+    rec.max = clamp(Math.round(base * depthHpMul(tier)), 10, 400);
+    rec.hp = Math.max(1, Math.round(rec.max * ratio));
+    rec.depthScaled = tier;
+  }
+
+  /* §10.4: is this enemy actually shootable right now, or is something painted over it? The honest test is the
+   * one the player's click will run — pickTarget at the enemy centre. */
+  function isCovered(el) {
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return false;
+    const picked = pickTarget(r.left + r.width / 2, r.top + r.height / 2, null, { noLock: true });
+    if (!picked) return true;
+    if (picked === el) return false;
+    try { return !el.contains(picked); } catch (e) { return true; }
+  }
+  /* §10.3 item 2. The table entry is read defensively so this works whether or not the weapon stats carry
+   * `pierce` yet — the sniper is the one hitscan weapon the spec gives a value to. */
+  function pierceOf(id) {
+    const W = WEAPONS[id];
+    if (W && typeof W.pierce === 'number') return W.pierce;
+    return id === 'sniper' ? 2 : 0;
+  }
+  function canPierceNow() { return pierceOf(state.weapon) > 0; }
+  /* ── §10.3 item 2: PIERCE — the arming half ─────────────────────────────────────────────────────────
+   * A hitscan weapon with `pierce` keeps going after its front target, hitting the next qualifying elements
+   * down the same stack at ×0.6 per layer. This module arms it; src/73-hit-resolution.js applies it.
+   *
+   * MERGED (v1.4 + v1.5): this module used to carry its OWN applyPierce()/pierceMark() pair next to the v1.5
+   * ones in src/73-hit-resolution.js. Every src/ fragment shares one closure and 87 is concatenated after 73,
+   * so this module's pair won every call — including the two v1.5 fire() call sites, which pass
+   * (x, y, front, kind, id) and were therefore handing a layer count of 'gun' and a base damage of 'sniper'
+   * to a (x, y, front, n, base) signature: Math.round('sniper' * 0.6) is NaN, so every layer behind a pistol
+   * or sniper shot had its hp set to NaN instead of taking 60 %. Both copies here are gone — the hit-resolution
+   * module owns the single applyPierce() and pierceMark() (SPEC-weapons §3 files 타격 판정 there) and this is
+   * its ONE caller, which is why the v1.5 fire() entries no longer call applyPierce() directly: two live entry
+   * points would pierce the same stack twice.
+   *
+   * It still hangs off interceptOrb() (src/90-combat.js), which every click weapon already calls with the exact
+   * impact point BEFORE the page is hit — so the primary hit stays entirely in the weapon code and the only
+   * thing living here is what happens behind it. Deferred by one task so the front target has already resolved
+   * (and possibly broken) before we look at what is behind it — §10.3 item 2's "최전면 대상을 처리한 뒤".
+   * `noLock` asks for the raw "what is really under this point?": the §2.2 lock-frame aim assist can send the
+   * PRIMARY hit to an enemy nowhere near (x, y), but the stack the bullet went through is still the one at
+   * (x, y) — isCovered() above reads the point the same way.
+   * §10.3 item 3 (aoeIgnoresCover) needs no code here: aoeCandidates() samples rings of POINTS, so a blast
+   * already reaches whatever is inside its radius no matter how many layers are painted over it. */
+  function schedulePierce(x, y) {
+    if (!state.active || !(pierceOf(state.weapon) > 0)) return;
+    const id = state.weapon, W = WEAPONS[id];
+    if (!W || !(W.damage > 0) || !isFinite(W.damage)) return;
+    const front = pickTarget(x, y, null, { noLock: true });
+    later(() => applyPierce(x, y, front, W.kind, id), 0);
+  }
+  /* ── §10.3 item 3: explosions ignore cover ──
+   * aoeCandidates() samples rings of POINTS and keeps only what pickTarget() returns at each — the topmost
+   * element. That makes a blast respect cover, which is the opposite of what §10.3 promises. This pass walks the
+   * SAME points and picks up what is behind the front element at each one, so a rocket reaches the back rank
+   * whatever is painted over it. Deferred one task, so the ordinary blast has already resolved and this only
+   * adds the layers it could not see; `aoeIgnoresCover` is the flag that documents it.
+   * Nothing is double-hit: anything pickTarget() would have returned is skipped, as is its own subtree. */
+  const aoeIgnoresCover = true;
+  function scheduleBlastThroughCover(x, y, R) {
+    const W = WEAPONS[state.weapon];
+    if (!aoeIgnoresCover || !W || W.kind !== 'bomb' || !(W.damage > 0) || !isFinite(W.damage)) return;
+    later(() => blastThroughCover(x, y, R, W.damage, W.maxTargets || 10), 0);
+  }
+  function blastThroughCover(x, y, R, damage, maxTargets) {
+    if (!state.active || !(R > 0)) return;
+    const points = [{ x, y }];
+    for (const k of [0.35, 0.7, 1]) {
+      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; points.push({ x: x + Math.cos(a) * k * R, y: y + Math.sin(a) * k * R }); }
+    }
+    const cache = new Map(), seen = new Set();
+    const vw = viewW(), vh = viewH();
+    let hits = 0;
+    for (const p of points) {
+      if (hits >= maxTargets) break;
+      if (p.x < 0 || p.y < 0 || p.x > vw || p.y > vh) continue;
+      const front = pickTarget(p.x, p.y, cache, { noLock: true });
+      let list = [];
+      try { list = doc.elementsFromPoint(p.x, p.y); } catch (e) { continue; }
+      for (const c of list) {
+        if (hits >= maxTargets) break;
+        if (!c || c.nodeType !== 1 || isOurs(c) || c === doc.body || c === docEl) continue;
+        if (c === front || seen.has(c) || SKIP_WALK_TAGS.has(tagOf(c))) continue;
+        try { if (front && (c.contains(front) || front.contains(c))) continue; } catch (e) { continue; }
+        try { if (c.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+        const cr = rectOf(c);
+        if (!cr || cr.width * cr.height < DEPTH_MIN_AREA) continue;
+        const d = edgeDist(cr, x, y);
+        if (d > R) continue;
+        seen.add(c);
+        hits++;
+        applyHit(c, Math.max(1, Math.round(damage * (1 - 0.73 * clamp(d / R, 0, 1)))), 'bomb', x, y, { aoe: true, radius: R, toward: { x, y } });
+      }
+    }
+  }
+  /* (The thin white pierce streak lives with applyPierce() in src/73-hit-resolution.js — see the merge note
+   * on schedulePierce() above. Its prefers-reduced-motion guard came from the copy that stood here.) */
+  /* §10.4: "뒤에 적 N" on the target box — the thing under your cursor is cover, and this says how much. */
+  function hostilesBehind(el) {
+    if (!el || !state.hostiles.size) return 0;
+    const r = rectOf(el);
+    if (!r) return 0;
+    let n = 0;
+    for (const rec of state.hostiles.values()) {
+      const h = rec.el;
+      if (h === el) continue;
+      try { if (h.contains(el) || el.contains(h)) continue; } catch (e) { continue; }
+      const hr = rectOf(h);
+      if (!hr || hr.right <= r.left || hr.left >= r.right || hr.bottom <= r.top || hr.top >= r.bottom) continue;
+      if ((rec.depth || 0) > 0 || isCovered(h)) n++;
+    }
+    return n;
   }
 
 // ── 88-toast.js ──
@@ -3896,6 +4558,24 @@
   function clearBeams() { for (const b of state.beams.slice()) removeBeam(b); }
   function clearWarns() { for (const n of state.warns) { try { n.remove(); } catch (e) { /* ignore */ } } state.warns.length = 0; }
 
+  // ── v1.4 §4: T3 now draws a lock frame instead of a laser, so the sweep is kept for the boss's third phase ──
+  /* The laser code above is unchanged and still reachable: §4 moves it onto the boss (phase 3, "레이저 쓸기")
+   * rather than deleting it. Until the boss lands, this hook is how the sweep is exercised. */
+  debug.forceLaser = (el) => {
+    if (!state.active || !modeHasEnemies() || state.paused || state.ko) return null;
+    bringIntoView(el);
+    const existing = state.hostiles.get(el) || null;
+    let rec = existing;
+    if (!rec) { const area = hostileArea(el); if (area == null) return null; rec = markHostile(el, area); }
+    if (!rec) return null;
+    const r = rectOf(rec.el);
+    if (!r) return null;
+    untrack(rec.timer); rec.timer = 0;
+    clearPhase(rec);
+    attackLaser(rec, r);
+    return 'laser';
+  };
+
 // ── 90-combat.js ──
   /* --- combat (A7–A10): player, selection tick, hostiles, attacks, orbs, KO ---
    * v1.3: the T3 laser lives in 89-beams.js and everything about how an attack READS — the player ring, the aim
@@ -3908,15 +4588,22 @@
   }
   function maxHostiles() { return combatElapsed() >= 60000 ? 5 : 3; }
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
-  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000); }
+  /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0). */
+  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1); }
   function resetPlayer() {
     const p = state.player;
     p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
+    // v1.4 §1.2: in survival the player IS the drone, so a reset parks it centre-bottom with no momentum
+    state.dashUntil = 0; state.dashReadyAt = 0; state.invulUntil = 0; state.dashVx = 0; state.dashVy = 0;
+    p.vx = 0; p.vy = 0;
+    if (modeHasAvatar()) avatarStart();
   }
   function playerInfo() {
     const p = state.player;
     return { hp: Math.max(0, Math.round(p.hp)), max: p.max, score: p.score, kills: p.kills, alive: p.alive, elapsedMs: Math.round(combatElapsed()), x: p.x, y: p.y,
-      lastHitFrom: p.lastHitFrom ? { x: p.lastHitFrom.x, y: p.lastHitFrom.y } : null };   // v1.3 §5: where the last hit came from
+      lastHitFrom: p.lastHitFrom ? { x: p.lastHitFrom.x, y: p.lastHitFrom.y } : null,   // v1.3 §5: where the last hit came from
+      // v1.4 §5: x / y are now the DRONE's centre in survival; the velocity and dash cooldown come with them
+      vx: p.vx || 0, vy: p.vy || 0, dashReadyAt: dashReadyWallClock(), hitRadius: AV_HIT_R, mode: state.mode };
   }
   function hostileSkip(el) {
     if (state.hostiles.has(el)) return true;
@@ -3944,6 +4631,9 @@
     state.graceUntil = now() + GRACE_MS;
     state.combatTimer = later(selectTick, GRACE_MS);
     state.clockTimer = later(clockTick, 1000);
+    armDepthTick();          // v1.4 §10.1
+    syncRatioMeter(false);   // v1.4 §3.2
+    if (modeHasAvatar()) ensureAvatar();   // v1.4 §1
   }
   /* The 생존 counter is a visible clock: the 1.5 s selection tick alone leaves it frozen through the whole
    * grace and then skips seconds, so the player HUD gets its own 1 s refresh chain (never setInterval). */
@@ -4004,16 +4694,26 @@
     if (!tier) return null;
     const aura = mk('div', 'crs-hostile');
     const label = mk('span', 'crs-hostile-label');
-    label.textContent = '👿 ' + tagOf(el).toUpperCase();
+    label.textContent = '👿 ' + tagOf(el).toUpperCase();   // recomposed with the ▲ depth mark below
     aura.append(label);
     root.append(aura);
-    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, aim: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now() };
+    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, aim: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now(),
+      // v1.4: depth role (§10), the lock frame it owns (§2) and its repair schedule (§3)
+      depth: 0, dtier: 'mid', depthAt: 0, lock: null, lockReadyAt: 0, repairTimer: 0 };
     state.hostiles.set(el, rec);
+    measureDepth(rec);           // v1.4 §10.1: once on selection, then every 2 s
+    applyDepthLook(rec);
+    /* v1.4 §10.2: front ×0.8, mid ×1.0, back ×1.2. Applied whenever an element becomes hostile — an element's
+     * depth role IS part of what it is as an enemy, and it has to hold whether or not the element happened to be
+     * hovered first (a hover caches HP too, so keying this off "first contact" made the role come and go). */
     hpOf(el);   // page-space max HP cached now (scope never runs the picker)
+    applyDepthHp(el, rec.dtier);
     placeAura(rec);
     setAuraPulse(rec, 900);
     scheduleAttack(rec, attackInterval(rec));
+    scheduleRepair(rec);         // v1.4 §3.1
     scheduleAura();
+    armDepthTick();
     updatePlayerHud();
     kick();
     return rec;
@@ -4025,6 +4725,7 @@
   }
   function clearPhase(rec) {   // telegraph / beam / warn / lock-mark nodes of this hostile; pulse back to idle
     dropAimLine(rec);   // v1.3 §3.2: the "aiming at you" line never outlives the wind-up it belongs to
+    dropLock(rec);      // v1.4 §2: so does the lock frame
     for (const n of rec.nodes) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } const i = state.warns.indexOf(n); if (i >= 0) state.warns.splice(i, 1); }
     rec.nodes.length = 0;
     if (rec.beam) { removeBeam(rec.beam); rec.beam = null; }
@@ -4036,6 +4737,8 @@
     if (!rec) return;
     state.hostiles.delete(el);
     untrack(rec.timer); rec.timer = 0;
+    untrack(rec.repairTimer); rec.repairTimer = 0;   // v1.4 §3.1
+    dropRepairsOf(rec);                              // a beam cannot outlive the enemy casting it
     clearPhase(rec);
     dropAimLine(rec, true);   // the hostile itself is going — its line cannot linger
     try { if (rec.pulse) { rec.pulse.cancel(); state.anims.delete(rec.pulse); } } catch (e) { /* ignore */ }
@@ -4058,8 +4761,11 @@
   function clearCombatNodes() {
     for (const el of Array.from(state.hostiles.keys())) releaseHostile(el);
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
+    clearLocks(); clearRepairs();   // v1.4 §2 / §3
   }
-  /* true only when one of the three attacks actually started (debug.forceAttack reports the tier off this). */
+  /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
+   * reports exactly that. v1.4 §4: quickdraw enemies only ever lock on, T3 everywhere is a lock instead of the
+   * laser, and §10.2 silences the back rank entirely. */
   function hostileAttack(rec, forced) {
     if (!state.active || !state.combat || state.hostiles.get(rec.el) !== rec || state.paused || state.ko) return false;
     const el = rec.el;
@@ -4074,13 +4780,27 @@
       return false;
     }
     rec.offscreenSince = 0;
-    if (!forced && (debug.noAttacks || !state.player.inWindow || !state.player.alive)) { scheduleAttack(rec, attackInterval(rec)); return false; }
+    // v1.4 §1.2: the drone stays whether or not the pointer is in the window, so inWindow no longer gates it
+    const awake = modeHasAvatar() ? state.player.alive : (state.player.inWindow && state.player.alive);
+    if (!forced && (debug.noAttacks || !awake)) { scheduleAttack(rec, attackInterval(rec)); return false; }
     if (forced) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
     scheduleAura();
+    // §10.2: the back rank is support — it repairs, it never shoots
+    if (!depthAttackMul(rec)) { if (!forced) scheduleAttack(rec, attackInterval(rec)); return false; }
+    /* §4 boss: 1st stage orbs, 2nd adds the slam, 3rd brings back the T3 LASER SWEEP (89-beams.js, kept for
+     * exactly this). A boss locks on as well — the sweep is what the third stage ADDS, not what it replaces. */
+    if (isBoss(rec) && modeHasProjectiles()) {
+      const phase = bossPhase(rec);
+      if (phase >= 3) { attackLaser(rec, r); return 'laser'; }
+      if (phase >= 2 && Math.random() < 0.5) { attackCharger(rec, r); return 'charger'; }
+      if (Math.random() < 0.6) { attackShooter(rec, r, forced); return 'shooter'; }
+      return startLock(rec, forced) ? 'lock' : false;
+    }
+    // §4: orbs and slams are survival-only; everything else (and every T3) draws a lock instead
+    if (!modeHasProjectiles() || rec.tier === 'laser') return startLock(rec, forced) ? 'lock' : false;
     if (rec.tier === 'shooter') attackShooter(rec, r, forced);
-    else if (rec.tier === 'charger') attackCharger(rec, r);
-    else attackLaser(rec, r);
-    return true;
+    else attackCharger(rec, r);
+    return rec.tier;
   }
   /* T1 shooter: wind-up 250 ms at the element centre (forced: none), then an orb toward the player at 520 px/s. */
   function attackShooter(rec, r, forced) {
@@ -4148,15 +4868,20 @@
     updatePlayerHud(); scheduleHud();
   }
   function interceptOrb(x, y) {
+    hitRepairBeams(x, y, 14);   // v1.4 §3.1: a shot across a repair beam delays it 0.4 s — it never absorbs the shot
     for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= 18) { popOrb(o); return true; } }
+    schedulePierce(x, y);       // v1.4 §10.3: the shot reaches the page, so it can also go THROUGH it
     return false;
   }
   function interceptOrbsWithin(x, y, R) {
+    hitRepairBeamsWithin(x, y, R);      // v1.4 §3.1
+    scheduleBlastThroughCover(x, y, R); // v1.4 §10.3: a blast reaches what is hiding behind cover
     let n = 0;
     for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R) { popOrb(o); n++; } }
     return n;
   }
   function interceptOrbsAlong(x1, y1, x2, y2, R) {
+    hitRepairBeamsAlong(x1, y1, x2, y2, R);   // v1.4 §3.1
     let n = 0;
     for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R) { popOrb(o); n++; } }
     return n;
@@ -4229,6 +4954,7 @@
     updatePlayerHud();
   }
   function showKo() {
+    if (!modeHasHealth()) return;   // v1.4 §0.5: quickdraw and rampage have no health, so no KO
     const p = state.player;
     p.alive = false; state.ko = true;
     resetChord(); scopeOff(); stopHold(); cancelSlash();
@@ -4267,26 +4993,7 @@
     restore();   // player reset + grace (A8)
     return true;
   }
-  function setCombat(v, opts) {
-    const silent = !!(opts && opts.silent);
-    const on = !!v, changed = on !== state.combat;
-    state.combat = on;
-    if (!silent) state.combatTouched = true;
-    if (!on) {
-      untrack(state.combatTimer); state.combatTimer = 0;
-      untrack(state.clockTimer); state.clockTimer = 0;
-      untrack(state.regenTimer); state.regenTimer = 0;
-      clearCombatNodes();   // auras / orbs / beams / warn rings go, the score stays
-      if (silent) hideToast(false); else if (changed) toast(msg('toastCombatOff'));
-    } else {
-      if (changed || !state.combatTimer) armCombat();
-      if (!silent && changed) toast(msg('toastCombatOn'));
-      if (state.player.hp < state.player.max) startRegen();
-    }
-    if (!silent) safe(() => chrome.storage.sync.set({ crsCombat: on }));
-    updateHud(); updatePlayerHud();
-    return on;
-  }
+  /* setCombat() / setMode() live in 86-modes.js from v1.4 on — one mode switch, one place. */
   /* Pause (A7): blur / hidden → cancel every combat timer, drop in-flight orbs / beams / rings, freeze the clock. */
   function pauseCombat() {
     if (state.paused) return;
@@ -4295,8 +5002,11 @@
     untrack(state.combatTimer); state.combatTimer = 0;
     untrack(state.clockTimer); state.clockTimer = 0;
     untrack(state.regenTimer); state.regenTimer = 0;
-    for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
+    untrack(state.depthTimer); state.depthTimer = 0;
+    untrack(state.ratioTimer); state.ratioTimer = 0;
+    for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; untrack(rec.repairTimer); rec.repairTimer = 0; clearPhase(rec); }
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
+    clearLocks(); clearRepairs();   // v1.4 §2 / §3
   }
   function resumeCombat() {
     if (!state.paused) return;
@@ -4305,7 +5015,9 @@
     if (!state.active || !state.combat) return;
     state.combatTimer = later(selectTick, Math.max(1000, state.graceUntil - now()));
     untrack(state.clockTimer); state.clockTimer = later(clockTick, 1000);
-    for (const rec of state.hostiles.values()) scheduleAttack(rec, Math.max(1000, attackInterval(rec)));
+    for (const rec of state.hostiles.values()) { scheduleAttack(rec, Math.max(1000, attackInterval(rec))); scheduleRepair(rec); }
+    armDepthTick(); armRatioTick();   // v1.4 §10.1 / §3.2
+    if (modeHasAvatar()) ensureAvatar();
     if (state.player.hp < state.player.max) startRegen();
   }
   /* --- debug hooks (§5) --- */
@@ -4328,16 +5040,94 @@
     if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; placeSelf(); }
     return { x: state.player.x, y: state.player.y };
   };
+  /* v1.4: the forced hooks bring a target that has been scrolled away back into view first. The picker only ever
+   * chooses on-screen elements, so this is the one place an off-screen element is a legitimate subject, and
+   * scrolling to the thing you asked about is what a reader of the hook means. */
+  function bringIntoView(el) {
+    if (!el || el.nodeType !== 1) return;
+    const r = rectOf(el);
+    if (r && r.right > 0 && r.bottom > 0 && r.left < viewW() && r.top < viewH()) return;
+    try { el.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (e) { /* ignore */ }
+    scheduleAura();
+  }
   debug.forceAttack = (el) => {   // same eligibility as the picker; works under noAttacks, null while paused / KO
     if (!state.active || !state.combat || state.paused || state.ko || !state.player.alive) return null;
+    bringIntoView(el);
     const existing = state.hostiles.get(el) || null;
     let rec = existing;
     if (!rec) { const area = hostileArea(el); if (area == null) return null; rec = markHostile(el, area); }
     if (!rec) return null;
     const ran = hostileAttack(rec, true);
-    if (!ran && !existing && state.hostiles.get(el) === rec) releaseHostile(el);   // a no-op must not consume a hostile slot
-    return ran ? rec.tier : null;
+    /* A no-op must not consume a hostile slot — EXCEPT for the back rank, whose "no-op" is the whole point of
+     * §10.2: it is a real hostile that simply never attacks, and its aura has to stay up. */
+    if (!ran && !existing && depthAttackMul(rec) && state.hostiles.get(el) === rec) releaseHostile(el);
+    return ran || null;   // v1.4: 'shooter' | 'charger' | 'lock' | 'laser'
   };
+  /* §5: the caller lives in wall-clock time, the engine in performance.now() time. */
+  function dashReadyWallClock() {
+    if (!state.dashReadyAt) return 0;
+    return Date.now() + Math.round(state.dashReadyAt - now());
+  }
+  /* §4 boss stages, read straight off its remaining HP. debug.forceBoss() takes an element (that one becomes a
+   * boss) or a number (every T3 hostile does), so a test can reach the third stage without guessing a signature. */
+  function isBoss(rec) { return !!(rec && (rec.boss || (state.bossMode && rec.tier === 'laser'))); }
+  function bossPhase(rec) {
+    const h = state.hp.get(rec.el);
+    const ratio = (h && h.max > 0) ? clamp(h.hp / h.max, 0, 1) : 1;
+    return ratio > 0.66 ? 1 : (ratio > 0.33 ? 2 : 3);
+  }
+  /* The biggest T3-sized element on the page, viewport or not — the thing a reader of forceBoss() means by
+   * "the boss". Capped scan, and only ever run from a debug hook. */
+  function biggestBossCandidate() {
+    let best = null, bestArea = 0, seen = 0;
+    let all = [];
+    try { all = doc.body.getElementsByTagName('*'); } catch (e) { return null; }
+    for (const el of all) {
+      if (++seen > 3000) break;
+      if (isOurs(el) || SKIP_WALK_TAGS.has(tagOf(el))) continue;
+      if ((el.offsetWidth || 0) < 300 || (el.offsetHeight || 0) < 200) continue;
+      const r = rectOf(el);
+      if (!r) continue;
+      const area = r.width * r.height;
+      if (tierFor(area) !== 'laser' || area > 0.7 * viewW() * viewH()) continue;
+      if (area > bestArea) { bestArea = area; best = el; }
+    }
+    return best;
+  }
+  function makeBoss(el, ratio) {
+    if (!el) return null;
+    bringIntoView(el);
+    const area = hostileArea(el);
+    const rec = state.hostiles.get(el) || (area != null ? markHostile(el, area) : null);
+    if (!rec) return null;
+    rec.boss = true;
+    state.bossMode = true;
+    if (ratio != null && isFinite(ratio) && ratio >= 0 && ratio <= 1) {
+      const h = hpOf(el);
+      // floor, so the caller's "drive it to 30 %" loop sees a value that is already AT or BELOW the threshold
+      h.hp = Math.max(1, Math.floor(h.max * ratio));
+      refreshHover(); scheduleHud();
+    }
+    return rec;
+  }
+  /* forceBoss(el) makes that element a boss; forceBoss(0.3) makes the page's biggest T3 element a boss already
+   * down to 30 % HP — its third stage (§4), where the laser sweep comes back. */
+  debug.forceBoss = (arg) => {
+    if (arg && arg.nodeType === 1) return makeBoss(arg, null) ? true : null;
+    const ratio = (typeof arg === 'number' && isFinite(arg)) ? arg : null;
+    const rec = makeBoss(biggestBossCandidate(), ratio);
+    if (rec) return true;
+    state.bossMode = true;   // nothing eligible on screen: every T3 hostile still fights as a boss
+    for (const r of state.hostiles.values()) if (r.tier === 'laser') r.boss = true;
+    return true;
+  };
+  debug.setAvatarPos = (x, y) => {
+    x = +x; y = +y;
+    const p = state.player;
+    if (isFinite(x) && isFinite(y)) { p.x = x; p.y = y; p.vx = 0; p.vy = 0; p.inWindow = true; placeAvatar(); placeSelf(); }
+    return { x: p.x, y: p.y };
+  };
+  debug.dashReady = () => { state.dashReadyAt = 0; updateDashDot(); return true; };
 
 // ── 91-combat-feedback.js ──
 // ── v1.3 combat readability: player ring, aim-line telegraph, orb legibility, near-miss, hit feedback ──
@@ -4389,7 +5179,7 @@
   }
   /* §2.2: below 30 % HP a faint red rim stays up for as long as the player is in danger (no animation, no timer). */
   function lowVignette(ratio) {
-    const want = state.active && state.combat && !state.ko && state.player.alive && ratio < 0.3;
+    const want = state.active && modeHasHealth() && !state.ko && state.player.alive && ratio < 0.3;
     if (!want) { clearLowVignette(); return; }
     if (state.lowVig && state.lowVig.isConnected) return;
     if (!root) return;
@@ -4439,7 +5229,9 @@
     box.append(ring, wedge, arc, dot, tag);
     return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1 };
   }
-  function selfShouldShow() { return !!(state.active && state.combat && !state.ko && root); }
+  /* v1.4 §0.5: the ring is a HEALTH gauge, so it exists only where health does — survival. In quickdraw the
+   * cursor is the player and there is nothing to drain; in rampage there is no combat at all. */
+  function selfShouldShow() { return !!(state.active && modeHasHealth() && !state.ko && root); }
   /* Mount / unmount + repaint. Called from updatePlayerHud(), so every hp change and every combat toggle lands. */
   function syncSelf() {
     if (!selfShouldShow()) { clearSelf(); return; }
@@ -4501,6 +5293,7 @@
   function selfGraze(from) {
     const s = state.self;
     if (!s || !s.box.isConnected) return;
+    if (!from) from = { x: state.player.x, y: state.player.y - 1 };
     try {
       s.arc.style.backgroundImage = wedgeGradient(angleTo(from.x, from.y), 40, 'rgba(255,255,255,.95)');
       cancelAnimsOf(s.arc);
@@ -4542,7 +5335,7 @@
     placeAimLine(a);
     try { trackAnim(node.animate([{ backgroundPosition: '0px 0px' }, { backgroundPosition: '18px 0px' }], { duration: 420, iterations: Infinity, easing: 'linear' })); } catch (e) { /* ignore */ }
     try { rec.aura.classList.add('crs-aimed'); } catch (e) { /* ignore */ }
-    try { rec.label.textContent = '🎯 ' + rec.label.textContent; } catch (e) { /* ignore */ }
+    setHostileLabel(rec);   // v1.4 §10.4: 🎯 and the ▲ depth mark share one composed label
     sfx('alert');
     kick();
   }
@@ -4553,7 +5346,7 @@
     if (a.rec && a.rec.aim === a) {
       a.rec.aim = null;
       try { a.rec.aura.classList.remove('crs-aimed'); } catch (e) { /* ignore */ }
-      try { a.rec.label.textContent = a.rec.label.textContent.replace(/^🎯\s*/, ''); } catch (e) { /* ignore */ }
+      setHostileLabel(a.rec);
     }
     try { cancelAnimsOf(a.node); a.node.remove(); } catch (e) { /* ignore */ }
   }
@@ -4659,7 +5452,8 @@
   }
   function damagePlayer(n, opts) {
     const p = state.player;
-    if (!state.active || !state.combat || !p.alive || state.ko || !(n > 0)) return;
+    if (!state.active || !modeHasHealth() || !p.alive || state.ko || !(n > 0)) return;
+    if (now() < state.invulUntil) { selfGraze(opts && opts.from ? opts.from : null); return; }   // v1.4 §1.2: dash i-frames
     const from = (opts && opts.from && isFinite(opts.from.x) && isFinite(opts.from.y)) ? { x: opts.from.x, y: opts.from.y } : null;
     const before = clamp(p.hp / p.max, 0, 1);
     p.hp = Math.max(0, p.hp - n);
@@ -4698,22 +5492,203 @@
   }
   /* §2.2 player HUD + the ring that mirrors it. Called from every path that can move hp or toggle combat. */
   function updatePlayerHud() {
+    state.ratioDirty = true;   // v1.4 §3.2: every break, kill and repair passes through here
     const p = state.player, ratio = clamp(p.hp / p.max, 0, 1);
     const h = hudEls.player;
     if (h) {
       try {
-        h.classList.toggle('on', !!state.combat);
-        if (hudEls.fallback) h.style.display = state.combat ? 'block' : 'none';
+        const showHp = modeHasHealth();   // v1.4 §0.5: no health bar where there is no health
+        h.classList.toggle('on', showHp);
+        if (hudEls.fallback) h.style.display = showHp ? 'block' : 'none';
         hudEls.pFill.style.width = (ratio * 100).toFixed(1) + '%';
         hudEls.pFill.style.background = fillColor(ratio);
         hudEls.pHp.textContent = msg('labelHealth') + ' ' + Math.max(0, Math.round(p.hp)) + ' / ' + p.max;
         hudEls.pStats.textContent = msg('labelScore') + ' ' + p.score + ' · ' + msg('labelKills') + ' ' + p.kills + ' · ' + msg('labelTime') + ' ' + Math.floor(combatElapsed() / 1000) + msg('unitSec') + ' · ' + msg('labelEnemies') + ' ' + state.hostiles.size;
-        setBarPulse(state.combat && p.alive && ratio < 0.3);
+        setBarPulse(showHp && p.alive && ratio < 0.3);
+        updateDashDot();
       } catch (e) { /* ignore */ }
     }
     state.hpRatio = ratio;
     syncSelf();
     lowVignette(ratio);
+  }
+
+  /* ===================================================================== */
+  /* ── v1.4 §1: the drone avatar — the half of the input that was missing ─ */
+  /* ===================================================================== */
+  /* With the cursor as the player, one mouse had to aim AND dodge: move to dodge and the aim is gone, hold still
+   * to aim and you get hit. Survival splits them. The mouse keeps aiming (nothing about shooting changes) and
+   * WASD flies this drone, so dodging finally costs nothing you were already spending.
+   *
+   * `state.player.x / y` simply BECOMES the drone centre, which is why no enemy code had to change: every
+   * targeting, hit and near-miss test already read exactly those two numbers. The v1.3 health ring is re-anchored
+   * here rather than rebuilt — it rides state.player too, so it followed the drone for free. */
+
+  function avatarStart() {
+    const p = state.player;
+    p.x = viewW() / 2; p.y = viewH() * 0.72;   // §1.2: centre, lower third
+    p.vx = 0; p.vy = 0;
+  }
+  function buildAvatar() {
+    const box = mk('div', 'crs-avatar');
+    const body = mk('div', 'crs-avatar-body');
+    const nose = mk('div', 'crs-avatar-nose');
+    const rotorL = mk('div', 'crs-avatar-rotor crs-avatar-rotor-l');
+    const rotorR = mk('div', 'crs-avatar-rotor crs-avatar-rotor-r');
+    box.append(body, rotorL, rotorR, nose);
+    return { box, body, nose, rotors: [rotorL, rotorR], wobble: [], ang: null };
+  }
+  function avatarWobble(a) {
+    for (const w of a.wobble) { try { w.cancel(); } catch (e) { /* ignore */ } state.anims.delete(w); }
+    a.wobble.length = 0;
+    if (reducedMotion()) return;
+    for (let i = 0; i < a.rotors.length; i++) {
+      try {
+        a.wobble.push(trackAnim(a.rotors[i].animate(
+          [{ transform: 'translateY(-50%) scaleY(1)' }, { transform: 'translateY(-50%) scaleY(.55)' }],
+          { duration: 600, direction: 'alternate', iterations: Infinity, easing: 'ease-in-out', delay: i * 120 }
+        )));
+      } catch (e) { /* ignore */ }
+    }
+  }
+  function ensureAvatar() {
+    if (!modeHasAvatar() || !state.active || !root) { clearAvatar(); return null; }
+    let a = state.avatar;
+    if (a && a.box.isConnected) return a;
+    a = buildAvatar();
+    state.avatar = a;
+    try { root.append(a.box); } catch (e) { /* ignore */ }
+    avatarStart();
+    avatarWobble(a);
+    placeAvatar();   // no kick(): a parked drone needs no frames, and keydown / startDash() arm the loop
+    return a;
+  }
+  function clearAvatar() {
+    const a = state.avatar;
+    state.avatar = null;
+    state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
+    state.dashUntil = 0; state.invulUntil = 0;
+    if (!a) return;
+    for (const w of a.wobble) { try { w.cancel(); } catch (e) { /* ignore */ } state.anims.delete(w); }
+    try { cancelAnimsOf(a.box); a.box.remove(); } catch (e) { /* ignore */ }
+  }
+  /* The nose points at the crosshair, so the drone always shows where the mouse half of the input is looking.
+   * Zero degrees is "to the right" (the triangle is drawn pointing right), which is what the §7.3 reading of the
+   * transform expects: the mouse directly left of the drone reads 180°. */
+  function placeAvatar() {
+    const a = state.avatar;
+    if (!a || !a.box.isConnected) return;
+    const p = state.player;
+    a.box.style.left = px(p.x);
+    a.box.style.top = px(p.y);
+    const tx = state.hoverX >= 0 ? state.hoverX : p.x + 1, ty = state.hoverY >= 0 ? state.hoverY : p.y;
+    let ang = Math.atan2(ty - p.y, tx - p.x) / DEG;
+    if (!isFinite(ang)) ang = 0;
+    if (a.ang == null || Math.abs(ang - a.ang) > 0.4) {
+      a.ang = ang;
+      try { a.nose.style.transform = 'rotate(' + ang.toFixed(2) + 'deg) translate(' + px(AV_R) + ', -5px)'; } catch (e) { /* ignore */ }
+    }
+  }
+  /* §1.2 physics: snappy acceleration with a little slide, capped speed, clamped 20 px inside the viewport. */
+  function avatarStep(t, dt) {
+    const a = state.avatar;
+    if (!a) return;
+    // the motion preference can be flipped after the drone was built (settings, or a test), so re-read it
+    if (t - (a.rmAt || 0) > 400) { a.rmAt = t; const rm = reducedMotion(); if (rm !== a.rm) { a.rm = rm; avatarWobble(a); } }
+    const p = state.player;
+    if (dt > 0) {
+      const dashing = t < state.dashUntil;
+      if (dashing) { p.vx = state.dashVx || 0; p.vy = state.dashVy || 0; }
+      else {
+        let ax = 0, ay = 0;
+        if (state.keys.left) ax -= 1;
+        if (state.keys.right) ax += 1;
+        if (state.keys.up) ay -= 1;
+        if (state.keys.down) ay += 1;
+        const L = Math.hypot(ax, ay);
+        if (L > 0) { p.vx += (ax / L) * AV_ACCEL * dt; p.vy += (ay / L) * AV_ACCEL * dt; }
+        /* Friction is DRAG, not braking: it only bites once the keys are let go. Applying it while a direction
+          * is held would fight the 2800 px/s² accelerator to a standstill around 287 px/s and the 420 px/s top
+          * speed could never be reached.
+          * On release it is applied hard enough to settle inside one frame. A literal 0.86-per-frame decay
+          * coasts ~50 px past the key, which reads as the drone ignoring you; the contract the suite holds this
+          * to is "position stable ~500 ms after release", and a drone that stops when you stop is the version
+          * that makes dodging feel like an input rather than a suggestion. */
+        else {
+          const f = Math.pow(AV_FRICTION, dt * 60);
+          p.vx *= f; p.vy *= f;
+          if (Math.hypot(p.vx, p.vy) < AV_MAX_SPEED) { p.vx = 0; p.vy = 0; }
+        }
+        const sp = Math.hypot(p.vx, p.vy);
+        if (sp > AV_MAX_SPEED) { p.vx = p.vx / sp * AV_MAX_SPEED; p.vy = p.vy / sp * AV_MAX_SPEED; }
+        if (!L) { if (Math.abs(p.vx) < 1) p.vx = 0; if (Math.abs(p.vy) < 1) p.vy = 0; }
+      }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      const W = viewW(), H = viewH();
+      if (p.x < AV_MARGIN) { p.x = AV_MARGIN; p.vx = 0; }
+      if (p.x > W - AV_MARGIN) { p.x = W - AV_MARGIN; p.vx = 0; }
+      if (p.y < AV_MARGIN) { p.y = AV_MARGIN; p.vy = 0; }
+      if (p.y > H - AV_MARGIN) { p.y = H - AV_MARGIN; p.vy = 0; }
+      p.inWindow = true;   // §1.2: the drone stays whether or not the pointer is over the window
+    }
+    placeAvatar();
+    placeSelf();
+  }
+  function avatarMoving() {
+    return !!(state.avatar && (state.keys.up || state.keys.down || state.keys.left || state.keys.right ||
+      now() < state.dashUntil || Math.abs(state.player.vx) > 0.5 || Math.abs(state.player.vy) > 0.5));
+  }
+  function dashGhost() {
+    if (!root || reducedMotion()) return;
+    const p = state.player;
+    const n = mk('div', 'crs-avatar-ghost');
+    n.style.left = px(p.x); n.style.top = px(p.y);
+    root.append(n);
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+    try { const an = trackAnim(n.animate([{ opacity: 0.55 }, { opacity: 0 }], { duration: 300, easing: 'ease-out', fill: 'forwards' })); an.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+    later(kill, 500);
+  }
+  function startDash() {
+    const t = now();
+    if (!modeHasAvatar() || !state.avatar || state.ko || !state.player.alive) return false;
+    if (t < state.dashReadyAt) return false;   // §7.4: a second Space inside the cooldown is simply ignored
+    const p = state.player;
+    let dx = 0, dy = 0;
+    if (state.keys.left) dx -= 1;
+    if (state.keys.right) dx += 1;
+    if (state.keys.up) dy -= 1;
+    if (state.keys.down) dy += 1;
+    if (!dx && !dy) {   // no direction held: dash toward the crosshair
+      dx = (state.hoverX >= 0 ? state.hoverX : p.x + 1) - p.x;
+      dy = (state.hoverY >= 0 ? state.hoverY : p.y) - p.y;
+    }
+    const L = Math.hypot(dx, dy) || 1;
+    const sp = DASH_PX / (DASH_MS / 1000);
+    state.dashVx = dx / L * sp; state.dashVy = dy / L * sp;
+    p.vx = state.dashVx; p.vy = state.dashVy;
+    state.dashUntil = t + DASH_MS;
+    state.dashReadyAt = t + DASH_CD;
+    state.invulUntil = t + DASH_IFRAME;
+    for (let i = 0; i < DASH_GHOSTS; i++) later(dashGhost, i * (DASH_MS / DASH_GHOSTS));
+    csfx('dash');
+    updateDashDot();
+    kick();
+    return true;
+  }
+  /* One dot on the health panel: lit when the dash is ready, dim while it is not. */
+  function updateDashDot() {
+    const d = hudEls.dashDot;
+    if (!d) return;
+    try {
+      const show = modeHasAvatar();
+      d.style.display = show ? 'inline-block' : 'none';
+      if (!show) return;
+      d.classList.toggle('ready', now() >= state.dashReadyAt);
+    } catch (e) { /* ignore */ }
+  }
+  function avatarInfo() {
+    const p = state.player;
+    return { x: p.x, y: p.y, dashing: now() < state.dashUntil };
   }
 
 // ── 92-tick.js ──
@@ -4738,7 +5713,7 @@
     catch (e) {
       state.lastError = String((e && e.stack) || e);
       state.tickErrors++;
-      busy = state.tickErrors < 120 && !!(state.pieces.length || state.orbs.length || state.beams.length || state.fxQueue.length || state.scoped);
+      busy = state.tickErrors < 120 && !!(state.pieces.length || state.orbs.length || state.beams.length || state.fxQueue.length || state.scoped || state.avatar || state.locks.length || state.repairs.length);
     }
     if (busy && state.active) state.rafId = raf(tick); else state.animating = false;
   }
@@ -4798,6 +5773,13 @@
     if (state.orbs.length) { orbStep(t, dt); busy = busy || state.orbs.length > 0; }
     if (state.beams.length) { beamStep(); busy = true; }
     if (state.scoped) { scopeStep(t); busy = true; }
+    /* ── v1.4 ──
+     * The drone (§1), the lock frames (§2) and the repair beams (§3) all ride THIS loop too. A PARKED drone does
+     * not keep the loop awake — keydown and startDash() both kick() it, and scheduleHover()'s existing move frame
+     * carries the nose — so standing still costs no frames at all, exactly like v1.3. */
+    if (state.avatar) { avatarStep(t, dt); if (avatarMoving()) busy = true; }
+    if (state.locks.length) { stepLocks(t); busy = true; }
+    if (state.repairs.length) { stepRepairs(); busy = true; }
     // v1.3 §3.1 / §3.2: the player ring rides this loop (and scheduleHover()'s RAF) — it never owns one
     if (state.self) selfStep();
     if (state.aimlines.length) { stepAimLines(); busy = true; }
@@ -4822,9 +5804,547 @@
       }
       refreshHover();
       scheduleAura();
+      if (state.avatar) {   // v1.4 §1.2: the drone lives in screen space, so a resize re-clamps it
+        const p = state.player;
+        p.x = clamp(p.x, AV_MARGIN, Math.max(AV_MARGIN, W - AV_MARGIN));
+        p.y = clamp(p.y, AV_MARGIN, Math.max(AV_MARGIN, H - AV_MARGIN));
+        placeAvatar(); placeSelf();
+      }
       kick();
     });
   }
+
+// ── 93-lock.js ──
+// ── v1.4 §2: the Virtua Cop lock-on — a frame that closes on a target, and you shoot it open again ──
+  /* The user was explicit: "the aim lock I meant is the Virtua Cop idea". In Virtua Cop a red frame snaps around
+   * the enemy that is drawing on you and closes over a couple of seconds; you shoot THAT ENEMY before the frame
+   * shuts and the shot never happens. So this is not a dodging device, it is an aiming device: the threat and
+   * the target are the same object, and the player only ever has one job — point and shoot.
+   *
+   *   quickdraw  the frame sits on the ENEMY and shooting it is the only answer (there is nothing to dodge)
+   *   survival   the frame sits on the DRONE, stops following at 1.0 s, so you may shoot the enemy OR fly out
+   *
+   * Breaking it needs one point of damage from any weapon, not a kill. We detect that by watching the enemy's
+   * hp in the frame loop rather than by hooking the damage sink, so every weapon — hitscan, hold tick, AoE,
+   * slash, collapse — breaks a lock identically, with no special case anywhere in the weapon code. */
+
+  function lockDuration(rec) { return (rec && rec.dtier === 'front') ? LOCK_MS_FRONT : LOCK_MS; }
+  function lockPhaseOf(k) { return k < LOCK_P1 ? 'warn' : (k < LOCK_P2 ? 'close' : 'imminent'); }
+  /* Bracket distance in px for a normalised progress k, reduced motion snapping it to the three readings. */
+  function lockGap(k) {
+    if (reducedMotion()) return k < LOCK_P1 ? LOCK_GAP0 : (k < LOCK_P2 ? LOCK_GAP1 : LOCK_GAP2);
+    if (k < LOCK_P1) return LOCK_GAP0;
+    if (k < LOCK_P2) return LOCK_GAP0 + (LOCK_GAP1 - LOCK_GAP0) * ((k - LOCK_P1) / (LOCK_P2 - LOCK_P1));
+    return LOCK_GAP1 + (LOCK_GAP2 - LOCK_GAP1) * clamp((k - LOCK_P2) / (1 - LOCK_P2), 0, 1);
+  }
+  function lockColor(phase) { return phase === 'warn' ? 'rgba(255,255,255,.7)' : (phase === 'close' ? '#e3b341' : '#e5484d'); }
+
+  function buildLock() {
+    const node = mk('div', 'crs-lock');
+    const ring = mk('div', 'crs-lock-ring');
+    const tag = mk('span', 'crs-lock-tag');
+    const brackets = [];
+    for (const corner of ['tl', 'tr', 'bl', 'br']) {
+      const b = mk('div', 'crs-lock-bracket');
+      try { b.classList.add('crs-lock-' + corner); } catch (e) { /* ignore */ }
+      brackets.push(b);
+      node.append(b);
+    }
+    node.append(ring, tag);
+    return { node, ring, tag, brackets };
+  }
+  /* Where the frame is anchored this frame. quickdraw: the enemy rect. survival: the drone, until it freezes. */
+  function lockAnchor(lk) {
+    if (lk.onEnemy) {
+      const r = rectOf(lk.rec.el);
+      if (!r) return null;
+      return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height };
+    }
+    const p = state.player;
+    return { cx: p.x, cy: p.y, w: 0, h: 0 };
+  }
+  function placeLock(lk, k) {
+    const gap = lockGap(k);
+    const halfW = lk.w / 2 + gap, halfH = lk.h / 2 + gap;
+    const s = lk.node.style;
+    s.left = px(lk.cx - halfW); s.top = px(lk.cy - halfH);
+    s.width = px(2 * halfW); s.height = px(2 * halfH);
+    const color = lockColor(lk.phase);
+    for (const b of lk.brackets) { try { b.style.borderColor = color; } catch (e) { /* ignore */ } }
+    try { lk.ring.style.borderColor = color; } catch (e) { /* ignore */ } 
+  }
+  /* §10.4: a covered enemy cannot be shot, so its frame is dashed and says so — unless the weapon in hand can
+   * punch through cover, in which case it says THAT instead. The answer holds for the enemy whether the frame is
+   * drawn on it (quickdraw) or on the drone (survival): either way it tells you whether shooting is an option.
+   * isCovered() runs a real hit test, so it is sampled a few times a second rather than every frame, and always
+   * the moment the weapon changes — which is exactly when the answer can flip. */
+  function lockCoverTag(lk, t) {
+    const weapon = state.weapon;
+    if (lk.coverAt && weapon === lk.tagWeapon && (t || now()) - lk.coverAt < 100) return;
+    lk.coverAt = t || now();
+    lk.tagWeapon = weapon;
+    const covered = isCovered(lk.rec.el);
+    const want = covered ? (canPierceNow() ? msg('hintPierce') : msg('hintCovered')) : '';
+    if (lk.tagText !== want) { lk.tagText = want; try { lk.tag.textContent = want; } catch (e) { /* ignore */ } }
+    if (lk.coveredNow !== covered) {
+      lk.coveredNow = covered;
+      try { lk.node.classList.toggle('crs-lock-covered', covered); } catch (e) { /* ignore */ }
+    }
+  }
+  /* `forced` (debug.forceLock) always runs the canonical 3.0 s timeline: the §10.2 shortening is a balance rule
+   * for enemies the game picked, and a debug hook that silently ran 2.4 s on some elements and 3.0 s on others
+   * would make every timing inspection depend on where the element happened to sit in the stack. */
+  function startLock(rec, forced) {
+    if (!root || !state.active || !modeHasEnemies() || state.paused || state.ko) return null;
+    if (!rec || !rec.el || !rec.el.isConnected) return null;
+    if (rec.lock) return rec.lock;
+    if (!forced && now() < (rec.lockReadyAt || 0)) return null;
+    if (state.locks.length >= LOCK_MAX) return null;   // §2.2: three at a time, the oldest ones finish first
+    const parts = buildLock();
+    const lk = Object.assign({ id: ++state.lockSeq, rec, startedAt: now(), dur: forced ? LOCK_MS : lockDuration(rec), phase: 'warn',
+      onEnemy: modeLockOnEnemy(), frozen: false, cx: 0, cy: 0, w: 0, h: 0, beeped: '', done: false, forced: !!forced, coverAt: 0, tagWeapon: null,
+      hp0: hpOf(rec.el).hp, tagText: null, coveredNow: null }, parts);
+    const a = lockAnchor(lk);
+    if (!a) { try { parts.node.remove(); } catch (e) { /* ignore */ } return null; }
+    lk.cx = a.cx; lk.cy = a.cy; lk.w = a.w; lk.h = a.h;
+    rec.lock = lk;
+    rec.phase = 'lock';
+    state.locks.push(lk);
+    root.append(lk.node);
+    placeLock(lk, 0);
+    lockCoverTag(lk);
+    addAimLine(rec);         // v1.3 §3.2 still answers "which one, right now"
+    csfx('lockWarn');
+    kick();
+    return lk;
+  }
+  function removeLock(lk, keepRecover) {
+    const i = state.locks.indexOf(lk);
+    if (i >= 0) state.locks.splice(i, 1);
+    const rec = lk.rec;
+    if (rec && rec.lock === lk) {
+      rec.lock = null;
+      if (rec.phase === 'lock') rec.phase = 'idle';
+      dropAimLine(rec);
+      try { rec.aura.classList.remove('crs-lock-imminent'); } catch (e) { /* ignore */ }
+      if (keepRecover) rec.lockReadyAt = now() + LOCK_RECOVER_MS;
+    }
+    try { cancelAnimsOf(lk.node); lk.node.remove(); } catch (e) { /* ignore */ }
+  }
+  function clearLocks() { for (const lk of state.locks.slice()) removeLock(lk, false); }
+  function dropLock(rec) { if (rec && rec.lock) removeLock(rec.lock, false); }
+  /* §2.2: one point of damage is enough. The brackets snap OUTWARD (the opposite of closing) so the cancel
+   * reads as the frame being blown open, 차단! holds for a second, and the enemy cannot re-arm for 1.5 s. */
+  function breakLock(lk) {
+    if (lk.done) return;
+    lk.done = true;
+    const rec = lk.rec;
+    state.locksBroken++;
+    state.player.score += 15;
+    csfx('lockBreak');
+    try {
+      lk.tag.textContent = msg('lockBlocked');
+      lk.node.classList.add('crs-lock-broken');
+      if (!reducedMotion()) trackAnim(lk.node.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(1.5)', opacity: 0 }], { duration: 320, easing: 'ease-out', fill: 'forwards' }));
+    } catch (e) { /* ignore */ }
+    if (root && rec) {
+      const n = mk('div', 'crs-dmg');
+      n.style.left = px(lk.cx); n.style.top = px(lk.cy - 26);
+      n.style.font = '800 20px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      n.style.color = '#7ee787';
+      n.style.textShadow = '0 1px 3px rgba(0,0,0,.9)';
+      n.style.transform = 'translate(-50%, -50%)';
+      n.textContent = msg('lockBlocked');
+      root.append(n);
+      const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+      try { const a = trackAnim(n.animate([{ opacity: 1 }, { opacity: 1, offset: 0.7 }, { opacity: 0 }], { duration: 1000, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+      later(kill, 1200);
+    }
+    const r = rec;
+    later(() => { removeLock(lk, true); if (r && state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }, 320);
+    updatePlayerHud(); scheduleHud();
+  }
+  /* §2.3 — what failing costs, which is the whole difference between the two combat modes. */
+  function fireLock(lk) {
+    if (lk.done) return;
+    lk.done = true;
+    const rec = lk.rec;
+    csfx('lockFire');
+    if (lk.onEnemy) {
+      // quickdraw: no health to lose, so the enemy spends the shot UNDOING one of your kills (§3)
+      edgeFlash();
+      tryRepair(rec, true);
+    } else {
+      const p = state.player;
+      const d = Math.hypot(p.x - lk.cx, p.y - lk.cy);
+      if (d <= LOCK_HIT_R && now() >= state.invulUntil) {
+        damagePlayer(26 + Math.round(Math.sqrt(rec.area || 40000) / 70), { from: { x: lk.cx, y: lk.cy } });
+      } else {
+        state.nearMisses++;
+        selfGraze({ x: lk.cx, y: lk.cy });
+        sfx('whiff');
+      }
+    }
+    const r = rec;
+    removeLock(lk, false);
+    if (r) { r.lockReadyAt = now() + LOCK_RECOVER_MS; if (state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }
+  }
+  /* A 150 ms red rim at the edge of the screen: quickdraw has no health bar to flash, so the failure still has
+   * to land somewhere the player is looking. */
+  function edgeFlash() {
+    if (!root) return;
+    const n = mk('div', 'crs-vignette crs-vignette-edge');
+    root.append(n);
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+    try { const a = trackAnim(n.animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 150, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+    later(kill, 400);
+  }
+  /* The frame loop. Runs from tickFrame(), so it inherits the hitstop and stops with everything else. */
+  function stepLocks(t) {
+    for (const lk of state.locks.slice()) {
+      if (lk.done) continue;
+      const rec = lk.rec;
+      // the enemy went away (killed, restored, released, scrolled off) — the frame cannot outlive it
+      if (!rec || !rec.el || !rec.el.isConnected || state.hostiles.get(rec.el) !== rec) { removeLock(lk, false); continue; }
+      try { if (rec.el.hasAttribute('data-crs-broken')) { removeLock(lk, false); continue; } } catch (e) { removeLock(lk, false); continue; }
+      // §2.2 the break condition: ANY damage to this enemy, from any weapon, cancels the shot
+      const hp = hpOf(rec.el).hp;
+      if (hp < lk.hp0) { breakLock(lk); continue; }
+      const k = clamp((t - lk.startedAt) / lk.dur, 0, 1);
+      const phase = lockPhaseOf(k);
+      if (phase !== lk.phase) {
+        lk.phase = phase;
+        if (phase === 'close') csfx('lockClose');
+        else if (phase === 'imminent') { csfx('lockImminent'); try { rec.aura.classList.add('crs-lock-imminent'); } catch (e) { /* ignore */ } }
+      }
+      // survival: the frame follows the drone for the first third, then freezes — that freeze IS the dodge window
+      if (!lk.onEnemy && !lk.frozen && k >= LOCK_FOLLOW) lk.frozen = true;
+      if (lk.onEnemy || !lk.frozen) {
+        const a = lockAnchor(lk);
+        if (a) { lk.cx = a.cx; lk.cy = a.cy; lk.w = a.w; lk.h = a.h; }
+      }
+      placeLock(lk, k);
+      lockCoverTag(lk, t);
+      // 0.2 s blink through the imminent phase (held steady under reduced motion, where blinking is the problem)
+      try { lk.node.style.opacity = (phase === 'imminent' && !reducedMotion() && Math.floor((t - lk.startedAt) / 200) % 2) ? '0.45' : '1'; } catch (e) { /* ignore */ }
+      if (k >= 1) fireLock(lk);
+    }
+  }
+  /* §2.2 aim assist: a click anywhere inside a closing frame is a click on that enemy, not on whatever child
+   * element happens to be under the pointer. pickTarget() asks this before it returns. */
+  function lockAt(x, y) {
+    for (const lk of state.locks) {
+      if (lk.done || !lk.rec || !lk.rec.el || !lk.rec.el.isConnected) continue;
+      const r = rectOf(lk.node);
+      if (!r) continue;
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return lk;
+    }
+    return null;
+  }
+  debug.forceLock = (el) => {
+    if (!state.active || !modeHasEnemies() || state.paused || state.ko) return null;
+    bringIntoView(el);
+    const existing = state.hostiles.get(el) || null;
+    let rec = existing;
+    if (!rec) { const area = hostileArea(el); if (area == null) return null; rec = markHostile(el, area); }
+    if (!rec) return null;
+    untrack(rec.timer); rec.timer = 0;
+    clearPhase(rec);
+    const lk = startLock(rec, true);
+    if (!lk && !existing && state.hostiles.get(el) === rec) releaseHostile(el);
+    return lk ? lk.id : null;
+  };
+
+// ── 94-repair.js ──
+// ── v1.4 §3: enemies that REPAIR the page, and the destruction-ratio meter that makes it matter ──
+  /* Until now breaking something was permanent, so combat had no objective: you could ignore every enemy and
+   * still "win". Now each hostile periodically pulls one of your kills back — a cyan beam reaches from it to the
+   * nearest broken element, and 1.5 s later the debris flies back into place and the element is whole again.
+   * The destruction-ratio meter turns that into a number you are fighting over.
+   *
+   * Which pieces belong to the element being repaired is worked out geometrically, from where each piece SPAWNED
+   * (`ox + cx`, `oy + cy`) against the element's box. A hidden element keeps its layout box, so that box is still
+   * exactly the one the pieces came from, and no piece has to carry a back-reference. */
+
+  function repairIntervalOf(rec) {
+    const base = REPAIR_MS[rec && rec.tier] || REPAIR_MS.shooter;
+    const k = depthRepairMul(rec);
+    if (!k) return 0;                       // §10.2: `front` enemies attack, they do not repair
+    return base * k * difficultyMul();
+  }
+  function scheduleRepair(rec) {
+    untrack(rec.repairTimer); rec.repairTimer = 0;
+    if (!modeHasRepair() || debug.noRepair) return;
+    const ms = repairIntervalOf(rec);
+    if (!(ms > 0)) return;
+    rec.repairTimer = later(() => { rec.repairTimer = 0; tryRepair(rec, false); scheduleRepair(rec); }, ms);
+  }
+  function repairBusy(el) { for (const rp of state.repairs) if (rp.el === el) return true; return false; }
+  /* Nearest broken original within 600 px of the enemy centre; nothing in range means this turn is skipped. */
+  function repairCandidate(rec) {
+    const r = rectOf(rec.el);
+    if (!r) return null;
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    let best = null, bestD = Infinity;
+    /* A hammer that breaks a card often breaks a child first, so `state.broken` can hold both. Rebuilding the
+      * inner one would leave the card still gone — the outermost broken element is the one worth putting back. */
+    const nested = new Set();
+    for (const a of state.broken) {
+      for (const b of state.broken) {
+        if (a === b || !a.el || !b.el) continue;
+        try { if (a.el.contains(b.el)) nested.add(b.el); } catch (e) { /* ignore */ }
+      }
+    }
+    for (const b of state.broken) {
+      const el = b.el;
+      if (!el || !el.isConnected || el === rec.el || repairBusy(el) || nested.has(el)) continue;
+      const er = rectOf(el);
+      if (!er || er.width < 1 || er.height < 1) continue;
+      const d = Math.hypot(er.left + er.width / 2 - cx, er.top + er.height / 2 - cy);
+      if (d <= REPAIR_RANGE && d < bestD) { bestD = d; best = el; }
+    }
+    return best;
+  }
+  function placeRepairBeam(rp) {
+    const r = rectOf(rp.rec.el), er = rectOf(rp.el);
+    if (!r || !er) return;
+    const tx = er.left + er.width / 2, ty = er.top + er.height / 2;
+    const from = { x: clamp(tx, r.left, r.right), y: clamp(ty, r.top, r.bottom) };
+    const len = Math.hypot(tx - from.x, ty - from.y);
+    const ang = Math.atan2(ty - from.y, tx - from.x);
+    const s = rp.node.style;
+    s.left = px(from.x); s.top = px(from.y); s.width = px(len); s.height = '3px';
+    s.transform = 'translateY(-1.5px) rotate(' + ang.toFixed(4) + 'rad)';
+    rp.x1 = from.x; rp.y1 = from.y; rp.x2 = tx; rp.y2 = ty;
+    const g = rp.ghost.style;
+    g.left = px(er.left); g.top = px(er.top); g.width = px(er.width); g.height = px(er.height);
+  }
+  function tryRepair(rec, forced) {
+    if (!root || !state.active || !modeHasRepair() || state.paused) return null;
+    if (!forced && debug.noRepair) return null;
+    if (!rec || !rec.el || !rec.el.isConnected || state.hostiles.get(rec.el) !== rec) return null;
+    const el = repairCandidate(rec);
+    if (!el) return null;
+    const node = mk('div', 'crs-repair');
+    node.style.transformOrigin = '0 50%';
+    const ghost = mk('div', 'crs-repair-ghost');
+    root.append(node, ghost);
+    const rp = { rec, el, node, ghost, startedAt: now(), dur: REPAIR_BEAM_MS, delays: 0, timer: 0, done: false, x1: 0, y1: 0, x2: 0, y2: 0 };
+    state.repairs.push(rp);
+    placeRepairBeam(rp);
+    // §10.4: a back-rank enemy drops its blur while it works, so you can see who is undoing your kills
+    try { rec.aura.classList.add('crs-repairing'); } catch (e) { /* ignore */ }
+    try { trackAnim(node.animate([{ backgroundPosition: '0px 0px' }, { backgroundPosition: '20px 0px' }], { duration: 500, iterations: Infinity, easing: 'linear' })); } catch (e) { /* ignore */ }
+    csfx('repair');
+    armRepairTimer(rp);
+    kick();
+    return el;
+  }
+  function armRepairTimer(rp) {
+    untrack(rp.timer);
+    rp.timer = later(() => { rp.timer = 0; completeRepair(rp); }, Math.max(0, rp.startedAt + rp.dur - now()));
+  }
+  function removeRepair(rp) {
+    const i = state.repairs.indexOf(rp);
+    if (i >= 0) state.repairs.splice(i, 1);
+    untrack(rp.timer); rp.timer = 0;
+    try { if (rp.rec && rp.rec.aura && !state.repairs.some((o) => o.rec === rp.rec)) rp.rec.aura.classList.remove('crs-repairing'); } catch (e) { /* ignore */ }
+    try { cancelAnimsOf(rp.node); rp.node.remove(); } catch (e) { /* ignore */ }
+    try { cancelAnimsOf(rp.ghost); rp.ghost.remove(); } catch (e) { /* ignore */ }
+  }
+  function clearRepairs() { for (const rp of state.repairs.slice()) removeRepair(rp); }
+  function dropRepairsOf(rec) { for (const rp of state.repairs.slice()) if (rp.rec === rec) removeRepair(rp); }
+  /* §3.1: shooting the beam itself buys you 0.4 s, twice. It never absorbs the shot — the page is still hit. */
+  function delayRepair(rp) {
+    if (rp.done || rp.delays >= REPAIR_DELAY_MAX) return false;
+    rp.delays++;
+    rp.dur += REPAIR_DELAY_MS;
+    armRepairTimer(rp);
+    try { trackAnim(rp.node.animate([{ filter: 'brightness(2.4)' }, { filter: 'brightness(1)' }], { duration: 180, easing: 'ease-out' })); } catch (e) { /* ignore */ }
+    sfx('clack');
+    return true;
+  }
+  function hitRepairBeams(x, y, R) {
+    let n = 0;
+    for (const rp of state.repairs.slice()) {
+      const q = nearestOnSegment(rp.x1, rp.y1, rp.x2, rp.y2, x, y);
+      if (Math.hypot(q.x - x, q.y - y) <= R && delayRepair(rp)) n++;
+    }
+    return n;
+  }
+  function hitRepairBeamsWithin(x, y, R) { return hitRepairBeams(x, y, R); }
+  function hitRepairBeamsAlong(x1, y1, x2, y2, R) {
+    let n = 0;
+    for (const rp of state.repairs.slice()) {
+      const a = nearestOnSegment(x1, y1, x2, y2, rp.x1, rp.y1);
+      const b = nearestOnSegment(x1, y1, x2, y2, rp.x2, rp.y2);
+      const m = nearestOnSegment(x1, y1, x2, y2, (rp.x1 + rp.x2) / 2, (rp.y1 + rp.y2) / 2);
+      const d = Math.min(Math.hypot(a.x - rp.x1, a.y - rp.y1), Math.hypot(b.x - rp.x2, b.y - rp.y2), Math.hypot(m.x - (rp.x1 + rp.x2) / 2, m.y - (rp.y1 + rp.y2) / 2));
+      if (d <= R && delayRepair(rp)) n++;
+    }
+    return n;
+  }
+  function stepRepairs() { for (const rp of state.repairs) if (!rp.done) placeRepairBeam(rp); }
+
+  /* ---- putting ONE element back (the existing restore(), narrowed to a single target) ---- */
+  /* The piece flies back to where it spawned (translate 0 / rotate 0 in its own frame) over 600 ms and fades. */
+  function flyPieceHome(p) {
+    const node = p.node;
+    try { node.classList.remove('crs-debris', 'crs-chip'); node.classList.add('crs-fading'); } catch (e) { /* ignore */ }
+    const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } };
+    if (reducedMotion()) { kill(); return; }
+    try {
+      const a = trackAnim(node.animate([
+        { transform: 'translate(' + p.x.toFixed(2) + 'px, ' + p.y.toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)', opacity: 1 },
+        { transform: 'translate(0px, 0px) rotate(0deg)', opacity: 0 }
+      ], { duration: REPAIR_PIECE_MS, easing: 'ease-in-out', fill: 'forwards' }));
+      a.addEventListener('finish', kill); a.addEventListener('cancel', kill);
+    } catch (e) { kill(); return; }
+    later(kill, REPAIR_PIECE_MS + 200);
+  }
+  /* §9.3: if the debris already expired there is nothing to fly back, so the element itself fades in instead. */
+  function fadeInOriginal(el) {
+    if (reducedMotion()) return;
+    try { trackAnim(el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: REPAIR_FADE_IN_MS, easing: 'ease-out' })); } catch (e) { /* ignore */ }
+  }
+  function piecesOf(el) {
+    const r = rectOf(el);
+    const out = [];
+    if (!r || r.width < 1 || r.height < 1) return out;
+    for (const p of state.pieces) {
+      const sx = p.ox + p.cx, sy = p.oy + p.cy;
+      if (sx >= r.left - 2 && sx <= r.right + 2 && sy >= r.top - 2 && sy <= r.bottom + 2) out.push(p);
+    }
+    return out;
+  }
+  function restoreOne(el) {
+    let idx = -1;
+    for (let i = 0; i < state.broken.length; i++) { if (state.broken[i].el === el) { idx = i; break; } }
+    if (idx < 0) return false;
+    const brec = state.broken[idx];
+    state.broken.splice(idx, 1);
+    try { if (brec.mo) brec.mo.disconnect(); } catch (e) { /* ignore */ }
+    const mine = piecesOf(el);
+    for (const p of mine) {
+      const i = state.pieces.indexOf(p);
+      if (i >= 0) state.pieces.splice(i, 1);
+      state.gpuSum -= p.gpu;
+      cancelAnimsOf(p.node);
+      flyPieceHome(p);
+    }
+    for (const s of brec.saved) {
+      try { if (s.value) s.node.style.setProperty(s.prop, s.value, s.priority); else s.node.style.removeProperty(s.prop); } catch (e) { /* ignore */ }
+    }
+    try { el.removeAttribute('data-crs-broken'); } catch (e) { /* ignore */ }
+    const hrec = state.hp.get(el);
+    if (hrec) hrec.hp = hrec.max;   // §3.1 item 4: it comes back whole
+    if (!mine.length) fadeInOriginal(el);
+    return true;
+  }
+  function completeRepair(rp) {
+    if (rp.done) return;
+    rp.done = true;
+    const el = rp.el, rec = rp.rec;
+    removeRepair(rp);
+    // cancelled: the enemy died, was released, or the target is already whole again
+    if (!el || !el.isConnected || !state.active) return;
+    if (!rec || state.hostiles.get(rec.el) !== rec) return;
+    let broken = false;
+    try { broken = el.hasAttribute('data-crs-broken'); } catch (e) { broken = false; }
+    if (!broken) return;
+    if (!restoreOne(el)) return;
+    state.repaired++;
+    const max = (state.hp.get(el) || {}).max || hpMax(el);
+    state.player.score -= Math.round(max / 2);
+    csfx('repairDone');
+    syncRatioMeter(true);
+    updatePlayerHud(); scheduleHud(); refreshHover();
+    kick();
+  }
+
+  /* ---- §3.2 destruction-ratio meter ---- */
+  function destroyRatio() {
+    const vw = viewW(), vh = viewH();
+    let brokenArea = 0;
+    for (const b of state.broken) {
+      const el = b.el;
+      if (!el || !el.isConnected) continue;
+      const r = rectOf(el);
+      if (!r || r.width < 1 || r.height < 1) continue;
+      if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
+      brokenArea += r.width * r.height;
+    }
+    let liveArea = 0;
+    const cands = walkCandidates(vw / 2, vh / 2, { limit: 0.7 * vw * vh, minArea: 1200, descendCollected: false });
+    for (const c of cands) liveArea += c.area;
+    const total = brokenArea + liveArea;
+    return total > 0 ? clamp(brokenArea / total, 0, 1) : 0;
+  }
+  function updateRatioHud() {
+    const n = state.ratioNodes;
+    if (!n) return;
+    const on = !!(state.active && modeHasRatio());
+    try {
+      n.box.classList.toggle('on', on);
+      if (hudEls.fallback) n.box.style.display = on ? 'block' : 'none';
+      if (!on) return;
+      const pct = Math.round(state.ratio * 100);
+      n.label.textContent = msg('labelRatio') + ' ' + pct + '%' + (state.ratio >= RATIO_DOMINATE ? ' · ' + msg('labelDominating') : '');
+      n.fill.style.width = (state.ratio * 100).toFixed(1) + '%';
+      n.fill.style.background = state.ratio >= RATIO_DOMINATE ? '#ffd166' : '#e5484d';
+    } catch (e) { /* ignore */ }
+  }
+  /* `drop` animates the bar leftwards so a repair is impossible to miss (§3.2). */
+  function syncRatioMeter(drop) {
+    if (!modeHasRatio()) { clearRatioMeter(); return; }
+    const before = state.ratio;
+    state.ratio = destroyRatio();
+    state.ratioDirty = false; state.ratioAt = now(); state.ratioBrokenN = state.broken.length;
+    if (drop && state.ratioNodes && state.ratio < before - 0.002 && !reducedMotion()) {
+      try { trackAnim(state.ratioNodes.fill.animate([{ width: (before * 100).toFixed(1) + '%' }, { width: (state.ratio * 100).toFixed(1) + '%' }], { duration: RATIO_DROP_MS, easing: 'ease-out' })); } catch (e) { /* ignore */ }
+    }
+    updateRatioHud();
+    armRatioTick();
+  }
+  function ratioTick() {
+    state.ratioTimer = 0;
+    if (!state.active || !modeHasRatio()) return;
+    state.ratio = destroyRatio();
+    state.ratioDirty = false; state.ratioAt = now(); state.ratioBrokenN = state.broken.length;
+    updateRatioHud();
+    state.ratioTimer = later(ratioTick, RATIO_REFRESH_MS);
+  }
+  /* The HUD bar is happy on a 2 s clock (§3.2), but a reader of stats() asking right after a break must not get
+   * the number from before it. Recompute on demand when something has changed since the last measurement. */
+  /* Throttled, because stats() can be read many times a second and destroyRatio() walks the page. The one case
+   * that must never be stale is the one every caller actually asks about — something was broken or put back —
+   * so a change in the broken count always forces a fresh measurement, whatever the throttle says. */
+  const RATIO_MIN_GAP = 250;
+  function ratioNow() {
+    if (!modeHasRatio()) return 0;
+    const changed = state.broken.length !== state.ratioBrokenN;
+    if (changed || (state.ratioDirty && now() - state.ratioAt >= RATIO_MIN_GAP) || now() - state.ratioAt > RATIO_REFRESH_MS) {
+      state.ratio = destroyRatio();
+      state.ratioDirty = false; state.ratioAt = now(); state.ratioBrokenN = state.broken.length;
+    }
+    return state.ratio;
+  }
+  function armRatioTick() {
+    if (state.ratioTimer || !state.active || !modeHasRatio()) return;
+    state.ratioTimer = later(ratioTick, RATIO_REFRESH_MS);
+  }
+  function clearRatioMeter() {
+    untrack(state.ratioTimer); state.ratioTimer = 0;
+    state.ratio = 0;
+    updateRatioHud();
+  }
+  debug.noRepair = false;
+  debug.forceRepair = (el) => {
+    const rec = state.hostiles.get(el);
+    if (!rec) return null;
+    return tryRepair(rec, true);
+  };
+  debug.depthOf = (el) => depthOf(el);
 
 // ── 95-events.js ──
   /* ===================================================================== */
@@ -4863,9 +6383,13 @@
     sc.rmb = false; sc.shiftDown = false; sc.shiftWant = false;
     untrack(sc.shiftTimer); sc.shiftTimer = 0;
   }
+  /* v1.4 §1.2: once a drone exists the mouse stops BEING the player and only aims. state.player.x/y is the
+   * drone's centre from then on — which is the whole point of the split — so the pointer must not write it. */
   function trackPlayer(e) {
     if (typeof e.clientX !== 'number') return;
-    state.player.x = e.clientX; state.player.y = e.clientY; state.player.inWindow = true;
+    state.player.inWindow = true;
+    if (state.avatar) return;
+    state.player.x = e.clientX; state.player.y = e.clientY;
   }
   function onSwallow(e) {
     if (!state.active) return;
@@ -4897,10 +6421,23 @@
       if (e.type === 'pointerup') resolveSlash(e.clientX, e.clientY); else resolveSlash();
     }
   }
-  function onWindowBlur() { stopHold(); cancelSlash(); resetChord(); scopeOff(); pauseCombat(); }
+  /* ── v1.4 §1.2: WASD / arrows drive the drone, Space dashes ──
+   * Claimed ONLY while a drone exists (survival) and never while a form field has focus, so in rampage and
+   * quickdraw — and in any text box anywhere — these keys still belong to the page, exactly as §7.13 requires. */
+  function moveDirOf(c, k) {
+    if (c === 'KeyW' || k === 'w' || k === 'W' || c === 'ArrowUp' || k === 'ArrowUp') return 'up';
+    if (c === 'KeyS' || k === 's' || k === 'S' || c === 'ArrowDown' || k === 'ArrowDown') return 'down';
+    if (c === 'KeyA' || k === 'a' || k === 'A' || c === 'ArrowLeft' || k === 'ArrowLeft') return 'left';
+    if (c === 'KeyD' || k === 'd' || k === 'D' || c === 'ArrowRight' || k === 'ArrowRight') return 'right';
+    return null;
+  }
+  function isSpaceKey(c, k) { return c === 'Space' || k === ' ' || k === 'Spacebar'; }
+  function releaseKeys() { state.keys.up = state.keys.down = state.keys.left = state.keys.right = false; }
+  function onWindowBlur() { stopHold(); cancelSlash(); resetChord(); scopeOff(); releaseKeys(); pauseCombat(); }
   function onWindowFocus() { resumeCombat(); }
+  function onMotionPref() { if (state.avatar) avatarWobble(state.avatar); }
   function onVisibility() {
-    if (doc.visibilityState === 'hidden') { stopHold(); cancelSlash(); resetChord(); scopeOff(); pauseCombat(); }
+    if (doc.visibilityState === 'hidden') { stopHold(); cancelSlash(); resetChord(); scopeOff(); releaseKeys(); pauseCombat(); }
     else resumeCombat();
   }
   function onPointerLeave(e) { if (state.active && e.relatedTarget == null) state.player.inWindow = false; }
@@ -4931,7 +6468,10 @@
   }
   function isShiftKey(e) { return e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift'; }
   function onKeyUp(e) {
-    if (!state.active || !isShiftKey(e)) return;
+    if (!state.active) return;
+    const dir = moveDirOf(e.code, e.key);   // v1.4: released whatever the mode, so a mode switch cannot strand a key
+    if (dir && state.keys[dir]) state.keys[dir] = false;
+    if (!isShiftKey(e)) return;
     const sc = state.scope;
     sc.shiftDown = false; sc.shiftWant = false;
     untrack(sc.shiftTimer); sc.shiftTimer = 0;
@@ -4964,12 +6504,15 @@
         else if (c === 'KeyM' || k === 'm' || k === 'M') action = 'mute';
         else if (c === 'KeyH' || k === 'h' || k === 'H') action = 'combat';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
+        else if (modeHasAvatar() && isSpaceKey(c, k)) action = 'dash';          // v1.4 §1.2
+        else if (modeHasAvatar() && moveDirOf(c, k)) { action = 'move'; arg = moveDirOf(c, k); }
       }
     }
     if (!action) return;
     handledKeys.add(e);
     try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
-    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart')) return;
+    if (action === 'move') { state.keys[arg] = true; kick(); return; }   // v1.4: a held key is simply a held key
+    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash')) return;
     if (action === 'escape') {   // layered (A2): scope-out if scoped, else exit (stops holds and the KO screen)
       if (state.scoped) { scopeOff(); return; }
       stopHold(); cancelSlash(); deactivate();
@@ -4982,8 +6525,9 @@
     else if (action === 'reload') reloadNow();
     else if (action === 'restore') restore();
     else if (action === 'mute') setMuted(!state.muted);
-    else if (action === 'combat') setCombat(!state.combat);
+    else if (action === 'combat') cycleMode();   // v1.4 §0.5: H cycles rampage → quickdraw → survival
     else if (action === 'restart') restartFromKo();
+    else if (action === 'dash') startDash();
   }
   function onWheel(e) {
     if (!state.active) return;
@@ -5037,6 +6581,8 @@
     listen(doc, 'visibilitychange', onVisibility);
     listen(docEl, 'pointerleave', onPointerLeave);             // v1.2 A7: pointer outside the window
     listen(docEl, 'pointerenter', onPointerEnter);
+    // v1.4: a parked drone arms no frames, so the reduced-motion preference has to come to US
+    try { const mq = win.matchMedia('(prefers-reduced-motion: reduce)'); if (mq && mq.addEventListener) listen(mq, 'change', onMotionPref); } catch (e) { /* ignore */ }
   }
   function unbindEvents() {
     for (const [t, type, fn, opts] of state.listeners) { try { t.removeEventListener(type, fn, opts); } catch (e) { /* ignore */ } }
@@ -5055,7 +6601,11 @@
     state.timers.clear();
     state.comboTimer = 0; state.lastHitTimer = 0; state.swingTimer = 0;
     state.combatTimer = 0; state.clockTimer = 0; state.regenTimer = 0; state.toastTimer = 0; state.swapTimer = 0; state.scope.shiftTimer = 0;
-    for (const rec of state.hostiles.values()) rec.timer = 0;
+    // ── v1.4: the depth refresh, the ratio refresh, the debris sweep and every per-enemy repair timer ──
+    state.depthTimer = 0; state.ratioTimer = 0; state.debrisTimer = 0;
+    for (const rec of state.hostiles.values()) { rec.timer = 0; rec.repairTimer = 0; }
+    for (const rp of state.repairs) rp.timer = 0;
+    for (const lk of state.locks) lk.timer = 0;
     if (state.reload) { state.reload.timer = 0; state.reload.magTimer = 0; state.reload = null; }
   }
   function cancelAnims() {
@@ -5080,13 +6630,14 @@
     state.rafId = 0; state.animating = false; state.tickErrors = 0;
     clearCombatNodes();   // hostiles / orbs / beams / warn rings / aim lines (no kills, no score) — v1.2 A8
     clearSelf(); clearLowVignette();   // v1.3 §3: the player marker and the low-HP vignette are rebuilt by updatePlayerHud()
+    clearAvatar(); clearHelp();        // ── v1.4 §1: the drone and its one-time control card ──
     cancelAnims();
     // debris + fx nodes
     for (const p of state.pieces) { try { p.node.remove(); } catch (e) { /* ignore */ } }
     state.pieces.length = 0; state.gpuSum = 0;
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce, .crs-lock, .crs-repair, .crs-repair-ghost, .crs-avatar, .crs-avatar-ghost, .crs-help'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -5106,6 +6657,11 @@
     // v1.2: magazines refilled, player reset, KO / toast hidden
     initAmmo(); state.swapUntil = 0; state.lastEmptyAt = 0; state.lastShot = null;
     state.nearMisses = 0; state.nearShown.length = 0; state.hitstopUntil = 0; state.hpRatio = 1;
+    // ── v1.4: locks, repairs and the ratio meter all reset with the page ──
+    state.locks.length = 0; state.repairs.length = 0; state.locksBroken = 0; state.repaired = 0; state.ratio = 0;
+    state.ratioDirty = true; state.ratioAt = 0; state.bossMode = false;
+    state.dashUntil = 0; state.dashReadyAt = 0; state.invulUntil = 0; state.dashVx = 0; state.dashVy = 0;
+    state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
     resetPlayer(); hideKo(); hideToast();
     clearCanvas();
     try { if (docEl.classList.contains('crs-swing')) docEl.classList.remove('crs-swing'); } catch (e) { /* ignore */ }
@@ -5113,6 +6669,7 @@
     updateHud();
     updateAmmoHud();
     updatePlayerHud();
+    updateModeHud(); updateRatioHud();   // ── v1.4 ──
     refreshHover();
     armCombat();   // END: the grace restarts while active with combat on (A8)
   }
@@ -5150,7 +6707,9 @@
     safe(() => chrome.storage.sync.set({ crsMuted: state.muted }));
   }
   function loadPrefs() {
-    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat']), (res) => {
+    // ── v1.4 §5: crsSeenCombatHelp is a LOCAL flag (the control card is shown once per machine, not synced) ──
+    safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
+    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife']), (res) => {
       if (!res || !state.active) return;
       if (!state.loadoutTouched && isPermutation(res.crsLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
@@ -5163,10 +6722,18 @@
       }
       if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
       if (typeof res.crsMuted === 'boolean') state.muted = res.crsMuted;
-      if (!state.combatTouched && typeof res.crsCombat === 'boolean' && res.crsCombat !== state.combat) setCombat(res.crsCombat, { silent: true });
+      /* ── v1.4 §0.5 ──
+       * `crsMode` is the real setting now. A stored v1.3 `crsCombat: true` migrates to QUICKDRAW, not survival:
+       * it came from someone who only ever played with the cursor, and quickdraw is the mode that keeps the
+       * cursor as the player. (`crsMode` here is the combat mode; the legacy weapon alias is `crsWeapon`.) */
+      if (!state.combatTouched) { const m = modeFromPrefs(res); if (m && m !== state.mode) setPlayMode(m, { silent: true }); }
+      // §9.2: crsDebrisLifeMs is the setting; crsDebrisLife is read too so an early build's key still loads
+      const dl = (typeof res.crsDebrisLifeMs === 'number') ? res.crsDebrisLifeMs : res.crsDebrisLife;
+      if (typeof dl === 'number' && dl >= 0) state.debrisLifeMs = dl;
       updateHud();
       updateAmmoHud();
       updatePlayerHud();
+      updateModeHud(); updateRatioHud();
     });
   }
   function sweepLeftovers() {
@@ -5234,6 +6801,11 @@
     state.paused = false; state.ko = false; state.scope.rmb = false; state.scope.shiftDown = false; state.scope.shiftWant = false;
     state.hostiles.clear(); state.orbs.length = 0; state.beams.length = 0; state.warns.length = 0;
     state.self = null; state.lowVig = null; state.aimlines.length = 0; state.hitstopUntil = 0;
+    // ── v1.4: drone, locks, repair beams, the ratio meter and the control card are all gone with the hosts ──
+    state.avatar = null; state.help = null; state.ratioNodes = null;
+    state.locks.length = 0; state.repairs.length = 0; state.ratio = 0;
+    state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
+    state.dashUntil = 0; state.invulUntil = 0; state.depthTimer = 0; state.ratioTimer = 0; state.debrisTimer = 0;
     if (wasActive) sendState(false);
   }
   function toggle() {
@@ -5243,7 +6815,7 @@
   function stats() {
     const id = state.weapon;
     return {
-      active: state.active, weapon: state.weapon, mode: state.weapon,
+      active: state.active, weapon: state.weapon,
       cracks: state.cracks, debris: debrisCount(), broken: state.broken.length,
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
@@ -5261,7 +6833,16 @@
       selfRing: selfRingInfo(), aimlines: state.aimlines.length, nearMisses: state.nearMisses,
       hitstop: now() < state.hitstopUntil,
       // ── v1.5 §4: the live aim cone and what the viewmodel is doing ──
-      spreadNow: spreadNow(id), bloomNow: bloomNow(now()), viewmodel: viewmodelPhase()
+      spreadNow: spreadNow(id), bloomNow: bloomNow(now()), viewmodel: viewmodelPhase(),
+      /* ── v1.4 §5 / §10.5 ──
+       * `mode` is the combat mode from here on (rampage | quickdraw | survival). The v1 alias that used to sit
+       * on this key — the weapon id — is still readable as stats().weapon and as api.mode / api.setMode. */
+      mode: state.mode, weaponMode: state.weapon,
+      locks: state.locks.length, locksBroken: state.locksBroken,
+      repairs: state.repairs.length, repaired: state.repaired,
+      destroyRatio: ratioNow(), hostilesByTier: hostilesByTier(),
+      avatar: state.avatar ? avatarInfo() : null, debrisLifeMs: state.debrisLifeMs,
+      dashReadyAt: dashReadyWallClock()
     };
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
@@ -5304,7 +6885,21 @@
     scope: (on) => { if (on) scopeOn(); else scopeOff(); return state.scoped; },
     player: playerInfo, setCombat: (v) => setCombat(v),
     // ── v1.5: the weapon picture (§1) and the two switches that have no options page yet (§1 / §2) ──
-    weaponArt: (id, size) => weaponArt(id, size), options: weaponOptions, setOption: setWeaponOption
+    weaponArt: (id, size) => weaponArt(id, size), options: weaponOptions, setOption: setWeaponOption,
+    // ── v1.4 §0.5 / §9.2: the mode setting and the debris lifetime ──
+    // (api.mode / api.setMode stay the v1 WEAPON alias; the combat mode has its own pair.)
+    get combatMode() { return state.mode; },
+    setCombatMode: (id) => setPlayMode(id),
+    cycleMode,
+    setDebrisLife: (ms) => {
+      ms = +ms;
+      if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;
+      state.debrisLifeMs = ms;
+      for (const p of state.pieces) if (p.resting) p.expireAt = ms > 0 ? now() + ms + rand(-DEBRIS_JITTER, DEBRIS_JITTER) : 0;
+      scheduleDebrisSweep();
+      safe(() => chrome.storage.sync.set({ crsDebrisLifeMs: ms, crsDebrisLife: ms }));
+      return state.debrisLifeMs;
+    }
   };
   window.__crashScreen = api;
   try {

@@ -184,3 +184,74 @@ footer { padding: 20px; color: #6a7389; font-size: 13px; border-top: 1px solid #
 .pierce-card h3, .pierce-card p { pointer-events: none; }
 .pierce-card-back { left: 0; top: 0; background: #eef7f0; }
 .pierce-card-front { left: 60px; top: 60px; background: #fff; }
+
+/* v1.4: depth-of-stack test fixture (SPEC-combat-v2 §10.6). Six layers share the exact same rect
+   (260 × 170 ≈ 44 200 px², inside the T1 40 000–150 000 hostile window), telling apart only by z-index:
+   depth-front (z6, nothing above it → depth 0 → tier "front") sits over depth-mid (z5, exactly one layer
+   above it → depth 1 → tier "mid"), which sits over three plain occluders (z4..z2) and finally depth-back
+   (z1, five layers above it → depth ≥ 3 → tier "back"). depth-mid-child is a plain inline child used to
+   check that an element's own ancestor (its parent, coincident at the same point) is excluded from its
+   depth count rather than miscounted as "a layer in front of it". */
+.depth-lab { position: relative; height: 200px; margin-bottom: 28px; }
+.depth-card, .depth-occ {
+  position: absolute;
+  left: 20px;
+  top: 0;
+  width: 260px;
+  height: 170px;
+  border-radius: 10px;
+}
+.depth-card { display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: #1f2430; text-align: center; }
+.depth-z6 { z-index: 6; }
+.depth-z5 { z-index: 5; }
+.depth-z4 { z-index: 4; }
+.depth-z3 { z-index: 3; }
+.depth-z2 { z-index: 2; }
+.depth-z1 { z-index: 1; }
+#depth-front { background: #cdeccb; border: 1px solid #8fcf8a; }
+#depth-mid { background: #cfe3ff; border: 1px solid #8fb6ea; }
+#depth-occ-a { background: #ffe9b8; }
+#depth-occ-b { background: #ffd8d8; }
+#depth-occ-c { background: #e6d8ff; }
+#depth-back { background: #fff0cf; border: 1px solid #e3b341; }
+#depth-mid-child { font-weight: 400; font-size: 12px; color: #4a5368; }
+
+/* v1.4: repair fodder within 600 px of the depth-lab fixture (§7.7 / §10.6.7) — small (~7 200 px², hp ≈ 50,
+   well under the T1 40 000 px² floor so it is never itself auto-selected as a hostile). */
+.depth-fodder {
+  margin-top: 16px;
+  width: 120px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef3ff;
+  border: 1px solid #c9d6f0;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #2f4a7a;
+}
+
+/* v1.4 (§10.6.5): a second overlapping pair sized well above any single weapon's damage (hp ≈ 298, vs. the
+   sniper's 200 and its 60 %-pierced 120), so a hit's damage amount is readable without either side being
+   clamped at 0 the way the ~94 hp depth-lab cards would be. Not part of the T1/T2/T3 depth-lab tier stack —
+   this pair exists purely to compare two damage NUMBERS, never forced into combat. */
+.depth-tank-lab { position: relative; height: 700px; margin-top: 16px; }
+.depth-tank {
+  position: absolute;
+  left: 20px;
+  top: 0;
+  width: 900px;
+  height: 700px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2430;
+}
+.depth-tank-z2 { z-index: 2; }
+.depth-tank-z1 { z-index: 1; }
+#depth-tank-front { background: #e4f3ec; border: 1px solid #8fcf8a; }
+#depth-tank-back { background: #fdf0df; border: 1px solid #e3b341; }

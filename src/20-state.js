@@ -21,13 +21,34 @@
     loadout: PRESETS.default.slice(), preset: 'default', loadoutTouched: false,
     // v1.2: scope (A2–A4)
     scoped: false, scope: { node: null, reticle: null, lines: [], cx: 0, cy: 0, startedAt: 0, recoilAt: 0, magnified: false, saved: null, rmb: false, shiftDown: false, shiftWant: false, shiftTimer: 0, hot: false },
-    // v1.2: combat (A7–A10)
-    combat: true, combatTouched: false, combatTimer: 0, clockTimer: 0, regenTimer: 0, toastTimer: 0, auraRaf: 0,
+    // v1.2: combat (A7–A10) — v1.4 §0.5: the `combat` BOOLEAN is now derived from `mode` (see below)
+    combatTouched: false, combatTimer: 0, clockTimer: 0, regenTimer: 0, toastTimer: 0, auraRaf: 0,
     hostiles: new Map(), orbs: [], beams: [], warns: [], paused: false, ko: false, graceUntil: 0,
     // v1.3: player marker / aim lines / near-miss / hitstop (§3)
     self: null, aimlines: [], nearMisses: 0, nearShown: [], hitstopUntil: 0, lowVig: null, hpRatio: 1,
-    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null }
+    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null },
+    // ── v1.4 §0.5: three modes (rampage · quickdraw · survival) replace the combat boolean ──
+    mode: 'rampage', lastCombatMode: 'survival',
+    // §1 drone avatar (survival only): keys held, physics, dash window, afterimages
+    avatar: null, keys: { up: false, down: false, left: false, right: false },
+    dashUntil: 0, dashReadyAt: 0, invulUntil: 0, help: null, seenHelp: false,
+    // §2 Virtua-Cop lock-ons, §3 repair beams + destruction-ratio meter
+    locks: [], lockSeq: 0, locksBroken: 0,
+    repairs: [], repaired: 0, ratio: 0, ratioTimer: 0, ratioNodes: null,
+    // §9 debris lifetime (0 = keep until the cap evicts, as before)
+    debrisLifeMs: 6000, debrisTimer: 0,
+    // §10 depth tiers, §4 boss stages, §3.2 ratio freshness
+    depthTimer: 0, bossMode: false, ratioDirty: true, ratioAt: 0, ratioBrokenN: -1
   };
+  /* §0.5: every v1.2/v1.3 call site reads `state.combat` as "are enemies live?". It stays exactly that, derived
+   * from the mode, so none of that code had to change. The setter keeps the legacy boolean writable: true picks
+   * the last combat mode the player actually used (survival unless they chose quickdraw), false is rampage. */
+  Object.defineProperty(state, 'combat', {
+    configurable: true,
+    enumerable: false,
+    get() { return state.mode !== 'rampage'; },
+    set(v) { state.mode = v ? (state.lastCombatMode || 'survival') : 'rampage'; }
+  });
   const handledEvents = new WeakSet();
   const handledKeys = new WeakSet();
 

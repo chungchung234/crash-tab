@@ -55,5 +55,21 @@
   "labelSwapping": {"message": "Swapping", "description": "Ammo HUD text during the weapon swap delay"},
   "dodgeLabel": {"message": "Dodge!", "description": "Near-miss call-out next to the player ring"},
   "statCrit": {"message": "Crit", "description": "Weapon tooltip: critical-hit chance label"},
-  "statSwap": {"message": "Swap", "description": "Weapon tooltip: swap (draw) time label"}
+  "statSwap": {"message": "Swap", "description": "Weapon tooltip: swap (draw) time label"},
+  "modeRampage": {"message": "Rampage", "description": "Mode name: rampage (no enemies)"},
+  "modeQuickdraw": {"message": "Quickdraw", "description": "Mode name: quickdraw (shoot the lock-on)"},
+  "modeSurvival": {"message": "Survival", "description": "Mode name: survival (fly the drone and dodge)"},
+  "modeRampageDesc": {"message": "No enemies, just smash", "description": "One-line description of the rampage mode"},
+  "modeQuickdrawDesc": {"message": "Shoot before they lock on", "description": "One-line description of the quickdraw mode"},
+  "modeSurvivalDesc": {"message": "Fly, dodge, survive", "description": "One-line description of the survival mode"},
+  "lockBlocked": {"message": "Blocked!", "description": "Call-out when a lock-on is cancelled by damaging the enemy"},
+  "labelRatio": {"message": "Destroyed", "description": "Destruction-ratio meter label"},
+  "labelDominating": {"message": "Dominating!", "description": "Shown on the destruction-ratio meter at 80% or more"},
+  "hintCovered": {"message": "Covered", "description": "Lock-on frame tag: this enemy is behind cover and cannot be shot"},
+  "hintPierce": {"message": "Can pierce", "description": "Lock-on frame tag: the weapon in hand can shoot through the cover"},
+  "hintEnemyBehind": {"message": "Enemy behind", "description": "Target box tag: N hostile elements are hidden behind this one"},
+  "helpMove": {"message": "Move", "description": "Control card: WASD move"},
+  "helpDash": {"message": "Dash", "description": "Control card: Space dash"},
+  "helpAim": {"message": "Aim with the mouse", "description": "Control card: aim with the mouse"},
+  "setDebrisLife": {"message": "Debris lifetime", "description": "Setting label: how long debris stays before it fades"}
 }

@@ -34,9 +34,13 @@
     sc.rmb = false; sc.shiftDown = false; sc.shiftWant = false;
     untrack(sc.shiftTimer); sc.shiftTimer = 0;
   }
+  /* v1.4 §1.2: once a drone exists the mouse stops BEING the player and only aims. state.player.x/y is the
+   * drone's centre from then on — which is the whole point of the split — so the pointer must not write it. */
   function trackPlayer(e) {
     if (typeof e.clientX !== 'number') return;
-    state.player.x = e.clientX; state.player.y = e.clientY; state.player.inWindow = true;
+    state.player.inWindow = true;
+    if (state.avatar) return;
+    state.player.x = e.clientX; state.player.y = e.clientY;
   }
   function onSwallow(e) {
     if (!state.active) return;
@@ -68,10 +72,23 @@
       if (e.type === 'pointerup') resolveSlash(e.clientX, e.clientY); else resolveSlash();
     }
   }
-  function onWindowBlur() { stopHold(); cancelSlash(); resetChord(); scopeOff(); pauseCombat(); }
+  /* ── v1.4 §1.2: WASD / arrows drive the drone, Space dashes ──
+   * Claimed ONLY while a drone exists (survival) and never while a form field has focus, so in rampage and
+   * quickdraw — and in any text box anywhere — these keys still belong to the page, exactly as §7.13 requires. */
+  function moveDirOf(c, k) {
+    if (c === 'KeyW' || k === 'w' || k === 'W' || c === 'ArrowUp' || k === 'ArrowUp') return 'up';
+    if (c === 'KeyS' || k === 's' || k === 'S' || c === 'ArrowDown' || k === 'ArrowDown') return 'down';
+    if (c === 'KeyA' || k === 'a' || k === 'A' || c === 'ArrowLeft' || k === 'ArrowLeft') return 'left';
+    if (c === 'KeyD' || k === 'd' || k === 'D' || c === 'ArrowRight' || k === 'ArrowRight') return 'right';
+    return null;
+  }
+  function isSpaceKey(c, k) { return c === 'Space' || k === ' ' || k === 'Spacebar'; }
+  function releaseKeys() { state.keys.up = state.keys.down = state.keys.left = state.keys.right = false; }
+  function onWindowBlur() { stopHold(); cancelSlash(); resetChord(); scopeOff(); releaseKeys(); pauseCombat(); }
   function onWindowFocus() { resumeCombat(); }
+  function onMotionPref() { if (state.avatar) avatarWobble(state.avatar); }
   function onVisibility() {
-    if (doc.visibilityState === 'hidden') { stopHold(); cancelSlash(); resetChord(); scopeOff(); pauseCombat(); }
+    if (doc.visibilityState === 'hidden') { stopHold(); cancelSlash(); resetChord(); scopeOff(); releaseKeys(); pauseCombat(); }
     else resumeCombat();
   }
   function onPointerLeave(e) { if (state.active && e.relatedTarget == null) state.player.inWindow = false; }
@@ -102,7 +119,10 @@
   }
   function isShiftKey(e) { return e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.key === 'Shift'; }
   function onKeyUp(e) {
-    if (!state.active || !isShiftKey(e)) return;
+    if (!state.active) return;
+    const dir = moveDirOf(e.code, e.key);   // v1.4: released whatever the mode, so a mode switch cannot strand a key
+    if (dir && state.keys[dir]) state.keys[dir] = false;
+    if (!isShiftKey(e)) return;
     const sc = state.scope;
     sc.shiftDown = false; sc.shiftWant = false;
     untrack(sc.shiftTimer); sc.shiftTimer = 0;
@@ -135,12 +155,15 @@
         else if (c === 'KeyM' || k === 'm' || k === 'M') action = 'mute';
         else if (c === 'KeyH' || k === 'h' || k === 'H') action = 'combat';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
+        else if (modeHasAvatar() && isSpaceKey(c, k)) action = 'dash';          // v1.4 §1.2
+        else if (modeHasAvatar() && moveDirOf(c, k)) { action = 'move'; arg = moveDirOf(c, k); }
       }
     }
     if (!action) return;
     handledKeys.add(e);
     try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
-    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart')) return;
+    if (action === 'move') { state.keys[arg] = true; kick(); return; }   // v1.4: a held key is simply a held key
+    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash')) return;
     if (action === 'escape') {   // layered (A2): scope-out if scoped, else exit (stops holds and the KO screen)
       if (state.scoped) { scopeOff(); return; }
       stopHold(); cancelSlash(); deactivate();
@@ -153,8 +176,9 @@
     else if (action === 'reload') reloadNow();
     else if (action === 'restore') restore();
     else if (action === 'mute') setMuted(!state.muted);
-    else if (action === 'combat') setCombat(!state.combat);
+    else if (action === 'combat') cycleMode();   // v1.4 §0.5: H cycles rampage → quickdraw → survival
     else if (action === 'restart') restartFromKo();
+    else if (action === 'dash') startDash();
   }
   function onWheel(e) {
     if (!state.active) return;
@@ -208,6 +232,8 @@
     listen(doc, 'visibilitychange', onVisibility);
     listen(docEl, 'pointerleave', onPointerLeave);             // v1.2 A7: pointer outside the window
     listen(docEl, 'pointerenter', onPointerEnter);
+    // v1.4: a parked drone arms no frames, so the reduced-motion preference has to come to US
+    try { const mq = win.matchMedia('(prefers-reduced-motion: reduce)'); if (mq && mq.addEventListener) listen(mq, 'change', onMotionPref); } catch (e) { /* ignore */ }
   }
   function unbindEvents() {
     for (const [t, type, fn, opts] of state.listeners) { try { t.removeEventListener(type, fn, opts); } catch (e) { /* ignore */ } }
