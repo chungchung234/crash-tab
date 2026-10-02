@@ -1,8 +1,10 @@
   /* ===================================================================== */
   /* 1. State                                                               */
+  /*    v1.3: state.power / powerTouched removed (§1); the player marker,     */
+  /*    aim lines, near misses, hitstop and the low-HP vignette added (§3).   */
   /* ===================================================================== */
   const state = {
-    active: false, weapon: 'hammer', power: 1, muted: false, weaponTouched: false, powerTouched: false,
+    active: false, weapon: 'hammer', muted: false, weaponTouched: false,
     cracks: 0, crackInk: 0, broken: [], pieces: [], hp: new WeakMap(),
     anims: new Set(), timers: new Set(), listeners: [],
     rafId: 0, moveRaf: 0, resizeRaf: 0, hudRaf: 0, animating: false, lastT: 0, tickErrors: 0,
@@ -22,7 +24,9 @@
     // v1.2: combat (A7–A10)
     combat: true, combatTouched: false, combatTimer: 0, clockTimer: 0, regenTimer: 0, toastTimer: 0, auraRaf: 0,
     hostiles: new Map(), orbs: [], beams: [], warns: [], paused: false, ko: false, graceUntil: 0,
-    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true }
+    // v1.3: player marker / aim lines / near-miss / hitstop (§3)
+    self: null, aimlines: [], nearMisses: 0, nearShown: [], hitstopUntil: 0, lowVig: null, hpRatio: 1,
+    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null }
   };
   const handledEvents = new WeakSet();
   const handledKeys = new WeakSet();

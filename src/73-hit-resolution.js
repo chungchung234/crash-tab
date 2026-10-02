@@ -1,4 +1,4 @@
-// ── hit resolution: floating damage numbers, hit tint, hold-window aggregation, applyHit, bullet chips, AoE candidates/falloff ──
+// ── hit resolution: floating damage numbers (v1.3 §3.5: opts.size), hit tint, hold-window aggregation, applyHit, bullet chips, AoE candidates/falloff ──
   /* --- cooldown (A3): one global timestamp, set only when an attack actually happened --- */
   function onCooldown() { return !debug.noCooldown && now() < state.cooldownUntil; }
   function startCooldown(id, ms) {
@@ -15,14 +15,15 @@
 
   /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, cap 40 --- */
   function dmgText(n, dmg, crit, tag) { n.textContent = (tag ? tag + ' ' : '') + '-' + dmg + (crit ? '!' : ''); }
-  /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) } */
+  /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) }
+   * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page. */
   function spawnDmg(x, y, dmg, crit, opts) {
     if (!root) return null;
     opts = opts || {};
     const n = mk('div', 'crs-dmg');
     if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag);
     n.style.left = px(x); n.style.top = px(y);
-    n.style.font = '700 ' + (crit ? 18 : 14) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    n.style.font = '700 ' + (opts.size || (crit ? 18 : 14)) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     n.style.color = opts.color || (crit ? '#ffd166' : '#fff');
     n.style.textShadow = '0 1px 2px rgba(0,0,0,.8)';
     n.style.transform = 'translate(-50%, -50%)';

@@ -1,5 +1,6 @@
   /* ===================================================================== */
   /* 7. Target picking + hover highlight                                    */
+  /*    v1.3 §3.1: scheduleHover()'s frame also carries the player ring      */
   /* ===================================================================== */
   /* Effective opacity = product of computed opacity up the (shadow-crossing) ancestor chain, ≤ 40 levels.
    * Hit testing ignores opacity, so an opacity:0 hover overlay (quick-view buttons, gallery captions)
@@ -140,7 +141,8 @@
   }
   function scheduleHover() {
     if (state.moveRaf) return;
-    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); });
+    // v1.3 §3.1: the player ring is repositioned on the frame the pointer move already schedules
+    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); if (state.self) selfStep(); });
   }
   function pulseTarget() {
     if (!targetBox || targetBox.style.display === 'none') return;

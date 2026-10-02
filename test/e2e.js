@@ -11,8 +11,8 @@
  *   B. strict CSP + TT   — fixture on "/strict" (default-src 'self'; require-trusted-types-for 'script')
  *   C. real extension    — copy of the extension with host_permissions for 127.0.0.1, service worker toggle
  *
- * v1.1: size-based HP (`api.hpOf`), weapons (`api.weapons()`), attack power (`api.setPower`), hold weapons
- * (smg / flame), sword slashes (`api.slash`), rocket AoE, hit feedback (.crs-dmg / .crs-hit).
+ * v1.1: size-based HP (`api.hpOf`), weapons (`api.weapons()`), hold weapons (smg / flame), sword slashes
+ * (`api.slash`), rocket AoE, hit feedback (.crs-dmg / .crs-hit).
  * v1.2 (SPEC-v3 §8 / A13): ten weapons incl. the sniper (`api.scope`, RMB / Shift chord, spread, bolt action),
  * ammo + reload (`api.ammo` / `api.reload`, `R`), loadouts (`api.loadout` / `setLoadout` / `applyPreset`, keys
  * 1–9,0 / Q / E / Shift+digit / drag), hostile components (`api.setCombat`, `api.player`, debug.forceAttack /
@@ -205,6 +205,19 @@ const TIMER_LEDGER = `(() => {
   window.cancelAnimationFrame = function (id) { pendingRaf.delete(id); return cf.call(window, id); };
   window.__crsPending = pending;
   window.__crsPendingRaf = pendingRaf;
+  // settleRaf() waits on a frame itself; it must use the UNWRAPPED rAF, or the harness's own probe frames would
+  // show up in __crsPendingRaf and be read as a content-script loop that outlived deactivate.
+  window.__crsRawRaf = (fn) => rf.call(window, fn);
+  window.__crsRawCaf = (id) => cf.call(window, id);
+  window.__crsRawTimeout = (fn, ms) => st.call(window, fn, ms);
+  window.__crsRawClear = (id) => ct.call(window, id);
+  // Headless Chrome parks its BeginFrame source once nothing is asking for frames, and a freshly scheduled rAF does
+  // not reliably restart it — frames then stop for the rest of the session, the content script's one-shot rAFs
+  // (hover, aura, HUD) never run, and every frame-dependent wait below blocks. One heartbeat on the UNWRAPPED rAF
+  // keeps the source alive for the whole suite. It is invisible to the ledger, so "zero live animation frames"
+  // keeps meaning zero CONTENT-SCRIPT frames.
+  const beat = () => { window.__crsFrames = (window.__crsFrames || 0) + 1; rf.call(window, beat); };
+  rf.call(window, beat);
   return 'ledger';
 })()`;
 const EN_MESSAGES = JSON.parse(fs.readFileSync(path.join(ROOT, '_locales', 'en', 'messages.json'), 'utf8'));
@@ -215,6 +228,14 @@ const CI = !!process.env.CI;
 const BASE_ARGS = ['--no-first-run', '--no-default-browser-check']
   .concat(CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : []);
 const TIME_BUDGET_MS = Number(process.env.CRS_TIME_BUDGET_MS || 100000);
+// Iteration speed knob. `CRS_SUITES=A node test/e2e.js` (or --suite=A, comma-separated) runs only the
+// named suites, so an agent fixing suite A pays ~25 s instead of ~85 s per attempt. The full suite is
+// still what gates a commit and what CI runs; a partial run says so in its summary and refuses to
+// report the runtime check, so a green partial run can never be mistaken for a green full run.
+const SUITE_ARG = (process.argv.find((a) => a.startsWith('--suite=')) || '').slice(8);
+const SUITES = String(process.env.CRS_SUITES || SUITE_ARG || 'ABC').toUpperCase();
+const PARTIAL = SUITES !== 'ABC';
+const WANT = (id) => SUITES.includes(id);
 
 
 function hookPage(page) {
@@ -236,9 +257,23 @@ async function installViolationCounter(page) {
 const violations = (page) => page.evaluate(() => window.__cspViolations || []);
 
 // Let every already-queued animation frame run, so __crsPendingRaf only holds frames that were (re)scheduled after.
+// Two details, both learned the hard way:
+//   * the probe frame goes through __crsRawRaf, so it never lands in the ledger it is meant to measure;
+//   * it is raced against a 400 ms timer. Headless Chrome parks its BeginFrame source when no page is asking for
+//     frames, and a freshly scheduled rAF does not always restart it — an unbounded wait then blocks until the CDP
+//     protocol timeout (180 s each, twice) and silently eats the suite's whole time budget.
 async function settleRaf(page) {
   for (let i = 0; i < 2; i++) {
-    try { await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null)))); } catch (e) { /* ignore */ }
+    try {
+      await page.evaluate(() => new Promise((r) => {
+        const raf = window.__crsRawRaf || requestAnimationFrame;
+        const to = window.__crsRawTimeout || setTimeout, clr = window.__crsRawClear || clearTimeout;
+        let done = false, id = 0;
+        const fin = () => { if (done) return; done = true; clr(id); r(null); };
+        raf(fin);
+        id = to(fin, 400);
+      }));
+    } catch (e) { /* ignore */ }
   }
 }
 
@@ -261,8 +296,7 @@ const api = {
   setWeapon: (page, id) => page.evaluate((w) => window.__crashScreen.setWeapon(w), id),
   weapon: (page) => page.evaluate(() => window.__crashScreen.weapon),
   weapons: (page) => page.evaluate(() => window.__crashScreen.weapons()),
-  setPower: (page, v) => page.evaluate((p) => window.__crashScreen.setPower(p), v),
-  power: (page) => page.evaluate(() => window.__crashScreen.power),
+  // v1.3 §1: the power multiplier is gone — no setPower / power wrappers any more.
   slash: (page, x1, y1, x2, y2) => page.evaluate((a, b, c, d) => window.__crashScreen.slash(a, b, c, d), x1, y1, x2, y2),
   // merge `patch` into api.debug (a plain object per A12) and return a copy of the whole flag set (A11; functions dropped)
   debug: (page, patch) => page.evaluate((p) => { const d = window.__crashScreen.debug; Object.assign(d, p || {}); const out = {}; for (const k of Object.keys(d)) if (typeof d[k] !== 'function') out[k] = d[k]; return out; }, patch || {}),
@@ -556,16 +590,18 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     return {
       ids: btns.map((b) => b.getAttribute('data-weapon')),
       pressed: btns.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-weapon')),
-      power: !!(sh.querySelector('.crs-power-down') && sh.querySelector('.crs-power-up')),
+      // v1.3 §1: the power row (-/+ buttons) is gone — no .crs-power-down / .crs-power-up should exist
+      noPowerButtons: !sh.querySelector('.crs-power-down') && !sh.querySelector('.crs-power-up'),
       badges: btns.map((b) => { const g = b.querySelector('.badge'); return g ? (g.textContent || '').trim() : null; }),
       cols,
       // compact grid (A6): names live in the button title / aria-label, the readout and the panel text
       text: (sh.textContent || '') + ' ' + btns.map((b) => (b.title || '') + ' ' + (b.getAttribute('aria-label') || '')).join(' '),
     };
   });
-  check('A.hud: 10 weapon buttons carry data-weapon ids in default-loadout order, hammer aria-pressed, power −/+ buttons present', !!hud && hud.ids.join(',') === WEAPON_IDS.join(',') && hud.pressed.join(',') === 'hammer' && hud.power, hud && { ids: hud.ids, pressed: hud.pressed, power: hud.power });
+  check('A.hud: 10 weapon buttons carry data-weapon ids in default-loadout order, hammer aria-pressed', !!hud && hud.ids.join(',') === WEAPON_IDS.join(',') && hud.pressed.join(',') === 'hammer', hud && { ids: hud.ids, pressed: hud.pressed });
   check('A.hud: grid is 2 × 5 (5 columns) and every button shows its slot badge 1…9, 0', !!hud && hud.cols === 5 && hud.badges.join(',') === KEYS.join(','), hud && { cols: hud.cols, badges: hud.badges });
-  check('A.hud: Korean labels (망치 · 권총 · 기관총 · 저격총 · 도끼 · 검 · 폭탄 · 로켓 · 화염 · 붕괴 · 공격력 · 피해 · 로드아웃 · 전투) present (text or button titles)', !!hud && ['망치', '권총', '기관총', '저격총', '도끼', '검', '폭탄', '로켓', '화염', '붕괴', '공격력', '피해', '로드아웃', '전투'].every((t) => hud.text.includes(t)), hud && hud.text.slice(0, 300));
+  check('A.hud: Korean labels (망치 · 권총 · 기관총 · 저격총 · 도끼 · 검 · 폭탄 · 로켓 · 화염 · 붕괴 · 피해 · 로드아웃 · 전투) present (text or button titles)', !!hud && ['망치', '권총', '기관총', '저격총', '도끼', '검', '폭탄', '로켓', '화염', '붕괴', '피해', '로드아웃', '전투'].every((t) => hud.text.includes(t)), hud && hud.text.slice(0, 300));
+  check('A.hud: no 공격력 (attack-power) text and no -/+ power buttons anywhere in the HUD (v1.3 §1)', !!hud && hud.noPowerButtons && !hud.text.includes('공격력'), hud && { noPowerButtons: hud.noPowerButtons, hasLabel: hud.text.includes('공격력') });
 
   // --- hammer on the small ("known") card — A31 (99 hp → 2 hits at 65) ---------------------------
   const urlBefore = page.url();
@@ -799,22 +835,28 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const dbgCd = await api.debug(page, { noCooldown: true });
   check('A.cooldown: noCooldown re-enabled for the rest of the suite', dbgCd.noCooldown === true, dbgCd);
 
-  // (3) attack power: setPower(2) → 130, keys -/= change power, crsPower persisted
-  const pw2 = await api.setPower(page, 2);
-  check('A.power 3: setPower(2) returns 2 and api.power / stats().power === 2', pw2 === 2 && (await api.power(page)) === 2 && (await api.stats(page)).power === 2, { ret: pw2, power: await api.power(page) });
-  const h3 = await hitFresh(page, 'hammer', cardPt, '#big-card');
-  check('A.power 3: hammer at ×2 deals 130 (hp === max − 130)', h3.hp === h3.max - 2 * DMG('hammer'), h3);
-  await api.setPower(page, 1);
-  check('A.power 3: setPower(1) restores ×1', (await api.power(page)) === 1);
+  // (3) v1.3 §1 / SPEC-readability §6 assertion 1: the attack-power multiplier is REMOVED, not weakened —
+  // api.setPower / api.power / stats().power are gone, the HUD −/+ row is gone, "-"/"=" (and the other old
+  // power hotkeys) are no-ops, labelPower is unreachable, and a single hammer hit always deals the flat 65.
+  const powerGone = await page.evaluate(() => ({
+    setPower: typeof window.__crashScreen.setPower,
+    power: typeof window.__crashScreen.power,
+    statsHasPower: 'power' in window.__crashScreen.stats(),
+  }));
+  check('A.power 3: api.setPower / api.power are undefined and stats() carries no "power" field', powerGone.setPower === 'undefined' && powerGone.power === 'undefined' && powerGone.statsHasPower === false, powerGone);
+  const beforeKeys3 = await api.stats(page);
   await page.keyboard.press('-');
-  const pwDown = await poll(async () => ((await api.stats(page)).power === 0.5 ? 0.5 : null), 500, 20);
-  check('A.power 3: "-" key → stats().power === 0.5', pwDown === 0.5, await api.stats(page).then((s) => s.power));
-  check('A.power 3: crsPower persisted (0.5) in the shim storage', (await api.store(page)).crsPower === 0.5, await api.store(page));
+  await page.keyboard.press('_');
   await page.keyboard.press('=');
-  const pwUp = await poll(async () => ((await api.stats(page)).power === 1 ? 1 : null), 500, 20);
-  check('A.power 3: "=" key → stats().power === 1', pwUp === 1, await api.stats(page).then((s) => s.power));
-  check('A.power 3: crsPower reflects the last value (1)', (await api.store(page)).crsPower === 1, await api.store(page));
-  await api.setPower(page, 1);
+  await page.keyboard.press('+');
+  await page.keyboard.press(']');
+  await page.keyboard.press('[');
+  await sleep(100);
+  const afterKeys3 = await api.stats(page);
+  check('A.power 3: "-" / "_" / "[" / "=" / "+" / "]" are no-ops — stats() carries no "power" field and is otherwise unchanged', !('power' in afterKeys3) && afterKeys3.weapon === beforeKeys3.weapon && afterKeys3.combo === beforeKeys3.combo && afterKeys3.cracks === beforeKeys3.cracks, { before: beforeKeys3, after: afterKeys3 });
+  check('A.power 3: the locale key "labelPower" is unreachable — no quoted/property reference to it survives in content.js (comments mentioning its removal are fine)', !/['"]labelPower['"]|\.labelPower\b/.test(contentJs), null);
+  const h3 = await hitFresh(page, 'hammer', cardPt, '#big-card');
+  check('A.power 3: a single hammer hit deals exactly 65 (max − 65) — no multiplier applies', h3.hp === h3.max - DMG('hammer'), h3);
 
   // (4) forced crit: 130 and a "-130!" floating number
   await api.debug(page, { forceCrit: true, noCrit: false });
@@ -1141,9 +1183,8 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.stats: pieceCount === pieces.length', ss.pieceCount === pieces.length, { pieceCount: ss.pieceCount, len: pieces.length });
   await api.restore(page);
 
-  // --- stress (12.8 / §7 test 15): 30 hammer clicks at ×4, then 1 s smg + 1 s flame holds --------------
+  // --- stress (12.8 / §7 test 15): 30 hammer clicks, then 1 s smg + 1 s flame holds (v1.3 §1: no power ×4) --
   const errBefore = log.pageErrors.length;
-  await api.setPower(page, 4);
   // seeded LCG so a failing run can be replayed with CRS_SEED=<n>
   const seed0 = Number(process.env.CRS_SEED) || 1234;
   let seed = seed0;
@@ -1173,7 +1214,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     await page.mouse.click(x, y);
   }
   const stressMs = Date.now() - tStress;
-  info(`stress: 30 clicks dispatched in ${stressMs} ms at power ×4 (CRS_SEED=${seed0}; points ${JSON.stringify(stressPts)})`);
+  info(`stress: 30 clicks dispatched in ${stressMs} ms (CRS_SEED=${seed0}; points ${JSON.stringify(stressPts)})`);
   await sleep(300);
   const debrisStress = await api.count(page, '.crs-debris');
   const stStress = await api.stats(page);
@@ -1184,7 +1225,6 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.stress: at least one element broken by the 30 clicks', stStress.broken >= 1, stStress.broken);
   check('A.stress: .crs-debris count ≤ 160', debrisStress <= 160, debrisStress);
   check('A.stress: stats().debris ≤ cap', stStress.debris <= 160, stStress.debris);
-  await api.setPower(page, 1);
   await api.restore(page);
   await sleep(60);
   await api.setWeapon(page, 'smg');
@@ -1478,18 +1518,59 @@ async function suiteA12(page, log, contentJs) {
   await api.debug(page, { infiniteAmmo: false });
   const ammoHudPistol = await api.hudQ(page, '.crs-ammo');
   check('A.ammo 1: .crs-ammo HUD (HUD shadow root, bottom-right) shows "12 / ∞" for a full pistol', !!ammoHudPistol && ammoHudPistol.visible && /12\s*\/\s*∞/.test(ammoHudPistol.text), ammoHudPistol);
-  check('A.ammo 1: .crs-ammo sits bottom-right (right: 16px; bottom: 16px)', !!ammoHudPistol && near(ammoHudPistol.right, ammoHudPistol.vw - 16, 4) && near(ammoHudPistol.bottom, ammoHudPistol.vh - 16, 4), ammoHudPistol && { right: ammoHudPistol.right, bottom: ammoHudPistol.bottom, vw: ammoHudPistol.vw, vh: ammoHudPistol.vh });
+  check('A.ammo 1: .crs-ammo sits bottom-right (right: 24px; bottom: 24px — v1.3 §2 widened the margin)', !!ammoHudPistol && near(ammoHudPistol.right, ammoHudPistol.vw - 24, 4) && near(ammoHudPistol.bottom, ammoHudPistol.vh - 24, 4), ammoHudPistol && { right: ammoHudPistol.right, bottom: ammoHudPistol.bottom, vw: ammoHudPistol.vw, vh: ammoHudPistol.vh });
   await api.setWeapon(page, 'hammer');
   const ammoHudHammer = await poll(async () => { const q = await api.hudQ(page, '.crs-ammo'); return q && /∞/.test(q.text) && !/\d+\s*\/\s*∞/.test(q.text) ? q : null; }, 500, 20);
   check('A.ammo 1: .crs-ammo shows "∞" (no "n / ∞") for the hammer (melee)', !!ammoHudHammer, await api.hudQ(page, '.crs-ammo'));
-  // empty magazine → the "R 재장전" prompt is visible (fastReload off so the empty state lasts 900 ms)
+  // empty magazine → the "R 재장전" prompt is visible (fastReload off so the empty state lasts 900 ms).
+  // Along the way: test/out/hud.png (ammo panel at ≤ 25%, pulsing red) and test/out/hud-reload.png (mid-reload).
   await api.debug(page, { fastReload: false });
   await api.setWeapon(page, 'pistol');
-  await page.evaluate((p) => { const a = window.__crashScreen; for (let i = 0; i < 12; i++) a.smashAt(p.x, p.y); }, ap);
+  await page.evaluate((p) => { const a = window.__crashScreen; for (let i = 0; i < 9; i++) a.smashAt(p.x, p.y); }, ap);
+  const lowAmmo = await poll(async () => { const m = await api.ammo(page); return m.mag === 3 ? m : null; }, 400, 15);
+  check('A.readability: at 3/12 (25%) the ammo count/pips enter the low (pulsing red) state', !!lowAmmo, lowAmmo || await api.ammo(page));
+  await sleep(100);   // let the low-ammo colour + pulse settle before the screenshot
+  await page.screenshot({ path: path.join(OUT, 'hud.png') });
+  info('screenshot test/out/hud.png (ammo panel at low ammo, ≤ 25%)');
+  await page.evaluate((p) => { const a = window.__crashScreen; for (let i = 0; i < 3; i++) a.smashAt(p.x, p.y); }, ap);
   const prompt = await poll(async () => { const q = await api.ammoPrompt(page); return q && q.visible ? q : null; }, 800, 25);
   check('A.ammo 1: empty magazine → the "R 재장전" prompt inside .crs-ammo is visible', !!prompt && /R\s*재장전|Reload/.test(prompt.text), prompt || await api.ammoPrompt(page));
+  const reloadingShot = await poll(async () => { const m = await api.ammo(page); return m.reloading ? m : null; }, 400, 15);
+  if (reloadingShot) await sleep(150);   // partway through the 900 ms reload, so the progress bar has visibly advanced
+  await page.screenshot({ path: path.join(OUT, 'hud-reload.png') });
+  info('screenshot test/out/hud-reload.png (ammo panel mid-reload, progress bar visible)');
+  // SPEC-readability §6 assertion 2 (bullet 4): the empty-magazine prompt is a 20 px "R" keycap glyph in a
+  // white-bordered box, next to the 재장전 text.
+  const keycapInfo = await page.evaluate(() => {
+    const sh = document.querySelector('crs-hud, .crs-hud-host').shadowRoot;
+    const k = sh.querySelector('.crs-ammo .keycap');
+    if (!k) return null;
+    const cs = getComputedStyle(k);
+    return { text: (k.textContent || '').trim(), fontSize: parseFloat(cs.fontSize), borderWidth: parseFloat(cs.borderWidth), borderColor: cs.borderColor };
+  });
+  check('A.readability 2: the empty-magazine prompt shows a 20 px "R" keycap glyph with a white border box', !!keycapInfo && keycapInfo.text === 'R' && near(keycapInfo.fontSize, 20, 0.5) && keycapInfo.borderWidth >= 1 && /255,\s*255,\s*255/.test(keycapInfo.borderColor), keycapInfo);
   await poll(async () => { const m = await api.ammo(page); return m.mag === 12 && !m.reloading; }, 1300, 30);
   await api.debug(page, { fastReload: true });
+  // SPEC-readability §6 assertion 2 (bullets 1–3): a full pistol magazine shows 12 ammo pips (none spent),
+  // the round count itself renders at 48 px, 3 shots leave 9 pips filled, and the panel's width is pinned
+  // (±1 px) across a weapon swap — 교체 중 may no longer widen it.
+  const pipsFull = await page.evaluate(() => {
+    const sh = document.querySelector('crs-hud, .crs-hud-host').shadowRoot;
+    const big = sh.querySelector('.abig');
+    return { total: sh.querySelectorAll('.crs-ammo .apip').length, spent: sh.querySelectorAll('.crs-ammo .apip.spent').length, fontSize: big ? parseFloat(getComputedStyle(big).fontSize) : null };
+  });
+  check('A.readability 2: a full pistol magazine shows 12 ammo pips (none spent) and the round count renders at 48 px', pipsFull.total === 12 && pipsFull.spent === 0 && near(pipsFull.fontSize, 48, 0.5), pipsFull);
+  await page.evaluate((p) => { const a = window.__crashScreen; a.smashAt(p.x, p.y); a.smashAt(p.x, p.y); a.smashAt(p.x, p.y); }, ap);
+  const pips3 = await poll(async () => page.evaluate(() => {
+    const sh = document.querySelector('crs-hud, .crs-hud-host').shadowRoot;
+    return { total: sh.querySelectorAll('.crs-ammo .apip').length, spent: sh.querySelectorAll('.crs-ammo .apip.spent').length };
+  }), 500, 15);
+  check('A.readability 2: after 3 shots, 9 of the 12 pips are still filled (3 marked spent)', !!pips3 && pips3.total === 12 && pips3.spent === 3, pips3);
+  const widthPistol2 = await page.evaluate(() => document.querySelector('crs-hud, .crs-hud-host').shadowRoot.querySelector('.crs-ammo').getBoundingClientRect().width);
+  await api.setWeapon(page, 'hammer');
+  const widthHammer2 = await page.evaluate(() => document.querySelector('crs-hud, .crs-hud-host').shadowRoot.querySelector('.crs-ammo').getBoundingClientRect().width);
+  await api.setWeapon(page, 'pistol');
+  check('A.readability 2: .crs-ammo panel width is pinned within ±1 px across a weapon swap (pistol ↔ hammer)', Math.abs(widthPistol2 - widthHammer2) <= 1, { pistol: widthPistol2, hammer: widthHammer2 });
   await api.setWeapon(page, 'rocket');
   const rocketAmmo = await api.ammo(page);
   check('A.ammo 1: setWeapon("rocket") → ammo() { mag: 2, size: 2 } (A1: rocket mag 2 / 1500 ms)', !!rocketAmmo && rocketAmmo.size === 2 && rocketAmmo.mag === 2, rocketAmmo);
@@ -1588,16 +1669,17 @@ async function suiteA12(page, log, contentJs) {
   await page.keyboard.up('Shift');
   const shiftOff = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
   check('A.sniper 3: Shift held 200 ms → scoped, Shift up → scope off', shiftOn === true && shiftOff === true, { shiftOn, shiftOff });
-  const pw0 = (await api.stats(page)).power;
+  // v1.3 §1: the power hotkey is gone — Shift + "=" is now just an arbitrary keypress; it must not flash
+  // the scope, and stats() must come out unchanged (no "power" field reappears).
+  const statsBeforeEq = await api.stats(page);
   await page.keyboard.down('Shift');
   await page.keyboard.press('=');
   let flashed = false;
   const tS = Date.now();
   while (Date.now() - tS < 350) { if ((await api.stats(page)).scoped) { flashed = true; break; } await sleep(10); }
   await page.keyboard.up('Shift');
-  const pw1 = (await api.stats(page)).power;
-  check('A.sniper 3: Shift + "=" within 100 ms → power changes and the scope never flashes', !flashed && pw1 !== pw0, { flashed, power: [pw0, pw1] });
-  await api.setPower(page, 1);
+  const statsAfterEq = await api.stats(page);
+  check('A.sniper 3: Shift + "=" does nothing (the power hotkey is gone) — the scope never flashes and stats() is otherwise unchanged', !flashed && !('power' in statsAfterEq) && statsAfterEq.weapon === statsBeforeEq.weapon && statsAfterEq.shots === statsBeforeEq.shots, { flashed, before: statsBeforeEq, after: statsAfterEq });
   // layered Escape
   await api.scope(page, true);
   await poll(async () => (await api.stats(page)).scoped === true, 300, 15);
@@ -1762,8 +1844,20 @@ async function suiteA12(page, log, contentJs) {
   const figArea = fg.width * fg.height;
   const playerHud = await api.hudQ(page, '.crs-player');
   check('A.combat 5: #figure is a T1 candidate by page-space area (40 000 ≤ area < 150 000)', figArea >= 40000 && figArea < 150000, { w: fg.width, h: fg.height, area: figArea });
-  check('A.combat 5: setCombat(true) → api.combat / stats().combat === true and the player HUD (.crs-player, bottom-left) is visible', (await api.combat(page)) === true && (await api.stats(page)).combat === true && !!playerHud && playerHud.visible && near(playerHud.left, 16, 4) && near(playerHud.bottom, playerHud.vh - 16, 4), { ret: combatOn, combat: await api.combat(page), hud: playerHud });
+  check('A.combat 5: setCombat(true) → api.combat / stats().combat === true and the player HUD (.crs-player, bottom-left, 24 px margin) is visible', (await api.combat(page)) === true && (await api.stats(page)).combat === true && !!playerHud && playerHud.visible && near(playerHud.left, 24, 4) && near(playerHud.bottom, playerHud.vh - 24, 4), { ret: combatOn, combat: await api.combat(page), hud: playerHud });
   check('A.combat 5: player HUD shows 체력 / 점수 / 처치 / 생존 / 적', !!playerHud && ['체력', '점수', '처치', '생존', '적'].every((t) => playerHud.text.includes(t)), playerHud && playerHud.text);
+  // SPEC-readability §6 assertion 3 (bullets 1–3): the health bar is 220 × 16 px over a ten-notch tick
+  // overlay, and the label reads the exact "체력 100 / 100" at full health.
+  const healthBarInfo = await page.evaluate(() => {
+    const sh = document.querySelector('crs-hud, .crs-hud-host').shadowRoot;
+    const bar = sh.querySelector('.crs-player .hbar');
+    const ticks = sh.querySelector('.crs-player .hticks');
+    if (!bar) return null;
+    const r = bar.getBoundingClientRect();
+    return { width: r.width, height: r.height, ticksBg: ticks ? getComputedStyle(ticks).backgroundImage : '' };
+  });
+  check('A.readability 3: the health bar is 220 × 16 px with a ten-notch tick overlay (repeating-linear-gradient)', !!healthBarInfo && near(healthBarInfo.width, 220, 1) && near(healthBarInfo.height, 16, 1) && /repeating-linear-gradient/.test(healthBarInfo.ticksBg), healthBarInfo);
+  check('A.readability 3: the health label reads exactly "체력 100 / 100" at full health', !!playerHud && /체력\s*100\s*\/\s*100/.test(playerHud.text), playerHud && playerHud.text);
   await api.seenReset(page);
   await api.setPlayerPos(page, fg.cx, fg.cy);
   const p0 = await api.player(page);
@@ -1775,6 +1869,18 @@ async function suiteA12(page, log, contentJs) {
   check('A.combat 5: within 1 s the player takes damage (hp < 100) and a .crs-vignette was seen', !!hit5 && !!seen5['.crs-vignette'], { player: hit5 || await api.player(page), seen: seen5 });
   check('A.combat 5: orb damage === 8 + round(√area / 60)', !!hit5 && 100 - hit5.hp === 8 + Math.round(Math.sqrt(figArea) / 60), { hp: hit5 && hit5.hp, expected: 8 + Math.round(Math.sqrt(figArea) / 60) });
   check('A.combat 5: a red floating "−N" number appeared for the player damage', seen5.dmgTexts.some((t) => /^[-−]\d+/.test(t)), seen5.dmgTexts);
+  // SPEC-readability §6 assertion 3 (bullet 4): the drain-bar animation (250 ms) has settled, so the fill-bar
+  // width ratio should track hp/max within ±2 % and the displayed number should have dropped from 100.
+  await sleep(320);
+  const barRatio5 = await page.evaluate(() => {
+    const sh = document.querySelector('crs-hud, .crs-hud-host').shadowRoot;
+    const bar = sh.querySelector('.crs-player .hbar'), fill = sh.querySelector('.crs-player .hfill');
+    const bw = bar.getBoundingClientRect().width, fw = fill.getBoundingClientRect().width;
+    return bw > 0 ? fw / bw : null;
+  });
+  const playerHudAfterHit = await api.hudQ(page, '.crs-player');
+  const hpAfterHit5 = await api.player(page);
+  check('A.readability 3: after taking damage, the health number drops below 100 and the fill-bar ratio tracks hp/max within ±2%', hpAfterHit5.hp < 100 && barRatio5 != null && Math.abs(barRatio5 - hpAfterHit5.hp / 100) <= 0.02 && !/체력\s*100\s*\/\s*100/.test(playerHudAfterHit && playerHudAfterHit.text || ''), { hp: hpAfterHit5.hp, ratio: barRatio5, text: playerHudAfterHit && playerHudAfterHit.text });
   // 5b dodge: 500 px to the side, then 300 px perpendicular to the orb's path right after the launch
   await api.restore(page);
   await sleep(60);
@@ -1886,12 +1992,16 @@ async function suiteA12(page, log, contentJs) {
   });
   check('A.combat 8: a .crs-hostile aura (glass root, data-crs) covers the hostile #figure rect (± 3 px) with a 2 px outline and the 👿 FIGURE label', tier8 === 'shooter' && !!aura8 && aura8.dataCrs && near(aura8.left, fg8.left, 3) && near(aura8.top, fg8.top, 3) && near(aura8.width, fg8.width, 3) && near(aura8.height, fg8.height, 3) && /solid 2px/.test(aura8.outline) && /👿/.test(aura8.label) && /FIGURE/.test(aura8.label), { tier: tier8, aura: aura8, fig: fg8 });
   check('A.combat 8: stats().hostiles === 1 while the figure is hostile', (await api.stats(page)).hostiles === 1, (await api.stats(page)).hostiles);
-  // A3: the glass layer keeps viewport geometry — scope-in / scope-out must re-measure the aura against the 2× page
+  // A3: the glass layer keeps viewport geometry — scope-in / scope-out must re-measure the aura against the 2× page.
+  // SPEC-readability §3.5 shakes the WHOLE glass root (up to 8 px) on every player hit, and the shooter above hits
+  // the player, so the aura is read in root-local coordinates: subtracting the root's own rect cancels that
+  // transient translate and leaves the same ± 3 px geometry assertion on the aura-vs-element placement.
   const auraRect = () => page.evaluate(() => {
     const a = document.querySelector('.crs-hostile'); const el = document.querySelector('#figure');
-    if (!a || !el) return null;
-    const ar = a.getBoundingClientRect(), er = el.getBoundingClientRect();
-    return { aura: [ar.left, ar.top, ar.width, ar.height], el: [er.left, er.top, er.width, er.height] };
+    const rt = document.querySelector('.crs-root');
+    if (!a || !el || !rt) return null;
+    const ar = a.getBoundingClientRect(), er = el.getBoundingClientRect(), rr = rt.getBoundingClientRect();
+    return { aura: [ar.left - rr.left, ar.top - rr.top, ar.width, ar.height], el: [er.left, er.top, er.width, er.height], shake: [+rr.left.toFixed(2), +rr.top.toFixed(2)] };
   });
   await api.setWeapon(page, 'sniper');
   await page.mouse.move(fg8.cx, fg8.cy);
@@ -1914,8 +2024,26 @@ async function suiteA12(page, log, contentJs) {
   const imgA8 = await api.hpOf(page, '#demo-img');
   check('A.combat 8: a hit on a DESCENDANT of a hostile lands on the hostile itself (#demo-img → #figure takes the damage, the image is untouched)', figA8.hp === figB8.hp - DMG('pistol') && imgA8.hp === imgB8.hp && imgA8.hp === imgA8.max && !(await api.broken(page, '#demo-img')), { fig: [figB8, figA8], img: [imgB8, imgA8], dmg: DMG('pistol') });
   await api.setWeapon(page, 'rocket');
+  // SPEC-readability §7: combat.png must show the player ring, an aim line, and the enlarged ammo/health
+  // panels together in one frame. The scope test just above moved the REAL mouse onto #figure's centre
+  // (the player follows the cursor), so re-place the player well clear of the hostile LAST, right before
+  // the forced attack — otherwise the ring and the aim line collapse onto the hostile's own position.
+  // Everything lands in ONE round trip, immediately followed by the screenshot: the aim line is only held
+  // for AIMLINE_MIN_MS (220 ms, §3.2), so extra CDP round trips here can comfortably age it out before the
+  // capture (each one costs tens of ms). setPlayerPos must be the LAST position write — the scope test just
+  // above moved the REAL mouse onto #figure's centre (the player follows the cursor), so without this the
+  // ring and the aim line collapse onto the hostile's own position.
+  await page.evaluate((x, y) => {
+    const a = window.__crashScreen;
+    a.debug.setPlayerHp(55);
+    a.setWeapon('pistol');
+    a.smashAt(2, 2); a.smashAt(2, 2); a.smashAt(2, 2);
+    a.debug.setPlayerPos(x, y);
+    a.debug.forceAttack(document.querySelector('#figure'));
+  }, fg8.cx + sideOf(fg8) * 500, fg8.cy);
   await page.screenshot({ path: path.join(OUT, 'combat.png') });
-  info('screenshot test/out/combat.png (aura + orb + player HUD + ammo HUD)');
+  info('screenshot test/out/combat.png (player ring + aim line + enlarged ammo/health HUD)');
+  await api.setWeapon(page, 'rocket');
   const max8 = (await api.hpOf(page, '#figure')).max;
   const score8a = (await api.player(page)).score;
   const rocketRet = await api.smashAt(page, fg8.left + 6, fg8.top + 6);
@@ -1991,6 +2119,190 @@ async function suiteA12(page, log, contentJs) {
   const settled9 = await poll(async () => { const st = await api.stats(page); return st.pieceCount > 0 && st.pieces.some((p) => p.resting) ? st : null; }, 3000, 60);
   await api.setWeapon(page, 'hammer');
   check('A.ko 9: a KO with two orbs in flight neither throws nor freezes the physics loop (lastError null, animating cleared by the restart, debris still falls and rests)', twoOrbs.t1 === 'shooter' && twoOrbs.t2 === 'shooter' && twoOrbs.orbs >= 2 && ko9b === true && s9b.animating === false && s9b.lastError === null && !!settled9, { orbs: twoOrbs, ko: ko9b, afterRestart: { animating: s9b.animating, lastError: s9b.lastError }, settled: !!settled9 });
+
+  // =============================================================================================
+  // v1.3 SPEC-readability §6 (assertions 4–9, 11 — assertion 1 lives with the v1.1 power block,
+  // assertion 2 with the ammo block, assertion 3 with combat test (5), assertion 10 with the exit
+  // test below): the player health ring, the aim-line telegraph, orb legibility, the near-miss
+  // graze, hit feedback (hitstop / directional vignette / damage number), T3 track-vs-lock, and
+  // reduced motion.
+  // =============================================================================================
+  console.log('--- v1.3: readability — player ring / aim line / orbs / near miss / hit feedback ---');
+
+  // ---- (R1) §3.1 player health ring ---------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  const fgR = await api.rect(page, '#figure');
+  await api.setPlayerPos(page, fgR.cx, fgR.cy);
+  await page.mouse.move(fgR.cx, fgR.cy);
+  await sleep(80);
+  const ringR = await page.evaluate(() => {
+    const n = document.querySelector('.crs-selfbox');
+    if (!n) return null;
+    const r = n.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height };
+  });
+  check('A.readability 4: combat ON → .crs-selfbox sits at the cursor (±2 px) with a 44 px diameter', !!ringR && near(ringR.cx, fgR.cx, 2) && near(ringR.cy, fgR.cy, 2) && near(ringR.w, 44, 1) && near(ringR.h, 44, 1), ringR);
+  await api.setCombat(page, false);
+  await sleep(60);
+  check('A.readability 4: combat OFF → no .crs-selfbox', !(await api.has(page, '.crs-selfbox')), await api.has(page, '.crs-selfbox'));
+  await api.setCombat(page, true);
+  await sleep(60);
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(40));
+  await sleep(80);
+  const ringAngle = await page.evaluate(() => {
+    const n = document.querySelector('.crs-self');
+    if (!n) return null;
+    const degs = [...(n.style.backgroundImage || '').matchAll(/([\d.]+)deg/g)].map((m) => parseFloat(m[1]));
+    return degs.length >= 3 ? degs[2] : null;   // [from-0, colour-start, colour-end(=hp%), track-end, 360]
+  });
+  check('A.readability 4: debug.setPlayerHp(40) → the ring\'s conic-gradient paints 144° ± 5° (40% of 360°)', ringAngle != null && Math.abs(ringAngle - 144) <= 5, ringAngle);
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(100));
+
+  // ---- (R2) §3.2 aim-line telegraph ---------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  await api.setPlayerPos(page, fgR.cx + 500, fgR.cy);
+  const tierAim = await api.forceAttack(page, '#figure');
+  const aimR = await page.evaluate(() => {
+    const label = document.querySelector('.crs-hostile-label');
+    return { aimlines: document.querySelectorAll('.crs-aimline').length, label: label ? label.textContent : null };
+  });
+  check('A.readability 5: debug.forceAttack → exactly one .crs-aimline and the hostile label gets a 🎯 prefix', tierAim === 'shooter' && aimR.aimlines === 1 && /^🎯/.test(aimR.label || ''), aimR);
+  const aimGone = await poll(async () => (await api.count(page, '.crs-aimline')) === 0, 700, 20);
+  check('A.readability 5: the aim line disappears again once the shot has gone', aimGone === true, await api.count(page, '.crs-aimline'));
+
+  // ---- (R3) §3.3 orb legibility --------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  await api.setPlayerPos(page, fgR.cx, fgR.cy);
+  const launchR = await page.evaluate((s) => {
+    const a = window.__crashScreen;
+    const tier = a.debug.forceAttack(document.querySelector(s));
+    const orb = document.querySelector('.crs-orb');
+    const r = orb ? orb.getBoundingClientRect() : null;
+    return { tier, w: r ? r.width : null, h: r ? r.height : null };
+  }, '#figure');
+  check('A.readability 6: a T1 orb renders at 22 × 22 px', launchR.tier === 'shooter' && near(launchR.w, 22, 1) && near(launchR.h, 22, 1), launchR);
+  // the ring is sampled over a LONG flight (player far from the hostile) so several readings land before impact
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  const dirRing = sideOf(fgR);
+  const farRing = { x: fgR.cx + dirRing * 500, y: fgR.cy };
+  await api.setPlayerPos(page, farRing.x, farRing.y);
+  const tierRing = await api.forceAttack(page, '#figure');
+  await settleRaf(page);   // the ring's left/top/width are written by the NEXT tick, not at spawn time
+  const ringSamples = [];
+  for (let i = 0; i < 8; i++) {
+    const w = await page.evaluate(() => { const n = document.querySelector('.crs-orb-ring'); return n ? n.getBoundingClientRect().width : null; });
+    if (w == null) { if (ringSamples.length) break; }   // orb has landed — stop sampling
+    else if (w > 20) ringSamples.push(w);   // ignore a pre-layout read (border-only box, a few px)
+    await sleep(80);
+  }
+  const monotonic = ringSamples.length >= 3 && ringSamples.every((v, i) => i === 0 || v <= ringSamples[i - 1] + 0.5);
+  check('A.readability 6: the arrival ring exists and its radius falls monotonically as the orb approaches', tierRing === 'shooter' && ringSamples.length >= 3 && monotonic, { tier: tierRing, ringSamples });
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  const dirR = sideOf(fgR);
+  const farR = { x: fgR.cx + dirR * 500, y: fgR.cy };
+  await api.setPlayerPos(page, farR.x, farR.y);
+  const launchBright = await page.evaluate((s) => ({ tier: window.__crashScreen.debug.forceAttack(document.querySelector(s)) }), '#figure');
+  await sleep(60);
+  const opBright = await page.evaluate(() => { const n = document.querySelector('.crs-orb'); return n ? parseFloat(getComputedStyle(n).opacity) : null; });
+  await api.setPlayerPos(page, farR.x, farR.y + 400);   // well clear of the orb's flight line now
+  await sleep(90);
+  const opDim = await page.evaluate(() => { const n = document.querySelector('.crs-orb'); return n ? parseFloat(getComputedStyle(n).opacity) : null; });
+  check('A.readability 6: an orb on a hitting trajectory renders bright (opacity 1) and dims (< 0.6) once the player steps off its path', launchBright.tier === 'shooter' && opBright === 1 && opDim != null && opDim < 0.6, { opBright, opDim });
+
+  // ---- (R4) §3.4 near miss / graze -----------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  const dirN = sideOf(fgR);
+  const farN = { x: fgR.cx + dirN * 500, y: fgR.cy };
+  await api.setPlayerPos(page, farN.x, farN.y);
+  const nearBefore = (await api.stats(page)).nearMisses;
+  const launchN = await page.evaluate((s) => ({ tier: window.__crashScreen.debug.forceAttack(document.querySelector(s)) }), '#figure');
+  // hitRadius (22) + 25 px off the straight line: inside the graze band (hitRadius, hitRadius + 45], outside a hit
+  await api.setPlayerPos(page, farN.x, farN.y + 47);
+  const grazeSeen = await poll(async () => { const s = await api.stats(page); return s.nearMisses > nearBefore ? s : null; }, 2500, 30);
+  const tagOpacity = await page.evaluate(() => { const t = document.querySelector('.crs-self-tag'); return t ? parseFloat(getComputedStyle(t).opacity) : null; });
+  const pAfterGraze = await api.player(page);
+  check('A.readability 7: a graze at hitRadius + 25 px leaves hp unchanged, bumps stats().nearMisses, and shows 회피!', launchN.tier === 'shooter' && !!grazeSeen && pAfterGraze.hp === 100 && tagOpacity != null && tagOpacity > 0.05, { launch: launchN, grazeSeen, player: pAfterGraze, tagOpacity });
+
+  // ---- (R5) §3.5 hit feedback: hitstop / directional vignette / damage number size -----------------------
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  await api.debug(page, { hitstop: true });
+  const fgH = await api.rect(page, '#figure');
+  await api.setPlayerPos(page, fgH.cx, fgH.cy);
+  await api.seenReset(page);
+  const tierH = await api.forceAttack(page, '#figure');
+  const hitstopOn = await poll(async () => (await api.stats(page)).hitstop === true, 600, 10);
+  const dirVigSeen = await api.has(page, '.crs-vignette.crs-vignette-dir');
+  const hitstopOff = await poll(async () => (await api.stats(page)).hitstop === false, 400, 10);
+  const dmgFontH = await page.evaluate(() => {
+    const d = [...document.querySelectorAll('.crs-dmg')].find((n) => /^[-−]\d/.test((n.textContent || '').trim()));
+    return d ? parseFloat(getComputedStyle(d).fontSize) : null;
+  });
+  const lastHitFromH = (await api.player(page)).lastHitFrom;
+  check('A.readability 8: debug.hitstop (default true) → stats().hitstop turns on at the hit and clears again within ~70 ms', tierH === 'shooter' && hitstopOn === true && hitstopOff === true, { tier: tierH, hitstopOn, hitstopOff });
+  check('A.readability 8: a directional vignette (.crs-vignette.crs-vignette-dir) is created, the damage number renders at 24 px, and player().lastHitFrom is recorded', dirVigSeen === true && dmgFontH != null && near(dmgFontH, 24, 0.5) && !!lastHitFromH && isFinite(lastHitFromH.x) && isFinite(lastHitFromH.y), { dirVigSeen, dmgFontH, lastHitFromH });
+  await api.debug(page, { hitstop: false });
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  await api.setPlayerPos(page, fgH.cx, fgH.cy);
+  const tierHoff = await api.forceAttack(page, '#figure');
+  let sawHitstop = false;
+  const tHoff = Date.now();
+  while (Date.now() - tHoff < 300) { if ((await api.stats(page)).hitstop) { sawHitstop = true; break; } await sleep(10); }
+  check('A.readability 8: debug.hitstop = false → stats().hitstop never turns on after a hit', tierHoff === 'shooter' && sawHitstop === false, { tier: tierHoff, sawHitstop });
+  await api.debug(page, { hitstop: true });
+
+  // ---- (R6) §3.3 T3 laser: TRACK follows the player, LOCK does not ----------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  const boT = await api.rect(page, '#boss');
+  await api.setPlayerPos(page, boT.cx, boT.cy);
+  const tierTrack = await api.forceAttack(page, '#boss');
+  await sleep(80);   // inside the 550 ms track phase
+  const trackA = await page.evaluate(() => { const b = document.querySelector('.crs-beam'); return b ? parseFloat(b.style.top || b.style.left) : null; });
+  await api.setPlayerPos(page, boT.cx, boT.cy + 120);
+  await sleep(80);
+  const trackB = await page.evaluate(() => { const b = document.querySelector('.crs-beam'); return b ? parseFloat(b.style.top || b.style.left) : null; });
+  const locked = await poll(async () => (await api.has(page, '.crs-beam.crs-beam-lock')), 700, 20);
+  const lockPos = await page.evaluate(() => { const b = document.querySelector('.crs-beam'); return b ? parseFloat(b.style.top || b.style.left) : null; });
+  await api.setPlayerPos(page, boT.cx, boT.cy + 240);
+  await sleep(80);
+  const afterLockMove = await page.evaluate(() => { const b = document.querySelector('.crs-beam'); return b ? parseFloat(b.style.top || b.style.left) : null; });
+  check('A.readability 9: during TRACK the laser line follows the player, but once LOCKED it stops following', tierTrack === 'laser' && trackA !== trackB && locked === true && near(lockPos, afterLockMove, 0.5), { trackA, trackB, lockPos, afterLockMove });
+
+  // ---- (R7) §3.5 reduced motion: hitstop and screen-shake are dropped, the vignette stays -----------------
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  await api.restore(page);
+  await sleep(60);
+  await api.setCombat(page, true);
+  await api.debug(page, { hitstop: true });
+  const fgRM = await api.rect(page, '#figure');   // re-scroll: §3.3's T3 block (R6) scrolled the page to #boss
+  await api.setPlayerPos(page, fgRM.cx, fgRM.cy);
+  const tierRM = await api.forceAttack(page, '#figure');
+  await sleep(60);
+  const statsRM = await api.stats(page);
+  const rootTransformRM = await page.evaluate(() => getComputedStyle(document.querySelector('.crs-root')).transform);
+  const vigRM = await api.has(page, '.crs-vignette.crs-vignette-dir');
+  check('A.readability 11: prefers-reduced-motion → no hitstop and no screen-shake transform on a hit, but the directional vignette still shows', tierRM === 'shooter' && statsRM.hitstop === false && rootTransformRM === 'none' && vigRM === true, { tier: tierRM, hitstop: statsRM.hitstop, rootTransform: rootTransformRM, vig: vigRM });
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+  // combat stays ON here (section (10) below is the one that tests turning it off) — reduced motion is undone.
+  await api.restore(page);
+  await sleep(60);
 
   // ---- (10) combat off / selection tick ----------------------------------------------------------------
   await api.restore(page);
@@ -2108,9 +2420,34 @@ async function suiteA12(page, log, contentJs) {
   await page.mouse.move(ap.x, ap.y);
   await page.mouse.down();
   const holding12 = await poll(async () => (await api.stats(page)).holding === true, 300, 10);
+  // SPEC-readability §6 assertion 10: force every readability node alive right before Escape — a fresh aim
+  // line (forceAttack again), the low-HP vignette (no timer, so it is deterministic), and the player ring
+  // (already up since combat is on and the cursor is in the window).
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(20));
+  // The aim line lives only for the length of a wind-up, and forceAttack() is refused while the hostile is still
+  // busy with the previous one, so a single call can land in the gap and leave no telegraph on screen. Retry until
+  // all three nodes are genuinely up — the assertion that matters is the one below it (the EXIT clears them all),
+  // and it only means anything when every readability node was really alive first.
+  let before12r = { self: 0, aim: 0, vig: 0 };
+  await poll(async () => {
+    before12r = await page.evaluate(() => ({
+      self: document.querySelectorAll('.crs-self, .crs-selfbox').length,
+      aim: document.querySelectorAll('.crs-aimline').length,
+      vig: document.querySelectorAll('.crs-vignette').length,
+    }));
+    if (before12r.self > 0 && before12r.aim > 0 && before12r.vig > 0) return true;
+    await api.forceAttack(page, '#figure');
+    return false;
+  }, 1500, 50);
+  check('A.readability 10: before Escape, combat readability nodes are present (.crs-self / .crs-aimline / .crs-vignette)', before12r.self > 0 && before12r.aim > 0 && before12r.vig > 0, before12r);
   await page.keyboard.press('Escape');
   const inactive12 = await poll(async () => !(await api.active(page)), 1500, 20);
   const nodes12 = await api.count(page, '[data-crs]');
+  const after12r = await page.evaluate(() => ({
+    self: document.querySelectorAll('.crs-self, .crs-selfbox').length,
+    aim: document.querySelectorAll('.crs-aimline').length,
+    vig: document.querySelectorAll('.crs-vignette').length,
+  }));
   const body12 = await api.bodyInline(page);
   const pend12 = await api.pending(page);
   await page.mouse.up();
@@ -2120,6 +2457,7 @@ async function suiteA12(page, log, contentJs) {
   await settleRaf(page);
   const raf12 = await api.pendingRaf(page);
   check('A.exit 12: Escape during an smg hold with combat on and an orb in flight → inactive, zero [data-crs] nodes', tier12b === 'shooter' && holding12 === true && inactive12 === true && nodes12 === 0, { tier: tier12b, holding12, inactive12, nodes12 });
+  check('A.readability 10: Escape during combat clears every readability node too (.crs-self / .crs-aimline / .crs-vignette all zero, folded into the zero [data-crs] count above)', after12r.self === 0 && after12r.aim === 0 && after12r.vig === 0, after12r);
   check('A.exit 12: body inline transform / transform-origin "" after the exit', body12.transform === '' && body12.transformOrigin === '', body12);
   check('A.exit 12: no .crs-orb 2 s after the exit, zero live timers / intervals (right after and 2 s later) and zero live animation frames', orbs12 === 0 && pend12 === 0 && pend12b === 0 && raf12 === 0, { orbs12, pend12, pend12b, raf12 });
   check('A.exit 12: no console errors and no page errors during the v1.2 block', log.consoleErrors.length === conBefore && log.pageErrors.length === errBefore, { console: log.consoleErrors.slice(conBefore, conBefore + 2), page: log.pageErrors.slice(errBefore, errBefore + 2) });
@@ -2129,7 +2467,6 @@ async function suiteA12(page, log, contentJs) {
   await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
   await api.applyPreset(page, 'default');
   await api.setWeapon(page, 'hammer');
-  await api.setPower(page, 1);
   await api.restore(page);
   await sleep(100);
 }
@@ -2433,17 +2770,18 @@ async function suiteC(puppeteer, origin) {
   let browser = null;
   try {
     browser = await puppeteer.launch({ headless: true, args: BASE_ARGS });
-    try { await suiteA(browser, origin, contentCss, contentJs); } catch (e) { check('Suite A completed without exceptions', false, String(e && e.stack || e)); }
-    try { await suiteB(browser, origin, contentCss, contentJs); } catch (e) { check('Suite B completed without exceptions', false, String(e && e.stack || e)); }
+    if (WANT('A')) { try { await suiteA(browser, origin, contentCss, contentJs); } catch (e) { check('Suite A completed without exceptions', false, String(e && e.stack || e)); } }
+    if (WANT('B')) { try { await suiteB(browser, origin, contentCss, contentJs); } catch (e) { check('Suite B completed without exceptions', false, String(e && e.stack || e)); } }
     await browser.close(); browser = null;
-    try { await suiteC(puppeteer, origin); } catch (e) { check('Suite C completed without exceptions', false, String(e && e.stack || e)); }
+    if (WANT('C')) { try { await suiteC(puppeteer, origin); } catch (e) { check('Suite C completed without exceptions', false, String(e && e.stack || e)); } }
   } finally {
     if (browser) { try { await browser.close(); } catch (_) { /* ignore */ } }
     server.close();
   }
 
   const secs = elapsed();
-  check(`total runtime < ${Math.round(TIME_BUDGET_MS / 1000)} s`, Number(secs) < TIME_BUDGET_MS / 1000, secs);
+  if (PARTIAL) console.log(`\n*** PARTIAL RUN: suites ${SUITES.split('').join(', ')} only — NOT a full verification ***`);
+  else check(`total runtime < ${Math.round(TIME_BUDGET_MS / 1000)} s`, Number(secs) < TIME_BUDGET_MS / 1000, secs);
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;
   console.log(`\nSUMMARY: ${passed} passed, ${failed} failed, ${results.length} total in ${secs} s`);

@@ -1,5 +1,6 @@
   /* ===================================================================== */
   /* 0. Captured globals, constants, generic helpers                        */
+  /*    v1.3: POWERS is gone (§1) and the readability numbers of §3 land here */
   /* ===================================================================== */
   const win = window;
   const doc = document;
@@ -39,15 +40,24 @@
     melee:     ['hammer', 'axe', 'sword', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']
   };
   const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee' };
-  const POWERS = [0.5, 1, 2, 4];     // attack power multiplier steps (§4)
   const HOLD_WINDOW = 150;           // ms: hold-weapon damage aggregation / fx throttle window (A4, A5)
   const BURNT_FILTER = 'brightness(.55) sepia(.6)';   // flame-broken pieces (A9)
   const SWAP_MS = 250;               // weapon swap delay (v1.2 A5)
   const GRACE_MS = 5000;             // combat activation grace (v1.2 A7)
   const TIER_BASE = { shooter: 1800, charger: 3000, laser: 4500 };   // attack intervals (v1.2 §5)
+  /* v1.3 readability (§3): player marker / orb / near-miss / hitstop numbers. ORB_HIT_R is the ONE radius the
+   * orb sweep test and the near-miss band both read — the damage rule itself is unchanged (v1.3 §4). */
+  const SELF_R = 22;                 // player ring radius (44 px diameter)
+  const SELF_HIT_R = 32;             // ring radius at the peak of the on-hit punch (64 px diameter)
+  const ORB_R = 11;                  // orb radius (22 px diameter)
+  const ORB_HIT_R = 22;              // orb → player hit radius
+  const NEAR_MISS_BAND = 45;         // px beyond ORB_HIT_R that still counts as a graze (§3.4)
+  const HITSTOP_MS = 70;             // physics dt is clamped to 0 for this long after a hit (§3.5)
+  const ORB_TRAIL = 6;               // afterimage samples behind each orb
+  const AIMLINE_MIN_MS = 220;        // an aim line stays visible at least this long (forced / zero wind-up)
   /* api.debug (A12): one plain object, survives toggles. v1.2 adds noSpread / noAttacks / fastReload /
    * infiniteAmmo and the hooks setPlayerHp / setPlayerPos / forceAttack (attached in section 12b). */
-  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false };
+  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false, hitstop: true };
   const CAP = 160;                 // live debris pieces (A1)
   const MIN_EVICT_AGE = 800;       // ms (A1)
   const GPU_BUDGET = 64e6;         // sum of w*h*dpr^2 over live pieces (A1)

@@ -1,5 +1,6 @@
   /* ===================================================================== */
   /* 5. Sound (Web Audio, synthesized)                                      */
+  /*    v1.3 adds alert / whiff / hurtbig — the three cues of §3.2, §3.4, §3.5 */
   /* ===================================================================== */
   const audio = { ctx: null, master: null, noise: null, boomAt: [], loop: null };   // boomAt: start times of recent boom voices (A24 cap 2); loop: flame noise (v1.1)
   function ensureAudio() {
@@ -118,6 +119,10 @@
       else if (kind === 'kill') { tone(t, 'triangle', 500, 1400, 0.18, 0.25 * gm, 0.2); tone(t + 0.08, 'triangle', 800, 1800, 0.14, 0.2 * gm, 0.16); }
       else if (kind === 'hurt') { tone(t, 'sine', 90, 40, 0.2, 0.8 * gm, 0.22); noiseBurst(t, 0.12, { type: 'lowpass', freq: 500, Q: 0.8 }, 0.4 * gm, 0.12); }
       else if (kind === 'pop') { tone(t, 'sine', 600, 200, 0.06, 0.3 * gm, 0.08); noiseBurst(t, 0.03, { type: 'highpass', freq: 3000, Q: 0.7 }, 0.2 * gm, 0.03); }
+      // v1.3 §3.2 / §3.4 / §3.5: "something is aiming at you", "that one went past you", "that one hit you"
+      else if (kind === 'alert') { tone(t, 'sine', 220, 220, 0.12, 0.32 * gm, 0.14); }
+      else if (kind === 'whiff') { noiseSweep(t, 0.09, 'highpass', 900, 7000, 0.45 * gm); }
+      else if (kind === 'hurtbig') { tone(t, 'sine', 90, 40, 0.25, 1.15 * gm, 0.28); noiseBurst(t, 0.08, { type: 'lowpass', freq: 420, Q: 0.9 }, 0.6 * gm, 0.09); }
       else if (kind === 'laser') { noiseSweep(t, 0.4, 'bandpass', 3000, 600, 0.5 * gm); tone(t, 'sawtooth', 220, 180, 0.4, 0.15 * gm, 0.4); }
     } catch (e) { /* ignore */ }
   }

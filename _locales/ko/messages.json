@@ -15,7 +15,6 @@
   "weaponFlame": {"message": "화염방사기", "description": "Flamethrower weapon (hold to fire)"},
   "weaponFlameShort": {"message": "화염", "description": "Flamethrower short label (HUD button)"},
   "weaponCollapse": {"message": "붕괴", "description": "Collapse weapon"},
-  "labelPower": {"message": "공격력", "description": "Attack power label"},
   "hudDamage": {"message": "피해", "description": "Damage dealt counter label"},
   "critLabel": {"message": "치명타!", "description": "Critical hit prefix in the HUD last-hit line"},
   "headshotLabel": {"message": "헤드샷!", "description": "Sniper critical hit label (floating number and HUD last-hit line)"},
@@ -26,8 +25,6 @@
   "btnMute": {"message": "음소거", "description": "Sound muted"},
   "btnRestore": {"message": "복구", "description": "Restore page"},
   "btnExit": {"message": "종료", "description": "Exit smash mode"},
-  "btnPowerDown": {"message": "공격력 낮추기", "description": "Attack power − button tooltip"},
-  "btnPowerUp": {"message": "공격력 높이기", "description": "Attack power + button tooltip"},
   "hudHint": {"message": "클릭해서 화면을 부수세요", "description": "HUD hint"},
   "hudHintHold": {"message": "꾹 눌러서 발사", "description": "HUD hint for hold weapons"},
   "hudHintDrag": {"message": "드래그해서 베기", "description": "HUD hint for the sword"},
@@ -55,5 +52,6 @@
   "toastCombatOn": {"message": "⚔️ 전투 모드: 큰 요소들이 반격해요 (H로 끄기)", "description": "Toast when combat mode is on"},
   "toastCombatOff": {"message": "전투 모드 꺼짐", "description": "Toast when combat mode is turned off"},
   "toastReload": {"message": "재장전", "description": "Reload label (ammo HUD prompt and manual reload toast)"},
-  "labelSwapping": {"message": "교체 중", "description": "Ammo HUD text during the weapon swap delay"}
+  "labelSwapping": {"message": "교체 중", "description": "Ammo HUD text during the weapon swap delay"},
+  "dodgeLabel": {"message": "회피!", "description": "Near-miss call-out next to the player ring"}
 }

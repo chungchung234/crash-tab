@@ -1,5 +1,7 @@
   /* ===================================================================== */
   /* 13. Physics loop                                                         */
+  /*     v1.3: the §3.5 hitstop clamps dt here, and the §3.1 player ring /     */
+  /*     §3.2 aim lines ride this frame rather than owning loops of their own. */
   /* ===================================================================== */
   function kick() {
     if (!state.active || state.animating) return;
@@ -22,10 +24,15 @@
     if (busy && state.active) state.rafId = raf(tick); else state.animating = false;
   }
   function tickFrame(t) {
-    const dt = clamp((t - state.lastT) / 1000, 0, 0.05);
+    let dt = clamp((t - state.lastT) / 1000, 0, 0.05);
     state.lastT = t;
     const W = viewW(), H = viewH();
     let busy = false;
+    /* v1.3 §3.5 hitstop: for 70 ms after the player is hit the integrator advances NO time. Frames still run and
+     * still consume their timestamps — dt is clamped to zero rather than the frame being skipped — so pieces,
+     * orbs and beams resume from exactly where they stopped instead of jumping a window's worth of motion. */
+    if (state.hitstopUntil > t) { dt = 0; busy = true; }
+    else if (state.hitstopUntil) state.hitstopUntil = 0;
     const resting = [];
     for (const q of state.pieces) if (q.resting) resting.push(q);
     for (const p of state.pieces) {
@@ -72,6 +79,9 @@
     if (state.orbs.length) { orbStep(t, dt); busy = busy || state.orbs.length > 0; }
     if (state.beams.length) { beamStep(); busy = true; }
     if (state.scoped) { scopeStep(t); busy = true; }
+    // v1.3 §3.1 / §3.2: the player ring rides this loop (and scheduleHover()'s RAF) — it never owns one
+    if (state.self) selfStep();
+    if (state.aimlines.length) { stepAimLines(); busy = true; }
     if (busy && state.combat && !state.paused && state.player.hp < state.player.max) regenStep();
     return busy;
   }

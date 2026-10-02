@@ -1,3 +1,5 @@
+  /* Small helpers + the Korean fallback strings. v1.3 §1 drops labelPower / btnPowerDown / btnPowerUp;
+   * §3.4 adds dodgeLabel (the 회피! call-out beside the player ring). */
   const rand = (a, b) => a + Math.random() * (b - a);
   const randInt = (a, b) => Math.floor(rand(a, b + 1));
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -52,8 +54,8 @@
     hudTitle: '화면부수기',
     weaponHammer: '망치', weaponPistol: '권총', weaponSmg: '기관총', weaponSniper: '저격총', weaponAxe: '도끼', weaponSword: '검', weaponBomb: '폭탄',
     weaponRocket: '로켓', weaponFlame: '화염방사기', weaponFlameShort: '화염', weaponCollapse: '붕괴',
-    labelPower: '공격력', hudDamage: '피해', critLabel: '치명타!', headshotLabel: '헤드샷!', unitPerShot: '/발', unitPerTick: '/틱',
-    btnSound: '소리', btnMute: '음소거', btnRestore: '복구', btnExit: '종료', btnPowerDown: '공격력 낮추기', btnPowerUp: '공격력 높이기',
+    hudDamage: '피해', critLabel: '치명타!', headshotLabel: '헤드샷!', unitPerShot: '/발', unitPerTick: '/틱',
+    btnSound: '소리', btnMute: '음소거', btnRestore: '복구', btnExit: '종료',
     hudHint: '클릭해서 화면을 부수세요', hudHintHold: '꾹 눌러서 발사', hudHintDrag: '드래그해서 베기',
     hudHintCollapse: '복구(Z)로 되돌릴 수 있어요', hudHintScope: '클릭해서 발사 · 오른쪽 버튼이나 Shift로 조준해요',
     hudPieces: '조각', hudCracks: '균열',
@@ -62,6 +64,8 @@
     labelCombat: '전투', labelHealth: '체력', labelScore: '점수', labelKills: '처치', labelTime: '생존', labelEnemies: '적',
     koTitle: '당신은 부서졌습니다', koRestart: '다시 시작', koExit: '종료', killLabel: '처치!',
     toastCombatOn: '⚔️ 전투 모드: 큰 요소들이 반격해요 (H로 끄기)', toastCombatOff: '전투 모드 꺼짐', toastReload: '재장전', labelSwapping: '교체 중',
+    // v1.3 (§2 / §3.4): the dodge call-out next to the player ring
+    dodgeLabel: '회피!',
     unitSec: '초'
   };
   function msg(key) {

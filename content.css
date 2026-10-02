@@ -1,4 +1,4 @@
-/* 화면부수기 (Crash Screen) v1.1 — document-level styles.
+/* 화면부수기 (Crash Screen) v1.3 — document-level styles.
  * Injected by background.js with origin USER (user !important beats page !important).
  * Only crs- prefixed classes / the crs-hud tag are touched.
  */
@@ -253,13 +253,20 @@ crs-hud::backdrop,
 .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx { z-index: 4 !important; }
 .crs-dmg { z-index: 5 !important; white-space: nowrap !important; line-height: 1 !important; }
 
-/* ---- v1.2 glass-root nodes (A11): scope, tracer, hostile auras, orbs, warn rings, beams, vignette ---- */
+/* ---- v1.2 glass-root nodes (A11): scope, tracer, hostile auras, orbs, warn rings, beams, vignette
+ *      v1.3 adds the player marker (.crs-selfbox / .crs-self*), the aim-line telegraph, the orb arrival
+ *      ring + afterimages and the laser lock markers (SPEC-readability §3). ---- */
 .crs-scope,
 .crs-tracer,
 .crs-hostile,
 .crs-orb,
+.crs-orb-ring,
+.crs-orb-trail,
 .crs-warn,
 .crs-beam,
+.crs-beam-mark,
+.crs-aimline,
+.crs-selfbox,
 .crs-vignette {
   position: fixed !important;
   margin: 0 !important;
@@ -293,19 +300,128 @@ crs-hud::backdrop,
   text-transform: none !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .35) !important;
 }
-.crs-tracer, .crs-orb, .crs-warn, .crs-beam { z-index: 4 !important; }
+.crs-tracer, .crs-orb, .crs-orb-ring, .crs-orb-trail, .crs-warn, .crs-beam, .crs-beam-mark, .crs-aimline { z-index: 4 !important; }
 .crs-tracer {
   background: linear-gradient(90deg, rgba(255, 200, 80, .15), #ffd166) !important;
   box-shadow: 0 0 6px 1px rgba(255, 170, 40, .9), 0 0 0 1px rgba(0, 0, 0, .35) !important;
   border-radius: 1px !important;
 }
+/* v1.3 §3.3: 22 px with a white-hot core and a wide glow — a projectile you can see coming and judge. */
 .crs-orb {
-  width: 14px !important;
-  height: 14px !important;
+  width: 22px !important;
+  height: 22px !important;
   border-radius: 50% !important;
-  background: radial-gradient(circle at 40% 40%, #fff 0%, #ff4d4d 40%, rgba(255, 77, 77, 0) 75%) !important;
-  box-shadow: 0 0 10px 3px rgba(255, 77, 77, .7) !important;
+  background: radial-gradient(circle at 42% 38%, #fff 0%, #ffd2d2 18%, #ff3b3b 52%, rgba(255, 59, 59, 0) 78%) !important;
+  box-shadow: 0 0 16px 5px rgba(255, 77, 77, .8), 0 0 36px 12px rgba(255, 60, 60, .35), 0 0 0 1px rgba(40, 0, 0, .5) !important;
   transform-origin: 50% 50% !important;
+}
+/* the arrival ring: starts wide, closes onto the orb exactly at the predicted impact */
+.crs-orb-ring {
+  border-radius: 50% !important;
+  border-width: 2px !important;
+  border-style: solid !important;
+  background: transparent !important;
+  /* border-color / opacity are written per frame from JS: user-origin !important would outrank the inline style */
+  border-color: rgba(255, 90, 90, .95);
+}
+.crs-orb-trail {
+  border-radius: 50% !important;
+  background: radial-gradient(circle, rgba(255, 150, 150, .95) 0%, rgba(255, 60, 60, 0) 72%) !important;
+}
+/* v1.3 §3.2: the "this one is attacking YOU" line, drawn from the attacker's nearest edge to the player ring */
+.crs-aimline {
+  height: 2px !important;
+  transform-origin: 0 50% !important;
+  border-radius: 1px !important;
+  background-image: repeating-linear-gradient(90deg, rgba(255, 70, 70, .95) 0 10px, rgba(255, 70, 70, 0) 10px 18px) !important;
+  background-repeat: repeat !important;
+  filter: drop-shadow(0 0 3px rgba(255, 50, 50, .75)) !important;
+}
+/* the hostile currently winding up: its aura reads 1.6x brighter than the idle ones */
+.crs-hostile.crs-aimed {
+  filter: brightness(1.6) !important;
+  outline-color: rgba(255, 110, 110, 1) !important;
+}
+/* v1.3 §3.3: the laser's lock markers, sliding inward from both ends of the line */
+.crs-beam-mark {
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 3px !important;
+  background: linear-gradient(135deg, rgba(255, 185, 60, 1), rgba(255, 120, 30, 1)) !important;
+  box-shadow: 0 0 10px 3px rgba(255, 160, 40, .8) !important;
+}
+
+/* ---- v1.3 §3.1: the player marker — the cursor finally has a body, and it is the health gauge ---- */
+.crs-selfbox {
+  width: 44px !important;
+  height: 44px !important;
+  z-index: 5 !important;
+  background: transparent !important;
+  /* NOT !important: the on-hit punch animates this transform, and a user-origin !important would outrank it */
+  transform: translate(-50%, -50%);
+}
+.crs-self,
+.crs-self-wedge,
+.crs-self-arc {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  background-color: transparent !important;
+  /* the middle is punched out with a radial-gradient mask: what is left is a 3 px ring (CSSOM only, no SVG) */
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 18px, #000 19px) !important;
+  mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 18px, #000 19px) !important;
+}
+/* the gauge itself. The gradient is rewritten from JS on every hp change and the brightness is animated on a
+ * hit, so neither may be !important here — this rule is only the full-health starting state. */
+.crs-self {
+  background-image: conic-gradient(from 0deg, #3fb950 0deg, #3fb950 360deg, rgba(255, 255, 255, .16) 360deg);
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .85));
+}
+.crs-self-wedge,
+.crs-self-arc {
+  opacity: 0;
+}
+.crs-self-dot {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  width: 6px !important;
+  height: 6px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, .7) !important;
+  box-shadow: 0 0 3px rgba(0, 0, 0, .8) !important;
+  transform: translate(-50%, -50%) !important;
+  pointer-events: none !important;
+  display: block !important;
+}
+.crs-self-tag {
+  position: absolute !important;
+  left: 100% !important;
+  top: 50% !important;
+  margin: 0 0 0 8px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  font: 700 11px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  color: #fff !important;
+  background: transparent !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .95) !important;
+  white-space: nowrap !important;
+  transform: translateY(-50%) !important;
+  opacity: 0;
+  pointer-events: none !important;
+  display: block !important;
 }
 .crs-warn {
   border-radius: 50% !important;
@@ -318,7 +434,8 @@ crs-hud::backdrop,
   background-color: transparent !important;
   background-repeat: repeat !important;
 }
-.crs-beam.crs-beam-lock { background-color: rgba(255, 60, 60, .9) !important; }
+/* v1.3 §3.3: lock is ORANGE and solid — it says "it stopped following you, step off the line" */
+.crs-beam.crs-beam-lock { background-color: rgba(255, 159, 28, .95) !important; box-shadow: 0 0 10px 2px rgba(255, 159, 28, .55) !important; }
 .crs-beam.crs-beam-fire {
   background-color: rgba(255, 80, 80, .95) !important;
   box-shadow: 0 0 12px 4px rgba(255, 80, 80, .7), 0 0 32px 10px rgba(255, 80, 80, .35) !important;
@@ -327,12 +444,17 @@ crs-hud::backdrop,
   inset: 0 !important;
   z-index: 6 !important;
   box-shadow: inset 0 0 120px 40px rgba(229, 72, 77, .7) !important;
-  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none;   /* NOT !important: the directional wash (§3.5) writes its gradient from JS */
 }
 .crs-vignette.crs-flash-white {
   box-shadow: none !important;
-  background: rgba(255, 255, 255, .9) !important;
+  background-color: rgba(255, 255, 255, .9) !important;
 }
+/* v1.3 §3.5: a wash aimed at the damage source (its gradient is written by CSSOM per hit) */
+.crs-vignette.crs-vignette-dir { box-shadow: none !important; }
+/* v1.3 §2.2: the standing "you are nearly dead" rim below 30 % HP */
+.crs-vignette.crs-vignette-low { box-shadow: inset 0 0 90px 24px rgba(229, 72, 77, .55) !important; background-color: transparent !important; }
 .crs-scope {
   inset: 0 !important;
   z-index: 7 !important;

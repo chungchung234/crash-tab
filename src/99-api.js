@@ -1,5 +1,8 @@
   /* ===================================================================== */
   /* 15. Public API: restore / activate / deactivate / toggle / prefs         */
+  /*     v1.3 §1/§5: setPower / power / stats().power removed, a stored        */
+  /*     crsPower is dropped on sight; stats() gains selfRing / aimlines /      */
+  /*     nearMisses / hitstop and player() gains lastHitFrom.                  */
   /* ===================================================================== */
   function clearTimers() {
     for (const id of state.timers) { try { clearT(id); } catch (e) { /* ignore */ } }
@@ -13,8 +16,10 @@
     for (const a of state.anims) { try { a.cancel(); } catch (e) { /* ignore */ } }
     state.anims.clear();
     state.shake = null;
-    if (hudEls.aBlink) hudEls.aBlink = null;
     if (hudEls.aFillFor) hudEls.aFillFor = null;
+    // v1.3: the looping attention pulses are cancelled above with everything else — forget their handles
+    hudEls.aPulse = null; hudEls.aPulseKey = '';
+    hudEls.pPulse = null; hudEls.pPulseOn = false;
   }
   function restore() {
     stopHold(true);
@@ -27,14 +32,15 @@
     // a frame that threw must never leave kick() permanently disabled
     if (state.rafId) { try { caf(state.rafId); } catch (e) { /* ignore */ } }
     state.rafId = 0; state.animating = false; state.tickErrors = 0;
-    clearCombatNodes();   // hostiles / orbs / beams / warn rings (no kills, no score) — v1.2 A8
+    clearCombatNodes();   // hostiles / orbs / beams / warn rings / aim lines (no kills, no score) — v1.2 A8
+    clearSelf(); clearLowVignette();   // v1.3 §3: the player marker and the low-HP vignette are rebuilt by updatePlayerHud()
     cancelAnims();
     // debris + fx nodes
     for (const p of state.pieces) { try { p.node.remove(); } catch (e) { /* ignore */ } }
     state.pieces.length = 0; state.gpuSum = 0;
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-warn, .crs-beam, .crs-vignette'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -53,6 +59,7 @@
     state.cooldownUntil = 0; state.shots = 0; state.damageDealt = 0; state.crits = 0; state.scorch = 0; state.lastBreakPieces = 0;
     // v1.2: magazines refilled, player reset, KO / toast hidden
     initAmmo(); state.swapUntil = 0; state.lastEmptyAt = 0; state.lastShot = null;
+    state.nearMisses = 0; state.nearShown.length = 0; state.hitstopUntil = 0; state.hpRatio = 1;
     resetPlayer(); hideKo(); hideToast();
     clearCanvas();
     try { if (docEl.classList.contains('crs-swing')) docEl.classList.remove('crs-swing'); } catch (e) { /* ignore */ }
@@ -89,20 +96,6 @@
   }
   /* Legacy alias (A12): v1 'gun' → 'pistol'; the other v1 ids are weapon ids already. */
   function setMode(m) { return setWeapon(m === 'gun' ? 'pistol' : m); }
-  function setPower(v) {
-    v = +v;
-    if (!isFinite(v)) return state.power;
-    let best = POWERS[0];
-    for (const p of POWERS) if (Math.abs(p - v) < Math.abs(best - v)) best = p;
-    state.power = best; state.powerTouched = true;
-    updateHud();
-    safe(() => chrome.storage.sync.set({ crsPower: best }));
-    return best;
-  }
-  function stepPower(dir) {
-    const i = POWERS.indexOf(state.power);
-    return setPower(POWERS[clamp((i < 0 ? 1 : i) + dir, 0, POWERS.length - 1)]);
-  }
   function setMuted(v) {
     state.muted = !!v;
     if (state.muted) stopLoop(); else if (state.hold && state.hold.id === 'flame') { ensureAudio(); startLoop(); }
@@ -121,7 +114,7 @@
         if (!WEAPON_IDS.includes(w)) w = res.crsMode === 'gun' ? 'pistol' : res.crsMode;
         if (WEAPON_IDS.includes(w)) setWeapon(w, { silent: true });   // no swap delay, no reload cancel, no scope-out (A5)
       }
-      if (!state.powerTouched && POWERS.includes(res.crsPower)) state.power = res.crsPower;
+      if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
       if (typeof res.crsMuted === 'boolean') state.muted = res.crsMuted;
       if (!state.combatTouched && typeof res.crsCombat === 'boolean' && res.crsCombat !== state.combat) setCombat(res.crsCombat, { silent: true });
       updateHud();
@@ -191,6 +184,7 @@
     state.active = false; state.hoverEl = null; state.hoverX = -1; state.hoverY = -1; state.overHud = false;
     state.paused = false; state.ko = false; state.scope.rmb = false; state.scope.shiftDown = false; state.scope.shiftWant = false;
     state.hostiles.clear(); state.orbs.length = 0; state.beams.length = 0; state.warns.length = 0;
+    state.self = null; state.lowVig = null; state.aimlines.length = 0; state.hitstopUntil = 0;
     if (wasActive) sendState(false);
   }
   function toggle() {
@@ -200,7 +194,7 @@
   function stats() {
     const id = state.weapon;
     return {
-      active: state.active, weapon: state.weapon, mode: state.weapon, power: state.power,
+      active: state.active, weapon: state.weapon, mode: state.weapon,
       cracks: state.cracks, debris: debrisCount(), broken: state.broken.length,
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
@@ -213,7 +207,10 @@
       lastShot: state.lastShot ? Object.assign({}, state.lastShot) : null,
       combat: state.combat, hostiles: state.hostiles.size, orbs: state.orbs.length, beams: state.beams.length,
       playerHp: Math.max(0, Math.round(state.player.hp)), score: state.player.score, kills: state.player.kills,
-      paused: state.paused, ko: state.ko, loadout: state.loadout.slice(), preset: state.preset
+      paused: state.paused, ko: state.ko, loadout: state.loadout.slice(), preset: state.preset,
+      // v1.3 §5: the player marker, the "who is aiming at me" lines, and the graze counter
+      selfRing: selfRingInfo(), aimlines: state.aimlines.length, nearMisses: state.nearMisses,
+      hitstop: now() < state.hitstopUntil
     };
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
@@ -243,10 +240,9 @@
     get active() { return state.active; },
     get weapon() { return state.weapon; },
     get mode() { return state.weapon; },
-    get power() { return state.power; },
     get combat() { return state.combat; },
     toggle, activate, deactivate: () => deactivate(false), restore,
-    setWeapon: (id) => setWeapon(id), setMode, setPower, weapons: weaponList, hpOf: hpOfPublic, smashAt, slash: slashSegment, stats,
+    setWeapon: (id) => setWeapon(id), setMode, weapons: weaponList, hpOf: hpOfPublic, smashAt, slash: slashSegment, stats,
     // v1.2
     ammo: ammoInfo, reload: reloadNow,
     loadout: () => state.loadout.slice(), setLoadout: (ids) => setLoadout(ids), applyPreset,

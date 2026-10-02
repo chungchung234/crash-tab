@@ -1,4 +1,7 @@
-  /* --- combat (A7–A10): player, selection tick, hostiles, attacks, orbs, KO --- */
+  /* --- combat (A7–A10): player, selection tick, hostiles, attacks, orbs, KO ---
+   * v1.3: the T3 laser lives in 89-beams.js and everything about how an attack READS — the player ring, the aim
+   * lines, orb legibility, near misses, the hit reaction and the player HUD — lives in 91-combat-feedback.js. The
+   * patterns, intervals, damage values, tiers and scoring in this file are untouched (SPEC-readability §4). */
   function combatElapsed() {
     const p = state.player;
     if (!p.startedAt) return 0;
@@ -9,11 +12,12 @@
   function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000); }
   function resetPlayer() {
     const p = state.player;
-    p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0;
+    p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
   }
   function playerInfo() {
     const p = state.player;
-    return { hp: Math.max(0, Math.round(p.hp)), max: p.max, score: p.score, kills: p.kills, alive: p.alive, elapsedMs: Math.round(combatElapsed()), x: p.x, y: p.y };
+    return { hp: Math.max(0, Math.round(p.hp)), max: p.max, score: p.score, kills: p.kills, alive: p.alive, elapsedMs: Math.round(combatElapsed()), x: p.x, y: p.y,
+      lastHitFrom: p.lastHitFrom ? { x: p.lastHitFrom.x, y: p.lastHitFrom.y } : null };   // v1.3 §5: where the last hit came from
   }
   function hostileSkip(el) {
     if (state.hostiles.has(el)) return true;
@@ -104,7 +108,7 @@
     label.textContent = '👿 ' + tagOf(el).toUpperCase();
     aura.append(label);
     root.append(aura);
-    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now() };
+    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, aim: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now() };
     state.hostiles.set(el, rec);
     hpOf(el);   // page-space max HP cached now (scope never runs the picker)
     placeAura(rec);
@@ -120,7 +124,8 @@
     rec.nextAttackAt = now() + ms;
     rec.timer = later(() => { rec.timer = 0; hostileAttack(rec, false); }, ms);
   }
-  function clearPhase(rec) {   // telegraph / beam / warn nodes of this hostile; pulse back to idle
+  function clearPhase(rec) {   // telegraph / beam / warn / lock-mark nodes of this hostile; pulse back to idle
+    dropAimLine(rec);   // v1.3 §3.2: the "aiming at you" line never outlives the wind-up it belongs to
     for (const n of rec.nodes) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } const i = state.warns.indexOf(n); if (i >= 0) state.warns.splice(i, 1); }
     rec.nodes.length = 0;
     if (rec.beam) { removeBeam(rec.beam); rec.beam = null; }
@@ -133,6 +138,7 @@
     state.hostiles.delete(el);
     untrack(rec.timer); rec.timer = 0;
     clearPhase(rec);
+    dropAimLine(rec, true);   // the hostile itself is going — its line cannot linger
     try { if (rec.pulse) { rec.pulse.cancel(); state.anims.delete(rec.pulse); } } catch (e) { /* ignore */ }
     try { rec.aura.remove(); } catch (e) { /* ignore */ }
     updatePlayerHud();
@@ -152,7 +158,7 @@
   }
   function clearCombatNodes() {
     for (const el of Array.from(state.hostiles.keys())) releaseHostile(el);
-    clearOrbs(); clearBeams(); clearWarns();
+    clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
   }
   /* true only when one of the three attacks actually started (debug.forceAttack reports the tier off this). */
   function hostileAttack(rec, forced) {
@@ -185,11 +191,14 @@
   function spawnOrb(rec, x, y, windup) {
     if (!root) return null;
     const n = mk('div', 'crs-orb');
-    n.style.left = px(x - 7); n.style.top = px(y - 7);
+    n.style.left = px(x - ORB_R); n.style.top = px(y - ORB_R);   // v1.3 §3.3: 22 px, so it can be seen coming
     root.append(n);
     const t = now();
-    const o = { node: n, rec, x, y, x0: x, y0: y, vx: 0, vy: 0, bornAt: t, launchAt: t + windup, launched: false, dmg: 8 + Math.round(Math.sqrt(rec.area) / 60) };
+    const o = { node: n, rec, x, y, x0: x, y0: y, vx: 0, vy: 0, bornAt: t, launchAt: t + windup, launched: false, dmg: 8 + Math.round(Math.sqrt(rec.area) / 60),
+      ring: null, trail: null, hist: null, flightMs: 0, minD: Infinity, minAt: null, nearDone: false };
     state.orbs.push(o);
+    orbVisuals(o);
+    addAimLine(rec);   // §3.2 — also for a forced (zero wind-up) shot, which the min hold time keeps visible
     if (windup > 0) { rec.phase = 'windup'; n.style.transform = 'scale(.3)'; } else launchOrb(o);
     kick();
     return o;
@@ -198,12 +207,14 @@
     const p = state.player;
     const dx = p.x - o.x, dy = p.y - o.y, L = Math.hypot(dx, dy) || 1;
     o.vx = dx / L * 520; o.vy = dy / L * 520; o.launched = true; o.launchAt = now();
+    o.flightMs = Math.max(1, L / 520 * 1000);   // the arrival ring shrinks over exactly this long (§3.3)
     o.node.style.transform = 'translate(0px, 0px)';
     if (o.rec && o.rec.phase === 'windup') o.rec.phase = 'idle';
+    dropAimLine(o.rec);   // the line goes with the shot
   }
   /* A10: the clutch bonus reads rec.phase, and only launchOrb() clears 'windup' — an orb that is removed before it
    * ever launches (interception, KO, restore) must put its hostile back to idle. */
-  function orbGone(o) { if (o && o.rec && !o.launched && o.rec.phase === 'windup') o.rec.phase = 'idle'; }
+  function orbGone(o) { if (!o) return; orbVisualsRemove(o); if (o.rec && !o.launched && o.rec.phase === 'windup') o.rec.phase = 'idle'; }
   function removeOrbAt(i) { const o = state.orbs[i]; state.orbs.splice(i, 1); orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } }
   function clearOrbs() { for (const o of state.orbs) { orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } } state.orbs.length = 0; }
   function orbStep(t, dt) {
@@ -219,11 +230,12 @@
       if (p.alive && !state.ko) {   // swept segment hit (no tunnelling at low frame rates)
         const q = nearestOnSegment(o.x, o.y, nx, ny, p.x, p.y);
         // damagePlayer() may KO the player, and showKo() → clearOrbs() empties state.orbs while we are iterating it
-        if (Math.hypot(q.x - p.x, q.y - p.y) < 22) { removeOrbAt(i); damagePlayer(o.dmg); if (state.ko || !state.orbs.length) return; continue; }
+        if (Math.hypot(q.x - p.x, q.y - p.y) < ORB_HIT_R) { removeOrbAt(i); damagePlayer(o.dmg, { from: q }); if (state.ko || !state.orbs.length) return; continue; }
       }
       o.x = nx; o.y = ny;
       if (t - o.launchAt > 3000 || nx < -20 || ny < -20 || nx > W + 20 || ny > H + 20) { removeOrbAt(i); continue; }
       o.node.style.transform = 'translate(' + px(nx - o.x0) + ', ' + px(ny - o.y0) + ')';
+      orbReadability(o, t);   // v1.3 §3.3 / §3.4: arrival ring, afterimages, will-hit tint, graze detection
     }
   }
   function popOrb(o) {
@@ -254,11 +266,19 @@
   function attackCharger(rec, r) {
     rec.phase = 'telegraph';
     setAuraPulse(rec, 150);
-    const cx = r.left + r.width / 2, cy = r.top + r.height / 2, S = 180;
-    const warn = mk('div', 'crs-warn');
-    warn.style.left = px(cx - S / 2); warn.style.top = px(cy - S / 2); warn.style.width = px(S); warn.style.height = px(S);
+    addAimLine(rec);
+    /* v1.3 §3.3: the warn ring now CLOSES onto the real hit boundary (rect + 60 px) instead of blooming past it,
+     * so the edge the player has to be outside of is the edge they can see. */
+    const ex = { left: r.left - 60, top: r.top - 60, w: r.width + 120, h: r.height + 120 };
+    const warn = mk('div', 'crs-warn crs-slam');
+    warn.style.left = px(ex.left); warn.style.top = px(ex.top); warn.style.width = px(ex.w); warn.style.height = px(ex.h);
     root.append(warn); rec.nodes.push(warn); state.warns.push(warn);
-    try { trackAnim(warn.animate([{ transform: 'scale(.2)', opacity: 1 }, { transform: 'scale(1.15)', opacity: 0.15 }], { duration: 700, easing: 'ease-out', fill: 'forwards' })); } catch (e) { /* ignore */ }
+    try {
+      trackAnim(warn.animate([
+        { left: px(ex.left - 130), top: px(ex.top - 130), width: px(ex.w + 260), height: px(ex.h + 260), opacity: 0.3, borderWidth: '6px' },
+        { left: px(ex.left), top: px(ex.top), width: px(ex.w), height: px(ex.h), opacity: 1, borderWidth: '3px' }
+      ], { duration: 700, easing: 'ease-in', fill: 'forwards' }));
+    } catch (e) { /* ignore */ }
     sfx('thump', { gain: 0.5 });
     rec.timer = later(() => { rec.timer = 0; chargerSlam(rec); }, 700);
   }
@@ -284,88 +304,10 @@
     }
     shake('bomb', { amp: near ? 10 : 3, dur: 300 });
     sfx('rumble', { gain: near ? 1 : 0.5 });
-    if (inside) damagePlayer(18 + Math.round(Math.sqrt(rec.area) / 50));
+    if (inside) damagePlayer(18 + Math.round(Math.sqrt(rec.area) / 50), { from: { x: cx, y: cy } });
     scheduleAttack(rec, attackInterval(rec));
   }
-  /* T3 laser: dashed telegraph tracking the player for 550 ms, lock 250 ms (solid), fire 400 ms (hit band 16 px, 30 dmg once). */
-  function attackLaser(rec, r) {
-    if (!root) { scheduleAttack(rec, attackInterval(rec)); return; }
-    rec.phase = 'track';
-    const horizontal = r.width >= r.height;
-    const node = mk('div', 'crs-beam crs-beam-telegraph telegraph');
-    const b = { rec, node, horizontal, pos: horizontal ? state.player.y : state.player.x, phase: 'track', hit: false };
-    rec.beam = b;
-    state.beams.push(b);
-    root.append(node);
-    placeBeam(b);
-    rec.timer = later(() => {
-      rec.timer = 0;
-      b.phase = 'lock'; rec.phase = 'lock';
-      try { node.classList.add('crs-beam-lock'); } catch (e) { /* ignore */ }
-      placeBeam(b);
-      rec.timer = later(() => { rec.timer = 0; fireBeam(b); }, 250);
-    }, 550);
-    kick();
-  }
-  function placeBeam(b) {
-    const s = b.node.style, th = b.phase === 'fire' ? 6 : 2;
-    if (b.horizontal) { s.left = '0px'; s.top = px(b.pos - th / 2); s.width = px(viewW()); s.height = px(th); }
-    else { s.top = '0px'; s.left = px(b.pos - th / 2); s.height = px(viewH()); s.width = px(th); }
-    s.backgroundImage = b.phase === 'track' ? 'repeating-linear-gradient(' + (b.horizontal ? '90deg' : '180deg') + ', rgba(255,60,60,.85) 0 10px, transparent 10px 18px)' : 'none';
-  }
-  function fireBeam(b) {
-    const rec = b.rec;
-    if (state.beams.indexOf(b) < 0) return;
-    b.phase = 'fire'; rec.phase = 'fire';
-    b.node.className = 'crs-beam crs-beam-fire fire';
-    placeBeam(b);
-    sfx('laser');
-    checkBeamHit(b);
-    rec.timer = later(() => { rec.timer = 0; removeBeam(b); rec.phase = 'idle'; scheduleAttack(rec, attackInterval(rec)); }, 400);
-    kick();
-  }
-  function checkBeamHit(b) {
-    if (b.hit || b.phase !== 'fire') return;
-    const p = state.player;
-    if (!p.alive || state.ko) return;
-    const d = b.horizontal ? Math.abs(p.y - b.pos) : Math.abs(p.x - b.pos);
-    if (d <= 16) { b.hit = true; vignette(true); damagePlayer(30); }
-  }
-  function beamStep() {
-    for (const b of state.beams.slice()) {
-      if (b.phase === 'track') { b.pos = b.horizontal ? state.player.y : state.player.x; placeBeam(b); }
-      else if (b.phase === 'fire') checkBeamHit(b);
-    }
-  }
-  function removeBeam(b) {
-    const i = state.beams.indexOf(b);
-    if (i >= 0) state.beams.splice(i, 1);
-    if (b.rec && b.rec.beam === b) b.rec.beam = null;
-    try { cancelAnimsOf(b.node); b.node.remove(); } catch (e) { /* ignore */ }
-  }
-  function clearBeams() { for (const b of state.beams.slice()) removeBeam(b); }
-  function clearWarns() { for (const n of state.warns) { try { n.remove(); } catch (e) { /* ignore */ } } state.warns.length = 0; }
-  /* --- player damage, regen, KO --- */
-  function vignette(white) {
-    if (!root) return;
-    const n = mk('div', white ? 'crs-vignette crs-flash-white' : 'crs-vignette');
-    root.append(n);
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
-    try { const a = trackAnim(n.animate([{ opacity: white ? 0.85 : 0.8 }, { opacity: 0 }], { duration: white ? 300 : 400, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
-    later(kill, 700);
-  }
-  function damagePlayer(n) {
-    const p = state.player;
-    if (!state.active || !state.combat || !p.alive || state.ko || !(n > 0)) return;
-    p.hp = Math.max(0, p.hp - n);
-    p.lastDamageAt = now(); p.lastRegenAt = p.lastDamageAt;
-    vignette(false);
-    sfx('hurt');
-    spawnDmg(p.x + rand(-10, 10), p.y - 18, Math.round(n), false, { color: '#ff6b6b' });
-    try { if (hudEls.player && !reducedMotion()) trackAnim(hudEls.player.animate([{ transform: 'translate(0px, 0px)' }, { transform: 'translate(-4px, 2px)' }, { transform: 'translate(4px, -2px)' }, { transform: 'translate(-2px, 1px)' }, { transform: 'translate(0px, 0px)' }], { duration: 260 })); } catch (e) { /* ignore */ }
-    updatePlayerHud();
-    if (p.hp <= 0) showKo(); else startRegen();
-  }
+  /* --- player regen, KO --- (vignette / damagePlayer / updatePlayerHud moved to 91-combat-feedback.js) */
   function startRegen() {   // 500 ms later() chain while hp < max (tick() also regens while the loop is busy)
     if (state.regenTimer || !state.active || !state.combat || state.paused) return;
     const p = state.player;
@@ -393,7 +335,7 @@
     resetChord(); scopeOff(); stopHold(); cancelSlash();
     untrack(state.regenTimer); state.regenTimer = 0;
     for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
-    clearOrbs(); clearBeams(); clearWarns();
+    clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
     // KO overlay (A11): built on demand inside the HUD shadow root; ordinary shadow buttons, so isHudEvent() lets clicks through
     if (hudEls.mount && !hudEls.ko) {
       try {
@@ -455,7 +397,7 @@
     untrack(state.clockTimer); state.clockTimer = 0;
     untrack(state.regenTimer); state.regenTimer = 0;
     for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
-    clearOrbs(); clearBeams(); clearWarns();
+    clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
   }
   function resumeCombat() {
     if (!state.paused) return;
@@ -467,25 +409,16 @@
     for (const rec of state.hostiles.values()) scheduleAttack(rec, Math.max(1000, attackInterval(rec)));
     if (state.player.hp < state.player.max) startRegen();
   }
-  function updatePlayerHud() {
-    const h = hudEls.player;
-    if (!h) return;
-    try {
-      h.classList.toggle('on', !!state.combat);
-      if (hudEls.fallback) h.style.display = state.combat ? 'block' : 'none';
-      const p = state.player, hp = Math.max(0, Math.round(p.hp)), ratio = clamp(p.hp / p.max, 0, 1);
-      hudEls.pFill.style.width = (ratio * 100).toFixed(1) + '%';
-      hudEls.pFill.style.background = fillColor(ratio);
-      hudEls.pHp.textContent = msg('labelHealth') + ' ' + hp;
-      hudEls.pStats.textContent = msg('labelScore') + ' ' + p.score + ' · ' + msg('labelKills') + ' ' + p.kills + ' · ' + msg('labelTime') + ' ' + Math.floor(combatElapsed() / 1000) + msg('unitSec') + ' · ' + msg('labelEnemies') + ' ' + state.hostiles.size;
-    } catch (e) { /* ignore */ }
-  }
   /* --- debug hooks (§5) --- */
   debug.setPlayerHp = (n) => {
     const p = state.player;
     n = +n;
     if (!isFinite(n)) return Math.round(p.hp);
     p.hp = clamp(n, 0, p.max);
+    /* A hard set, not a hit. A §2.2 drain still in flight from an earlier hit animates width AND background on
+     * the same node, and an animation outranks the inline style updatePlayerHud() is about to write — the bar
+     * would keep showing the OLD length and colour next to the NEW number for up to 250 ms. Snap it instead. */
+    if (hudEls.pFill) cancelAnimsOf(hudEls.pFill);
     updatePlayerHud();
     if (p.hp <= 0 && p.alive && state.combat && state.active) showKo();
     else if (p.hp < p.max) startRegen();
@@ -493,7 +426,7 @@
   };
   debug.setPlayerPos = (x, y) => {
     x = +x; y = +y;
-    if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; }
+    if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; placeSelf(); }
     return { x: state.player.x, y: state.player.y };
   };
   debug.forceAttack = (el) => {   // same eligibility as the picker; works under noAttacks, null while paused / KO

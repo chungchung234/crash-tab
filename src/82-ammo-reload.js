@@ -1,4 +1,4 @@
-// ── ammo & reload: magazine spend, auto/manual reload state machine, ammo HUD ──
+// ── ammo & reload: magazine spend, auto/manual reload state machine, ammo HUD (v1.3 §2.1: pips, 48 px count, pinned width) ──
   /* ===================================================================== */
   /* 12b. v1.2: ammo / reload, scope + sniper, loadouts, combat, toasts         */
   /* ===================================================================== */
@@ -69,28 +69,51 @@
     const reloading = isReloading(id);
     return { mag: size == null ? null : state.ammo[id], size, reloading, reloadProgress: reloading ? clamp((now() - r.startedAt) / r.ms, 0, 1) : 0, swapping: swapActive() };
   }
+  /* v1.3 §2.1: magazine pips. One 7 × 4 bar per round up to 30; past that the magazine is bucketed into tens
+   * (flame: 100 rounds → 10 pips). Nodes are reused, so a hold weapon firing every 50 ms does not churn the DOM. */
+  function renderPips(size, left) {
+    const list = hudEls.aPipList, box = hudEls.aPips;
+    if (!list || !box) return;
+    const per = (size == null || size <= 30) ? 1 : 10;
+    const total = size == null ? 0 : Math.ceil(size / per);
+    const full = size == null ? 0 : clamp(Math.ceil(left / per), 0, total);
+    while (list.length > total) { const n = list.pop(); try { n.remove(); } catch (e) { /* ignore */ } }
+    while (list.length < total) { const n = doc.createElement('span'); n.className = 'apip'; list.push(n); box.append(n); }
+    for (let i = 0; i < list.length; i++) list[i].classList.toggle('spent', i >= full);
+  }
+  /* The two attention pulses of the ammo panel (low magazine 0.9 s, empty magazine 1.1 s). One WAAPI animation at a
+   * time, held in hudEls.aPulse so cancelAnims() / restore() can stop it; `key` keeps it from restarting every frame. */
+  function setAmmoPulse(key, node, ms) {
+    if (hudEls.aPulseKey === key && hudEls.aPulse && hudEls.aPulse.playState === 'running') return;
+    if (hudEls.aPulse) { try { hudEls.aPulse.cancel(); } catch (e) { /* ignore */ } state.anims.delete(hudEls.aPulse); hudEls.aPulse = null; }
+    hudEls.aPulseKey = key;
+    if (!key || !node || reducedMotion()) return;
+    try { hudEls.aPulse = trackAnim(node.animate([{ opacity: 1 }, { opacity: 0.35 }, { opacity: 1 }], { duration: ms, iterations: Infinity })); } catch (e) { hudEls.aPulse = null; }
+  }
   function updateAmmoHud() {
     const a = hudEls.ammo;
     if (!a) return;
     try {
       const id = state.weapon, W = WEAPONS[id], size = W.mag;
       hudEls.aEmoji.textContent = W.emoji;
-      const big = hudEls.aBig;
-      let promptOn = false;
-      if (swapActive()) { big.textContent = msg('labelSwapping'); hudEls.aDim.textContent = ''; big.classList.remove('low'); }
-      else if (size == null) { big.textContent = '∞'; hudEls.aDim.textContent = ''; big.classList.remove('low'); }
-      else {
-        const mag = state.ammo[id];
-        big.textContent = String(mag); hudEls.aDim.textContent = ' / ∞';
-        big.classList.toggle('low', mag <= 0.2 * size);
-        promptOn = mag <= 0;
-      }
-      hudEls.aPrompt.classList.toggle('on', promptOn);
-      if (hudEls.fallback) hudEls.aPrompt.style.display = promptOn ? 'block' : 'none';
-      if (promptOn) {
-        if (!hudEls.aBlink || hudEls.aBlink.playState !== 'running') hudEls.aBlink = trackAnim(hudEls.aPrompt.animate([{ opacity: 1 }, { opacity: 0.2 }, { opacity: 1 }], { duration: 800, iterations: Infinity }));
-      } else if (hudEls.aBlink) { try { hudEls.aBlink.cancel(); } catch (e) { /* ignore */ } hudEls.aBlink = null; }
+      const big = hudEls.aBig, swapping = swapActive();
       const r = state.reload, reloading = !!(r && r.id === id);
+      const mag = size == null ? null : state.ammo[id];
+      const empty = size != null && !(mag > 0) && !swapping;
+      const low = size != null && !empty && mag <= 0.25 * size;
+      // the count line: 교체 중 renders at 20 px inside the SAME 196 px plate, so a swap no longer moves the panel
+      big.classList.toggle('swap', swapping);
+      big.classList.toggle('low', low);
+      big.classList.toggle('dim', reloading && !empty);
+      if (swapping) { big.textContent = msg('labelSwapping'); hudEls.aDim.textContent = ''; }
+      else if (size == null) { big.textContent = '∞'; hudEls.aDim.textContent = ''; }
+      else { big.textContent = String(mag); hudEls.aDim.textContent = ' / ∞'; }
+      big.style.display = empty ? 'none' : '';
+      hudEls.aDim.style.display = empty ? 'none' : '';
+      hudEls.aPrompt.classList.toggle('on', empty);
+      if (hudEls.fallback) hudEls.aPrompt.style.display = empty ? 'flex' : 'none';
+      renderPips(swapping || size == null ? null : size, mag || 0);
+      setAmmoPulse(empty ? 'empty' : (low ? 'low' : ''), empty ? hudEls.aPrompt : hudEls.aPips, empty ? 1100 : 900);
       hudEls.aBar.classList.toggle('on', reloading);
       if (hudEls.fallback) hudEls.aBar.style.display = reloading ? 'block' : 'none';
       if (reloading) {

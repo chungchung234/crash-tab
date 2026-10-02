@@ -1,5 +1,6 @@
   /* ===================================================================== */
   /* 14. Events                                                               */
+  /*     v1.3 §1: the - / _ / [ and = / + / ] power hotkeys are gone.          */
   /* ===================================================================== */
   const SWALLOW = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'selectstart', 'dragstart'];
   function isHudEvent(e) {
@@ -133,8 +134,6 @@
         else if (c === 'KeyZ' || k === 'z' || k === 'Z') action = 'restore';
         else if (c === 'KeyM' || k === 'm' || k === 'M') action = 'mute';
         else if (c === 'KeyH' || k === 'h' || k === 'H') action = 'combat';
-        else if (c === 'Minus' || k === '-' || k === '_' || k === '[') action = 'powerDown';
-        else if (c === 'Equal' || k === '=' || k === '+' || k === ']') action = 'powerUp';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
       }
     }
@@ -155,8 +154,6 @@
     else if (action === 'restore') restore();
     else if (action === 'mute') setMuted(!state.muted);
     else if (action === 'combat') setCombat(!state.combat);
-    else if (action === 'powerDown') stepPower(-1);
-    else if (action === 'powerUp') stepPower(1);
     else if (action === 'restart') restartFromKo();
   }
   function onWheel(e) {

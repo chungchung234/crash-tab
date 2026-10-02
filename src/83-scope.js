@@ -1,4 +1,4 @@
-// ── scope: ADS reticle build/show/hide, 2x body magnification, sway/recoil step ──
+// ── scope: ADS reticle build/show/hide, 2x body magnification, sway/recoil step (v1.3 §3.1: ADS dims the player ring) ──
   /* --- scope (A2–A4): visual layer in the glass root + 2× body transform saved/restored exactly --- */
   function scopeMag() { return (state.scoped && state.scope.magnified) ? 2 : 1; }
   function scopeRadius() { return 0.42 * Math.min(viewW(), viewH()); }
@@ -47,6 +47,7 @@
       }
     } catch (e) { sc.magnified = false; }
     scopeStep(now());
+    placeSelf();   // v1.3 §3.1: ADS drops the player ring to 20 % so it cannot cover the reticle
     scheduleAura();   // A3: every page rect just changed under the 2× transform — hostile auras must follow
     sfx('scopeIn');
     kick();
@@ -67,7 +68,7 @@
       } catch (e) { /* ignore */ }
     }
     sc.magnified = false; sc.saved = null;
-    if (state.active) { scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras
+    if (state.active) { placeSelf(); scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras
     return true;
   }
   /* RMB (chord model) OR Shift (after its 120 ms delay) want the scope while the sniper is selected. */

@@ -15,6 +15,7 @@
 // ── 00-prelude.js ──
   /* ===================================================================== */
   /* 0. Captured globals, constants, generic helpers                        */
+  /*    v1.3: POWERS is gone (§1) and the readability numbers of §3 land here */
   /* ===================================================================== */
   const win = window;
   const doc = document;
@@ -54,15 +55,24 @@
     melee:     ['hammer', 'axe', 'sword', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']
   };
   const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee' };
-  const POWERS = [0.5, 1, 2, 4];     // attack power multiplier steps (§4)
   const HOLD_WINDOW = 150;           // ms: hold-weapon damage aggregation / fx throttle window (A4, A5)
   const BURNT_FILTER = 'brightness(.55) sepia(.6)';   // flame-broken pieces (A9)
   const SWAP_MS = 250;               // weapon swap delay (v1.2 A5)
   const GRACE_MS = 5000;             // combat activation grace (v1.2 A7)
   const TIER_BASE = { shooter: 1800, charger: 3000, laser: 4500 };   // attack intervals (v1.2 §5)
+  /* v1.3 readability (§3): player marker / orb / near-miss / hitstop numbers. ORB_HIT_R is the ONE radius the
+   * orb sweep test and the near-miss band both read — the damage rule itself is unchanged (v1.3 §4). */
+  const SELF_R = 22;                 // player ring radius (44 px diameter)
+  const SELF_HIT_R = 32;             // ring radius at the peak of the on-hit punch (64 px diameter)
+  const ORB_R = 11;                  // orb radius (22 px diameter)
+  const ORB_HIT_R = 22;              // orb → player hit radius
+  const NEAR_MISS_BAND = 45;         // px beyond ORB_HIT_R that still counts as a graze (§3.4)
+  const HITSTOP_MS = 70;             // physics dt is clamped to 0 for this long after a hit (§3.5)
+  const ORB_TRAIL = 6;               // afterimage samples behind each orb
+  const AIMLINE_MIN_MS = 220;        // an aim line stays visible at least this long (forced / zero wind-up)
   /* api.debug (A12): one plain object, survives toggles. v1.2 adds noSpread / noAttacks / fastReload /
    * infiniteAmmo and the hooks setPlayerHp / setPlayerPos / forceAttack (attached in section 12b). */
-  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false };
+  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false, hitstop: true };
   const CAP = 160;                 // live debris pieces (A1)
   const MIN_EVICT_AGE = 800;       // ms (A1)
   const GPU_BUDGET = 64e6;         // sum of w*h*dpr^2 over live pieces (A1)
@@ -99,6 +109,8 @@
   const STYLE_SVG_EXTRA = ['fill', 'stroke', 'stroke-width', 'opacity'];
 
 // ── 10-util.js ──
+  /* Small helpers + the Korean fallback strings. v1.3 §1 drops labelPower / btnPowerDown / btnPowerUp;
+   * §3.4 adds dodgeLabel (the 회피! call-out beside the player ring). */
   const rand = (a, b) => a + Math.random() * (b - a);
   const randInt = (a, b) => Math.floor(rand(a, b + 1));
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -153,8 +165,8 @@
     hudTitle: '화면부수기',
     weaponHammer: '망치', weaponPistol: '권총', weaponSmg: '기관총', weaponSniper: '저격총', weaponAxe: '도끼', weaponSword: '검', weaponBomb: '폭탄',
     weaponRocket: '로켓', weaponFlame: '화염방사기', weaponFlameShort: '화염', weaponCollapse: '붕괴',
-    labelPower: '공격력', hudDamage: '피해', critLabel: '치명타!', headshotLabel: '헤드샷!', unitPerShot: '/발', unitPerTick: '/틱',
-    btnSound: '소리', btnMute: '음소거', btnRestore: '복구', btnExit: '종료', btnPowerDown: '공격력 낮추기', btnPowerUp: '공격력 높이기',
+    hudDamage: '피해', critLabel: '치명타!', headshotLabel: '헤드샷!', unitPerShot: '/발', unitPerTick: '/틱',
+    btnSound: '소리', btnMute: '음소거', btnRestore: '복구', btnExit: '종료',
     hudHint: '클릭해서 화면을 부수세요', hudHintHold: '꾹 눌러서 발사', hudHintDrag: '드래그해서 베기',
     hudHintCollapse: '복구(Z)로 되돌릴 수 있어요', hudHintScope: '클릭해서 발사 · 오른쪽 버튼이나 Shift로 조준해요',
     hudPieces: '조각', hudCracks: '균열',
@@ -163,6 +175,8 @@
     labelCombat: '전투', labelHealth: '체력', labelScore: '점수', labelKills: '처치', labelTime: '생존', labelEnemies: '적',
     koTitle: '당신은 부서졌습니다', koRestart: '다시 시작', koExit: '종료', killLabel: '처치!',
     toastCombatOn: '⚔️ 전투 모드: 큰 요소들이 반격해요 (H로 끄기)', toastCombatOff: '전투 모드 꺼짐', toastReload: '재장전', labelSwapping: '교체 중',
+    // v1.3 (§2 / §3.4): the dodge call-out next to the player ring
+    dodgeLabel: '회피!',
     unitSec: '초'
   };
   function msg(key) {
@@ -173,9 +187,11 @@
 // ── 20-state.js ──
   /* ===================================================================== */
   /* 1. State                                                               */
+  /*    v1.3: state.power / powerTouched removed (§1); the player marker,     */
+  /*    aim lines, near misses, hitstop and the low-HP vignette added (§3).   */
   /* ===================================================================== */
   const state = {
-    active: false, weapon: 'hammer', power: 1, muted: false, weaponTouched: false, powerTouched: false,
+    active: false, weapon: 'hammer', muted: false, weaponTouched: false,
     cracks: 0, crackInk: 0, broken: [], pieces: [], hp: new WeakMap(),
     anims: new Set(), timers: new Set(), listeners: [],
     rafId: 0, moveRaf: 0, resizeRaf: 0, hudRaf: 0, animating: false, lastT: 0, tickErrors: 0,
@@ -195,7 +211,9 @@
     // v1.2: combat (A7–A10)
     combat: true, combatTouched: false, combatTimer: 0, clockTimer: 0, regenTimer: 0, toastTimer: 0, auraRaf: 0,
     hostiles: new Map(), orbs: [], beams: [], warns: [], paused: false, ko: false, graceUntil: 0,
-    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true }
+    // v1.3: player marker / aim lines / near-miss / hitstop (§3)
+    self: null, aimlines: [], nearMisses: 0, nearShown: [], hitstopUntil: 0, lowVig: null, hpRatio: 1,
+    player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null }
   };
   const handledEvents = new WeakSet();
   const handledKeys = new WeakSet();
@@ -571,6 +589,7 @@
 // ── 40-audio.js ──
   /* ===================================================================== */
   /* 5. Sound (Web Audio, synthesized)                                      */
+  /*    v1.3 adds alert / whiff / hurtbig — the three cues of §3.2, §3.4, §3.5 */
   /* ===================================================================== */
   const audio = { ctx: null, master: null, noise: null, boomAt: [], loop: null };   // boomAt: start times of recent boom voices (A24 cap 2); loop: flame noise (v1.1)
   function ensureAudio() {
@@ -689,6 +708,10 @@
       else if (kind === 'kill') { tone(t, 'triangle', 500, 1400, 0.18, 0.25 * gm, 0.2); tone(t + 0.08, 'triangle', 800, 1800, 0.14, 0.2 * gm, 0.16); }
       else if (kind === 'hurt') { tone(t, 'sine', 90, 40, 0.2, 0.8 * gm, 0.22); noiseBurst(t, 0.12, { type: 'lowpass', freq: 500, Q: 0.8 }, 0.4 * gm, 0.12); }
       else if (kind === 'pop') { tone(t, 'sine', 600, 200, 0.06, 0.3 * gm, 0.08); noiseBurst(t, 0.03, { type: 'highpass', freq: 3000, Q: 0.7 }, 0.2 * gm, 0.03); }
+      // v1.3 §3.2 / §3.4 / §3.5: "something is aiming at you", "that one went past you", "that one hit you"
+      else if (kind === 'alert') { tone(t, 'sine', 220, 220, 0.12, 0.32 * gm, 0.14); }
+      else if (kind === 'whiff') { noiseSweep(t, 0.09, 'highpass', 900, 7000, 0.45 * gm); }
+      else if (kind === 'hurtbig') { tone(t, 'sine', 90, 40, 0.25, 1.15 * gm, 0.28); noiseBurst(t, 0.08, { type: 'lowpass', freq: 420, Q: 0.9 }, 0.6 * gm, 0.09); }
       else if (kind === 'laser') { noiseSweep(t, 0.4, 'bandpass', 3000, 600, 0.5 * gm); tone(t, 'sawtooth', 220, 180, 0.4, 0.15 * gm, 0.4); }
     } catch (e) { /* ignore */ }
   }
@@ -696,6 +719,12 @@
 // ── 45-hud.js ──
   /* ===================================================================== */
   /* 6. HUD (shadow DOM, constructed stylesheet)                            */
+  /*                                                                        */
+  /* v1.3 §1/§2: the 공격력 ×N row is gone, and the two panels the player    */
+  /* actually reads mid-fight — ammo (bottom-right) and health (bottom-left) */
+  /* — sit on their own dark, blurred plates at 24 px so they stop           */
+  /* disappearing into bright pages. Both are width-stable: the ammo panel   */
+  /* is pinned to 196 px so 교체 중 can no longer make it jump.               */
   /* ===================================================================== */
   const HUD_CSS = [
     ':host{all:initial;display:block;cursor:default;color-scheme:dark}',
@@ -717,9 +746,6 @@
     '.presets .plabel{flex:none;font-size:11.5px;color:rgba(255,255,255,.7);white-space:nowrap;margin-right:2px}',
     '.presets button{flex:0 0 auto;min-width:max-content;height:24px;padding:0 4px;font-size:11px;border-radius:7px}',
     '.presets .custom{flex:none;font-size:10.5px;color:#ffb224;white-space:nowrap}',
-    '.power{align-items:center}',
-    '.power .ptxt{flex:1 1 auto;min-width:0;padding-left:2px;font-size:12.5px;color:rgba(255,255,255,.85);white-space:nowrap}',
-    '.power button{flex:0 0 36px;min-width:0;font-size:14px}',
     'button:hover{background:rgba(255,255,255,.16)}',
     'button:focus-visible{outline:2px solid #e5484d;outline-offset:1px}',
     'button[aria-pressed="true"]{background:#e5484d;border-color:#e5484d}',
@@ -733,24 +759,35 @@
     '@keyframes pop{from{transform:scale(1.4)}to{transform:scale(1)}}',
     // v1.2 A11: ammo HUD / player HUD / toast / KO live in this shadow root as siblings of .panel (host pins transform: none)
     '.crs-ammo,.crs-player,.crs-toast,.crs-ko{font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff;user-select:none;-webkit-user-select:none}',
-    '.crs-ammo{position:fixed;right:16px;bottom:16px;pointer-events:none;text-align:right;background:rgba(18,18,22,.72);padding:8px 12px;border-radius:12px;min-width:200px;box-shadow:0 6px 20px rgba(0,0,0,.35)}',
-    '.crs-ammo .aline{display:flex;align-items:baseline;justify-content:flex-end;gap:6px}',
-    '.crs-ammo .aemoji{font-size:18px}',
-    '.crs-ammo .abig{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}',
+    // v1.3 §2: one shared plate for both read-at-a-glance panels — dark, blurred, bordered, 24 px from the corner
+    '.crs-plate{background:rgba(12,12,16,.72);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.16);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.45);padding:10px 12px}',
+    '.crs-num{font-variant-numeric:tabular-nums;text-shadow:0 1px 3px rgba(0,0,0,.9)}',
+    // ammo (bottom-right). The width is PINNED: 교체 중 / ∞ / 100 all render inside 196 px, so swapping never shifts it.
+    '.crs-ammo{position:fixed;right:24px;bottom:24px;pointer-events:none;text-align:right;min-width:196px;max-width:196px}',
+    '.crs-ammo .apips{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:3px;min-height:4px;margin-bottom:6px}',
+    '.crs-ammo .apip{flex:none;width:7px;height:4px;border-radius:1px;background:#fff}',
+    '.crs-ammo .apip.spent{background:rgba(255,255,255,.22)}',
+    '.crs-ammo .aline{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:48px}',
+    '.crs-ammo .aemoji{font-size:30px;line-height:1}',
+    '.crs-ammo .abig{font-size:48px;font-weight:800;line-height:1}',
     '.crs-ammo .abig.low{color:#e5484d}',
-    '.crs-ammo .adim{font-size:14px;opacity:.6}',
-    '.crs-ammo .abar{width:120px;height:4px;background:rgba(255,255,255,.2);border-radius:2px;margin:6px 0 0 auto;overflow:hidden;display:none}',
+    '.crs-ammo .abig.dim{color:rgba(255,255,255,.4)}',
+    '.crs-ammo .abig.swap{font-size:20px;font-weight:700;color:rgba(255,255,255,.72)}',
+    '.crs-ammo .adim{font-size:16px;color:rgba(255,255,255,.55)}',
+    '.crs-ammo .abar{width:180px;height:8px;background:rgba(255,255,255,.22);border-radius:4px;margin:6px 0 0 auto;overflow:hidden;display:none}',
     '.crs-ammo .abar.on{display:block}',
-    '.crs-ammo .afill{height:100%;width:0;background:#ffb224}',
-    '.crs-ammo .aprompt{font-size:12px;color:#e5484d;font-weight:700;display:none;margin-top:4px}',
-    '.crs-ammo .aprompt.on{display:block}',
-    '.crs-player{position:fixed;left:16px;bottom:16px;pointer-events:none;background:rgba(18,18,22,.72);padding:8px 12px;border-radius:12px;display:none;box-shadow:0 6px 20px rgba(0,0,0,.35)}',
+    '.crs-ammo .afill{height:100%;width:0;background:#ffb224;border-radius:4px}',
+    '.crs-ammo .aprompt{display:none;align-items:center;justify-content:flex-end;gap:7px;font-size:18px;font-weight:700;color:#e5484d;text-shadow:0 1px 3px rgba(0,0,0,.9)}',
+    '.crs-ammo .aprompt.on{display:flex}',
+    '.crs-ammo .keycap{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:26px;padding:0 4px;border:1.5px solid rgba(255,255,255,.9);border-radius:6px;font-size:20px;font-weight:800;line-height:1;color:#fff}',
+    // health (bottom-left): 220 × 16 bar, ten notches, label above it
+    '.crs-player{position:fixed;left:24px;bottom:24px;pointer-events:none;display:none}',
     '.crs-player.on{display:block}',
-    '.crs-player .hrow{display:flex;align-items:center;gap:8px}',
-    '.crs-player .hbar{width:160px;height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}',
-    '.crs-player .hfill{height:100%;width:100%;background:#3fb950}',
-    '.crs-player .php{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}',
-    '.crs-player .pstats{margin-top:4px;font-size:12px;color:rgba(255,255,255,.85);white-space:nowrap}',
+    '.crs-player .php{display:block;font-size:16px;font-weight:700;white-space:nowrap;margin-bottom:5px}',
+    '.crs-player .hbar{position:relative;width:220px;height:16px;background:rgba(255,255,255,.18);border-radius:8px;overflow:hidden}',
+    '.crs-player .hfill{height:100%;width:100%;background:#3fb950;border-radius:8px}',
+    '.crs-player .hticks{position:absolute;left:0;top:0;right:0;bottom:0;background-image:repeating-linear-gradient(90deg,transparent 0 21px,rgba(0,0,0,.5) 21px 22px)}',
+    '.crs-player .pstats{margin-top:6px;font-size:12px;color:rgba(255,255,255,.85);white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.9)}',
     '.crs-toast{position:fixed;left:50%;top:14px;transform:translate(-50%,0);background:rgba(18,18,22,.92);padding:7px 14px;border-radius:999px;pointer-events:none;display:none;white-space:nowrap;box-shadow:0 6px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.14);z-index:6}',
     '.crs-toast.show{display:block}',
     '.crs-ko{position:fixed;inset:0;background:rgba(0,0,0,.78);pointer-events:auto;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:5}',
@@ -859,14 +896,6 @@
     hudEls.combatBtn.className = 'crs-combat-toggle';
     hudEls.exit = hudButton('✕ ' + msg('btnExit'), msg('btnExit') + ' (Esc)', () => deactivate());
     actions.append(hudEls.sound, hudEls.restore, hudEls.combatBtn, hudEls.exit);
-    // attack power row (§4): "공격력 ×1  [−] [+]"
-    const power = doc.createElement('div'); power.className = 'row power';
-    hudEls.powerText = doc.createElement('span'); hudEls.powerText.className = 'ptxt';
-    hudEls.powerDown = hudButton('−', msg('btnPowerDown') + ' (-)', () => stepPower(-1));
-    hudEls.powerDown.className = 'crs-power-down';
-    hudEls.powerUp = hudButton('+', msg('btnPowerUp') + ' (=)', () => stepPower(1));
-    hudEls.powerUp.className = 'crs-power-up';
-    power.append(hudEls.powerText, hudEls.powerDown, hudEls.powerUp);
     const status = doc.createElement('div'); status.className = 'status';
     hudEls.hint = doc.createElement('span'); hudEls.hint.className = 'hint';
     hudEls.pieces = doc.createElement('span');
@@ -876,31 +905,37 @@
     hudEls.combo = doc.createElement('span'); hudEls.combo.className = 'combo';
     hudEls.last = doc.createElement('span'); hudEls.last.className = 'last';
     status.append(hudEls.hint, hudEls.pieces, hudEls.cracks, hudEls.damage, hudEls.score, hudEls.combo, hudEls.last);
-    panel.append(title, grid, presets, hudEls.cur, actions, power, status);
+    panel.append(title, grid, presets, hudEls.cur, actions, status);
     mountPoint.append(panel);
     hudEls.panel = panel; hudEls.title = title;
     // v1.2 A11: ammo HUD (bottom-right), player HUD (bottom-left), toast (top-centre), KO overlay — shadow siblings of .panel
-    const ammo = mk('div', 'crs-ammo');
+    const ammo = mk('div', 'crs-ammo'); ammo.classList.add('crs-plate');
+    hudEls.aPips = doc.createElement('div'); hudEls.aPips.className = 'apips';   // v1.3 §2.1: one bar per round, read without the number
+    hudEls.aPipList = [];
     const aline = doc.createElement('div'); aline.className = 'aline';
     hudEls.aEmoji = doc.createElement('span'); hudEls.aEmoji.className = 'aemoji';
-    hudEls.aBig = doc.createElement('span'); hudEls.aBig.className = 'abig';
-    hudEls.aDim = doc.createElement('span'); hudEls.aDim.className = 'adim';
-    aline.append(hudEls.aEmoji, hudEls.aBig, hudEls.aDim);
+    hudEls.aBig = doc.createElement('span'); hudEls.aBig.className = 'abig crs-num';
+    hudEls.aDim = doc.createElement('span'); hudEls.aDim.className = 'adim crs-num';
+    // the empty-magazine prompt takes the NUMBER's place (§2.1): "⌨R 재장전"
+    hudEls.aPrompt = doc.createElement('span'); hudEls.aPrompt.className = 'aprompt';
+    const keycap = doc.createElement('span'); keycap.className = 'keycap'; keycap.textContent = 'R';
+    // the label is a bare text node, so .aprompt is the deepest element reading "R 재장전" as one string
+    hudEls.aPrompt.append(keycap, doc.createTextNode(msg('toastReload')));
+    aline.append(hudEls.aEmoji, hudEls.aBig, hudEls.aDim, hudEls.aPrompt);
     hudEls.aBar = doc.createElement('div'); hudEls.aBar.className = 'abar';
     hudEls.aFill = doc.createElement('div'); hudEls.aFill.className = 'afill';
     hudEls.aBar.append(hudEls.aFill);
-    hudEls.aPrompt = doc.createElement('div'); hudEls.aPrompt.className = 'aprompt'; hudEls.aPrompt.textContent = 'R ' + msg('toastReload');
-    ammo.append(aline, hudEls.aBar, hudEls.aPrompt);
+    ammo.append(hudEls.aPips, aline, hudEls.aBar);
     hudEls.ammo = ammo;
-    const player = mk('div', 'crs-player');
-    const hrow = doc.createElement('div'); hrow.className = 'hrow';
+    const player = mk('div', 'crs-player'); player.classList.add('crs-plate');
+    hudEls.pHp = doc.createElement('span'); hudEls.pHp.className = 'php crs-num';
     const hbar = doc.createElement('div'); hbar.className = 'hbar';
     hudEls.pFill = doc.createElement('div'); hudEls.pFill.className = 'hfill';
-    hbar.append(hudEls.pFill);
-    hudEls.pHp = doc.createElement('span'); hudEls.pHp.className = 'php';
-    hrow.append(hbar, hudEls.pHp);
+    const hticks = doc.createElement('div'); hticks.className = 'hticks';   // ten notches: one cell per 10 % (§2.2)
+    hbar.append(hudEls.pFill, hticks);
+    hudEls.pBar = hbar;
     hudEls.pStats = doc.createElement('div'); hudEls.pStats.className = 'pstats';
-    player.append(hrow, hudEls.pStats);
+    player.append(hudEls.pHp, hbar, hudEls.pStats);
     hudEls.player = player;
     hudEls.toast = mk('div', 'crs-toast');
     hudEls.mount = mountPoint;   // the KO overlay (`.crs-ko`) is built on demand by showKo() and removed by hideKo()
@@ -939,9 +974,13 @@
         p.font = '13px system-ui, sans-serif'; p.width = 'max-content'; p.minWidth = '300px'; p.maxWidth = '380px'; p.boxShadow = '0 10px 30px rgba(0,0,0,.45)';
         for (const b of hudEls.panel.querySelectorAll('button')) { b.style.margin = '2px'; b.style.padding = '4px 6px'; b.style.color = '#fff'; b.style.background = 'rgba(255,255,255,.12)'; b.style.border = '1px solid rgba(255,255,255,.2)'; b.style.borderRadius = '8px'; b.style.cursor = 'pointer'; }
         // v1.2 A11: the shadow siblings get a minimal fixed placement too (their .on / .show classes are mirrored by style.display)
-        const fixed = (n, l, r, t, b) => { const s = n.style; s.position = 'fixed'; s.left = l; s.right = r; s.top = t; s.bottom = b; s.color = '#fff'; s.background = 'rgba(18,18,22,.85)'; s.padding = '8px 12px'; s.borderRadius = '12px'; s.font = '13px system-ui, sans-serif'; s.pointerEvents = 'none'; };
-        if (hudEls.ammo) fixed(hudEls.ammo, 'auto', '16px', 'auto', '16px');
-        if (hudEls.player) { fixed(hudEls.player, '16px', 'auto', 'auto', '16px'); hudEls.player.style.display = state.combat ? 'block' : 'none'; }
+        const fixed = (n, l, r, t, b) => { const s = n.style; s.position = 'fixed'; s.left = l; s.right = r; s.top = t; s.bottom = b; s.color = '#fff'; s.background = 'rgba(12,12,16,.85)'; s.padding = '10px 12px'; s.borderRadius = '14px'; s.font = '13px system-ui, sans-serif'; s.pointerEvents = 'none'; };
+        if (hudEls.ammo) { fixed(hudEls.ammo, 'auto', '24px', 'auto', '24px'); hudEls.ammo.style.minWidth = '196px'; hudEls.ammo.style.maxWidth = '196px'; hudEls.ammo.style.textAlign = 'right'; }
+        if (hudEls.aBig) { hudEls.aBig.style.fontSize = '48px'; hudEls.aBig.style.fontWeight = '800'; }
+        if (hudEls.aPrompt) hudEls.aPrompt.style.display = 'none';
+        if (hudEls.player) { fixed(hudEls.player, '24px', 'auto', 'auto', '24px'); hudEls.player.style.display = state.combat ? 'block' : 'none'; }
+        if (hudEls.pBar) { const b = hudEls.pBar.style; b.position = 'relative'; b.width = '220px'; b.height = '16px'; b.borderRadius = '8px'; b.overflow = 'hidden'; b.background = 'rgba(255,255,255,.18)'; }
+        if (hudEls.pFill) { hudEls.pFill.style.height = '100%'; hudEls.pFill.style.background = '#3fb950'; }
         if (hudEls.toast) { fixed(hudEls.toast, '50%', 'auto', '14px', 'auto'); hudEls.toast.style.transform = 'translate(-50%, 0)'; hudEls.toast.style.display = 'none'; }
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
@@ -953,7 +992,6 @@
     if (W.id === 'collapse') return '∞';
     return String(W.damage);
   }
-  function fmtPower(v) { return '×' + (v === 0.5 ? '0.5' : String(v)); }
   function updateHud() {
     if (!hudEls.panel) return;
     try {
@@ -964,7 +1002,6 @@
       hudEls.sound.textContent = state.muted ? '🔇 ' + msg('btnMute') : '🔊 ' + msg('btnSound');
       hudEls.sound.title = (state.muted ? msg('btnMute') : msg('btnSound')) + ' (M)';
       hudEls.sound.setAttribute('aria-pressed', state.muted ? 'true' : 'false');
-      hudEls.powerText.textContent = msg('labelPower') + ' ' + fmtPower(state.power);
       const W = WEAPONS[state.weapon];
       hudEls.hint.textContent = state.hintCollapse ? msg('hudHintCollapse') : (W.hold ? msg('hudHintHold') : (W.input === 'drag' ? msg('hudHintDrag') : (W.scope ? msg('hudHintScope') : msg('hudHint'))));
       hudEls.pieces.textContent = msg('hudPieces') + ' ' + debrisCount();
@@ -1033,6 +1070,7 @@
 // ── 50-target.js ──
   /* ===================================================================== */
   /* 7. Target picking + hover highlight                                    */
+  /*    v1.3 §3.1: scheduleHover()'s frame also carries the player ring      */
   /* ===================================================================== */
   /* Effective opacity = product of computed opacity up the (shadow-crossing) ancestor chain, ≤ 40 levels.
    * Hit testing ignores opacity, so an opacity:0 hover overlay (quick-view buttons, gallery captions)
@@ -1173,7 +1211,8 @@
   }
   function scheduleHover() {
     if (state.moveRaf) return;
-    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); });
+    // v1.3 §3.1: the player ring is repositioned on the frame the pointer move already schedules
+    state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); if (state.self) selfStep(); });
   }
   function pulseTarget() {
     if (!targetBox || targetBox.style.display === 'none') return;
@@ -1903,19 +1942,19 @@
   }
 
 // ── 71-weapon-helpers.js ──
-// ── shared combat helpers: crit/damage rolls, cooldown gate, HUD weapon-button lookup ──
+// ── shared combat helpers: crit/damage rolls (v1.3 §1: no power multiplier), cooldown gate, HUD weapon-button lookup ──
   /* ===================================================================== */
   /* 12. Weapons (v1.1): damage roll, hit feedback, the nine fire() entries, actions   */
   /* ===================================================================== */
   function rollCrit() { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < 0.1); }
   function rollSniperCrit(scoped) { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < (scoped ? 0.25 : 0.1)); }   // 헤드샷 (v1.2 §2)
-  function rollDamage(base, crit) { return Math.max(1, Math.round(base * state.power * (crit ? 2 : 1))); }
+  function rollDamage(base, crit) { return Math.max(1, Math.round(base * (crit ? 2 : 1))); }   // v1.3 §1: the power multiplier is gone
   function reducedMotion() { try { return win.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
   function weaponBtn(id) { return (hudEls.weaponBtns && hudEls.weaponBtns[id]) || null; }
   function willBreak(el, dmg) { if (!el) return false; const r = state.hp.get(el); return (r ? r.hp : hpMax(el)) - dmg <= 0; }
 
 // ── 73-hit-resolution.js ──
-// ── hit resolution: floating damage numbers, hit tint, hold-window aggregation, applyHit, bullet chips, AoE candidates/falloff ──
+// ── hit resolution: floating damage numbers (v1.3 §3.5: opts.size), hit tint, hold-window aggregation, applyHit, bullet chips, AoE candidates/falloff ──
   /* --- cooldown (A3): one global timestamp, set only when an attack actually happened --- */
   function onCooldown() { return !debug.noCooldown && now() < state.cooldownUntil; }
   function startCooldown(id, ms) {
@@ -1932,14 +1971,15 @@
 
   /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, cap 40 --- */
   function dmgText(n, dmg, crit, tag) { n.textContent = (tag ? tag + ' ' : '') + '-' + dmg + (crit ? '!' : ''); }
-  /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) } */
+  /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) }
+   * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page. */
   function spawnDmg(x, y, dmg, crit, opts) {
     if (!root) return null;
     opts = opts || {};
     const n = mk('div', 'crs-dmg');
     if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag);
     n.style.left = px(x); n.style.top = px(y);
-    n.style.font = '700 ' + (crit ? 18 : 14) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    n.style.font = '700 ' + (opts.size || (crit ? 18 : 14)) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     n.style.color = opts.color || (crit ? '#ffd166' : '#fff');
     n.style.textShadow = '0 1px 2px rgba(0,0,0,.8)';
     n.style.transform = 'translate(-50%, -50%)';
@@ -2621,7 +2661,7 @@
   }
 
 // ── 82-ammo-reload.js ──
-// ── ammo & reload: magazine spend, auto/manual reload state machine, ammo HUD ──
+// ── ammo & reload: magazine spend, auto/manual reload state machine, ammo HUD (v1.3 §2.1: pips, 48 px count, pinned width) ──
   /* ===================================================================== */
   /* 12b. v1.2: ammo / reload, scope + sniper, loadouts, combat, toasts         */
   /* ===================================================================== */
@@ -2692,28 +2732,51 @@
     const reloading = isReloading(id);
     return { mag: size == null ? null : state.ammo[id], size, reloading, reloadProgress: reloading ? clamp((now() - r.startedAt) / r.ms, 0, 1) : 0, swapping: swapActive() };
   }
+  /* v1.3 §2.1: magazine pips. One 7 × 4 bar per round up to 30; past that the magazine is bucketed into tens
+   * (flame: 100 rounds → 10 pips). Nodes are reused, so a hold weapon firing every 50 ms does not churn the DOM. */
+  function renderPips(size, left) {
+    const list = hudEls.aPipList, box = hudEls.aPips;
+    if (!list || !box) return;
+    const per = (size == null || size <= 30) ? 1 : 10;
+    const total = size == null ? 0 : Math.ceil(size / per);
+    const full = size == null ? 0 : clamp(Math.ceil(left / per), 0, total);
+    while (list.length > total) { const n = list.pop(); try { n.remove(); } catch (e) { /* ignore */ } }
+    while (list.length < total) { const n = doc.createElement('span'); n.className = 'apip'; list.push(n); box.append(n); }
+    for (let i = 0; i < list.length; i++) list[i].classList.toggle('spent', i >= full);
+  }
+  /* The two attention pulses of the ammo panel (low magazine 0.9 s, empty magazine 1.1 s). One WAAPI animation at a
+   * time, held in hudEls.aPulse so cancelAnims() / restore() can stop it; `key` keeps it from restarting every frame. */
+  function setAmmoPulse(key, node, ms) {
+    if (hudEls.aPulseKey === key && hudEls.aPulse && hudEls.aPulse.playState === 'running') return;
+    if (hudEls.aPulse) { try { hudEls.aPulse.cancel(); } catch (e) { /* ignore */ } state.anims.delete(hudEls.aPulse); hudEls.aPulse = null; }
+    hudEls.aPulseKey = key;
+    if (!key || !node || reducedMotion()) return;
+    try { hudEls.aPulse = trackAnim(node.animate([{ opacity: 1 }, { opacity: 0.35 }, { opacity: 1 }], { duration: ms, iterations: Infinity })); } catch (e) { hudEls.aPulse = null; }
+  }
   function updateAmmoHud() {
     const a = hudEls.ammo;
     if (!a) return;
     try {
       const id = state.weapon, W = WEAPONS[id], size = W.mag;
       hudEls.aEmoji.textContent = W.emoji;
-      const big = hudEls.aBig;
-      let promptOn = false;
-      if (swapActive()) { big.textContent = msg('labelSwapping'); hudEls.aDim.textContent = ''; big.classList.remove('low'); }
-      else if (size == null) { big.textContent = '∞'; hudEls.aDim.textContent = ''; big.classList.remove('low'); }
-      else {
-        const mag = state.ammo[id];
-        big.textContent = String(mag); hudEls.aDim.textContent = ' / ∞';
-        big.classList.toggle('low', mag <= 0.2 * size);
-        promptOn = mag <= 0;
-      }
-      hudEls.aPrompt.classList.toggle('on', promptOn);
-      if (hudEls.fallback) hudEls.aPrompt.style.display = promptOn ? 'block' : 'none';
-      if (promptOn) {
-        if (!hudEls.aBlink || hudEls.aBlink.playState !== 'running') hudEls.aBlink = trackAnim(hudEls.aPrompt.animate([{ opacity: 1 }, { opacity: 0.2 }, { opacity: 1 }], { duration: 800, iterations: Infinity }));
-      } else if (hudEls.aBlink) { try { hudEls.aBlink.cancel(); } catch (e) { /* ignore */ } hudEls.aBlink = null; }
+      const big = hudEls.aBig, swapping = swapActive();
       const r = state.reload, reloading = !!(r && r.id === id);
+      const mag = size == null ? null : state.ammo[id];
+      const empty = size != null && !(mag > 0) && !swapping;
+      const low = size != null && !empty && mag <= 0.25 * size;
+      // the count line: 교체 중 renders at 20 px inside the SAME 196 px plate, so a swap no longer moves the panel
+      big.classList.toggle('swap', swapping);
+      big.classList.toggle('low', low);
+      big.classList.toggle('dim', reloading && !empty);
+      if (swapping) { big.textContent = msg('labelSwapping'); hudEls.aDim.textContent = ''; }
+      else if (size == null) { big.textContent = '∞'; hudEls.aDim.textContent = ''; }
+      else { big.textContent = String(mag); hudEls.aDim.textContent = ' / ∞'; }
+      big.style.display = empty ? 'none' : '';
+      hudEls.aDim.style.display = empty ? 'none' : '';
+      hudEls.aPrompt.classList.toggle('on', empty);
+      if (hudEls.fallback) hudEls.aPrompt.style.display = empty ? 'flex' : 'none';
+      renderPips(swapping || size == null ? null : size, mag || 0);
+      setAmmoPulse(empty ? 'empty' : (low ? 'low' : ''), empty ? hudEls.aPrompt : hudEls.aPips, empty ? 1100 : 900);
       hudEls.aBar.classList.toggle('on', reloading);
       if (hudEls.fallback) hudEls.aBar.style.display = reloading ? 'block' : 'none';
       if (reloading) {
@@ -2728,7 +2791,7 @@
   }
 
 // ── 83-scope.js ──
-// ── scope: ADS reticle build/show/hide, 2x body magnification, sway/recoil step ──
+// ── scope: ADS reticle build/show/hide, 2x body magnification, sway/recoil step (v1.3 §3.1: ADS dims the player ring) ──
   /* --- scope (A2–A4): visual layer in the glass root + 2× body transform saved/restored exactly --- */
   function scopeMag() { return (state.scoped && state.scope.magnified) ? 2 : 1; }
   function scopeRadius() { return 0.42 * Math.min(viewW(), viewH()); }
@@ -2777,6 +2840,7 @@
       }
     } catch (e) { sc.magnified = false; }
     scopeStep(now());
+    placeSelf();   // v1.3 §3.1: ADS drops the player ring to 20 % so it cannot cover the reticle
     scheduleAura();   // A3: every page rect just changed under the 2× transform — hostile auras must follow
     sfx('scopeIn');
     kick();
@@ -2797,7 +2861,7 @@
       } catch (e) { /* ignore */ }
     }
     sc.magnified = false; sc.saved = null;
-    if (state.active) { scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras
+    if (state.active) { placeSelf(); scheduleAura(); sfx('scopeOut'); refreshHover(); }   // A3: rects are back to 1× — re-place the auras
     return true;
   }
   /* RMB (chord model) OR Shift (after its 120 ms delay) want the scope while the sniper is selected. */
@@ -2927,8 +2991,99 @@
     try { const a = trackAnim(n.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: 'ease-in', fill: 'forwards' })); a.addEventListener('finish', off); a.addEventListener('cancel', off); } catch (e) { off(); }
   }
 
+// ── 89-beams.js ──
+// ── T3 laser beams: track / lock / fire phases, lock-in markers, beam hit test ──
+  /* Split out of 90-combat.js in v1.3 so both files stay readable.
+   *
+   * v1.3 §3.3 makes the three phases tell the player what to do:
+   *   track (550 ms)  thin red DASHES that follow the player — "it is finding you"
+   *   lock  (250 ms)  tracking STOPS and the line turns a solid ORANGE, with two markers
+   *                   sliding inward from the ends — "this is where it will hit, move"
+   *   fire  (400 ms)  thick red line, 16 px hit band, 30 damage once
+   * Timings, damage and the hit band are unchanged (§4) — only the reading of them is. */
+  function attackLaser(rec, r) {
+    if (!root) { scheduleAttack(rec, attackInterval(rec)); return; }
+    rec.phase = 'track';
+    addAimLine(rec);   // v1.3 §3.2: "this one is aiming at me"
+    const horizontal = r.width >= r.height;
+    const node = mk('div', 'crs-beam crs-beam-telegraph telegraph');
+    const b = { rec, node, horizontal, pos: horizontal ? state.player.y : state.player.x, phase: 'track', hit: false };
+    rec.beam = b;
+    state.beams.push(b);
+    root.append(node);
+    placeBeam(b);
+    rec.timer = later(() => {
+      rec.timer = 0;
+      b.phase = 'lock'; rec.phase = 'lock';
+      try { node.classList.add('crs-beam-lock'); } catch (e) { /* ignore */ }
+      placeBeam(b);
+      lockMarks(b);   // the "it stopped following you" cue
+      rec.timer = later(() => { rec.timer = 0; fireBeam(b); }, 250);
+    }, 550);
+    kick();
+  }
+  /* Two markers that slide from the ends of the locked line toward its middle over 250 ms. They are rec.nodes, so
+   * clearPhase() / releaseHostile() / pauseCombat() take them with everything else. */
+  function lockMarks(b) {
+    const rec = b.rec;
+    if (!root || reducedMotion()) return;
+    const W = viewW(), H = viewH(), L = b.horizontal ? W : H, reach = L * 0.42;
+    for (const dir of [1, -1]) {
+      const n = mk('div', 'crs-beam-mark');
+      if (b.horizontal) { n.style.left = px(dir > 0 ? 0 : W - 16); n.style.top = px(b.pos - 8); }
+      else { n.style.left = px(b.pos - 8); n.style.top = px(dir > 0 ? 0 : H - 16); }
+      root.append(n);
+      rec.nodes.push(n);
+      const to = b.horizontal ? 'translate(' + px(dir * reach) + ', 0px)' : 'translate(0px, ' + px(dir * reach) + ')';
+      try { trackAnim(n.animate([{ transform: 'translate(0px, 0px)', opacity: 1 }, { transform: to, opacity: 0 }], { duration: 250, easing: 'ease-in', fill: 'forwards' })); } catch (e) { /* ignore */ }
+    }
+  }
+  function placeBeam(b) {
+    const s = b.node.style, th = b.phase === 'fire' ? 6 : (b.phase === 'lock' ? 3 : 2);
+    if (b.horizontal) { s.left = '0px'; s.top = px(b.pos - th / 2); s.width = px(viewW()); s.height = px(th); }
+    else { s.top = '0px'; s.left = px(b.pos - th / 2); s.height = px(viewH()); s.width = px(th); }
+    s.backgroundImage = b.phase === 'track' ? 'repeating-linear-gradient(' + (b.horizontal ? '90deg' : '180deg') + ', rgba(255,60,60,.85) 0 10px, transparent 10px 18px)' : 'none';
+  }
+  function fireBeam(b) {
+    const rec = b.rec;
+    if (state.beams.indexOf(b) < 0) return;
+    b.phase = 'fire'; rec.phase = 'fire';
+    b.node.className = 'crs-beam crs-beam-fire fire';
+    placeBeam(b);
+    dropAimLine(rec);
+    sfx('laser');
+    checkBeamHit(b);
+    rec.timer = later(() => { rec.timer = 0; removeBeam(b); rec.phase = 'idle'; scheduleAttack(rec, attackInterval(rec)); }, 400);
+    kick();
+  }
+  function checkBeamHit(b) {
+    if (b.hit || b.phase !== 'fire') return;
+    const p = state.player;
+    if (!p.alive || state.ko) return;
+    const d = b.horizontal ? Math.abs(p.y - b.pos) : Math.abs(p.x - b.pos);
+    // the damage source is the point of the line nearest the player, so the directional vignette points at the beam
+    if (d <= 16) { b.hit = true; vignette(true); damagePlayer(30, { from: b.horizontal ? { x: p.x, y: b.pos } : { x: b.pos, y: p.y } }); }
+  }
+  function beamStep() {
+    for (const b of state.beams.slice()) {
+      if (b.phase === 'track') { b.pos = b.horizontal ? state.player.y : state.player.x; placeBeam(b); }
+      else if (b.phase === 'fire') checkBeamHit(b);
+    }
+  }
+  function removeBeam(b) {
+    const i = state.beams.indexOf(b);
+    if (i >= 0) state.beams.splice(i, 1);
+    if (b.rec && b.rec.beam === b) b.rec.beam = null;
+    try { cancelAnimsOf(b.node); b.node.remove(); } catch (e) { /* ignore */ }
+  }
+  function clearBeams() { for (const b of state.beams.slice()) removeBeam(b); }
+  function clearWarns() { for (const n of state.warns) { try { n.remove(); } catch (e) { /* ignore */ } } state.warns.length = 0; }
+
 // ── 90-combat.js ──
-  /* --- combat (A7–A10): player, selection tick, hostiles, attacks, orbs, KO --- */
+  /* --- combat (A7–A10): player, selection tick, hostiles, attacks, orbs, KO ---
+   * v1.3: the T3 laser lives in 89-beams.js and everything about how an attack READS — the player ring, the aim
+   * lines, orb legibility, near misses, the hit reaction and the player HUD — lives in 91-combat-feedback.js. The
+   * patterns, intervals, damage values, tiers and scoring in this file are untouched (SPEC-readability §4). */
   function combatElapsed() {
     const p = state.player;
     if (!p.startedAt) return 0;
@@ -2939,11 +3094,12 @@
   function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000); }
   function resetPlayer() {
     const p = state.player;
-    p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0;
+    p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
   }
   function playerInfo() {
     const p = state.player;
-    return { hp: Math.max(0, Math.round(p.hp)), max: p.max, score: p.score, kills: p.kills, alive: p.alive, elapsedMs: Math.round(combatElapsed()), x: p.x, y: p.y };
+    return { hp: Math.max(0, Math.round(p.hp)), max: p.max, score: p.score, kills: p.kills, alive: p.alive, elapsedMs: Math.round(combatElapsed()), x: p.x, y: p.y,
+      lastHitFrom: p.lastHitFrom ? { x: p.lastHitFrom.x, y: p.lastHitFrom.y } : null };   // v1.3 §5: where the last hit came from
   }
   function hostileSkip(el) {
     if (state.hostiles.has(el)) return true;
@@ -3034,7 +3190,7 @@
     label.textContent = '👿 ' + tagOf(el).toUpperCase();
     aura.append(label);
     root.append(aura);
-    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now() };
+    const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, aim: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now() };
     state.hostiles.set(el, rec);
     hpOf(el);   // page-space max HP cached now (scope never runs the picker)
     placeAura(rec);
@@ -3050,7 +3206,8 @@
     rec.nextAttackAt = now() + ms;
     rec.timer = later(() => { rec.timer = 0; hostileAttack(rec, false); }, ms);
   }
-  function clearPhase(rec) {   // telegraph / beam / warn nodes of this hostile; pulse back to idle
+  function clearPhase(rec) {   // telegraph / beam / warn / lock-mark nodes of this hostile; pulse back to idle
+    dropAimLine(rec);   // v1.3 §3.2: the "aiming at you" line never outlives the wind-up it belongs to
     for (const n of rec.nodes) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } const i = state.warns.indexOf(n); if (i >= 0) state.warns.splice(i, 1); }
     rec.nodes.length = 0;
     if (rec.beam) { removeBeam(rec.beam); rec.beam = null; }
@@ -3063,6 +3220,7 @@
     state.hostiles.delete(el);
     untrack(rec.timer); rec.timer = 0;
     clearPhase(rec);
+    dropAimLine(rec, true);   // the hostile itself is going — its line cannot linger
     try { if (rec.pulse) { rec.pulse.cancel(); state.anims.delete(rec.pulse); } } catch (e) { /* ignore */ }
     try { rec.aura.remove(); } catch (e) { /* ignore */ }
     updatePlayerHud();
@@ -3082,7 +3240,7 @@
   }
   function clearCombatNodes() {
     for (const el of Array.from(state.hostiles.keys())) releaseHostile(el);
-    clearOrbs(); clearBeams(); clearWarns();
+    clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
   }
   /* true only when one of the three attacks actually started (debug.forceAttack reports the tier off this). */
   function hostileAttack(rec, forced) {
@@ -3115,11 +3273,14 @@
   function spawnOrb(rec, x, y, windup) {
     if (!root) return null;
     const n = mk('div', 'crs-orb');
-    n.style.left = px(x - 7); n.style.top = px(y - 7);
+    n.style.left = px(x - ORB_R); n.style.top = px(y - ORB_R);   // v1.3 §3.3: 22 px, so it can be seen coming
     root.append(n);
     const t = now();
-    const o = { node: n, rec, x, y, x0: x, y0: y, vx: 0, vy: 0, bornAt: t, launchAt: t + windup, launched: false, dmg: 8 + Math.round(Math.sqrt(rec.area) / 60) };
+    const o = { node: n, rec, x, y, x0: x, y0: y, vx: 0, vy: 0, bornAt: t, launchAt: t + windup, launched: false, dmg: 8 + Math.round(Math.sqrt(rec.area) / 60),
+      ring: null, trail: null, hist: null, flightMs: 0, minD: Infinity, minAt: null, nearDone: false };
     state.orbs.push(o);
+    orbVisuals(o);
+    addAimLine(rec);   // §3.2 — also for a forced (zero wind-up) shot, which the min hold time keeps visible
     if (windup > 0) { rec.phase = 'windup'; n.style.transform = 'scale(.3)'; } else launchOrb(o);
     kick();
     return o;
@@ -3128,12 +3289,14 @@
     const p = state.player;
     const dx = p.x - o.x, dy = p.y - o.y, L = Math.hypot(dx, dy) || 1;
     o.vx = dx / L * 520; o.vy = dy / L * 520; o.launched = true; o.launchAt = now();
+    o.flightMs = Math.max(1, L / 520 * 1000);   // the arrival ring shrinks over exactly this long (§3.3)
     o.node.style.transform = 'translate(0px, 0px)';
     if (o.rec && o.rec.phase === 'windup') o.rec.phase = 'idle';
+    dropAimLine(o.rec);   // the line goes with the shot
   }
   /* A10: the clutch bonus reads rec.phase, and only launchOrb() clears 'windup' — an orb that is removed before it
    * ever launches (interception, KO, restore) must put its hostile back to idle. */
-  function orbGone(o) { if (o && o.rec && !o.launched && o.rec.phase === 'windup') o.rec.phase = 'idle'; }
+  function orbGone(o) { if (!o) return; orbVisualsRemove(o); if (o.rec && !o.launched && o.rec.phase === 'windup') o.rec.phase = 'idle'; }
   function removeOrbAt(i) { const o = state.orbs[i]; state.orbs.splice(i, 1); orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } }
   function clearOrbs() { for (const o of state.orbs) { orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } } state.orbs.length = 0; }
   function orbStep(t, dt) {
@@ -3149,11 +3312,12 @@
       if (p.alive && !state.ko) {   // swept segment hit (no tunnelling at low frame rates)
         const q = nearestOnSegment(o.x, o.y, nx, ny, p.x, p.y);
         // damagePlayer() may KO the player, and showKo() → clearOrbs() empties state.orbs while we are iterating it
-        if (Math.hypot(q.x - p.x, q.y - p.y) < 22) { removeOrbAt(i); damagePlayer(o.dmg); if (state.ko || !state.orbs.length) return; continue; }
+        if (Math.hypot(q.x - p.x, q.y - p.y) < ORB_HIT_R) { removeOrbAt(i); damagePlayer(o.dmg, { from: q }); if (state.ko || !state.orbs.length) return; continue; }
       }
       o.x = nx; o.y = ny;
       if (t - o.launchAt > 3000 || nx < -20 || ny < -20 || nx > W + 20 || ny > H + 20) { removeOrbAt(i); continue; }
       o.node.style.transform = 'translate(' + px(nx - o.x0) + ', ' + px(ny - o.y0) + ')';
+      orbReadability(o, t);   // v1.3 §3.3 / §3.4: arrival ring, afterimages, will-hit tint, graze detection
     }
   }
   function popOrb(o) {
@@ -3184,11 +3348,19 @@
   function attackCharger(rec, r) {
     rec.phase = 'telegraph';
     setAuraPulse(rec, 150);
-    const cx = r.left + r.width / 2, cy = r.top + r.height / 2, S = 180;
-    const warn = mk('div', 'crs-warn');
-    warn.style.left = px(cx - S / 2); warn.style.top = px(cy - S / 2); warn.style.width = px(S); warn.style.height = px(S);
+    addAimLine(rec);
+    /* v1.3 §3.3: the warn ring now CLOSES onto the real hit boundary (rect + 60 px) instead of blooming past it,
+     * so the edge the player has to be outside of is the edge they can see. */
+    const ex = { left: r.left - 60, top: r.top - 60, w: r.width + 120, h: r.height + 120 };
+    const warn = mk('div', 'crs-warn crs-slam');
+    warn.style.left = px(ex.left); warn.style.top = px(ex.top); warn.style.width = px(ex.w); warn.style.height = px(ex.h);
     root.append(warn); rec.nodes.push(warn); state.warns.push(warn);
-    try { trackAnim(warn.animate([{ transform: 'scale(.2)', opacity: 1 }, { transform: 'scale(1.15)', opacity: 0.15 }], { duration: 700, easing: 'ease-out', fill: 'forwards' })); } catch (e) { /* ignore */ }
+    try {
+      trackAnim(warn.animate([
+        { left: px(ex.left - 130), top: px(ex.top - 130), width: px(ex.w + 260), height: px(ex.h + 260), opacity: 0.3, borderWidth: '6px' },
+        { left: px(ex.left), top: px(ex.top), width: px(ex.w), height: px(ex.h), opacity: 1, borderWidth: '3px' }
+      ], { duration: 700, easing: 'ease-in', fill: 'forwards' }));
+    } catch (e) { /* ignore */ }
     sfx('thump', { gain: 0.5 });
     rec.timer = later(() => { rec.timer = 0; chargerSlam(rec); }, 700);
   }
@@ -3214,88 +3386,10 @@
     }
     shake('bomb', { amp: near ? 10 : 3, dur: 300 });
     sfx('rumble', { gain: near ? 1 : 0.5 });
-    if (inside) damagePlayer(18 + Math.round(Math.sqrt(rec.area) / 50));
+    if (inside) damagePlayer(18 + Math.round(Math.sqrt(rec.area) / 50), { from: { x: cx, y: cy } });
     scheduleAttack(rec, attackInterval(rec));
   }
-  /* T3 laser: dashed telegraph tracking the player for 550 ms, lock 250 ms (solid), fire 400 ms (hit band 16 px, 30 dmg once). */
-  function attackLaser(rec, r) {
-    if (!root) { scheduleAttack(rec, attackInterval(rec)); return; }
-    rec.phase = 'track';
-    const horizontal = r.width >= r.height;
-    const node = mk('div', 'crs-beam crs-beam-telegraph telegraph');
-    const b = { rec, node, horizontal, pos: horizontal ? state.player.y : state.player.x, phase: 'track', hit: false };
-    rec.beam = b;
-    state.beams.push(b);
-    root.append(node);
-    placeBeam(b);
-    rec.timer = later(() => {
-      rec.timer = 0;
-      b.phase = 'lock'; rec.phase = 'lock';
-      try { node.classList.add('crs-beam-lock'); } catch (e) { /* ignore */ }
-      placeBeam(b);
-      rec.timer = later(() => { rec.timer = 0; fireBeam(b); }, 250);
-    }, 550);
-    kick();
-  }
-  function placeBeam(b) {
-    const s = b.node.style, th = b.phase === 'fire' ? 6 : 2;
-    if (b.horizontal) { s.left = '0px'; s.top = px(b.pos - th / 2); s.width = px(viewW()); s.height = px(th); }
-    else { s.top = '0px'; s.left = px(b.pos - th / 2); s.height = px(viewH()); s.width = px(th); }
-    s.backgroundImage = b.phase === 'track' ? 'repeating-linear-gradient(' + (b.horizontal ? '90deg' : '180deg') + ', rgba(255,60,60,.85) 0 10px, transparent 10px 18px)' : 'none';
-  }
-  function fireBeam(b) {
-    const rec = b.rec;
-    if (state.beams.indexOf(b) < 0) return;
-    b.phase = 'fire'; rec.phase = 'fire';
-    b.node.className = 'crs-beam crs-beam-fire fire';
-    placeBeam(b);
-    sfx('laser');
-    checkBeamHit(b);
-    rec.timer = later(() => { rec.timer = 0; removeBeam(b); rec.phase = 'idle'; scheduleAttack(rec, attackInterval(rec)); }, 400);
-    kick();
-  }
-  function checkBeamHit(b) {
-    if (b.hit || b.phase !== 'fire') return;
-    const p = state.player;
-    if (!p.alive || state.ko) return;
-    const d = b.horizontal ? Math.abs(p.y - b.pos) : Math.abs(p.x - b.pos);
-    if (d <= 16) { b.hit = true; vignette(true); damagePlayer(30); }
-  }
-  function beamStep() {
-    for (const b of state.beams.slice()) {
-      if (b.phase === 'track') { b.pos = b.horizontal ? state.player.y : state.player.x; placeBeam(b); }
-      else if (b.phase === 'fire') checkBeamHit(b);
-    }
-  }
-  function removeBeam(b) {
-    const i = state.beams.indexOf(b);
-    if (i >= 0) state.beams.splice(i, 1);
-    if (b.rec && b.rec.beam === b) b.rec.beam = null;
-    try { cancelAnimsOf(b.node); b.node.remove(); } catch (e) { /* ignore */ }
-  }
-  function clearBeams() { for (const b of state.beams.slice()) removeBeam(b); }
-  function clearWarns() { for (const n of state.warns) { try { n.remove(); } catch (e) { /* ignore */ } } state.warns.length = 0; }
-  /* --- player damage, regen, KO --- */
-  function vignette(white) {
-    if (!root) return;
-    const n = mk('div', white ? 'crs-vignette crs-flash-white' : 'crs-vignette');
-    root.append(n);
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
-    try { const a = trackAnim(n.animate([{ opacity: white ? 0.85 : 0.8 }, { opacity: 0 }], { duration: white ? 300 : 400, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
-    later(kill, 700);
-  }
-  function damagePlayer(n) {
-    const p = state.player;
-    if (!state.active || !state.combat || !p.alive || state.ko || !(n > 0)) return;
-    p.hp = Math.max(0, p.hp - n);
-    p.lastDamageAt = now(); p.lastRegenAt = p.lastDamageAt;
-    vignette(false);
-    sfx('hurt');
-    spawnDmg(p.x + rand(-10, 10), p.y - 18, Math.round(n), false, { color: '#ff6b6b' });
-    try { if (hudEls.player && !reducedMotion()) trackAnim(hudEls.player.animate([{ transform: 'translate(0px, 0px)' }, { transform: 'translate(-4px, 2px)' }, { transform: 'translate(4px, -2px)' }, { transform: 'translate(-2px, 1px)' }, { transform: 'translate(0px, 0px)' }], { duration: 260 })); } catch (e) { /* ignore */ }
-    updatePlayerHud();
-    if (p.hp <= 0) showKo(); else startRegen();
-  }
+  /* --- player regen, KO --- (vignette / damagePlayer / updatePlayerHud moved to 91-combat-feedback.js) */
   function startRegen() {   // 500 ms later() chain while hp < max (tick() also regens while the loop is busy)
     if (state.regenTimer || !state.active || !state.combat || state.paused) return;
     const p = state.player;
@@ -3323,7 +3417,7 @@
     resetChord(); scopeOff(); stopHold(); cancelSlash();
     untrack(state.regenTimer); state.regenTimer = 0;
     for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
-    clearOrbs(); clearBeams(); clearWarns();
+    clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
     // KO overlay (A11): built on demand inside the HUD shadow root; ordinary shadow buttons, so isHudEvent() lets clicks through
     if (hudEls.mount && !hudEls.ko) {
       try {
@@ -3385,7 +3479,7 @@
     untrack(state.clockTimer); state.clockTimer = 0;
     untrack(state.regenTimer); state.regenTimer = 0;
     for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; clearPhase(rec); }
-    clearOrbs(); clearBeams(); clearWarns();
+    clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
   }
   function resumeCombat() {
     if (!state.paused) return;
@@ -3397,25 +3491,16 @@
     for (const rec of state.hostiles.values()) scheduleAttack(rec, Math.max(1000, attackInterval(rec)));
     if (state.player.hp < state.player.max) startRegen();
   }
-  function updatePlayerHud() {
-    const h = hudEls.player;
-    if (!h) return;
-    try {
-      h.classList.toggle('on', !!state.combat);
-      if (hudEls.fallback) h.style.display = state.combat ? 'block' : 'none';
-      const p = state.player, hp = Math.max(0, Math.round(p.hp)), ratio = clamp(p.hp / p.max, 0, 1);
-      hudEls.pFill.style.width = (ratio * 100).toFixed(1) + '%';
-      hudEls.pFill.style.background = fillColor(ratio);
-      hudEls.pHp.textContent = msg('labelHealth') + ' ' + hp;
-      hudEls.pStats.textContent = msg('labelScore') + ' ' + p.score + ' · ' + msg('labelKills') + ' ' + p.kills + ' · ' + msg('labelTime') + ' ' + Math.floor(combatElapsed() / 1000) + msg('unitSec') + ' · ' + msg('labelEnemies') + ' ' + state.hostiles.size;
-    } catch (e) { /* ignore */ }
-  }
   /* --- debug hooks (§5) --- */
   debug.setPlayerHp = (n) => {
     const p = state.player;
     n = +n;
     if (!isFinite(n)) return Math.round(p.hp);
     p.hp = clamp(n, 0, p.max);
+    /* A hard set, not a hit. A §2.2 drain still in flight from an earlier hit animates width AND background on
+     * the same node, and an animation outranks the inline style updatePlayerHud() is about to write — the bar
+     * would keep showing the OLD length and colour next to the NEW number for up to 250 ms. Snap it instead. */
+    if (hudEls.pFill) cancelAnimsOf(hudEls.pFill);
     updatePlayerHud();
     if (p.hp <= 0 && p.alive && state.combat && state.active) showKo();
     else if (p.hp < p.max) startRegen();
@@ -3423,7 +3508,7 @@
   };
   debug.setPlayerPos = (x, y) => {
     x = +x; y = +y;
-    if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; }
+    if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; placeSelf(); }
     return { x: state.player.x, y: state.player.y };
   };
   debug.forceAttack = (el) => {   // same eligibility as the picker; works under noAttacks, null while paused / KO
@@ -3437,9 +3522,388 @@
     return ran ? rec.tier : null;
   };
 
+// ── 91-combat-feedback.js ──
+// ── v1.3 combat readability: player ring, aim-line telegraph, orb legibility, near-miss, hit feedback ──
+  /* The whole of SPEC-readability §3 lives here, plus the player health HUD (§2.2) that the ring mirrors.
+   *
+   * The complaint this file answers: "the attacks feel good, but I cannot tell that something is attacking ME,
+   * whether I can dodge, or that I am taking damage." The player IS the mouse cursor and the cursor carried no
+   * mark at all, so none of those three questions had anywhere to be answered. In order:
+   *
+   *   §3.1  the cursor gets a 44 px health RING — the player, drawn where the player is already looking
+   *   §3.2  a dashed AIM LINE from the attacker to that ring the moment a wind-up starts — "this one, right now"
+   *   §3.3  bigger orbs with a shrinking arrival ring, bright when they will hit and dim when they will not
+   *   §3.4  a near-miss graze that proves dodging works
+   *   §3.5  hitstop + a vignette aimed at the damage source + a 24 px number — "you were hit, from there"
+   *
+   * Nothing here changes a pattern, an interval, a damage value, a tier or a score (§4). Every node is made with
+   * mk() (data-crs + a crs- class), every timer goes through later(), every animation through trackAnim(), so
+   * restore() and deactivate() sweep all of it. */
+
+  /* ===================================================================== */
+  /* vignettes (§3.5 directional, §2.2 low-HP)                              */
+  /* ===================================================================== */
+  function vignette(white) {
+    if (!root) return;
+    const n = mk('div', white ? 'crs-vignette crs-flash-white' : 'crs-vignette');
+    root.append(n);
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+    try { const a = trackAnim(n.animate([{ opacity: white ? 0.85 : 0.8 }, { opacity: 0 }], { duration: white ? 300 : 400, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+    later(kill, 700);
+  }
+  /* §3.5: a red wash concentrated on the side the damage came from, 450 ms. An even border said "something
+   * happened"; this says "something hit you FROM THERE", which is the half the player was missing. */
+  function dirVignette(from) {
+    if (!root) return;
+    const W = viewW(), H = viewH();
+    const p = state.player;
+    let fx = from && isFinite(from.x) ? from.x : p.x, fy = from && isFinite(from.y) ? from.y : p.y;
+    let dx = fx - p.x, dy = fy - p.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 1) { dx = 0; dy = -1; } else { dx /= L; dy /= L; }
+    // project the direction onto the viewport edge and bias the gradient centre well outside it
+    const cx = clamp(50 + dx * 85, -45, 145), cy = clamp(50 + dy * 85, -45, 145);
+    const n = mk('div', 'crs-vignette crs-vignette-dir');
+    n.style.backgroundImage = 'radial-gradient(ellipse ' + px(W * 0.95) + ' ' + px(H * 0.95) + ' at ' + cx.toFixed(1) + '% ' + cy.toFixed(1) + '%, rgba(229,72,77,.85) 0%, rgba(229,72,77,.45) 28%, rgba(229,72,77,0) 62%)';
+    root.append(n);
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
+    try { const a = trackAnim(n.animate([{ opacity: 0 }, { opacity: 1, offset: 0.12 }, { opacity: 0 }], { duration: 450, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
+    later(kill, 800);
+  }
+  /* §2.2: below 30 % HP a faint red rim stays up for as long as the player is in danger (no animation, no timer). */
+  function lowVignette(ratio) {
+    const want = state.active && state.combat && !state.ko && state.player.alive && ratio < 0.3;
+    if (!want) { clearLowVignette(); return; }
+    if (state.lowVig && state.lowVig.isConnected) return;
+    if (!root) return;
+    const n = mk('div', 'crs-vignette crs-vignette-low');
+    n.style.opacity = '0.55';
+    root.append(n);
+    state.lowVig = n;
+  }
+  function clearLowVignette() {
+    const n = state.lowVig;
+    state.lowVig = null;
+    if (n) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+  }
+
+  /* ===================================================================== */
+  /* §3.1 player marker / health ring                                       */
+  /* ===================================================================== */
+  /* Geometry: a `.crs-selfbox` wrapper is translated onto the pointer and holds four same-sized layers. The RING
+   * itself is `.crs-self` — a conic-gradient disc with its middle punched out by a radial-gradient mask, so the
+   * painted arc runs clockwise from 12 o'clock for exactly hp/max of the circle. CSSOM only; no SVG. */
+  function selfColor(ratio) { return fillColor(ratio); }
+  function ringGradient(ratio) {
+    const deg = clamp(ratio, 0, 1) * 360;
+    const c = selfColor(ratio);
+    return 'conic-gradient(from 0deg, ' + c + ' 0deg, ' + c + ' ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) 360deg)';
+  }
+  /* A 60°-wide (or `span`-wide) coloured window centred on `deg`, used for the damage wedge and the graze arc. */
+  function wedgeGradient(deg, span, color) {
+    const a = ((deg - span / 2) % 360 + 360) % 360;
+    return 'conic-gradient(from ' + a.toFixed(2) + 'deg, ' + color + ' 0deg, ' + color + ' ' + span.toFixed(2) + 'deg, rgba(0,0,0,0) ' + span.toFixed(2) + 'deg, rgba(0,0,0,0) 360deg)';
+  }
+  /* CSS conic-gradient angles start at 12 o'clock and grow clockwise; screen y grows downward. */
+  function angleTo(x, y) {
+    const p = state.player;
+    const dx = x - p.x, dy = y - p.y;
+    if (!isFinite(dx) || !isFinite(dy) || (dx === 0 && dy === 0)) return 0;
+    return (Math.atan2(dx, -dy) / DEG + 360) % 360;
+  }
+  function buildSelf() {
+    const box = mk('div', 'crs-selfbox');
+    const ring = mk('div', 'crs-self');
+    const wedge = mk('div', 'crs-self-wedge');
+    const arc = mk('div', 'crs-self-arc');
+    const dot = mk('div', 'crs-self-dot');
+    const tag = mk('span', 'crs-self-tag');
+    tag.textContent = msg('dodgeLabel');
+    box.append(ring, wedge, arc, dot, tag);
+    return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1 };
+  }
+  function selfShouldShow() { return !!(state.active && state.combat && !state.ko && root); }
+  /* Mount / unmount + repaint. Called from updatePlayerHud(), so every hp change and every combat toggle lands. */
+  function syncSelf() {
+    if (!selfShouldShow()) { clearSelf(); return; }
+    let s = state.self;
+    if (!s || !s.box.isConnected) { s = buildSelf(); state.self = s; try { root.append(s.box); } catch (e) { /* ignore */ } }
+    const ratio = clamp(state.player.hp / state.player.max, 0, 1);
+    if (Math.abs(ratio - s.ratio) > 0.0005) { s.ratio = ratio; s.ring.style.backgroundImage = ringGradient(ratio); }
+    setSelfLowPulse(s, ratio < 0.3);
+    placeSelf();
+  }
+  function setSelfLowPulse(s, on) {
+    if (on === s.lowOn && (!on || (s.pulse && s.pulse.playState === 'running'))) return;
+    s.lowOn = on;
+    if (s.pulse) { try { s.pulse.cancel(); } catch (e) { /* ignore */ } state.anims.delete(s.pulse); s.pulse = null; }
+    if (!on || reducedMotion()) return;
+    try { s.pulse = trackAnim(s.ring.animate([{ opacity: 1 }, { opacity: 0.4 }, { opacity: 1 }], { duration: 1200, iterations: Infinity })); } catch (e) { s.pulse = null; }
+  }
+  /* The ring rides the pointer from the frames that already exist — scheduleHover()'s one-shot RAF on every
+   * pointermove, and tickFrame() while anything else is live. It never owns a loop of its own. */
+  function placeSelf() {
+    const s = state.self;
+    if (!s || !s.box.isConnected) return;
+    const p = state.player;
+    s.box.style.left = px(p.x);
+    s.box.style.top = px(p.y);
+    // ADS: drop the ring to 20 % so it cannot compete with the reticle (§3.1)
+    s.box.style.opacity = state.scoped ? '0.2' : '1';
+  }
+  function selfStep() { placeSelf(); }
+  function clearSelf() {
+    const s = state.self;
+    state.self = null;
+    if (!s) return;
+    if (s.pulse) { try { s.pulse.cancel(); } catch (e) { /* ignore */ } state.anims.delete(s.pulse); }
+    try { cancelAnimsOf(s.box); cancelAnimsOf(s.ring); cancelAnimsOf(s.wedge); cancelAnimsOf(s.arc); cancelAnimsOf(s.tag); s.box.remove(); } catch (e) { /* ignore */ }
+  }
+  function selfRingInfo() {
+    const s = state.self;
+    return { shown: !!(s && s.box && s.box.isConnected), hpRatio: clamp(state.player.hp / state.player.max, 0, 1) };
+  }
+  /* Hit: the ring punches out to 64 px and settles back over 200 ms while flashing red, and a 60° wedge points at
+   * the damage source for 350 ms. Reduced motion keeps the colour cues and drops the punch. */
+  function selfHit(from) {
+    const s = state.self;
+    if (!s || !s.box.isConnected) return;
+    const rm = reducedMotion();
+    try {
+      if (!rm) trackAnim(s.box.animate([{ transform: 'translate(-50%, -50%) scale(' + (SELF_HIT_R / SELF_R).toFixed(3) + ')' }, { transform: 'translate(-50%, -50%) scale(1)' }], { duration: 200, easing: 'ease-out' }));
+      trackAnim(s.ring.animate([{ filter: 'brightness(2.6) drop-shadow(0 0 6px rgba(255,80,80,.95))' }, { filter: 'brightness(1) drop-shadow(0 1px 3px rgba(0,0,0,.85))' }], { duration: 200, easing: 'ease-out' }));
+    } catch (e) { /* ignore */ }
+    if (!from) return;
+    try {
+      s.wedge.style.backgroundImage = wedgeGradient(angleTo(from.x, from.y), 60, 'rgba(255,70,70,.95)');
+      cancelAnimsOf(s.wedge);
+      trackAnim(s.wedge.animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 350, easing: 'ease-out', fill: 'forwards' }));
+    } catch (e) { /* ignore */ }
+  }
+  /* Graze: a white arc on the side the shot went past, plus 회피! beside the ring (§3.4). */
+  function selfGraze(from) {
+    const s = state.self;
+    if (!s || !s.box.isConnected) return;
+    try {
+      s.arc.style.backgroundImage = wedgeGradient(angleTo(from.x, from.y), 40, 'rgba(255,255,255,.95)');
+      cancelAnimsOf(s.arc);
+      trackAnim(s.arc.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: 'ease-out', fill: 'forwards' }));
+    } catch (e) { /* ignore */ }
+    try {
+      cancelAnimsOf(s.tag);
+      trackAnim(s.tag.animate([{ opacity: 0.7 }, { opacity: 0.7, offset: 0.7 }, { opacity: 0 }], { duration: 500, easing: 'ease-out', fill: 'forwards' }));
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ===================================================================== */
+  /* §3.2 aim lines — "that one is attacking ME, right now"                 */
+  /* ===================================================================== */
+  function aimPoint(rec) {   // the point on the hostile's border nearest the player
+    const r = rectOf(rec.el);
+    if (!r) return null;
+    const p = state.player;
+    return { x: clamp(p.x, r.left, r.right), y: clamp(p.y, r.top, r.bottom) };
+  }
+  function placeAimLine(a) {
+    const from = aimPoint(a.rec);
+    if (!from) return;
+    const p = state.player;
+    const len = Math.hypot(p.x - from.x, p.y - from.y);
+    const ang = Math.atan2(p.y - from.y, p.x - from.x);
+    const s = a.node.style;
+    s.left = px(from.x); s.top = px(from.y); s.width = px(len); s.height = '2px';
+    s.transform = 'translateY(-1px) rotate(' + ang.toFixed(4) + 'rad)';
+  }
+  function addAimLine(rec) {
+    if (!root || !rec || rec.aim) return;
+    const node = mk('div', 'crs-aimline');
+    node.style.transformOrigin = '0 50%';
+    root.append(node);
+    const a = { rec, node, bornAt: now(), timer: 0 };
+    rec.aim = a;
+    state.aimlines.push(a);
+    placeAimLine(a);
+    try { trackAnim(node.animate([{ backgroundPosition: '0px 0px' }, { backgroundPosition: '18px 0px' }], { duration: 420, iterations: Infinity, easing: 'linear' })); } catch (e) { /* ignore */ }
+    try { rec.aura.classList.add('crs-aimed'); } catch (e) { /* ignore */ }
+    try { rec.label.textContent = '🎯 ' + rec.label.textContent; } catch (e) { /* ignore */ }
+    sfx('alert');
+    kick();
+  }
+  function removeAimLine(a) {
+    const i = state.aimlines.indexOf(a);
+    if (i >= 0) state.aimlines.splice(i, 1);
+    untrack(a.timer); a.timer = 0;
+    if (a.rec && a.rec.aim === a) {
+      a.rec.aim = null;
+      try { a.rec.aura.classList.remove('crs-aimed'); } catch (e) { /* ignore */ }
+      try { a.rec.label.textContent = a.rec.label.textContent.replace(/^🎯\s*/, ''); } catch (e) { /* ignore */ }
+    }
+    try { cancelAnimsOf(a.node); a.node.remove(); } catch (e) { /* ignore */ }
+  }
+  /* The line goes with the shot. A wind-up of zero (debug.forceAttack on a shooter) would otherwise create and
+   * destroy it inside one frame, so it is always held for AIMLINE_MIN_MS first. */
+  function dropAimLine(rec, immediate) {
+    const a = rec && rec.aim;
+    if (!a) return;
+    if (immediate) { removeAimLine(a); return; }
+    if (a.timer) return;
+    const wait = Math.max(0, AIMLINE_MIN_MS - (now() - a.bornAt));
+    if (wait <= 0) { removeAimLine(a); return; }
+    a.timer = later(() => { a.timer = 0; removeAimLine(a); }, wait);
+  }
+  function stepAimLines() { for (const a of state.aimlines) placeAimLine(a); }
+  function clearAimLines() { for (const a of state.aimlines.slice()) removeAimLine(a); }
+
+  /* ===================================================================== */
+  /* §3.3 orb legibility + §3.4 near miss                                   */
+  /* ===================================================================== */
+  /* Each orb gets an arrival ring that shrinks onto it and six afterimages behind it. The ring's radius is driven
+   * by elapsed/predicted flight time, so it falls monotonically and reaches orb size at the predicted impact. */
+  function orbVisuals(o) {
+    if (!root) return;
+    const ring = mk('div', 'crs-orb-ring');
+    root.append(ring);
+    o.ring = ring;
+    o.trail = [];
+    o.hist = [];
+    if (reducedMotion()) return;
+    for (let i = 0; i < ORB_TRAIL; i++) {
+      const n = mk('div', 'crs-orb-trail');
+      const k = 1 - i / ORB_TRAIL;
+      const sz = Math.max(4, Math.round(2 * ORB_R * k * 0.72));
+      n.style.width = px(sz); n.style.height = px(sz);
+      n.style.opacity = (0.42 * k).toFixed(3);
+      root.append(n);
+      o.trail.push(n);
+    }
+  }
+  function orbVisualsRemove(o) {
+    if (!o) return;
+    if (o.ring) { try { cancelAnimsOf(o.ring); o.ring.remove(); } catch (e) { /* ignore */ } o.ring = null; }
+    if (o.trail) { for (const n of o.trail) { try { n.remove(); } catch (e) { /* ignore */ } } o.trail.length = 0; }
+  }
+  /* Will this orb, on its current heading, reach the player? The answer is what decides bright vs. dim, and it is
+   * recomputed every frame — moving the cursor off the line dims the orb where it flies, which is the lesson. */
+  function orbWillHit(o) {
+    const p = state.player;
+    if (!p.alive || !p.inWindow) return false;
+    const q = nearestOnSegment(o.x, o.y, o.x + o.vx * 3, o.y + o.vy * 3, p.x, p.y);
+    return Math.hypot(q.x - p.x, q.y - p.y) < ORB_HIT_R;
+  }
+  function orbReadability(o, t) {
+    const p = state.player;
+    const hit = orbWillHit(o);
+    try { o.node.style.opacity = hit ? '1' : '0.4'; } catch (e) { /* ignore */ }
+    if (o.ring) {
+      const k = o.flightMs > 0 ? clamp(1 - (t - o.launchAt) / o.flightMs, 0, 1) : 0;
+      const R = ORB_R + 34 * k;
+      const s = o.ring.style;
+      s.left = px(o.x - R); s.top = px(o.y - R); s.width = px(2 * R); s.height = px(2 * R);
+      s.borderColor = hit ? 'rgba(255,90,90,.95)' : 'rgba(255,255,255,.35)';
+      s.opacity = hit ? '1' : '0.45';
+    }
+    if (o.trail && o.trail.length) {
+      o.hist.unshift(o.x, o.y);
+      if (o.hist.length > 2 * (ORB_TRAIL + 1) * 2) o.hist.length = 2 * (ORB_TRAIL + 1) * 2;
+      for (let i = 0; i < o.trail.length; i++) {
+        const j = 2 * ((i + 1) * 2);
+        if (j + 1 >= o.hist.length) break;
+        const n = o.trail[i], w = parseFloat(n.style.width) || 8;
+        n.style.left = px(o.hist[j] - w / 2);
+        n.style.top = px(o.hist[j + 1] - w / 2);
+      }
+    }
+    // §3.4: the closest approach. Between ORB_HIT_R and ORB_HIT_R + 45 px it is a graze, and the player is told so.
+    if (!o.nearDone && p.alive && !state.ko) {
+      const d = Math.hypot(o.x - p.x, o.y - p.y);
+      if (d < o.minD) { o.minD = d; o.minAt = { x: o.x, y: o.y }; }
+      else if (d > o.minD + 6 && o.minD <= ORB_HIT_R + NEAR_MISS_BAND && o.minD > ORB_HIT_R) { o.nearDone = true; nearMiss(o.minAt); }
+    }
+  }
+  function nearMiss(from) {
+    state.nearMisses++;
+    const t = now();
+    state.nearShown = state.nearShown.filter((x) => t - x < 2000);
+    if (state.nearShown.length >= 3) return;   // at most three call-outs per 2 s (§3.4)
+    state.nearShown.push(t);
+    selfGraze(from || { x: state.player.x, y: state.player.y - 1 });
+    sfx('whiff');
+  }
+
+  /* ===================================================================== */
+  /* §3.5 taking damage                                                     */
+  /* ===================================================================== */
+  /* Hitstop: tickFrame() clamps dt to 0 while this window is open. Frames keep running and keep being counted —
+   * the integrator simply advances no time — so nothing accumulates and nothing is skipped. */
+  function hitstop() {
+    if (!debug.hitstop || reducedMotion()) return;
+    state.hitstopUntil = now() + HITSTOP_MS;
+    kick();
+  }
+  function damagePlayer(n, opts) {
+    const p = state.player;
+    if (!state.active || !state.combat || !p.alive || state.ko || !(n > 0)) return;
+    const from = (opts && opts.from && isFinite(opts.from.x) && isFinite(opts.from.y)) ? { x: opts.from.x, y: opts.from.y } : null;
+    const before = clamp(p.hp / p.max, 0, 1);
+    p.hp = Math.max(0, p.hp - n);
+    p.lastDamageAt = now(); p.lastRegenAt = p.lastDamageAt;
+    p.lastHitFrom = from;
+    hitstop();
+    dirVignette(from);
+    shake('bomb', { amp: 8, dur: 260 });
+    sfx('hurtbig');
+    spawnDmg(p.x + rand(-10, 10), p.y - 30, Math.round(n), false, { color: '#ff6b6b', size: 24 });
+    selfHit(from);
+    updatePlayerHud();
+    drainBar(before);
+    if (p.hp <= 0) showKo(); else startRegen();
+  }
+  /* §2.2: the bar flashes white for a frame, the lost slice drains over 250 ms, and the panel takes a 6 px knock. */
+  function drainBar(before) {
+    if (!hudEls.pFill || !hudEls.player) return;
+    const after = clamp(state.player.hp / state.player.max, 0, 1);
+    try {
+      cancelAnimsOf(hudEls.pFill);
+      trackAnim(hudEls.pFill.animate([{ width: (before * 100).toFixed(1) + '%' }, { width: (after * 100).toFixed(1) + '%' }], { duration: 250, easing: 'ease-out' }));
+      trackAnim(hudEls.pFill.animate([{ backgroundColor: '#fff' }, { backgroundColor: '#fff', offset: 0.08 }, { backgroundColor: fillColor(after) }], { duration: 250, easing: 'ease-out' }));
+    } catch (e) { /* ignore */ }
+    if (reducedMotion()) return;
+    try { trackAnim(hudEls.player.animate([{ transform: 'translate(0px, 0px)' }, { transform: 'translate(-6px, 3px)' }, { transform: 'translate(6px, -3px)' }, { transform: 'translate(-3px, 1px)' }, { transform: 'translate(0px, 0px)' }], { duration: 260 })); } catch (e) { /* ignore */ }
+  }
+  function setBarPulse(on) {
+    const bar = hudEls.pBar;
+    if (!bar) return;
+    if (on === !!hudEls.pPulseOn && (!on || (hudEls.pPulse && hudEls.pPulse.playState === 'running'))) return;
+    hudEls.pPulseOn = on;
+    if (hudEls.pPulse) { try { hudEls.pPulse.cancel(); } catch (e) { /* ignore */ } state.anims.delete(hudEls.pPulse); hudEls.pPulse = null; }
+    if (!on || reducedMotion()) return;
+    try { hudEls.pPulse = trackAnim(bar.animate([{ boxShadow: '0 0 0 0 rgba(229,72,77,0)' }, { boxShadow: '0 0 0 3px rgba(229,72,77,.6)' }, { boxShadow: '0 0 0 0 rgba(229,72,77,0)' }], { duration: 1200, iterations: Infinity })); } catch (e) { hudEls.pPulse = null; }
+  }
+  /* §2.2 player HUD + the ring that mirrors it. Called from every path that can move hp or toggle combat. */
+  function updatePlayerHud() {
+    const p = state.player, ratio = clamp(p.hp / p.max, 0, 1);
+    const h = hudEls.player;
+    if (h) {
+      try {
+        h.classList.toggle('on', !!state.combat);
+        if (hudEls.fallback) h.style.display = state.combat ? 'block' : 'none';
+        hudEls.pFill.style.width = (ratio * 100).toFixed(1) + '%';
+        hudEls.pFill.style.background = fillColor(ratio);
+        hudEls.pHp.textContent = msg('labelHealth') + ' ' + Math.max(0, Math.round(p.hp)) + ' / ' + p.max;
+        hudEls.pStats.textContent = msg('labelScore') + ' ' + p.score + ' · ' + msg('labelKills') + ' ' + p.kills + ' · ' + msg('labelTime') + ' ' + Math.floor(combatElapsed() / 1000) + msg('unitSec') + ' · ' + msg('labelEnemies') + ' ' + state.hostiles.size;
+        setBarPulse(state.combat && p.alive && ratio < 0.3);
+      } catch (e) { /* ignore */ }
+    }
+    state.hpRatio = ratio;
+    syncSelf();
+    lowVignette(ratio);
+  }
+
 // ── 92-tick.js ──
   /* ===================================================================== */
   /* 13. Physics loop                                                         */
+  /*     v1.3: the §3.5 hitstop clamps dt here, and the §3.1 player ring /     */
+  /*     §3.2 aim lines ride this frame rather than owning loops of their own. */
   /* ===================================================================== */
   function kick() {
     if (!state.active || state.animating) return;
@@ -3462,10 +3926,15 @@
     if (busy && state.active) state.rafId = raf(tick); else state.animating = false;
   }
   function tickFrame(t) {
-    const dt = clamp((t - state.lastT) / 1000, 0, 0.05);
+    let dt = clamp((t - state.lastT) / 1000, 0, 0.05);
     state.lastT = t;
     const W = viewW(), H = viewH();
     let busy = false;
+    /* v1.3 §3.5 hitstop: for 70 ms after the player is hit the integrator advances NO time. Frames still run and
+     * still consume their timestamps — dt is clamped to zero rather than the frame being skipped — so pieces,
+     * orbs and beams resume from exactly where they stopped instead of jumping a window's worth of motion. */
+    if (state.hitstopUntil > t) { dt = 0; busy = true; }
+    else if (state.hitstopUntil) state.hitstopUntil = 0;
     const resting = [];
     for (const q of state.pieces) if (q.resting) resting.push(q);
     for (const p of state.pieces) {
@@ -3512,6 +3981,9 @@
     if (state.orbs.length) { orbStep(t, dt); busy = busy || state.orbs.length > 0; }
     if (state.beams.length) { beamStep(); busy = true; }
     if (state.scoped) { scopeStep(t); busy = true; }
+    // v1.3 §3.1 / §3.2: the player ring rides this loop (and scheduleHover()'s RAF) — it never owns one
+    if (state.self) selfStep();
+    if (state.aimlines.length) { stepAimLines(); busy = true; }
     if (busy && state.combat && !state.paused && state.player.hp < state.player.max) regenStep();
     return busy;
   }
@@ -3540,6 +4012,7 @@
 // ── 95-events.js ──
   /* ===================================================================== */
   /* 14. Events                                                               */
+  /*     v1.3 §1: the - / _ / [ and = / + / ] power hotkeys are gone.          */
   /* ===================================================================== */
   const SWALLOW = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'selectstart', 'dragstart'];
   function isHudEvent(e) {
@@ -3673,8 +4146,6 @@
         else if (c === 'KeyZ' || k === 'z' || k === 'Z') action = 'restore';
         else if (c === 'KeyM' || k === 'm' || k === 'M') action = 'mute';
         else if (c === 'KeyH' || k === 'h' || k === 'H') action = 'combat';
-        else if (c === 'Minus' || k === '-' || k === '_' || k === '[') action = 'powerDown';
-        else if (c === 'Equal' || k === '=' || k === '+' || k === ']') action = 'powerUp';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
       }
     }
@@ -3695,8 +4166,6 @@
     else if (action === 'restore') restore();
     else if (action === 'mute') setMuted(!state.muted);
     else if (action === 'combat') setCombat(!state.combat);
-    else if (action === 'powerDown') stepPower(-1);
-    else if (action === 'powerUp') stepPower(1);
     else if (action === 'restart') restartFromKo();
   }
   function onWheel(e) {
@@ -3760,6 +4229,9 @@
 // ── 99-api.js ──
   /* ===================================================================== */
   /* 15. Public API: restore / activate / deactivate / toggle / prefs         */
+  /*     v1.3 §1/§5: setPower / power / stats().power removed, a stored        */
+  /*     crsPower is dropped on sight; stats() gains selfRing / aimlines /      */
+  /*     nearMisses / hitstop and player() gains lastHitFrom.                  */
   /* ===================================================================== */
   function clearTimers() {
     for (const id of state.timers) { try { clearT(id); } catch (e) { /* ignore */ } }
@@ -3773,8 +4245,10 @@
     for (const a of state.anims) { try { a.cancel(); } catch (e) { /* ignore */ } }
     state.anims.clear();
     state.shake = null;
-    if (hudEls.aBlink) hudEls.aBlink = null;
     if (hudEls.aFillFor) hudEls.aFillFor = null;
+    // v1.3: the looping attention pulses are cancelled above with everything else — forget their handles
+    hudEls.aPulse = null; hudEls.aPulseKey = '';
+    hudEls.pPulse = null; hudEls.pPulseOn = false;
   }
   function restore() {
     stopHold(true);
@@ -3787,14 +4261,15 @@
     // a frame that threw must never leave kick() permanently disabled
     if (state.rafId) { try { caf(state.rafId); } catch (e) { /* ignore */ } }
     state.rafId = 0; state.animating = false; state.tickErrors = 0;
-    clearCombatNodes();   // hostiles / orbs / beams / warn rings (no kills, no score) — v1.2 A8
+    clearCombatNodes();   // hostiles / orbs / beams / warn rings / aim lines (no kills, no score) — v1.2 A8
+    clearSelf(); clearLowVignette();   // v1.3 §3: the player marker and the low-HP vignette are rebuilt by updatePlayerHud()
     cancelAnims();
     // debris + fx nodes
     for (const p of state.pieces) { try { p.node.remove(); } catch (e) { /* ignore */ } }
     state.pieces.length = 0; state.gpuSum = 0;
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-warn, .crs-beam, .crs-vignette'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -3813,6 +4288,7 @@
     state.cooldownUntil = 0; state.shots = 0; state.damageDealt = 0; state.crits = 0; state.scorch = 0; state.lastBreakPieces = 0;
     // v1.2: magazines refilled, player reset, KO / toast hidden
     initAmmo(); state.swapUntil = 0; state.lastEmptyAt = 0; state.lastShot = null;
+    state.nearMisses = 0; state.nearShown.length = 0; state.hitstopUntil = 0; state.hpRatio = 1;
     resetPlayer(); hideKo(); hideToast();
     clearCanvas();
     try { if (docEl.classList.contains('crs-swing')) docEl.classList.remove('crs-swing'); } catch (e) { /* ignore */ }
@@ -3849,20 +4325,6 @@
   }
   /* Legacy alias (A12): v1 'gun' → 'pistol'; the other v1 ids are weapon ids already. */
   function setMode(m) { return setWeapon(m === 'gun' ? 'pistol' : m); }
-  function setPower(v) {
-    v = +v;
-    if (!isFinite(v)) return state.power;
-    let best = POWERS[0];
-    for (const p of POWERS) if (Math.abs(p - v) < Math.abs(best - v)) best = p;
-    state.power = best; state.powerTouched = true;
-    updateHud();
-    safe(() => chrome.storage.sync.set({ crsPower: best }));
-    return best;
-  }
-  function stepPower(dir) {
-    const i = POWERS.indexOf(state.power);
-    return setPower(POWERS[clamp((i < 0 ? 1 : i) + dir, 0, POWERS.length - 1)]);
-  }
   function setMuted(v) {
     state.muted = !!v;
     if (state.muted) stopLoop(); else if (state.hold && state.hold.id === 'flame') { ensureAudio(); startLoop(); }
@@ -3881,7 +4343,7 @@
         if (!WEAPON_IDS.includes(w)) w = res.crsMode === 'gun' ? 'pistol' : res.crsMode;
         if (WEAPON_IDS.includes(w)) setWeapon(w, { silent: true });   // no swap delay, no reload cancel, no scope-out (A5)
       }
-      if (!state.powerTouched && POWERS.includes(res.crsPower)) state.power = res.crsPower;
+      if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
       if (typeof res.crsMuted === 'boolean') state.muted = res.crsMuted;
       if (!state.combatTouched && typeof res.crsCombat === 'boolean' && res.crsCombat !== state.combat) setCombat(res.crsCombat, { silent: true });
       updateHud();
@@ -3951,6 +4413,7 @@
     state.active = false; state.hoverEl = null; state.hoverX = -1; state.hoverY = -1; state.overHud = false;
     state.paused = false; state.ko = false; state.scope.rmb = false; state.scope.shiftDown = false; state.scope.shiftWant = false;
     state.hostiles.clear(); state.orbs.length = 0; state.beams.length = 0; state.warns.length = 0;
+    state.self = null; state.lowVig = null; state.aimlines.length = 0; state.hitstopUntil = 0;
     if (wasActive) sendState(false);
   }
   function toggle() {
@@ -3960,7 +4423,7 @@
   function stats() {
     const id = state.weapon;
     return {
-      active: state.active, weapon: state.weapon, mode: state.weapon, power: state.power,
+      active: state.active, weapon: state.weapon, mode: state.weapon,
       cracks: state.cracks, debris: debrisCount(), broken: state.broken.length,
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
@@ -3973,7 +4436,10 @@
       lastShot: state.lastShot ? Object.assign({}, state.lastShot) : null,
       combat: state.combat, hostiles: state.hostiles.size, orbs: state.orbs.length, beams: state.beams.length,
       playerHp: Math.max(0, Math.round(state.player.hp)), score: state.player.score, kills: state.player.kills,
-      paused: state.paused, ko: state.ko, loadout: state.loadout.slice(), preset: state.preset
+      paused: state.paused, ko: state.ko, loadout: state.loadout.slice(), preset: state.preset,
+      // v1.3 §5: the player marker, the "who is aiming at me" lines, and the graze counter
+      selfRing: selfRingInfo(), aimlines: state.aimlines.length, nearMisses: state.nearMisses,
+      hitstop: now() < state.hitstopUntil
     };
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
@@ -4003,10 +4469,9 @@
     get active() { return state.active; },
     get weapon() { return state.weapon; },
     get mode() { return state.weapon; },
-    get power() { return state.power; },
     get combat() { return state.combat; },
     toggle, activate, deactivate: () => deactivate(false), restore,
-    setWeapon: (id) => setWeapon(id), setMode, setPower, weapons: weaponList, hpOf: hpOfPublic, smashAt, slash: slashSegment, stats,
+    setWeapon: (id) => setWeapon(id), setMode, weapons: weaponList, hpOf: hpOfPublic, smashAt, slash: slashSegment, stats,
     // v1.2
     ammo: ammoInfo, reload: reloadNow,
     loadout: () => state.loadout.slice(), setLoadout: (ids) => setLoadout(ids), applyPreset,
