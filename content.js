@@ -1,20 +1,18 @@
-/* 화면부수기 (Crash Screen) — content script v1.2.0
+/* AUTO-GENERATED FILE — DO NOT EDIT — generated from src/ by tools/build.js.
  *
- * Injected on demand by background.js. Re-executing this file toggles smash
- * mode; the IIFE's completion value ('on' | 'off') is what executeScript
- * (and Runtime.evaluate in the test harness) returns.
+ * To change behaviour, edit the module files under src/ (their order is
+ * declared in src/modules.json) and regenerate with:
  *
- * Hostile-page rules: DOM is built with createElement / textContent / append
- * only, styles go through CSSOM only, every chrome.* access is wrapped in
- * safe(), and every node we own carries data-crs="1" plus a crs- class.
+ *   node tools/build.js
  *
- * v1.2 (SPEC-v3-final): sniper + scope (2× body magnification), ammo / reload,
- * loadouts (10 slots on 1–9/0), hostile components (combat mode), toasts.
+ * Hand edits to this file will be silently overwritten by the next build,
+ * and `node tools/build.js --check` (run in CI) fails while they stand.
  */
 (() => {
   'use strict';
   if (window.__crashScreen) { return window.__crashScreen.toggle(); }
 
+// ── 00-prelude.js ──
   /* ===================================================================== */
   /* 0. Captured globals, constants, generic helpers                        */
   /* ===================================================================== */
@@ -100,6 +98,7 @@
     'box-shadow', 'opacity', 'object-fit', 'fill', 'stroke', 'stroke-width']);
   const STYLE_SVG_EXTRA = ['fill', 'stroke', 'stroke-width', 'opacity'];
 
+// ── 10-util.js ──
   const rand = (a, b) => a + Math.random() * (b - a);
   const randInt = (a, b) => Math.floor(rand(a, b + 1));
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -171,6 +170,7 @@
     return (typeof s === 'string' && s) ? s : (KO[key] || key);
   }
 
+// ── 20-state.js ──
   /* ===================================================================== */
   /* 1. State                                                               */
   /* ===================================================================== */
@@ -230,6 +230,7 @@
   }
   function sendState(active) { safe(() => chrome.runtime.sendMessage({ type: 'crash:state', active: !!active })); }
 
+// ── 25-layers.js ──
   /* ===================================================================== */
   /* 2. Mount points, top layer, zoom                                       */
   /* ===================================================================== */
@@ -281,6 +282,7 @@
     hudFallbackCheck();
   }
 
+// ── 30-canvas.js ──
   /* ===================================================================== */
   /* 3. Crack canvas (persistent, DPR aware, resize-preserving)             */
   /* ===================================================================== */
@@ -520,6 +522,7 @@
     } catch (e) { /* ignore */ }
   }
 
+// ── 35-effects.js ──
   /* ===================================================================== */
   /* 4. Effects: flash, ring, shake, swing cursor                            */
   /* ===================================================================== */
@@ -565,6 +568,7 @@
     state.swingTimer = later(() => { state.swingTimer = 0; try { docEl.classList.remove('crs-swing'); } catch (e) { /* ignore */ } }, 120);
   }
 
+// ── 40-audio.js ──
   /* ===================================================================== */
   /* 5. Sound (Web Audio, synthesized)                                      */
   /* ===================================================================== */
@@ -689,6 +693,7 @@
     } catch (e) { /* ignore */ }
   }
 
+// ── 45-hud.js ──
   /* ===================================================================== */
   /* 6. HUD (shadow DOM, constructed stylesheet)                            */
   /* ===================================================================== */
@@ -1025,6 +1030,7 @@
     } catch (e) { /* ignore */ }
   }
 
+// ── 50-target.js ──
   /* ===================================================================== */
   /* 7. Target picking + hover highlight                                    */
   /* ===================================================================== */
@@ -1177,6 +1183,7 @@
     } catch (e) { /* ignore */ }
   }
 
+// ── 55-geometry.js ──
   /* ===================================================================== */
   /* 8. Geometry: polygon splitting                                          */
   /* ===================================================================== */
@@ -1268,6 +1275,7 @@
   }
   function polyToClip(poly) { return 'polygon(' + poly.pts.map((p) => px(p[0]) + ' ' + px(p[1])).join(',') + ')'; }
 
+// ── 60-clone.js ──
   /* ===================================================================== */
   /* 9. Cloning (recursive cloneTree + computed-style diff)                  */
   /* ===================================================================== */
@@ -1414,6 +1422,7 @@
     for (const [, clone] of st.pairs) { imp(clone, 'color', 'transparent'); imp(clone, '-webkit-text-fill-color', 'transparent'); imp(clone, 'text-shadow', 'none'); }
   }
 
+// ── 65-pieces.js ──
   /* ===================================================================== */
   /* 10. Pieces, physics state, eviction                                      */
   /* ===================================================================== */
@@ -1543,6 +1552,7 @@
     return { piece, clip };
   }
 
+// ── 70-break.js ──
   /* ===================================================================== */
   /* 11. Breaking elements                                                    */
   /* ===================================================================== */
@@ -1892,6 +1902,7 @@
     } catch (e) { /* ignore */ }
   }
 
+// ── 80-weapons.js ──
   /* ===================================================================== */
   /* 12. Weapons (v1.1): damage roll, hit feedback, the nine fire() entries, actions   */
   /* ===================================================================== */
@@ -2602,6 +2613,7 @@
     return slashSegment(s.x1, s.y1, s.x2, s.y2);
   }
 
+// ── 82-ammo.js ──
   /* ===================================================================== */
   /* 12b. v1.2: ammo / reload, scope + sniper, loadouts, combat, toasts         */
   /* ===================================================================== */
@@ -2838,6 +2850,7 @@
     return el;
   }
 
+// ── 85-loadout.js ──
   /* --- loadouts (A6) --- */
   function isPermutation(ids) {
     if (!Array.isArray(ids) || ids.length !== WEAPON_IDS.length) return false;
@@ -2877,6 +2890,7 @@
     return setWeapon(state.loadout[((((i < 0 ? 0 : i) + dir) % n) + n) % n]);
   }
 
+// ── 88-toast.js ──
   /* --- toast (§7 / A11): one node in the HUD shadow root, textContent swapped, hide timer in state.toastTimer --- */
   function toast(text) {
     const n = hudEls.toast;
@@ -2901,6 +2915,7 @@
     try { const a = trackAnim(n.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: 'ease-in', fill: 'forwards' })); a.addEventListener('finish', off); a.addEventListener('cancel', off); } catch (e) { off(); }
   }
 
+// ── 90-combat.js ──
   /* --- combat (A7–A10): player, selection tick, hostiles, attacks, orbs, KO --- */
   function combatElapsed() {
     const p = state.player;
@@ -3410,6 +3425,7 @@
     return ran ? rec.tier : null;
   };
 
+// ── 92-tick.js ──
   /* ===================================================================== */
   /* 13. Physics loop                                                         */
   /* ===================================================================== */
@@ -3509,6 +3525,7 @@
     });
   }
 
+// ── 95-events.js ──
   /* ===================================================================== */
   /* 14. Events                                                               */
   /* ===================================================================== */
@@ -3728,6 +3745,7 @@
     state.listeners.length = 0;
   }
 
+// ── 99-api.js ──
   /* ===================================================================== */
   /* 15. Public API: restore / activate / deactivate / toggle / prefs         */
   /* ===================================================================== */
