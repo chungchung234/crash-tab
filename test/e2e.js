@@ -1,0 +1,2441 @@
+#!/usr/bin/env node
+/*
+ * 화면부수기 (Crash Screen) — end-to-end tests (spec §9, §12.8, §13 A28–A31, A33; v1.1 addendum §7 / A15–A16).
+ *
+ * Zero npm dependencies. Puppeteer is resolved from PUPPETEER_PATH, then from the npx cache
+ * (~/.npm/_npx/<hash>/node_modules/puppeteer), then from a plain require('puppeteer').
+ *
+ * Suites:
+ *   A. content harness   — fixture on "/", content.css via CDP (CSS.createStyleSheet), chrome shim,
+ *                          content.js via page.evaluate(source) (CSP-exempt like a real content script)
+ *   B. strict CSP + TT   — fixture on "/strict" (default-src 'self'; require-trusted-types-for 'script')
+ *   C. real extension    — copy of the extension with host_permissions for 127.0.0.1, service worker toggle
+ *
+ * v1.1: size-based HP (`api.hpOf`), weapons (`api.weapons()`), attack power (`api.setPower`), hold weapons
+ * (smg / flame), sword slashes (`api.slash`), rocket AoE, hit feedback (.crs-dmg / .crs-hit).
+ * v1.2 (SPEC-v3 §8 / A13): ten weapons incl. the sniper (`api.scope`, RMB / Shift chord, spread, bolt action),
+ * ammo + reload (`api.ammo` / `api.reload`, `R`), loadouts (`api.loadout` / `setLoadout` / `applyPreset`, keys
+ * 1–9,0 / Q / E / Shift+digit / drag), hostile components (`api.setCombat`, `api.player`, debug.forceAttack /
+ * setPlayerPos / setPlayerHp, T1 orb / T2 slam / T3 laser, KO + Enter), `Z` restore, pause on blur, exit.
+ * Suite A runs with `api.debug = { noCrit, noCooldown, noSpread, noAttacks, fastReload }` all true (flags
+ * flipped per block and restored afterwards); every damage number is read from `api.weapons()`.
+ *
+ * Output: one PASS/FAIL line per assertion, a summary line, exit code 0/1 (2 = puppeteer missing).
+ */
+'use strict';
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const http = require('http');
+
+const ROOT = path.resolve(__dirname, '..');
+const TEST_DIR = __dirname;
+const OUT = path.join(TEST_DIR, 'out');
+const VIEWPORT = { width: 1280, height: 900, deviceScaleFactor: 1 };
+const STRICT_CSP = "default-src 'self'; style-src 'self'; img-src 'self' data:; require-trusted-types-for 'script'";
+const T0 = Date.now();
+
+// v1.2 weapon table (SPEC-v3 A1 / A6) — WEAPON_IDS is the DEFAULT PRESET order (slots 1–10 → keys 1…9, 0);
+// damages / cooldowns / magazines are cross-checked against api.weapons()
+const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'sword', 'bomb', 'rocket', 'flame', 'collapse'];
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+const SPEC_DMG = { hammer: 65, pistol: 25, smg: 22, sniper: 200, axe: 130, sword: 60, bomb: 190, rocket: 260, flame: 15 };
+const SPEC_COOLDOWN = { hammer: 0, pistol: 0, sniper: 600, axe: 550, bomb: 700, rocket: 1200, collapse: 2000 };
+// mag / reloadMs per weapon (null = melee ∞); flame = 100 fuel, collapse = 1 charge
+const SPEC_MAG = { hammer: [null, null], axe: [null, null], sword: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [5, 2000], bomb: [3, 1800], rocket: [2, 1500], flame: [100, 2500], collapse: [1, 5000] };
+const PRESETS = {
+  default: WEAPON_IDS,
+  assault: ['smg', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'sword', 'collapse'],
+};
+const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: '저격총', axe: '도끼', sword: '검', bomb: '폭탄', rocket: '로켓', flame: '화염', collapse: '붕괴' };
+
+// ---------------------------------------------------------------------------
+// puppeteer resolution
+// ---------------------------------------------------------------------------
+function resolvePuppeteer() {
+  const candidates = [];
+  if (process.env.PUPPETEER_PATH) candidates.push(process.env.PUPPETEER_PATH);
+  const npx = path.join(os.homedir(), '.npm', '_npx');
+  try {
+    for (const dir of fs.readdirSync(npx)) {
+      const p = path.join(npx, dir, 'node_modules', 'puppeteer');
+      if (fs.existsSync(path.join(p, 'package.json'))) candidates.push(p);
+    }
+  } catch (_) { /* no npx cache */ }
+  for (const c of candidates) {
+    try { return { puppeteer: require(c), from: c }; } catch (e) { console.log(`note: puppeteer at ${c} failed to load: ${e.message}`); }
+  }
+  try { return { puppeteer: require('puppeteer'), from: 'require("puppeteer")' }; } catch (_) { /* fallthrough */ }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// tiny test harness
+// ---------------------------------------------------------------------------
+const results = [];
+function check(name, cond, detail) {
+  const ok = !!cond;
+  results.push({ name, ok, detail });
+  let line = `${ok ? 'PASS' : 'FAIL'} ${name}`;
+  if (!ok && detail !== undefined) line += ` — ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`;
+  console.log(line);
+  return ok;
+}
+function info(msg) { console.log(`     ${msg}`); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function poll(fn, timeout = 3000, interval = 40) {
+  const start = Date.now();
+  let last;
+  for (;;) {
+    last = await fn();
+    if (last) return last;
+    if (Date.now() - start >= timeout) return last;
+    await sleep(interval);
+  }
+}
+function elapsed() { return ((Date.now() - T0) / 1000).toFixed(1); }
+const hitsFor = (max, dmg) => Math.ceil(max / dmg);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+// addendum A1 formula from a live rect (text-ish elements: mult 0.6 and cap 60)
+function specMaxHp(w, h, mult, textish) {
+  const base = 20 + 0.35 * Math.sqrt(Math.max(1, w * h));
+  return textish ? clamp(Math.min(60, Math.round(base * 0.6)), 10, 400) : clamp(Math.round(base * mult), 10, 400);
+}
+
+// ---------------------------------------------------------------------------
+// static server: "/" and "/strict" → fixture.html (CSP header only on /strict), /fixture.css, /fixture.js
+// ---------------------------------------------------------------------------
+function startServer() {
+  const files = {
+    '/fixture.css': { file: path.join(TEST_DIR, 'fixture.css'), type: 'text/css; charset=utf-8' },
+    '/fixture.js': { file: path.join(TEST_DIR, 'fixture.js'), type: 'text/javascript; charset=utf-8' },
+  };
+  const html = fs.readFileSync(path.join(TEST_DIR, 'fixture.html'));
+  const server = http.createServer((req, res) => {
+    const url = (req.url || '/').split('?')[0];
+    const headers = { 'Cache-Control': 'no-store' };
+    if (url === '/' || url === '/strict') {
+      headers['Content-Type'] = 'text/html; charset=utf-8';
+      if (url === '/strict') headers['Content-Security-Policy'] = STRICT_CSP;
+      res.writeHead(200, headers);
+      res.end(html);
+      return;
+    }
+    if (files[url]) {
+      headers['Content-Type'] = files[url].type;
+      res.writeHead(200, headers);
+      res.end(fs.readFileSync(files[url].file));
+      return;
+    }
+    if (url === '/favicon.ico') { res.writeHead(204); res.end(); return; }
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('not found');
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve({ server, origin: `http://127.0.0.1:${server.address().port}` }));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// page helpers (suites A/B — content script lives in the main world here)
+// ---------------------------------------------------------------------------
+// `msgs` = parsed _locales/<lang>/messages.json ({} → content.js falls back to its hard-coded Korean strings)
+const chromeShim = (msgs) => `(() => {
+  const store = {};
+  const messages = [];
+  const MSGS = ${JSON.stringify(msgs || {})};
+  const shim = {
+    runtime: {
+      id: 'test',
+      lastError: undefined,
+      sendMessage: (m) => { messages.push(m); return Promise.resolve(undefined); },
+      onMessage: { addListener() {}, removeListener() {} },
+    },
+    storage: {
+      sync: {
+        get: (keys) => {
+          const out = {};
+          const list = keys == null ? Object.keys(store) : (Array.isArray(keys) ? keys : (typeof keys === 'string' ? [keys] : Object.keys(keys)));
+          for (const k of list) if (k in store) out[k] = store[k];
+          if (keys && typeof keys === 'object' && !Array.isArray(keys)) for (const k of Object.keys(keys)) if (!(k in out)) out[k] = keys[k];
+          return Promise.resolve(out);
+        },
+        set: (obj) => { Object.assign(store, obj); return Promise.resolve(); },
+      },
+      onChanged: { addListener() {}, removeListener() {} },
+    },
+    i18n: { getMessage: (k) => (MSGS[k] && MSGS[k].message) || '' },
+  };
+  window.__crsMessages = messages;
+  window.__crsStore = store;
+  try { Object.defineProperty(window, 'chrome', { value: shim, configurable: true, writable: true }); }
+  catch (e) { window.chrome = shim; }
+  return 'shim';
+})()`;
+const CHROME_SHIM = chromeShim({});
+// Timer ledger (G8): installed BEFORE content.js, which binds setTimeout/clearTimeout once at load, so every
+// later() timer is tracked; window.__crsPending.size === live content-script timers (0 after deactivate).
+const TIMER_LEDGER = `(() => {
+  const pending = new Set();
+  const st = window.setTimeout, ct = window.clearTimeout;
+  window.setTimeout = function (fn, ms, ...args) {
+    let id = 0;
+    const wrapped = typeof fn === 'function' ? function () { pending.delete(id); return fn.apply(this, arguments); } : fn;
+    id = st.call(window, wrapped, ms, ...args);
+    pending.add(id);
+    return id;
+  };
+  window.clearTimeout = function (id) { pending.delete(id); return ct.call(window, id); };
+  // intervals never self-clear, so a leaked one stays in the ledger until clearInterval (hard rule: none may outlive deactivate)
+  const si = window.setInterval, ci = window.clearInterval;
+  window.setInterval = function (fn, ms, ...args) { const id = si.call(window, fn, ms, ...args); pending.add(id); return id; };
+  window.clearInterval = function (id) { pending.delete(id); return ci.call(window, id); };
+  // RAF ledger: content.js binds requestAnimationFrame / cancelAnimationFrame once at load, so every frame it
+  // schedules passes through here; a self-rescheduling loop that survived deactivate shows up as a live id.
+  const pendingRaf = new Set();
+  const rf = window.requestAnimationFrame, cf = window.cancelAnimationFrame;
+  window.requestAnimationFrame = function (fn) {
+    let id = 0;
+    const wrapped = typeof fn === 'function' ? function () { pendingRaf.delete(id); return fn.apply(this, arguments); } : fn;
+    id = rf.call(window, wrapped);
+    pendingRaf.add(id);
+    return id;
+  };
+  window.cancelAnimationFrame = function (id) { pendingRaf.delete(id); return cf.call(window, id); };
+  window.__crsPending = pending;
+  window.__crsPendingRaf = pendingRaf;
+  return 'ledger';
+})()`;
+const EN_MESSAGES = JSON.parse(fs.readFileSync(path.join(ROOT, '_locales', 'en', 'messages.json'), 'utf8'));
+
+function hookPage(page) {
+  const log = { pageErrors: [], consoleErrors: [] };
+  page.on('pageerror', (e) => log.pageErrors.push(String(e && e.message || e)));
+  page.on('console', (m) => { if (m.type() === 'error') log.consoleErrors.push(m.text()); });
+  return log;
+}
+
+async function installViolationCounter(page) {
+  // window-level listener (A29) installed before any page script runs, so load-time violations count too
+  await page.evaluateOnNewDocument(() => {
+    window.__cspViolations = [];
+    window.addEventListener('securitypolicyviolation', (e) => {
+      window.__cspViolations.push(`${e.violatedDirective} blocked=${e.blockedURI || ''} sample=${(e.sample || '').slice(0, 80)}`);
+    });
+  });
+}
+const violations = (page) => page.evaluate(() => window.__cspViolations || []);
+
+// Let every already-queued animation frame run, so __crsPendingRaf only holds frames that were (re)scheduled after.
+async function settleRaf(page) {
+  for (let i = 0; i < 2; i++) {
+    try { await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null)))); } catch (e) { /* ignore */ }
+  }
+}
+
+async function injectCss(page, cssText) {
+  const client = await page.createCDPSession();
+  await client.send('DOM.enable');
+  await client.send('CSS.enable');
+  const { frameTree } = await client.send('Page.getFrameTree');
+  const { styleSheetId } = await client.send('CSS.createStyleSheet', { frameId: frameTree.frame.id });
+  await client.send('CSS.setStyleSheetText', { styleSheetId, text: cssText });
+  return client;
+}
+
+const api = {
+  stats: (page) => page.evaluate(() => window.__crashScreen.stats()),
+  active: (page) => page.evaluate(() => !!(window.__crashScreen && window.__crashScreen.active)),
+  restore: (page) => page.evaluate(() => window.__crashScreen.restore()),
+  setMode: (page, mode) => page.evaluate((m) => window.__crashScreen.setMode(m), mode),
+  mode: (page) => page.evaluate(() => window.__crashScreen.mode),
+  setWeapon: (page, id) => page.evaluate((w) => window.__crashScreen.setWeapon(w), id),
+  weapon: (page) => page.evaluate(() => window.__crashScreen.weapon),
+  weapons: (page) => page.evaluate(() => window.__crashScreen.weapons()),
+  setPower: (page, v) => page.evaluate((p) => window.__crashScreen.setPower(p), v),
+  power: (page) => page.evaluate(() => window.__crashScreen.power),
+  slash: (page, x1, y1, x2, y2) => page.evaluate((a, b, c, d) => window.__crashScreen.slash(a, b, c, d), x1, y1, x2, y2),
+  // merge `patch` into api.debug (a plain object per A12) and return a copy of the whole flag set (A11; functions dropped)
+  debug: (page, patch) => page.evaluate((p) => { const d = window.__crashScreen.debug; Object.assign(d, p || {}); const out = {}; for (const k of Object.keys(d)) if (typeof d[k] !== 'function') out[k] = d[k]; return out; }, patch || {}),
+  hpOf: (page, sel) => page.evaluate((s) => { const r = window.__crashScreen.hpOf(document.querySelector(s)); return { hp: r.hp, max: r.max }; }, sel),
+  store: (page) => page.evaluate(() => Object.assign({}, window.__crsStore || {})),
+  pending: (page) => page.evaluate(() => (window.__crsPending ? window.__crsPending.size : -1)),
+  pendingRaf: (page) => page.evaluate(() => (window.__crsPendingRaf ? window.__crsPendingRaf.size : -1)),
+  count: (page, sel) => page.evaluate((s) => document.querySelectorAll(s).length, sel),
+  has: (page, sel) => page.evaluate((s) => !!document.querySelector(s), sel),
+  broken: (page, sel) => page.evaluate((s) => { const el = document.querySelector(s); return !!(el && el.hasAttribute('data-crs-broken')); }, sel),
+  visibility: (page, sel) => page.evaluate((s) => getComputedStyle(document.querySelector(s)).visibility, sel),
+  dmgTexts: (page) => page.evaluate(() => [...document.querySelectorAll('.crs-dmg')].map((n) => (n.textContent || '').trim())),
+  fx: (page) => page.evaluate(() => {
+    const c = (s) => document.querySelectorAll(s).length;
+    return { dmg: c('.crs-dmg'), hit: c('.crs-hit'), fire: c('.crs-fire'), rocket: c('.crs-rocket'), preview: c('.crs-slash-preview'), slashFx: c('.crs-slash-fx'), ring: c('.crs-fx-ring'), ringXl: c('.crs-fx-ring.crs-fx-ring-xl'), debris: c('.crs-debris'),
+      orb: c('.crs-orb'), beam: c('.crs-beam'), warn: c('.crs-warn'), hostile: c('.crs-hostile'), tracer: c('.crs-tracer'), scope: c('.crs-scope'), vignette: c('.crs-vignette') };
+  }),
+  // scroll the element to the vertical centre of the viewport and return its viewport rect
+  rect: (page, sel) => page.evaluate((s) => {
+    const el = document.querySelector(s);
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height, right: r.right, bottom: r.bottom, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  }, sel),
+  rectNoScroll: (page, sel) => page.evaluate((s) => {
+    const el = document.querySelector(s);
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height, right: r.right, bottom: r.bottom, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  }, sel),
+  // hover box: label text (`TAG hp/max`), plus the A11 health bar (fill/track width ratio and fill colour)
+  targetBox: (page) => page.evaluate(() => {
+    const box = document.querySelector('.crs-target');
+    if (!box) return null;
+    const cs = getComputedStyle(box);
+    const r = box.getBoundingClientRect();
+    const label = box.querySelector('.crs-target-label') || box.querySelector('span');
+    const bar = box.querySelector('.crs-target-bar');
+    const fill = box.querySelector('.crs-target-fill');
+    let ratio = null, fillColor = null, barW = null;
+    if (bar && fill) {
+      barW = parseFloat(getComputedStyle(bar).width);
+      const fw = parseFloat(getComputedStyle(fill).width);
+      ratio = barW > 0 ? fw / barW : null;
+      fillColor = getComputedStyle(fill).backgroundColor;
+    }
+    return { display: cs.display, visibility: cs.visibility, left: r.left, top: r.top, width: r.width, height: r.height, label: label ? label.textContent.trim() : '', hasBar: !!(bar && fill), barW, ratio, fillColor };
+  }),
+  // a HUD button whose textContent OR title / aria-label includes `text` (A6: compact grid buttons carry the name in `title`)
+  hudButtonRect: (page, text) => page.evaluate((t) => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    if (!host || !host.shadowRoot) return null;
+    const btn = [...host.shadowRoot.querySelectorAll('button')].find((b) => (b.textContent || '').includes(t) || (b.title || '').includes(t) || (b.getAttribute('aria-label') || '').includes(t));
+    if (!btn) return null;
+    const r = btn.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, width: r.width, height: r.height };
+  }, text),
+  hudWeaponBtnRect: (page, id) => page.evaluate((w) => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const btn = host && host.shadowRoot ? host.shadowRoot.querySelector(`button[data-weapon="${w}"]`) : null;
+    if (!btn) return null;
+    const r = btn.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, width: r.width, height: r.height };
+  }, id),
+  // ---- v1.2 (SPEC-v3 A11): shadow-root nodes, api surface, debug hooks ----
+  // `document.querySelector("crs-hud").shadowRoot.querySelector(sel)` → text / visibility / rect, or null
+  hudQ: (page, sel) => page.evaluate((s) => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const el = host && host.shadowRoot ? host.shadowRoot.querySelector(s) : null;
+    if (!el) return null;
+    const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
+    const visible = cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.05 && r.width > 0 && r.height > 0 && !el.hidden;
+    return { text: (el.textContent || '').replace(/\s+/g, ' ').trim(), visible, display: cs.display, visibility: cs.visibility, opacity: cs.opacity, left: r.left, top: r.top, width: r.width, height: r.height, right: r.right, bottom: r.bottom, vw: document.documentElement.clientWidth, vh: document.documentElement.clientHeight };
+  }, sel),
+  // the "R 재장전" / "R Reload" prompt inside .crs-ammo: the deepest element carrying that text, with its own visibility
+  ammoPrompt: (page) => page.evaluate(() => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const ammo = host && host.shadowRoot ? host.shadowRoot.querySelector('.crs-ammo') : null;
+    if (!ammo) return null;
+    const re = /재장전|Reload/;
+    const all = [ammo, ...ammo.querySelectorAll('*')].filter((el) => re.test(el.textContent || ''));
+    const el = all.length ? all[all.length - 1] : null;
+    if (!el) return { text: (ammo.textContent || '').trim(), visible: false, found: false };
+    let visible = true;
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.05 || n.hidden) { visible = false; break; }
+    }
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) visible = false;
+    return { text: (el.textContent || '').replace(/\s+/g, ' ').trim(), visible, found: true, opacity: getComputedStyle(el).opacity };
+  }),
+  // api methods that may not exist yet: a missing method yields a 'missing:<name>' string instead of a thrown error
+  call: (page, name, ...args) => page.evaluate((n, a) => {
+    const api = window.__crashScreen; const f = api && api[n];
+    if (typeof f !== 'function') return 'missing:' + n;
+    try { return f.apply(api, a); } catch (e) { return 'threw:' + String(e && e.message || e); }
+  }, name, args),
+  ammo: (page) => api.call(page, 'ammo'),
+  reload: (page) => api.call(page, 'reload'),
+  scope: (page, on) => api.call(page, 'scope', on),
+  loadout: (page) => api.call(page, 'loadout'),
+  setLoadout: (page, ids) => api.call(page, 'setLoadout', ids),
+  applyPreset: (page, name) => api.call(page, 'applyPreset', name),
+  setCombat: (page, on) => api.call(page, 'setCombat', on),
+  player: (page) => api.call(page, 'player'),
+  combat: (page) => page.evaluate(() => window.__crashScreen.combat),
+  smashAt: (page, x, y, w) => page.evaluate((a, b, c) => window.__crashScreen.smashAt(a, b, c === null ? undefined : c), x, y, w === undefined ? null : w),
+  dbgCall: (page, name, ...args) => page.evaluate((n, a) => {
+    const d = window.__crashScreen.debug; const f = d && d[n];
+    if (typeof f !== 'function') return 'missing:debug.' + n;
+    try { return f.apply(d, a); } catch (e) { return 'threw:' + String(e && e.message || e); }
+  }, name, args),
+  forceAttack: (page, sel) => page.evaluate((s) => {
+    const d = window.__crashScreen.debug;
+    if (!d || typeof d.forceAttack !== 'function') return 'missing:debug.forceAttack';
+    try { return d.forceAttack(document.querySelector(s)); } catch (e) { return 'threw:' + String(e && e.message || e); }
+  }, sel),
+  setPlayerPos: (page, x, y) => api.dbgCall(page, 'setPlayerPos', x, y),
+  setPlayerHp: (page, n) => api.dbgCall(page, 'setPlayerHp', n),
+  bodyInline: (page) => page.evaluate(() => { const st = document.body.style; return { transform: st.transform, transformOrigin: st.transformOrigin, willChange: st.willChange, priority: st.getPropertyPriority('transform') }; }),
+  seen: (page) => page.evaluate(() => Object.assign({}, window.__crsSeen || {})),
+  seenReset: (page) => page.evaluate(() => { if (window.__crsSeenReset) window.__crsSeenReset(); }),
+  // loadout HUD: data-weapon ids in grid order, slot badges, titles, preset buttons (aria-pressed), custom tag
+  hudLoadout: (page) => page.evaluate(() => {
+    const host = document.querySelector('crs-hud, .crs-hud-host'); const sh = host && host.shadowRoot;
+    if (!sh) return null;
+    const btns = [...sh.querySelectorAll('button[data-weapon]')];
+    const presets = [...sh.querySelectorAll('.presets button')];
+    return {
+      ids: btns.map((b) => b.getAttribute('data-weapon')),
+      badges: btns.map((b) => { const g = b.querySelector('.badge'); return g ? (g.textContent || '').trim() : null; }),
+      titles: btns.map((b) => b.title || b.getAttribute('aria-label') || ''),
+      presetCount: presets.length,
+      pressed: presets.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => (b.textContent || '').trim()),
+      customTag: /사용자 지정|Custom/.test(sh.textContent || ''),
+      cur: ((sh.querySelector('.cur') || {}).textContent || '').trim(),
+    };
+  }),
+};
+
+// Click until the element reports data-crs-broken (hp-aware), at most `max` clicks.
+async function clickUntilBroken(page, sel, x, y, max = 3) {
+  return smashUntil(page, () => api.broken(page, sel), x, y, max);
+}
+// Same loop with a predicate (shadow-root targets etc.).
+async function smashUntil(page, isBroken, x, y, max = 3) {
+  for (let i = 0; i < max; i++) {
+    await page.mouse.click(x, y);
+    const ok = await poll(() => isBroken(), 400);
+    if (ok) return i + 1;
+  }
+  return 0;
+}
+// Damage numbers from api.weapons() (fallback: the A2 table) keyed by id.
+async function weaponTable(page) {
+  let list = [];
+  try { list = await api.weapons(page); } catch (_) { list = []; }
+  const byId = {};
+  for (const w of Array.isArray(list) ? list : []) if (w && w.id) byId[w.id] = w;
+  const dmg = (id) => (byId[id] && typeof byId[id].damage === 'number' ? byId[id].damage : SPEC_DMG[id]);
+  return { list: Array.isArray(list) ? list : [], byId, dmg };
+}
+// Fresh target (restore between checks), then a click with the given weapon; resolves once hp dropped.
+async function hitFresh(page, weaponId, pt, sel) {
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, weaponId);
+  const before = await api.hpOf(page, sel);
+  await page.mouse.click(pt.x, pt.y);
+  const after = await poll(async () => { const r = await api.hpOf(page, sel); return r.hp < before.max ? r : null; }, 600, 20);
+  return { max: before.max, hp: (after || await api.hpOf(page, sel)).hp, broken: await api.broken(page, sel) };
+}
+// Scroll #arena into view and return the A15 hold/click point (top-left padding zone).
+async function arenaPt(page) {
+  const r = await api.rect(page, '#arena');
+  return { x: r.left + 40, y: r.top + 40 };
+}
+// Hold the primary button at `pt` for `ms`; `sampler(elapsedMs)` runs every ~20 ms while held.
+async function holdAt(page, pt, ms, sampler) {
+  await page.mouse.move(pt.x, pt.y);
+  await page.mouse.down();
+  const t = Date.now();
+  const samples = [];
+  while (Date.now() - t < ms) {
+    if (sampler) samples.push(await sampler(Date.now() - t));
+    await sleep(20);
+  }
+  await page.mouse.up();
+  return samples;
+}
+
+// ---------------------------------------------------------------------------
+// Suite A — content harness
+// ---------------------------------------------------------------------------
+async function suiteA(browser, origin, contentCss, contentJs) {
+  console.log('\n=== Suite A: content harness (/) ===');
+  const page = await browser.newPage();
+  await page.setViewport(VIEWPORT);
+  const log = hookPage(page);
+  await installViolationCounter(page);
+  await page.goto(`${origin}/`, { waitUntil: 'load' });
+
+  // fixture sanity (12.8 / A28 / A15)
+  const fx = await page.evaluate(() => {
+    const vis = [...document.querySelectorAll('body *')].filter((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.display === 'inline' || cs.display === 'none' || cs.visibility === 'hidden') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }).length;
+    const big = document.getElementById('big-card').getBoundingClientRect();
+    const small = document.getElementById('small-card').getBoundingClientRect();
+    const words = document.getElementById('long-para').textContent.trim().split(/\s+/).length;
+    const spot = document.getElementById('bomb-spot').getBoundingClientRect();
+    const leaves = [...document.querySelectorAll('#cluster .leaf')].filter((p) => {
+      const r = p.getBoundingClientRect();
+      return Math.hypot(r.left + r.width / 2 - (spot.left + spot.width / 2), r.top + r.height / 2 - (spot.top + spot.height / 2)) <= 120;
+    }).length;
+    const stackX = ['#stack-1', '#stack-2', '#stack-3'].map((s) => document.querySelector(s).getBoundingClientRect().left);
+    const arenaEl = document.getElementById('arena');
+    const arena = arenaEl ? arenaEl.getBoundingClientRect() : null;
+    const overlaps = arena ? [...document.querySelectorAll('main > *')].filter((el) => {
+      if (el === arenaEl) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.left < arena.right && r.right > arena.left && r.top < arena.bottom && r.bottom > arena.top;
+    }).map((el) => el.tagName + (el.id ? '#' + el.id : '')) : ['no #arena'];
+    // v1.2: section#boss (T3 ≥ 1000 × 420) after #arena, #figure (T1 window) and #demo-img (240 × 140) unchanged
+    const bossEl = document.getElementById('boss');
+    const boss = bossEl ? bossEl.getBoundingClientRect() : null;
+    const bossOverlaps = boss ? [...document.querySelectorAll('main > *')].filter((el) => {
+      if (el === bossEl) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.left < boss.right && r.right > boss.left && r.top < boss.bottom && r.bottom > boss.top;
+    }).map((el) => el.tagName + (el.id ? '#' + el.id : '')) : ['no #boss'];
+    const bossAfterArena = !!(arenaEl && bossEl && (arenaEl.compareDocumentPosition(bossEl) & Node.DOCUMENT_POSITION_FOLLOWING) && boss.top >= arena.bottom && bossEl.nextElementSibling && bossEl.nextElementSibling.id === 'nav');
+    const figR = document.getElementById('figure').getBoundingClientRect();
+    const imgR = document.getElementById('demo-img').getBoundingClientRect();
+    return {
+      vis, bigW: big.width, bigH: big.height, bigArea: big.width * big.height, smallArea: small.width * small.height, words, leaves,
+      stackSameX: stackX.every((x) => Math.abs(x - stackX[0]) < 1),
+      sticky: getComputedStyle(document.getElementById('site-header')).position === 'sticky',
+      btnClicks: window.__btnClicks, inputVal: document.getElementById('text-input').value.length,
+      arenaW: arena ? arena.width : 0, arenaH: arena ? arena.height : 0, arenaCaption: !!(arenaEl && arenaEl.querySelector('.arena-caption')), overlaps,
+      bossW: boss ? boss.width : 0, bossH: boss ? boss.height : 0, bossCaption: !!(bossEl && bossEl.querySelector('.boss-caption')), bossOverlaps, bossAfterArena,
+      figArea: figR.width * figR.height, imgW: imgR.width, imgH: imgR.height, imgInFigure: !!document.querySelector('figure#figure > img#demo-img'),
+    };
+  });
+  check('A.fixture: ≥ 25 visible block elements', fx.vis >= 25, fx);
+  check('A.fixture: large card ≥ 500×320 and area ≥ 160 000', fx.bigW >= 500 && fx.bigH >= 320 && fx.bigArea >= 160000, fx);
+  check('A.fixture: small card area < 150 000', fx.smallArea < 150000, fx);
+  check('A.fixture: long paragraph ≥ 25 words', fx.words >= 25, fx.words);
+  check('A.fixture: ≥ 3 text leaves within 120 px of #bomb-spot', fx.leaves >= 3, fx.leaves);
+  check('A.fixture: stacked blocks share x, sticky header, prefilled input, fixture.js ran', fx.stackSameX && fx.sticky && fx.inputVal > 0 && fx.btnClicks === 0, fx);
+  check('A.fixture: section#arena ≥ 900×240 with a caption, overlapping no other target', fx.arenaW >= 900 && fx.arenaH >= 240 && fx.arenaCaption && fx.overlaps.length === 0, { w: fx.arenaW, h: fx.arenaH, overlaps: fx.overlaps });
+  check('A.fixture: section#boss ≥ 1000×420 with a caption, after #arena and before footer#nav, overlapping no other target', fx.bossW >= 1000 && fx.bossH >= 420 && fx.bossCaption && fx.bossAfterArena && fx.bossOverlaps.length === 0, { w: fx.bossW, h: fx.bossH, after: fx.bossAfterArena, overlaps: fx.bossOverlaps });
+  check('A.fixture: #boss area in the T3 window (> 400 000 and ≤ 0.7 × viewport), #figure in the T1 window (40 000–150 000)', fx.bossW * fx.bossH > 400000 && fx.bossW * fx.bossH <= 0.7 * VIEWPORT.width * VIEWPORT.height && fx.figArea >= 40000 && fx.figArea < 150000, { boss: fx.bossW * fx.bossH, fig: fx.figArea });
+  check('A.fixture: #demo-img still 240×140 inside figure#figure', fx.imgW === 240 && fx.imgH === 140 && fx.imgInFigure, { w: fx.imgW, h: fx.imgH, inFigure: fx.imgInFigure });
+
+  // injection (A29)
+  const client = await injectCss(page, contentCss);
+  check('A.inject: timer ledger installed before content.js', (await page.evaluate(TIMER_LEDGER)) === 'ledger');
+  await page.evaluate(CHROME_SHIM);
+  const r1 = await page.evaluate(contentJs);
+  check('A.inject: content.js completion value is "on"', r1 === 'on', r1);
+  check('A.inject: window.__crashScreen.active === true', await api.active(page));
+  check('A.inject: .crs-canvas present', await api.has(page, '.crs-canvas'));
+  check('A.inject: HUD host present with open shadow root', await page.evaluate(() => {
+    const h = document.querySelector('crs-hud[data-crs], .crs-hud-host[data-crs]');
+    return !!(h && h.shadowRoot);
+  }));
+  check('A.inject: crash:state active:true message sent', await page.evaluate(() => (window.__crsMessages || []).some((m) => m && m.type === 'crash:state' && m.active === true)));
+  // v1.1 / v1.2 setup (A16 / A13): deterministic damage, no cooldowns, no spread, no hostile attacks, fast reloads
+  let dbg = null;
+  try { dbg = await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false }); } catch (e) { dbg = String(e && e.message || e); }
+  check('A.inject: api.debug noCrit / noCooldown / noSpread / noAttacks / fastReload set for the suite', dbg && dbg.noCrit === true && dbg.noCooldown === true && dbg.noSpread === true && dbg.noAttacks === true && dbg.fastReload === true, dbg);
+
+  // --- weapon table / HUD contract (§5, §6, A2) -----------------------------------------------
+  const W = await weaponTable(page);
+  const DMG = W.dmg;
+  check('A.weapons: api.weapons() lists the 10 ids in default-loadout order with slot 1–10 and keys 1–9, 0', W.list.map((w) => w.id).join(',') === WEAPON_IDS.join(',') && W.list.every((w, i) => String(w.key) === KEYS[i] && w.slot === i + 1), W.list.map((w) => `${w && w.id}:${w && w.slot}:${w && w.key}`));
+  check('A.weapons: damages match the A1/A2 table (65/25/22/200/130/60/190/260/15)', Object.keys(SPEC_DMG).every((id) => W.byId[id] && W.byId[id].damage === SPEC_DMG[id]), Object.keys(SPEC_DMG).map((id) => `${id}=${W.byId[id] && W.byId[id].damage}`));
+  check('A.weapons: cooldownMs hammer 0 / pistol 0 / sniper 600 / axe 550 / bomb 700 / rocket 1200 / collapse 2000; smg & flame are hold weapons', Object.keys(SPEC_COOLDOWN).every((id) => W.byId[id] && W.byId[id].cooldownMs === SPEC_COOLDOWN[id]) && !!(W.byId.smg && W.byId.smg.hold) && !!(W.byId.flame && W.byId.flame.hold) && WEAPON_IDS.filter((id) => id !== 'smg' && id !== 'flame').every((id) => !(W.byId[id] && W.byId[id].hold)), Object.keys(SPEC_COOLDOWN).map((id) => `${id}=${W.byId[id] && W.byId[id].cooldownMs}`));
+  check('A.weapons: mag / reloadMs per weapon (pistol 12/900, smg 30/1400, sniper 5/2000, bomb 3/1800, rocket 2/1500, flame 100/2500, collapse 1/5000; melee null/null)', Object.keys(SPEC_MAG).every((id) => W.byId[id] && W.byId[id].mag === SPEC_MAG[id][0] && W.byId[id].reloadMs === SPEC_MAG[id][1]), Object.keys(SPEC_MAG).map((id) => `${id}=${W.byId[id] && W.byId[id].mag}/${W.byId[id] && W.byId[id].reloadMs}`));
+  check('A.weapons: sniper { kind: "gun", spread: 25, scope: true, emoji 🎯, name 저격총 }; every other weapon spread null / scope false', !!W.byId.sniper && W.byId.sniper.kind === 'gun' && W.byId.sniper.spread === 25 && W.byId.sniper.scope === true && W.byId.sniper.emoji === '🎯' && W.byId.sniper.name === '저격총' && WEAPON_IDS.filter((id) => id !== 'sniper').every((id) => W.byId[id] && W.byId[id].spread === null && W.byId[id].scope === false), W.byId.sniper);
+  const hud = await page.evaluate(() => {
+    const h = document.querySelector('crs-hud, .crs-hud-host');
+    if (!h || !h.shadowRoot) return null;
+    const sh = h.shadowRoot;
+    const btns = [...sh.querySelectorAll('button[data-weapon]')];
+    const cols = getComputedStyle(sh.querySelector('.grid') || sh.querySelector('button[data-weapon]').parentElement).gridTemplateColumns.split(/\s+/).filter(Boolean).length;
+    return {
+      ids: btns.map((b) => b.getAttribute('data-weapon')),
+      pressed: btns.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-weapon')),
+      power: !!(sh.querySelector('.crs-power-down') && sh.querySelector('.crs-power-up')),
+      badges: btns.map((b) => { const g = b.querySelector('.badge'); return g ? (g.textContent || '').trim() : null; }),
+      cols,
+      // compact grid (A6): names live in the button title / aria-label, the readout and the panel text
+      text: (sh.textContent || '') + ' ' + btns.map((b) => (b.title || '') + ' ' + (b.getAttribute('aria-label') || '')).join(' '),
+    };
+  });
+  check('A.hud: 10 weapon buttons carry data-weapon ids in default-loadout order, hammer aria-pressed, power −/+ buttons present', !!hud && hud.ids.join(',') === WEAPON_IDS.join(',') && hud.pressed.join(',') === 'hammer' && hud.power, hud && { ids: hud.ids, pressed: hud.pressed, power: hud.power });
+  check('A.hud: grid is 2 × 5 (5 columns) and every button shows its slot badge 1…9, 0', !!hud && hud.cols === 5 && hud.badges.join(',') === KEYS.join(','), hud && { cols: hud.cols, badges: hud.badges });
+  check('A.hud: Korean labels (망치 · 권총 · 기관총 · 저격총 · 도끼 · 검 · 폭탄 · 로켓 · 화염 · 붕괴 · 공격력 · 피해 · 로드아웃 · 전투) present (text or button titles)', !!hud && ['망치', '권총', '기관총', '저격총', '도끼', '검', '폭탄', '로켓', '화염', '붕괴', '공격력', '피해', '로드아웃', '전투'].every((t) => hud.text.includes(t)), hud && hud.text.slice(0, 300));
+
+  // --- hammer on the small ("known") card — A31 (99 hp → 2 hits at 65) ---------------------------
+  const urlBefore = page.url();
+  const sc = await api.rect(page, '#small-card');
+  const brokenBefore = (await api.stats(page)).broken;
+  const smallPt = { x: sc.left + 12, y: sc.top + 12 };
+  const smallClicks = await clickUntilBroken(page, '#small-card', smallPt.x, smallPt.y, 3);
+  check('A.hammer small card: broken on the 2nd hammer hit (99 hp / 65)', smallClicks === 2, smallClicks);
+  const s1 = await api.stats(page);
+  check('A.hammer small card: stats().broken ≥ 1', s1.broken >= brokenBefore + 1 && s1.broken >= 1, s1.broken);
+  check('A.hammer small card: .crs-debris count ≥ 1', (await api.count(page, '.crs-debris')) >= 1);
+  check('A.hammer small card: original has data-crs-broken', await api.broken(page, '#small-card'));
+  check('A.hammer small card: computed visibility hidden', (await api.visibility(page, '#small-card')) === 'hidden');
+  check('A.hammer small card: link not navigated (URL unchanged)', page.url() === urlBefore && (await page.evaluate(() => location.hash === '' && !window.__linkClicks)), page.url());
+  check('A.hammer small card: stats().cracks ≥ 1', s1.cracks >= 1, s1.cracks);
+
+  // --- hammer on the long paragraph → word pieces (12.8; text cap 60 < 65 → one click) ------------
+  const lp = await api.rect(page, '#long-para');
+  await page.mouse.click(lp.cx, lp.cy);
+  await poll(() => api.broken(page, '#long-para'), 1500);
+  check('A.hammer paragraph: data-crs-broken', await api.broken(page, '#long-para'));
+  const words = await api.count(page, '.crs-word');
+  check('A.hammer paragraph: .crs-word count ≥ 5', words >= 5, words);
+  await sleep(1500);
+  await page.screenshot({ path: path.join(OUT, 'hammer.png') });
+  info(`screenshot test/out/hammer.png (${words} word pieces)`);
+
+  // canvas has ink at the small-card impact point before restore
+  const inkBefore = await page.evaluate((pt) => {
+    const c = document.querySelector('.crs-canvas');
+    const ctx = c.getContext('2d');
+    const sx = c.width / c.clientWidth, sy = c.height / c.clientHeight;
+    const d = ctx.getImageData(Math.round(pt.x * sx) - 4, Math.round(pt.y * sy) - 4, 9, 9).data;
+    let a = 0; for (let i = 3; i < d.length; i += 4) a += d[i];
+    return a;
+  }, smallPt);
+  check('A.canvas: crack drawn at impact point (alpha > 0)', inkBefore > 0, inkBefore);
+
+  // --- restore ------------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(100);
+  const sr = await api.stats(page);
+  check('A.restore: zero debris', sr.debris === 0 && (await api.count(page, '.crs-debris')) === 0, sr);
+  check('A.restore: no [data-crs-broken]', (await api.count(page, '[data-crs-broken]')) === 0);
+  check('A.restore: small card visibility restored', (await api.visibility(page, '#small-card')) === 'visible');
+  check('A.restore: stats().broken === 0', sr.broken === 0, sr.broken);
+  const inkAfter = await page.evaluate(() => {
+    const c = document.querySelector('.crs-canvas');
+    const ctx = c.getContext('2d');
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] !== 0) return d[i];
+    return 0;
+  });
+  check('A.restore: canvas cleared (every sampled pixel transparent)', inkAfter === 0, inkAfter);
+  check('A.restore: still active', await api.active(page));
+
+  // --- hammer ON the small card's link: smashed (card is the pick target), never followed (§9A / A31) ---
+  const lk = await api.rect(page, '#card-link');
+  await clickUntilBroken(page, '#small-card', lk.cx, lk.cy, 3);
+  check('A.hammer link: clicks on <a> break the card instead of following the link', await api.broken(page, '#small-card'));
+  check('A.hammer link: URL unchanged, hash empty, link handler not run', page.url() === urlBefore && (await page.evaluate(() => location.hash === '' && !window.__linkClicks)), { url: page.url(), hash: await page.evaluate(() => location.hash) });
+  await api.restore(page);
+  await sleep(100);
+
+  // --- hammer on the large card: 184 hp → label DIV 119/184 → DIV 54/184 → broken (12.8 + A16) ------
+  await api.setWeapon(page, 'hammer');
+  const bc = await api.rect(page, '#big-card');
+  const bigPt = { x: bc.left + 12, y: bc.top + 12 };
+  const bigMax = (await api.hpOf(page, '#big-card')).max;
+  const nBig = hitsFor(bigMax, DMG('hammer'));
+  check('A.hammer large card: hitsFor(max, 65) === 3', nBig === 3, { bigMax, nBig });
+  const b0 = (await api.stats(page)).broken;
+  let bigOk = true;
+  const bigSteps = [];
+  for (let k = 1; k < nBig; k++) {
+    await page.mouse.click(bigPt.x, bigPt.y);
+    const expected = 'DIV ' + (bigMax - DMG('hammer') * k) + '/' + bigMax;
+    const tb = await poll(async () => { const t = await api.targetBox(page); return t && t.label === expected ? t : null; }, 600, 20);
+    const step = { k, broken: await api.broken(page, '#big-card'), count: (await api.stats(page)).broken, label: (tb || await api.targetBox(page) || {}).label, expected };
+    bigSteps.push(step);
+    check(`A.hammer large card: click ${k} → NOT broken, stats().broken unchanged`, !step.broken && step.count === b0, step);
+    check(`A.hammer large card: label shows DIV <hp>/<max> after click ${k}`, step.label === expected, step);
+    if (step.broken) bigOk = false;
+  }
+  await page.mouse.click(bigPt.x, bigPt.y);
+  check(`A.hammer large card: click ${nBig} → broken`, bigOk && await poll(() => api.broken(page, '#big-card'), 1500));
+  await api.restore(page);
+  await sleep(100);
+
+  // --- pistol on the large card: 8 shots (A16; setMode('gun') alias) -------------------------------
+  await api.setMode(page, 'gun');
+  check('A.gun: setMode("gun") → api.mode === "pistol" and api.weapon === "pistol" (legacy alias)', (await api.mode(page)) === 'pistol' && (await api.weapon(page)) === 'pistol', { mode: await api.mode(page), weapon: await api.weapon(page) });
+  const gc = await api.rect(page, '#big-card');
+  const gunPt = { x: gc.left + 12, y: gc.top + 12 };
+  const gunMax = (await api.hpOf(page, '#big-card')).max;
+  const nGun = hitsFor(gunMax, DMG('pistol'));
+  check('A.gun large card: hitsFor(max, 25) === 8', nGun === 8, { gunMax, nGun });
+  const debris0 = await api.count(page, '.crs-debris');
+  const gunSteps = [];
+  for (let k = 1; k < nGun; k++) {
+    await page.mouse.click(gunPt.x, gunPt.y);
+    const expected = 'DIV ' + (gunMax - DMG('pistol') * k) + '/' + gunMax;
+    const tb = await poll(async () => { const t = await api.targetBox(page); return t && t.label === expected ? t : null; }, 600, 20);
+    gunSteps.push({ k, broken: await api.broken(page, '#big-card'), debris: await api.count(page, '.crs-debris'), label: (tb || await api.targetBox(page) || {}).label, expected });
+  }
+  check('A.gun large card: shots 1 … 7 → not broken, debris count unchanged', gunSteps.length === nGun - 1 && gunSteps.every((s) => !s.broken && s.debris === debris0), { debris0, steps: gunSteps.map((s) => [s.k, s.broken, s.debris]) });
+  check('A.gun large card: shot 1 → label "DIV ' + (gunMax - DMG('pistol')) + '/' + gunMax + '"', gunSteps[0] && gunSteps[0].label === gunSteps[0].expected, gunSteps[0]);
+  check('A.gun large card: shot 2 → label "DIV ' + (gunMax - 2 * DMG('pistol')) + '/' + gunMax + '"', gunSteps[1] && gunSteps[1].label === gunSteps[1].expected, gunSteps[1]);
+  await page.mouse.click(gunPt.x, gunPt.y);
+  check(`A.gun large card: shot ${nGun} → broken`, await poll(() => api.broken(page, '#big-card'), 1500));
+
+  // --- pistol on the image: 5 shots (12.8 / A16) ---------------------------------------------------
+  // v1.2 (A1/A5): the pistol magazine holds 12 rounds and the emptying shot starts an auto-reload during
+  // which every shot is rejected. The 8 large-card shots above left 4 rounds, so top the magazine up first
+  // (manual reload, fastReload = 30 ms) — the 5 image shots then run on one full magazine, deterministically.
+  const imgReload = await api.reload(page);
+  const imgAmmo = await poll(async () => { const a = await api.ammo(page); return a && a.mag === a.size && !a.reloading ? a : null; }, 1500, 20);
+  check('A.gun image: pistol magazine refilled before the image shots (reload() → true, then mag === size and not reloading)', imgReload === true && !!imgAmmo && imgAmmo.size === 12, { imgReload, imgAmmo });
+  const ic = await api.rect(page, '#demo-img');
+  const imgMax = (await api.hpOf(page, '#demo-img')).max;
+  const nImg = hitsFor(imgMax, DMG('pistol'));
+  check('A.gun image: hitsFor(max, 25) === 5', nImg === 5, { imgMax, nImg });
+  const i1 = { broken: false, debris: 0 };
+  for (let k = 1; k < nImg; k++) {
+    await page.mouse.click(ic.cx, ic.cy);
+    await poll(async () => (await api.hpOf(page, '#demo-img')).hp <= imgMax - DMG('pistol') * k, 400, 20);
+    if (await api.broken(page, '#demo-img')) i1.broken = true;
+  }
+  i1.debris = await api.count(page, '.crs-debris');
+  check(`A.gun image: shots 1 … ${nImg - 1} → not broken`, !i1.broken);
+  await page.mouse.click(ic.cx, ic.cy);
+  const imgBroken = await poll(() => api.broken(page, '#demo-img'), 1500);
+  const i2 = await api.count(page, '.crs-debris');
+  check(`A.gun image: shot ${nImg} → broken`, imgBroken);
+  check(`A.gun image: shot ${nImg} → .crs-debris count increased`, i2 > i1.debris, { before: i1.debris, after: i2 });
+  await api.restore(page);
+  await sleep(100);
+
+  // --- bomb via the HUD button (A31) ----------------------------------------------------------
+  const hb = await api.hudButtonRect(page, '폭탄');
+  check('A.bomb: HUD "폭탄" button found in shadow root', !!hb, hb);
+  if (hb) await page.mouse.click(hb.cx, hb.cy);
+  check('A.bomb: clicking HUD 폭탄 switches the weapon to "bomb"', await poll(async () => (await api.mode(page)) === 'bomb' && (await api.weapon(page)) === 'bomb', 1000));
+  check('A.bomb: HUD click did not smash anything', (await api.stats(page)).broken === 0);
+  const spot = await api.rect(page, '#bomb-spot');
+  const tClick = Date.now();
+  await page.mouse.click(spot.cx, spot.cy);
+  const leavesBroken = await poll(async () => {
+    const n = await api.count(page, '#cluster .leaf[data-crs-broken]');
+    return n >= 2 ? n : 0;
+  }, 200, 20);
+  check('A.bomb: ≥ 2 cluster leaves broken within 200 ms', leavesBroken >= 2, { leavesBroken: await api.count(page, '#cluster .leaf[data-crs-broken]'), ms: Date.now() - tClick });
+  await sleep(1500);
+  await page.screenshot({ path: path.join(OUT, 'bomb.png') });
+  info('screenshot test/out/bomb.png');
+  await api.restore(page);
+
+  // --- hover target box over the image (12.8 + A31) --------------------------------------------
+  await api.setWeapon(page, 'hammer');
+  const hr = await api.rect(page, '#demo-img');
+  await sleep(550);
+  await page.mouse.move(hr.cx, hr.cy);
+  await sleep(150);
+  const hv = await api.targetBox(page);
+  const within = (a, b) => Math.abs(a - b) <= 3;
+  check('A.hover: .crs-target visible over image', hv && hv.display !== 'none' && hv.visibility !== 'hidden', hv);
+  check('A.hover: target rect within ±3 px of image rect', hv && within(hv.left, hr.left) && within(hv.top, hr.top) && within(hv.width, hr.width) && within(hv.height, hr.height), { box: hv, img: hr });
+  check('A.hover: label matches /^IMG \\d+\\/\\d+$/', hv && /^IMG \d+\/\d+$/.test(hv.label), hv && hv.label);
+  // hover over the HUD hides the box
+  const hudPos = await api.hudButtonRect(page, '망치');
+  check('A.hover: HUD "망치" button found in shadow root', !!hudPos, hudPos);
+  if (hudPos) {
+    await page.mouse.move(hudPos.cx, hudPos.cy);
+    await sleep(150);
+    const hvHud = await api.targetBox(page);
+    check('A.hover: target box hidden while pointer is over the HUD', !hvHud || hvHud.display === 'none', hvHud);
+  }
+
+  // =============================================================================================
+  // v1.1 — size-based HP, weapons, power, hit feedback (addendum §7 / A16, numbering kept)
+  // =============================================================================================
+  console.log('--- v1.1: size-based HP / weapons ---');
+  await api.restore(page);
+  await sleep(60);
+
+  // (1) HP scales with size + exact A1 formula from the live rects
+  const hpLeaf = await api.hpOf(page, '#cluster .leaf:first-child');
+  const hpBtn = await api.hpOf(page, '#test-btn');
+  const hpImg = await api.hpOf(page, '#demo-img');
+  const hpCard = await api.hpOf(page, '#big-card');
+  const hpPara = await api.hpOf(page, '#long-para');
+  const rects = await page.evaluate(() => {
+    const R = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return { w: r.width, h: r.height }; };
+    return { img: R('#demo-img'), card: R('#big-card') };
+  });
+  const inRange = (r) => r.max >= 10 && r.max <= 400 && r.hp === r.max;
+  check('A.hp 1: max scales with size — leaf < button < image < large card', hpLeaf.max < hpBtn.max && hpBtn.max < hpImg.max && hpImg.max < hpCard.max, { leaf: hpLeaf.max, btn: hpBtn.max, img: hpImg.max, card: hpCard.max });
+  check('A.hp 1: every max within [10, 400] and hp === max on a fresh page', [hpLeaf, hpBtn, hpImg, hpCard, hpPara].every(inRange), { leaf: hpLeaf, btn: hpBtn, img: hpImg, card: hpCard, para: hpPara });
+  check('A.hp 1: image max === round((20 + 0.35·√area) × 1.2) from its live rect', hpImg.max === specMaxHp(rects.img.w, rects.img.h, 1.2, false), { got: hpImg.max, expected: specMaxHp(rects.img.w, rects.img.h, 1.2, false), rect: rects.img });
+  check('A.hp 1: large card max === round(20 + 0.35·√area) (mult 1.0) from its live rect', hpCard.max === specMaxHp(rects.card.w, rects.card.h, 1.0, false), { got: hpCard.max, expected: specMaxHp(rects.card.w, rects.card.h, 1.0, false), rect: rects.card });
+  check('A.hp 1: long paragraph (text-ish) max === 60 (cap)', hpPara.max === 60, hpPara);
+
+  // (2) fresh large card: hammer −65, pistol −25, axe −130 (restore between checks)
+  const bcc = await api.rect(page, '#big-card');
+  const cardPt = { x: bcc.left + 12, y: bcc.top + 12 };
+  const h2 = await hitFresh(page, 'hammer', cardPt, '#big-card');
+  check('A.hp 2: hammer on a fresh large card → hp === max − 65, not broken', h2.hp === h2.max - DMG('hammer') && !h2.broken, h2);
+  const p2 = await hitFresh(page, 'pistol', cardPt, '#big-card');
+  check('A.hp 2: pistol on a fresh large card → hp === max − 25', p2.hp === p2.max - DMG('pistol') && !p2.broken, p2);
+  const a2 = await hitFresh(page, 'axe', cardPt, '#big-card');
+  check('A.hp 2: axe on a fresh large card → hp === max − 130 (54 left), not broken', a2.hp === a2.max - DMG('axe') && !a2.broken, a2);
+
+  // (A3) cooldown gate: with noCooldown OFF, a second axe click inside 550 ms is rejected — no counter, no crack,
+  // no damage (the suite otherwise runs with noCooldown = true, so this is the only place the gate executes)
+  await api.debug(page, { noCooldown: false });
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'axe');
+  const sCd0 = await api.stats(page);
+  const hCd0 = await api.hpOf(page, '#big-card');
+  await page.mouse.click(cardPt.x, cardPt.y);
+  await page.mouse.click(cardPt.x, cardPt.y);
+  const rejected = await page.evaluate((p) => window.__crashScreen.smashAt(p.x, p.y, 'axe'), cardPt);
+  await poll(async () => (await api.hpOf(page, '#big-card')).hp < hCd0.max, 400, 20);
+  await sleep(100);
+  const sCd1 = await api.stats(page);
+  const hCd1 = await api.hpOf(page, '#big-card');
+  check('A.cooldown: 2nd axe click within 550 ms is rejected — hp === max − 130 (one hit), card not broken', hCd1.hp === hCd1.max - DMG('axe') && !(await api.broken(page, '#big-card')), { before: hCd0, after: hCd1 });
+  check('A.cooldown: rejected clicks change no counter (shots +1, cracks +1)', sCd1.shots === sCd0.shots + 1 && sCd1.cracks === sCd0.cracks + 1, { shots: [sCd0.shots, sCd1.shots], cracks: [sCd0.cracks, sCd1.cracks] });
+  check('A.cooldown: api.smashAt(x, y, "axe") returns false while the axe is cooling down', rejected === false, rejected);
+  const dbgCd = await api.debug(page, { noCooldown: true });
+  check('A.cooldown: noCooldown re-enabled for the rest of the suite', dbgCd.noCooldown === true, dbgCd);
+
+  // (3) attack power: setPower(2) → 130, keys -/= change power, crsPower persisted
+  const pw2 = await api.setPower(page, 2);
+  check('A.power 3: setPower(2) returns 2 and api.power / stats().power === 2', pw2 === 2 && (await api.power(page)) === 2 && (await api.stats(page)).power === 2, { ret: pw2, power: await api.power(page) });
+  const h3 = await hitFresh(page, 'hammer', cardPt, '#big-card');
+  check('A.power 3: hammer at ×2 deals 130 (hp === max − 130)', h3.hp === h3.max - 2 * DMG('hammer'), h3);
+  await api.setPower(page, 1);
+  check('A.power 3: setPower(1) restores ×1', (await api.power(page)) === 1);
+  await page.keyboard.press('-');
+  const pwDown = await poll(async () => ((await api.stats(page)).power === 0.5 ? 0.5 : null), 500, 20);
+  check('A.power 3: "-" key → stats().power === 0.5', pwDown === 0.5, await api.stats(page).then((s) => s.power));
+  check('A.power 3: crsPower persisted (0.5) in the shim storage', (await api.store(page)).crsPower === 0.5, await api.store(page));
+  await page.keyboard.press('=');
+  const pwUp = await poll(async () => ((await api.stats(page)).power === 1 ? 1 : null), 500, 20);
+  check('A.power 3: "=" key → stats().power === 1', pwUp === 1, await api.stats(page).then((s) => s.power));
+  check('A.power 3: crsPower reflects the last value (1)', (await api.store(page)).crsPower === 1, await api.store(page));
+  await api.setPower(page, 1);
+
+  // (4) forced crit: 130 and a "-130!" floating number
+  await api.debug(page, { forceCrit: true, noCrit: false });
+  const c4 = await hitFresh(page, 'hammer', cardPt, '#big-card');
+  const critText = await poll(async () => { const t = await api.dmgTexts(page); return t.includes('-' + 2 * DMG('hammer') + '!') ? t : null; }, 300, 15);
+  check('A.crit 4: debug.forceCrit → hammer deals 130', c4.hp === c4.max - 2 * DMG('hammer'), c4);
+  check('A.crit 4: a .crs-dmg with text "-130!" appears', !!critText, await api.dmgTexts(page));
+  const dbgReset = await api.debug(page, { forceCrit: false, noCrit: true });
+  check('A.crit 4: debug flags reset (forceCrit false, noCrit true)', dbgReset.forceCrit === false && dbgReset.noCrit === true, dbgReset);
+  check('A.crit 4: stats().crits ≥ 1 after the forced crit', (await api.stats(page)).crits >= 1, (await api.stats(page)).crits);
+
+  // (5) floating number + hit tint on a normal hammer hit
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'hammer');
+  await page.mouse.click(cardPt.x, cardPt.y);
+  const seen5 = { dmg: false, hit: false, dmgAt: -1, hitAt: -1 };
+  const t5 = Date.now();
+  while (Date.now() - t5 < 300 && !(seen5.dmg && seen5.hit)) {
+    const s = await page.evaluate(() => ({ dmg: [...document.querySelectorAll('.crs-dmg')].map((n) => (n.textContent || '').trim()), hit: document.querySelectorAll('.crs-hit').length }));
+    if (!seen5.dmg && s.dmg.includes('-' + DMG('hammer'))) { seen5.dmg = true; seen5.dmgAt = Date.now() - t5; }
+    if (!seen5.hit && s.hit >= 1) { seen5.hit = true; seen5.hitAt = Date.now() - t5; }
+    await sleep(10);
+  }
+  check('A.fx 5: a .crs-dmg with text "-65" exists within 300 ms of a hammer hit', seen5.dmg, seen5);
+  check('A.fx 5: a .crs-hit tint appears on the hit', seen5.hit, seen5);
+  check('A.fx 5: .crs-hit gone within 1 s', await poll(async () => (await api.count(page, '.crs-hit')) === 0, 1000, 30), await api.count(page, '.crs-hit'));
+  check('A.fx 5: "-65" number gone within 2.5 s', await poll(async () => !(await api.dmgTexts(page)).includes('-' + DMG('hammer')), 2500, 50), await api.dmgTexts(page));
+  const st5 = await api.stats(page);
+  check('A.fx 5: stats().damageDealt === 65 and shots === 1 for the single hit', st5.damageDealt === DMG('hammer') && st5.shots === 1, { damageDealt: st5.damageDealt, shots: st5.shots });
+
+  // (14) restore() resets HP, counters and every feedback node
+  await page.mouse.click(cardPt.x, cardPt.y);   // leaves a live .crs-dmg / .crs-hit
+  const fxPre14 = await api.fx(page);
+  check('A.restore 14: a live .crs-dmg exists before restore() (precondition, so the "none left" check is not vacuous)', fxPre14.dmg >= 1, fxPre14);
+  await api.restore(page);
+  const h14 = await api.hpOf(page, '#big-card');
+  const s14 = await api.stats(page);
+  const fx14 = await api.fx(page);
+  check('A.restore 14: hpOf(card).hp === max again after restore()', h14.hp === h14.max, h14);
+  check('A.restore 14: shots / damageDealt / crits / scorch === 0', s14.shots === 0 && s14.damageDealt === 0 && s14.crits === 0 && s14.scorch === 0, s14);
+  check('A.restore 14: no .crs-dmg / .crs-hit / .crs-fire / .crs-rocket / .crs-slash-preview left', fx14.dmg === 0 && fx14.hit === 0 && fx14.fire === 0 && fx14.rocket === 0 && fx14.preview === 0, fx14);
+  check('A.restore 14: no .crs-orb / .crs-beam / .crs-warn / .crs-hostile / .crs-tracer / .crs-scope / .crs-vignette left', fx14.orb === 0 && fx14.beam === 0 && fx14.warn === 0 && fx14.hostile === 0 && fx14.tracer === 0 && fx14.scope === 0 && fx14.vignette === 0, fx14);
+
+  // (6) smg hold on the arena
+  await api.setWeapon(page, 'smg');
+  check('A.smg 6: setWeapon("smg") → api.weapon === "smg"', (await api.weapon(page)) === 'smg');
+  let ap = await arenaPt(page);
+  const s6a = await api.stats(page);
+  const h6a = await api.hpOf(page, '#arena');
+  const samples6 = await holdAt(page, ap, 400, async () => { const s = await api.stats(page); return { combo: s.combo, holding: s.holding }; });
+  const s6b = await api.stats(page);
+  const h6b = await api.hpOf(page, '#arena');
+  check('A.smg 6: 400 ms hold → stats().shots increased by ≥ 4', s6b.shots - s6a.shots >= 4, { before: s6a.shots, after: s6b.shots });
+  check('A.smg 6: arena hp decreased by ≥ 28 (and not broken)', h6a.hp - h6b.hp >= 28 && !(await api.broken(page, '#arena')), { before: h6a, after: h6b });
+  check('A.smg 6: stats().holding === true while held', samples6.some((s) => s.holding === true), samples6.slice(0, 4));
+  check('A.smg 6: stats().combo never exceeded 1 during the hold', samples6.every((s) => s.combo <= 1) && s6b.combo <= 1, { max: Math.max(...samples6.map((s) => s.combo), s6b.combo) });
+  await sleep(200);
+  const s6c = await api.stats(page);
+  check('A.smg 6: holding === false 200 ms after mouse.up', s6c.holding === false, s6c.holding);
+  await sleep(200);
+  const s6d = await api.stats(page);
+  check('A.smg 6: shots stop increasing after release', s6d.shots === s6c.shots, { at200: s6c.shots, at400: s6d.shots });
+
+  // (A4) hold crit window: forceCrit → every 150 ms window rolls a crit, its number reads "-<sum>!" and crits counts windows
+  await api.debug(page, { forceCrit: true, noCrit: false });
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'smg');
+  ap = await arenaPt(page);
+  const h6c0 = await api.hpOf(page, '#arena');
+  let goldSeen = null;
+  await holdAt(page, ap, 300, async () => { if (!goldSeen) { const t = (await api.dmgTexts(page)).find((s) => /^-\d+!$/.test(s)); if (t) goldSeen = t; } });
+  const s6crit = await api.stats(page);
+  const h6c1 = await api.hpOf(page, '#arena');
+  check('A.smg crit: a gold "-<sum>!" window number appears during a forced-crit smg hold', !!goldSeen, await api.dmgTexts(page));
+  check('A.smg crit: the window sum is a multiple of the crit shot (44 = 22 × 2)', !!goldSeen && parseInt(goldSeen.slice(1), 10) % (2 * DMG('smg')) === 0, goldSeen);
+  check('A.smg crit: stats().crits ≥ 1 (one per window) and arena lost ≥ 2 crit shots (≥ 88)', s6crit.crits >= 1 && h6c0.hp - h6c1.hp >= 2 * 2 * DMG('smg'), { crits: s6crit.crits, lost: h6c0.hp - h6c1.hp });
+  const dbg6 = await api.debug(page, { forceCrit: false, noCrit: true });
+  check('A.smg crit: debug flags reset (forceCrit false, noCrit true)', dbg6.forceCrit === false && dbg6.noCrit === true, dbg6);
+
+  // (7) flame hold on the arena (+ flame.png during the hold)
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'flame');
+  ap = await arenaPt(page);
+  const s7a = await api.stats(page);
+  const h7a = await api.hpOf(page, '#arena');
+  let fireSeen = 0, flameShot = false;
+  await holdAt(page, ap, 400, async (ms) => {
+    const n = await api.count(page, '.crs-fire');
+    if (n > fireSeen) fireSeen = n;
+    if (!flameShot && ms >= 200) { flameShot = true; await page.screenshot({ path: path.join(OUT, 'flame.png') }); }
+  });
+  const s7b = await api.stats(page);
+  const h7b = await api.hpOf(page, '#arena');
+  info(`screenshot test/out/flame.png (${fireSeen} fire particles seen at peak)`);
+  check('A.flame 7: 400 ms hold → arena hp decreased by ≥ 30', h7a.hp - h7b.hp >= 30, { before: h7a, after: h7b });
+  check('A.flame 7: .crs-fire particles observed during the hold', fireSeen >= 1, fireSeen);
+  check('A.flame 7: stats().scorch ≥ 1', s7b.scorch >= 1, s7b.scorch);
+  check('A.flame 7: stats().cracks unchanged by the hold (no crack per tick)', s7b.cracks === s7a.cracks, { before: s7a.cracks, after: s7b.cracks });
+  check('A.flame 7: holding === false after release', await poll(async () => (await api.stats(page)).holding === false, 300, 20), (await api.stats(page)).holding);
+  check('A.flame 7: no .crs-fire left 1.5 s after release', await poll(async () => (await api.count(page, '.crs-fire')) === 0, 1500, 50), await api.count(page, '.crs-fire'));
+  // restore() WHILE the button is still down: the hold stops at once, every particle is swept, no further ticks
+  await api.restore(page);
+  await sleep(60);
+  ap = await arenaPt(page);
+  await page.mouse.move(ap.x, ap.y);
+  await page.mouse.down();
+  await sleep(120);
+  const fireLive = await poll(async () => { const f = await api.fx(page); return f.fire >= 1 ? f.fire : 0; }, 300, 20);
+  check('A.flame 7: .crs-fire particles live 120 ms into a hold (precondition for the mid-hold restore)', fireLive >= 1, fireLive);
+  await api.restore(page);
+  const midHold = { holding: (await api.stats(page)).holding, fire: (await api.fx(page)).fire, shots: (await api.stats(page)).shots };
+  await sleep(200);
+  const midHold2 = await api.stats(page);
+  check('A.flame 7: restore() during the hold → holding === false and .crs-fire === 0 immediately', midHold.holding === false && midHold.fire === 0, midHold);
+  check('A.flame 7: no further ticks after the mid-hold restore (shots stays 0 over 200 ms)', midHold.shots === 0 && midHold2.shots === 0 && midHold2.holding === false, { at0: midHold.shots, at200: midHold2.shots });
+  await page.mouse.up();
+
+  // (8) sword: api.slash across both cards, real drag, two-piece split of a leaf (+ sword.png)
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'sword');
+  const bc8 = await api.rect(page, '#big-card');
+  const sc8 = await api.rectNoScroll(page, '#small-card');
+  const seg = { x1: bc8.left + 12, y1: bc8.top + 12, x2: sc8.left + 12, y2: sc8.top + 12 };
+  const nSlash = await api.slash(page, seg.x1, seg.y1, seg.x2, seg.y2);
+  await poll(async () => (await api.hpOf(page, '#small-card')).hp < (await api.hpOf(page, '#small-card')).max, 400, 20);
+  const bigS = await api.hpOf(page, '#big-card');
+  const smallS = await api.hpOf(page, '#small-card');
+  check('A.sword 8: api.slash across both cards → each at hp === max − 60, neither broken', bigS.hp === bigS.max - DMG('sword') && smallS.hp === smallS.max - DMG('sword') && !(await api.broken(page, '#big-card')) && !(await api.broken(page, '#small-card')), { ret: nSlash, big: bigS, small: smallS });
+  check('A.sword 8: api.slash returns the number of elements damaged (≥ 2)', typeof nSlash === 'number' && nSlash >= 2, nSlash);
+  check('A.sword 8: a slash counts as one action (stats().shots === 1) and draws a crack', (await api.stats(page)).shots === 1 && (await api.stats(page)).cracks >= 1, await api.stats(page).then((s) => ({ shots: s.shots, cracks: s.cracks })));
+  await api.restore(page);
+  await sleep(60);
+  await page.mouse.move(seg.x1, seg.y1);
+  await page.mouse.down();
+  await page.mouse.move(seg.x2, seg.y2, { steps: 8 });
+  const previewSeen = await api.count(page, '.crs-slash-preview');
+  await page.mouse.up();
+  const dragOk = await poll(async () => { const b = await api.hpOf(page, '#big-card'); const s = await api.hpOf(page, '#small-card'); return b.hp < b.max && s.hp < s.max; }, 500, 20);
+  check('A.sword 8: real drag (down/move/up) damages both cards', dragOk, { big: await api.hpOf(page, '#big-card'), small: await api.hpOf(page, '#small-card') });
+  check('A.sword 8: .crs-slash-preview shown while dragging', previewSeen >= 1, previewSeen);
+  check('A.sword 8: preview removed on pointerup (before any restore)', (await api.count(page, '.crs-slash-preview')) === 0, await api.count(page, '.crs-slash-preview'));
+  await page.screenshot({ path: path.join(OUT, 'sword.png') });
+  info('screenshot test/out/sword.png');
+  await api.restore(page);
+  await sleep(60);
+  const leaf8 = await api.rect(page, '#cluster .leaf:first-child');
+  await api.slash(page, leaf8.left + 4, leaf8.cy, leaf8.right - 4, leaf8.cy);
+  const leafBroken = await poll(() => api.broken(page, '#cluster .leaf:first-child'), 600, 20);
+  const s8 = await api.stats(page);
+  check('A.sword 8: a slash across a leaf breaks it', leafBroken);
+  check('A.sword 8: stats().lastBreakPieces === 2 (geometric two-piece split, no word shattering)', s8.lastBreakPieces === 2, s8.lastBreakPieces);
+  check('A.sword 8: no .crs-slash-preview left after the slashes', (await api.count(page, '.crs-slash-preview')) === 0);
+
+  // (9) rocket: streak during travel, card broken within 600 ms, XL ring, AoE neighbours (+ rocket.png)
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'rocket');
+  const bc9 = await api.rect(page, '#big-card');
+  const rocketPt = { x: bc9.left + 12, y: bc9.top + 12 };
+  // The streak lives only 150 ms, so a sampling loop could miss it: a MutationObserver installed before the click
+  // records the insertion time against a page-side anchor taken just before the click is sent.
+  await page.evaluate(() => {
+    const rec = { t0: performance.now(), rocketAt: -1 };
+    const mo = new MutationObserver(() => { if (rec.rocketAt < 0 && document.querySelector('.crs-rocket')) { rec.rocketAt = performance.now() - rec.t0; mo.disconnect(); } });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    window.__crsRocketProbe = rec;
+  });
+  const t9 = Date.now();   // anchored BEFORE the click round-trip
+  await page.mouse.click(rocketPt.x, rocketPt.y);
+  const seen9 = { rocketAt: -1, ringAt: -1, brokenAt: -1 };
+  while (Date.now() - t9 < 900 && (seen9.ringAt < 0 || seen9.brokenAt < 0)) {
+    const s = await page.evaluate(() => ({ ring: document.querySelectorAll('.crs-fx-ring.crs-fx-ring-xl').length, broken: document.getElementById('big-card').hasAttribute('data-crs-broken') }));
+    const ms = Date.now() - t9;
+    if (seen9.ringAt < 0 && s.ring) seen9.ringAt = ms;
+    if (seen9.brokenAt < 0 && s.broken) seen9.brokenAt = ms;
+    await sleep(10);
+  }
+  seen9.rocketAt = await page.evaluate(() => { const p = window.__crsRocketProbe; delete window.__crsRocketProbe; return p ? Math.round(p.rocketAt) : -2; });
+  check('A.rocket 9: .crs-rocket streak inserted within 150 ms of the click (MutationObserver probe)', seen9.rocketAt >= 0 && seen9.rocketAt <= 150, seen9);
+  check('A.rocket 9: #big-card broken within 600 ms', seen9.brokenAt >= 0 && seen9.brokenAt <= 600, seen9);
+  check('A.rocket 9: .crs-fx-ring.crs-fx-ring-xl seen at impact', seen9.ringAt >= 0, seen9);
+  const aoe = await poll(async () => {
+    const r = await page.evaluate(() => {
+      const api = window.__crashScreen;
+      const els = [document.getElementById('intro'), document.querySelector('.tags'), ...document.querySelectorAll('.tag'), document.getElementById('title'), document.querySelector('section.hero')].filter(Boolean);
+      return els.map((el) => { const h = api.hpOf(el); return { tag: el.tagName + (el.id ? '#' + el.id : '.' + el.className), hp: h.hp, max: h.max, broken: el.hasAttribute('data-crs-broken') }; }).filter((e) => e.hp < e.max || e.broken);
+    });
+    return r.length ? r : null;
+  }, 400, 20);
+  check('A.rocket 9: AoE — at least one neighbour (#intro / .tags / .tag / #title / section.hero) damaged or broken within 400 ms', !!aoe && aoe.length >= 1, aoe);
+  await page.screenshot({ path: path.join(OUT, 'rocket.png') });
+  info('screenshot test/out/rocket.png');
+  check('A.rocket 9: no .crs-rocket left after impact', await poll(async () => (await api.count(page, '.crs-rocket')) === 0, 500, 20));
+  // restore() 40 ms into the flight: the streak goes at once and the impact timer never fires on the restored page
+  await api.restore(page);
+  await sleep(60);
+  const bc9b = await api.rect(page, '#big-card');
+  const h9b0 = await api.hpOf(page, '#big-card');
+  await page.mouse.click(bc9b.left + 12, bc9b.top + 12);
+  await sleep(40);
+  await api.restore(page);
+  const fx9mid = await api.fx(page);
+  check('A.rocket 9: restore() mid-flight removes the .crs-rocket streak immediately', fx9mid.rocket === 0, fx9mid);
+  await sleep(250);
+  const fx9after = await api.fx(page);
+  const s9after = await api.stats(page);
+  const h9b1 = await api.hpOf(page, '#big-card');
+  check('A.rocket 9: no impact after a mid-flight restore (no XL ring, nothing broken, card hp === max 250 ms later)', fx9after.ring === 0 && fx9after.ringXl === 0 && s9after.broken === 0 && h9b1.hp === h9b0.max, { fx: fx9after, broken: s9after.broken, hp: h9b1 });
+
+  // (10) bomb on the arena: exactly 190 at the centre, ≥ 2 damage numbers
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'bomb');
+  ap = await arenaPt(page);
+  const h10a = await api.hpOf(page, '#arena');
+  await page.mouse.click(ap.x, ap.y);
+  const dmg10 = await poll(async () => { const n = await api.count(page, '.crs-dmg'); return n >= 2 ? n : 0; }, 200, 10);
+  const h10b = await poll(async () => { const r = await api.hpOf(page, '#arena'); return r.hp < r.max ? r : null; }, 300, 20) || await api.hpOf(page, '#arena');
+  check('A.bomb 10: arena takes exactly 190 at the blast centre (hp === max − 190), not broken', h10b.hp === h10a.max - DMG('bomb') && !(await api.broken(page, '#arena')), { before: h10a, after: h10b });
+  check('A.bomb 10: ≥ 2 .crs-dmg numbers within 200 ms (arena + a neighbour above it)', dmg10 >= 2, await api.count(page, '.crs-dmg'));
+  // (A7) a blast centred on a nested element never hits its ANCESTORS at centre damage (v1 bombCandidates rule):
+  // a 400 × 400 padded container (160 hp) around a 200 × 200 child (90 hp) — the only element the ring samples
+  // land on inside the box is the container itself, so without the rule it would take 190 (edgeDist 0) and break
+  await api.restore(page);
+  await sleep(60);
+  const nest10 = await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'x-aoe';
+    Object.assign(box.style, { position: 'fixed', left: '60px', top: '240px', width: '400px', height: '400px', padding: '100px', boxSizing: 'border-box', background: '#eef2ff', border: '1px solid #99a', zIndex: '40' });
+    const inner = document.createElement('div'); inner.id = 'x-aoe-inner';
+    Object.assign(inner.style, { width: '200px', height: '200px', background: '#4a7bd0', borderRadius: '8px' });
+    box.append(inner); document.body.append(box);
+    const r = inner.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  });
+  const boxHp0 = await api.hpOf(page, '#x-aoe');
+  await page.mouse.click(nest10.cx, nest10.cy);
+  const innerGone10 = await poll(() => api.broken(page, '#x-aoe-inner'), 400, 20);
+  await sleep(120);   // the AoE stagger is ≤ 90 ms (edgeDist / 4)
+  const boxHp1 = await api.hpOf(page, '#x-aoe');
+  check('A.bomb 10: a bomb centred on a nested 200 × 200 child breaks the child (90 hp < 190)', innerGone10, await api.hpOf(page, '#x-aoe-inner'));
+  check('A.bomb 10: its padded 400 × 400 container keeps full hp — ancestors of candidate 0 are never AoE candidates', boxHp1.hp === boxHp1.max && boxHp1.max === boxHp0.max && !(await api.broken(page, '#x-aoe')), { before: boxHp0, after: boxHp1, containerBroken: await api.broken(page, '#x-aoe') });
+  await api.restore(page);
+  await page.evaluate(() => { const b = document.getElementById('x-aoe'); if (b) b.remove(); });
+
+  // (12) hover label + health bar over the image, red fill below 30 %
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'pistol');
+  const ir = await api.rect(page, '#demo-img');
+  await sleep(550);
+  await page.mouse.move(ir.cx, ir.cy);
+  await sleep(150);
+  const tb12 = await api.targetBox(page);
+  const hp12 = await api.hpOf(page, '#demo-img');
+  check('A.bar 12: hover label matches /^IMG \\d+\\/\\d+$/ and equals "IMG hp/max"', tb12 && /^IMG \d+\/\d+$/.test(tb12.label) && tb12.label === `IMG ${hp12.hp}/${hp12.max}`, { box: tb12 && tb12.label, hp: hp12 });
+  check('A.bar 12: .crs-target-bar / .crs-target-fill present, fill ratio ≈ hp/max (± 8 %)', tb12 && tb12.hasBar && tb12.ratio !== null && Math.abs(tb12.ratio - hp12.hp / hp12.max) <= 0.08, { ratio: tb12 && tb12.ratio, expected: hp12.hp / hp12.max, color: tb12 && tb12.fillColor });
+  check('A.bar 12: fill colour green (rgb(63, 185, 80)) at full hp', tb12 && tb12.fillColor === 'rgb(63, 185, 80)', tb12 && tb12.fillColor);
+  for (let k = 1; k <= 3; k++) {
+    await page.mouse.click(ir.cx, ir.cy);
+    await poll(async () => (await api.hpOf(page, '#demo-img')).hp <= hp12.max - DMG('pistol') * k, 400, 20);
+  }
+  const hp12b = await api.hpOf(page, '#demo-img');
+  const tb12b = await poll(async () => { const t = await api.targetBox(page); return t && t.label === `IMG ${hp12b.hp}/${hp12b.max}` ? t : null; }, 400, 20) || await api.targetBox(page);
+  check('A.bar 12: after 3 pistol shots hp === max − 75 (ratio ≈ 0.26) and the label follows', hp12b.hp === hp12.max - 3 * DMG('pistol') && tb12b && tb12b.label === `IMG ${hp12b.hp}/${hp12b.max}`, { hp: hp12b, label: tb12b && tb12b.label });
+  check('A.bar 12: fill ratio ≈ hp/max (± 8 %) after the shots', tb12b && tb12b.ratio !== null && Math.abs(tb12b.ratio - hp12b.hp / hp12b.max) <= 0.08, { ratio: tb12b && tb12b.ratio, expected: hp12b.hp / hp12b.max });
+  check('A.bar 12: fill colour turns red (rgb(229, 72, 77)) below 30 %', tb12b && tb12b.fillColor === 'rgb(229, 72, 77)', tb12b && tb12b.fillColor);
+  await page.mouse.move(10, VIEWPORT.height / 2);   // park the pointer off the image (and off the HUD)
+
+  // (13) hotkeys 1–9 then 0 select the ids in default-loadout order; setMode('gun') → pistol
+  await api.restore(page);
+  const keyed = [];
+  for (let i = 0; i < KEYS.length; i++) {
+    await page.keyboard.press(KEYS[i]);
+    const want = WEAPON_IDS[i];
+    const got = await poll(async () => ((await api.weapon(page)) === want ? want : null), 400, 20);
+    keyed.push({ key: KEYS[i], want, got: got || await api.weapon(page) });
+  }
+  check('A.keys 13: keys 1–9, 0 select hammer … collapse in default-loadout order', keyed.every((k) => k.got === k.want), keyed);
+  check('A.keys 13: stats().weapon / mode mirror the selection', await page.evaluate(() => { const s = window.__crashScreen.stats(); return s.weapon === 'collapse' && s.mode === 'collapse'; }), await api.stats(page).then((s) => ({ weapon: s.weapon, mode: s.mode })));
+  await api.setMode(page, 'gun');
+  check('A.keys 13: setMode("gun") → api.weapon === "pistol"', (await api.weapon(page)) === 'pistol' && (await api.mode(page)) === 'pistol', { weapon: await api.weapon(page), mode: await api.mode(page) });
+  check('A.keys 13: crsWeapon persisted in the shim storage', (await api.store(page)).crsWeapon === 'pistol', await api.store(page));
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(60);
+
+  // --- collapse (12.8; §7 test 11 unchanged) -----------------------------------------------------
+  await api.setWeapon(page, 'collapse');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await sleep(100);
+  await page.mouse.click(VIEWPORT.width / 2, VIEWPORT.height / 2);
+  await sleep(2500);
+  const cs = await api.stats(page);
+  check('A.collapse: stats().broken ≥ 10 after 2.5 s (ignores HP)', cs.broken >= 10, cs.broken);
+  check('A.collapse: stats().lastError === null (no swallowed exception)', cs.lastError === null, cs.lastError);
+  await api.restore(page);
+  await sleep(100);
+  const cr = await api.stats(page);
+  check('A.collapse: restore → 0 broken, 0 [data-crs-broken]', cr.broken === 0 && (await api.count(page, '[data-crs-broken]')) === 0, cr.broken);
+
+  // --- stacking / settling (A31) ---------------------------------------------------------------
+  await api.setWeapon(page, 'hammer');
+  const st1 = await api.rect(page, '#stack-1');
+  const st2 = await api.rectNoScroll(page, '#stack-2');
+  const st3 = await api.rectNoScroll(page, '#stack-3');
+  const sx = st1.cx;
+  const c1 = await clickUntilBroken(page, '#stack-1', sx, st1.cy);
+  const c2 = await clickUntilBroken(page, '#stack-2', sx, st2.cy);
+  const c3 = await clickUntilBroken(page, '#stack-3', sx, st3.cy);
+  check('A.stack: three stacked blocks broken at the same x', c1 && c2 && c3, { c1, c2, c3 });
+  await sleep(3000);
+  const ss = await api.stats(page);
+  const clientH = await page.evaluate(() => document.documentElement.clientHeight);
+  const pieces = Array.isArray(ss.pieces) ? ss.pieces : [];
+  const bad = pieces.filter((p) => !(p.bottom <= clientH + 1 && p.resting));
+  check('A.stack: stats().pieces present', pieces.length >= 3, pieces.length);
+  check('A.stack: every piece bottom ≤ clientHeight + 1 and resting after 3 s', pieces.length > 0 && bad.length === 0, { bad: bad.slice(0, 5), clientH });
+  check('A.stack: stats().animating === false', ss.animating === false, ss.animating);
+  check('A.stats: cap === 160', ss.cap === 160, ss.cap);
+  check('A.stats: pieceCount === pieces.length', ss.pieceCount === pieces.length, { pieceCount: ss.pieceCount, len: pieces.length });
+  await api.restore(page);
+
+  // --- stress (12.8 / §7 test 15): 30 hammer clicks at ×4, then 1 s smg + 1 s flame holds --------------
+  const errBefore = log.pageErrors.length;
+  await api.setPower(page, 4);
+  // seeded LCG so a failing run can be replayed with CRS_SEED=<n>
+  const seed0 = Number(process.env.CRS_SEED) || 1234;
+  let seed = seed0;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  // keep away from the HUD: a click on the panel is a HUD event (§5 / A3 — never an attack, so no crack).
+  // v1.2 adds fixed-position shadow children (ammo HUD bottom-right, player HUD bottom-left, toast top-centre,
+  // A11), so measure the live host rect plus every shadow-root child and resample any seeded point inside one.
+  const hudBoxes = await page.evaluate((vp) => {
+    const out = [];
+    const add = (el) => { const r = el.getBoundingClientRect(); if (r.width > 0 && r.height > 0) out.push({ left: r.left - 8, top: r.top - 8, right: r.right + 8, bottom: r.bottom + 8 }); };
+    const h = document.querySelector('crs-hud, .crs-hud-host');
+    if (h) { add(h); if (h.shadowRoot) for (const el of h.shadowRoot.children) if (el.tagName !== 'STYLE') add(el); }
+    if (!out.length) out.push({ left: vp.width - 348, top: -8, right: vp.width + 8, bottom: 228 });
+    return out;
+  }, VIEWPORT);
+  const inHud = (x, y) => hudBoxes.some((b) => x >= b.left && x <= b.right && y >= b.top && y <= b.bottom);
+  const stressPts = [];
+  const tStress = Date.now();
+  for (let i = 0; i < 30; i++) {
+    let x = 20 + rnd() * (VIEWPORT.width - 40);
+    let y = 20 + rnd() * (VIEWPORT.height - 40);
+    for (let guard = 0; inHud(x, y) && guard < 50; guard++) {
+      x = 20 + rnd() * (VIEWPORT.width - 40);
+      y = 20 + rnd() * (VIEWPORT.height - 40);
+    }
+    stressPts.push([Math.round(x), Math.round(y)]);
+    await page.mouse.click(x, y);
+  }
+  const stressMs = Date.now() - tStress;
+  info(`stress: 30 clicks dispatched in ${stressMs} ms at power ×4 (CRS_SEED=${seed0}; points ${JSON.stringify(stressPts)})`);
+  await sleep(300);
+  const debrisStress = await api.count(page, '.crs-debris');
+  const stStress = await api.stats(page);
+  check('A.stress: 30 clicks dispatched within 2 s', stressMs < 2000, stressMs);
+  check('A.stress: no page errors during 30 hammer clicks', log.pageErrors.length === errBefore, log.pageErrors.slice(errBefore, errBefore + 2));
+  check('A.stress: stats().lastError === null (smashAt swallows exceptions there)', stStress.lastError === null, stStress.lastError);
+  check('A.stress: every click produced a crack (stats().cracks === 30)', stStress.cracks === 30, stStress.cracks);
+  check('A.stress: at least one element broken by the 30 clicks', stStress.broken >= 1, stStress.broken);
+  check('A.stress: .crs-debris count ≤ 160', debrisStress <= 160, debrisStress);
+  check('A.stress: stats().debris ≤ cap', stStress.debris <= 160, stStress.debris);
+  await api.setPower(page, 1);
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'smg');
+  ap = await arenaPt(page);
+  const smgHold = await holdAt(page, ap, 1000, async () => api.fx(page));
+  const smgPeak = smgHold.reduce((m, f) => ({ dmg: Math.max(m.dmg, f.dmg), debris: Math.max(m.debris, f.debris) }), { dmg: 0, debris: 0 });
+  const smgAfter = await api.stats(page);
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'flame');
+  ap = await arenaPt(page);
+  const flameHold = await holdAt(page, ap, 1000, async () => api.fx(page));
+  const flamePeak = flameHold.reduce((m, f) => ({ dmg: Math.max(m.dmg, f.dmg), fire: Math.max(m.fire, f.fire), debris: Math.max(m.debris, f.debris) }), { dmg: 0, fire: 0, debris: 0 });
+  const fxHold = await api.fx(page);
+  const stHold = await api.stats(page);
+  info(`stress holds: smg shots ${smgAfter.shots}, flame shots ${stHold.shots}, peaks ${JSON.stringify({ smg: smgPeak, flame: flamePeak })}`);
+  check('A.stress: no page errors during the 1 s smg + 1 s flame holds', log.pageErrors.length === errBefore, log.pageErrors.slice(errBefore, errBefore + 2));
+  check('A.stress: stats().lastError === null after the holds', stHold.lastError === null, stHold.lastError);
+  check('A.stress: smg hold fired ≥ 10 shots, flame hold ≥ 15 ticks', smgAfter.shots >= 10 && stHold.shots >= 15, { smg: smgAfter.shots, flame: stHold.shots });
+  check('A.stress: .crs-debris ≤ 160 throughout the holds', fxHold.debris <= 160 && smgPeak.debris <= 160 && flamePeak.debris <= 160, { now: fxHold.debris, smgPeak, flamePeak });
+  check('A.stress: .crs-fire ≤ 40 throughout the flame hold', fxHold.fire <= 40 && flamePeak.fire <= 40, { now: fxHold.fire, peak: flamePeak.fire });
+  check('A.stress: .crs-dmg ≤ 40 throughout the holds', fxHold.dmg <= 40 && smgPeak.dmg <= 40 && flamePeak.dmg <= 40, { now: fxHold.dmg, smgPeak, flamePeak });
+  check('A.stress: holding === false after the holds', stHold.holding === false, stHold.holding);
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(100);
+
+  // --- hostile DOM, part 1: full-viewport transparent shadow host (Ionic/Lit/Stencil-style app root) --------
+  // document.elementsFromPoint only ever returns the host; the cards live in its open shadow root.
+  await api.setWeapon(page, 'hammer');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const xcard = await page.evaluate(() => {
+    const host = document.createElement('x-app');
+    host.id = 'x-app';
+    Object.assign(host.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', display: 'block', zIndex: '50' });
+    const sh = host.attachShadow({ mode: 'open' });
+    const wrap = document.createElement('div');
+    Object.assign(wrap.style, { position: 'absolute', left: '0', top: '0', width: '100%', height: '100%' });
+    sh.append(wrap);
+    for (let i = 0; i < 3; i++) {
+      const c = document.createElement('div');
+      c.className = 'xcard';
+      Object.assign(c.style, { position: 'absolute', left: (40 + i * 230) + 'px', top: '640px', width: '200px', height: '80px', background: '#fff', border: '1px solid #99a', borderRadius: '8px', padding: '12px', boxSizing: 'border-box', font: '16px sans-serif', color: '#223' });
+      c.textContent = '쉐도우 카드 ' + (i + 1);
+      wrap.append(c);
+    }
+    document.body.append(host);
+    const r = sh.querySelector('.xcard').getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  });
+  await sleep(550);
+  await page.mouse.move(xcard.cx, xcard.cy);
+  await sleep(150);
+  const hvShadow = await api.targetBox(page);
+  check('A.shadow: hover over a card inside a full-viewport transparent shadow host → label "DIV hp/max"', hvShadow && hvShadow.display !== 'none' && /^DIV \d+\/\d+$/.test(hvShadow.label), hvShadow);
+  const shadowIsBroken = () => page.evaluate(() => {
+    const h = document.getElementById('x-app');
+    return !!(h && h.shadowRoot.querySelector('.xcard').hasAttribute('data-crs-broken'));
+  });
+  const shadowClicks = await smashUntil(page, shadowIsBroken, xcard.cx, xcard.cy, 3);
+  check('A.shadow: hammer clicks break the shadow card (data-crs-broken inside the shadow root)', shadowClicks >= 1 && await shadowIsBroken(), shadowClicks);
+  check('A.shadow: debris spawned, nothing in the light DOM broken instead', (await api.count(page, '.crs-debris')) >= 1 && (await api.count(page, '[data-crs-broken]')) === 0, { debris: await api.count(page, '.crs-debris'), lightBroken: await api.count(page, '[data-crs-broken]') });
+  await api.restore(page);
+  await sleep(100);
+  await api.setWeapon(page, 'collapse');
+  await page.mouse.click(VIEWPORT.width / 2, VIEWPORT.height / 2);
+  const shadowCollapsed = await poll(() => page.evaluate(() => {
+    const h = document.getElementById('x-app');
+    return h ? h.shadowRoot.querySelectorAll('.xcard[data-crs-broken]').length : 0;
+  }), 3000);
+  check('A.shadow: collapse reaches elements inside the shadow root', shadowCollapsed >= 1, shadowCollapsed);
+  await api.restore(page);
+  await sleep(100);
+  await page.evaluate(() => { const h = document.getElementById('x-app'); if (h) h.remove(); });
+  await api.setWeapon(page, 'hammer');
+
+  // --- hostile DOM, part 2: opacity:0 hover overlay, scaled ancestor, <audio>, nested broken attribute ------
+  const hd = await page.evaluate(() => {
+    const fixed = (tag, st, parent) => { const n = document.createElement(tag); Object.assign(n.style, st); (parent || document.body).append(n); return n; };
+    const layer = fixed('div', { position: 'fixed', left: '0', top: '0', width: '0', height: '0', zIndex: '60' });
+    layer.id = 'x-layer';
+    // product-card pattern: image + opacity:0 overlay with a "quick view" button (no pointer-events:none)
+    const card = fixed('div', { position: 'fixed', left: '40px', top: '600px', width: '200px', height: '120px' }, layer);
+    const img = fixed('img', { display: 'block', width: '200px', height: '120px' }, card);
+    img.id = 'x-img';
+    img.src = document.getElementById('demo-img').src;
+    const ov = fixed('div', { position: 'absolute', left: '0', top: '0', width: '100%', height: '100%', opacity: '0', background: 'rgba(0,0,0,.6)' }, card);
+    const qv = fixed('button', { position: 'absolute', left: '50px', top: '40px', padding: '8px 16px' }, ov);
+    qv.id = 'x-qv'; qv.type = 'button'; qv.textContent = 'Quick view';
+    // paragraph under transform: scale(1.5)
+    const sc = fixed('div', { position: 'fixed', left: '300px', top: '600px', width: '280px', transform: 'scale(1.5)', transformOrigin: '0 0' }, layer);
+    const p = fixed('p', { margin: '0', padding: '8px', background: '#fff', font: '16px/1.4 sans-serif', color: '#223' }, sc);
+    p.id = 'x-scaled';
+    p.textContent = '확대된 문단의 단어들은 원래 크기로 떨어져야 합니다';
+    // text box containing an <audio controls>
+    const ab = fixed('div', { position: 'fixed', left: '760px', top: '600px', width: '320px', padding: '12px', background: '#fde', font: '15px sans-serif', color: '#223' }, layer);
+    ab.id = 'x-audio-box';
+    ab.append(document.createTextNode('오디오가 들어 있는 상자 '));
+    const au = fixed('audio', { display: 'block', width: '280px' }, ab);
+    au.controls = true;
+    // nested: a heading broken first, then its container
+    const nest = fixed('div', { position: 'fixed', left: '760px', top: '740px', width: '320px', padding: '16px', background: '#eef', font: '15px sans-serif', color: '#223' }, layer);
+    nest.id = 'x-nest';
+    const h = fixed('h3', { margin: '0 0 6px', font: '700 18px sans-serif' }, nest);
+    h.id = 'x-nest-h'; h.textContent = '중첩 제목';
+    const np = fixed('p', { margin: '0' }, nest); np.textContent = '컨테이너 본문 텍스트';
+    const R = (el) => { const r = el.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, left: r.left, top: r.top, w: r.width, h: r.height }; };
+    const rg = document.createRange(); rg.setStart(p.firstChild, 0); rg.setEnd(p.firstChild, 3);
+    return { img: R(img), p: R(p), pFont: getComputedStyle(p).fontSize, word0H: rg.getBoundingClientRect().height, ab: R(ab), h: R(h), nest: R(nest) };
+  });
+  await sleep(550);
+  await page.mouse.move(hd.img.cx, hd.img.cy);
+  await sleep(150);
+  const hvOv = await api.targetBox(page);
+  check('A.overlay: invisible (opacity:0 ancestor) quick-view button is skipped → label "IMG hp/max"', hvOv && hvOv.display !== 'none' && /^IMG \d+\/\d+$/.test(hvOv.label), hvOv);
+  await clickUntilBroken(page, '#x-img', hd.img.cx, hd.img.cy, 3);
+  check('A.overlay: the image breaks, the hidden button does not', (await api.broken(page, '#x-img')) && !(await api.broken(page, '#x-qv')), { img: await api.broken(page, '#x-img'), qv: await api.broken(page, '#x-qv') });
+  await page.mouse.click(hd.p.cx, hd.p.cy);
+  check('A.scaled: paragraph under transform: scale(1.5) breaks into word pieces', await poll(() => api.broken(page, '#x-scaled'), 1500));
+  const scaledWords = await page.evaluate(() => [...document.querySelectorAll('.crs-word')].map((w) => { const cs = getComputedStyle(w); return { fs: parseFloat(cs.fontSize), lh: parseFloat(cs.lineHeight), h: w.getBoundingClientRect().height }; }));
+  const pFont = parseFloat(hd.pFont);
+  check('A.scaled: word pieces carry the scaled font size (≈ 1.5 × paragraph font, ±1 px)', scaledWords.length >= 3 && scaledWords.every((w) => Math.abs(w.fs - 1.5 * pFont) <= 1), { pFont, sample: scaledWords.slice(0, 3) });
+  check('A.scaled: word piece line-height equals the piece box height', scaledWords.every((w) => Math.abs(w.lh - w.h) <= 1), scaledWords.slice(0, 3));
+  await clickUntilBroken(page, '#x-audio-box', hd.ab.left + 6, hd.ab.top + 6, 3);
+  check('A.audio: text box containing <audio> breaks', await api.broken(page, '#x-audio-box'));
+  check('A.audio: no <audio> element is cloned into the debris', (await api.count(page, '.crs-root audio')) === 0, await api.count(page, '.crs-root audio'));
+  await page.mouse.click(hd.h.cx, hd.h.cy);
+  check('A.nested: heading broken first', await poll(() => api.broken(page, '#x-nest-h'), 1500));
+  await clickUntilBroken(page, '#x-nest', hd.nest.left + 6, hd.nest.top + 6, 3);
+  const nestState = { containerBroken: await api.broken(page, '#x-nest'), attrs: await api.count(page, '[data-crs-broken]'), broken: (await api.stats(page)).broken, inPieces: await api.count(page, '.crs-root [data-crs-broken]') };
+  check('A.nested: container broken after its heading; [data-crs-broken] count === stats().broken (no copies in the clones)', nestState.containerBroken && nestState.attrs === nestState.broken && nestState.inPieces === 0, nestState);
+  await api.restore(page);
+  await sleep(100);
+  await page.evaluate(() => { const l = document.getElementById('x-layer'); if (l) l.remove(); });
+  check('A.hostile: restore left no [data-crs-broken] and no debris', (await api.count(page, '[data-crs-broken]')) === 0 && (await api.count(page, '.crs-debris')) === 0);
+
+  // --- button handler blocked while active (44 hp → one hammer hit) ------------------------------------
+  const btn = await api.rect(page, '#test-btn');
+  const btnClicks = await clickUntilBroken(page, '#test-btn', btn.cx, btn.cy, 3);
+  check('A.button: BUTTON smashed on the first hammer hit (44 hp < 65)', btnClicks === 1, btnClicks);
+  check('A.button: click handler NOT invoked while active', (await page.evaluate(() => window.__btnClicks)) === 0, await page.evaluate(() => window.__btnClicks));
+
+  // =============================================================================================
+  // v1.2 — ammo / sniper + scope / loadouts / hostile components (SPEC-v3 §8 / A13; ends with the exit test
+  // and re-activates the page)
+  // =============================================================================================
+  await suiteA12(page, log, contentJs);
+
+  // --- (16) Escape DURING an smg hold exits cleanly: no nodes, no intervals, shots stop -------------------
+  await api.setWeapon(page, 'smg');
+  ap = await arenaPt(page);
+  await page.mouse.move(ap.x, ap.y);
+  await page.mouse.down();
+  await sleep(150);
+  const holdingBefore = (await api.stats(page)).holding;
+  await page.keyboard.press('Escape');
+  check('A.escape 16: active === false after Escape during the hold', await poll(async () => !(await api.active(page)), 1500));
+  check('A.escape 16: no [data-crs] nodes remain', (await api.count(page, '[data-crs]')) === 0);
+  const sEsc = await api.stats(page);
+  check('A.escape 16: holding was true during the hold and is false after Escape', holdingBefore === true && sEsc.holding === false, { before: holdingBefore, after: sEsc.holding });
+  const pendEsc = await api.pending(page);
+  check('A.escape 16: zero live content-script timers right after Escape (ledger: hold chain + safety timer cancelled)', pendEsc === 0, pendEsc);
+  check('A.escape 16: stats().shots === 0 right after Escape (restore contract)', sEsc.shots === 0, sEsc.shots);
+  await sleep(200);
+  const sEsc2 = await api.stats(page);
+  const pendEsc2 = await api.pending(page);
+  check('A.escape 16: stats().shots unchanged over the next 200 ms (hold chain stopped)', sEsc2.shots === sEsc.shots, { at0: sEsc.shots, at200: sEsc2.shots });
+  check('A.escape 16: still zero live timers 200 ms later (nothing rescheduled itself)', pendEsc2 === 0, pendEsc2);
+  await settleRaf(page);
+  const rafEsc = await api.pendingRaf(page);
+  check('A.escape 16: zero live animation frames after two rAF turns (no self-rescheduling RAF loop survived the exit)', rafEsc === 0, rafEsc);
+  await page.mouse.up();
+  check('A.escape: html lacks crs-active class', await page.evaluate(() => !document.documentElement.classList.contains('crs-active')));
+  check('A.escape: crash:state active:false message sent', await page.evaluate(() => (window.__crsMessages || []).some((m) => m && m.type === 'crash:state' && m.active === false)));
+  check('A.escape: still no [data-crs] nodes after the late mouse.up', (await api.count(page, '[data-crs]')) === 0);
+  const btn2 = await api.rect(page, '#test-btn');
+  await page.mouse.click(btn2.cx, btn2.cy);
+  check('A.escape: button click handler runs after exit (listeners gone)', await poll(() => page.evaluate(() => window.__btnClicks === 1), 1000), await page.evaluate(() => window.__btnClicks));
+  const lk2 = await api.rect(page, '#card-link');
+  await page.mouse.click(lk2.cx, lk2.cy);
+  check('A.escape: link click navigates after exit (hash "#nav", handler ran once)', await poll(() => page.evaluate(() => location.hash === '#nav' && window.__linkClicks === 1), 1000), await page.evaluate(() => ({ hash: location.hash, clicks: window.__linkClicks })));
+  await page.evaluate(() => { history.replaceState(null, '', location.pathname); window.scrollTo(0, 0); });
+
+  // --- re-evaluate toggles ----------------------------------------------------------------------
+  const r2 = await page.evaluate(contentJs);
+  check('A.toggle: re-evaluating content.js returns "on"', r2 === 'on', r2);
+  check('A.toggle: active again, .crs-canvas present', (await api.active(page)) && (await api.has(page, '.crs-canvas')));
+  check('A.toggle: api.debug flags survive the toggle (plain object, A12)', await page.evaluate(() => { const d = window.__crashScreen.debug; return !!d && d.noCrit === true && d.noCooldown === true; }));
+  const r3 = await page.evaluate(contentJs);
+  check('A.toggle: evaluating again returns "off"', r3 === 'off', r3);
+  check('A.toggle: no [data-crs] nodes after off', (await api.count(page, '[data-crs]')) === 0);
+  check('A.toggle: zero live content-script timers after off (ledger)', (await api.pending(page)) === 0, await api.pending(page));
+  await settleRaf(page);
+  check('A.toggle: zero live animation frames after off (RAF ledger)', (await api.pendingRaf(page)) === 0, await api.pendingRaf(page));
+
+  // --- console / CSP -----------------------------------------------------------------------------
+  const v = await violations(page);
+  check('A.console: zero error-level console messages', log.consoleErrors.length === 0, log.consoleErrors[0]);
+  check('A.console: zero page errors', log.pageErrors.length === 0, log.pageErrors[0]);
+  check('A.csp: zero securitypolicyviolation events', v.length === 0, v[0]);
+  check('A.stats: stats().lastError === null for the whole suite', (await api.stats(page)).lastError === null, (await api.stats(page)).lastError);
+
+  try { await client.detach(); } catch (_) { /* ignore */ }
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
+// v1.2 — FPS layer (SPEC-v3 §8 as amended by A13): ammo / reload, swap delay, sniper + scope, loadouts,
+// hostile components, KO, pause and exit. Runs inside suite A between the hostile-DOM blocks and the
+// v1 Escape test; it ends inactive (test 12) and re-evaluates content.js so the v1 blocks after it still run.
+// ---------------------------------------------------------------------------
+// MutationObserver ledger for transient glass-root nodes (orbs can live a single frame): first-seen times per
+// selector plus every .crs-dmg text, so "seen" assertions never depend on polling luck.
+async function installWatcher(page) {
+  await page.evaluate(() => {
+    if (window.__crsSeen) return;
+    const SELS = ['.crs-orb', '.crs-vignette', '.crs-warn', '.crs-beam', '.crs-beam.telegraph', '.crs-beam.crs-beam-lock', '.crs-beam.fire', '.crs-tracer', '.crs-hostile', '.crs-scope'];
+    const seen = { dmgTexts: [] };
+    const noteDmg = (el) => {
+      const list = el.matches('.crs-dmg') ? [el] : [...el.querySelectorAll('.crs-dmg')];
+      if (!list.length) return;
+      queueMicrotask(() => { for (const d of list) { const t = (d.textContent || '').trim(); if (t && !seen.dmgTexts.includes(t) && seen.dmgTexts.length < 300) seen.dmgTexts.push(t); } });
+    };
+    const note = (el) => {
+      for (const s of SELS) { if (seen[s]) continue; try { if (el.matches(s) || el.querySelector(s)) seen[s] = Math.round(performance.now()); } catch (e) { /* ignore */ } }
+      try { noteDmg(el); } catch (e) { /* ignore */ }
+    };
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (m.type === 'attributes') { if (m.target && m.target.nodeType === 1) note(m.target); continue; }
+        for (const n of m.addedNodes) if (n.nodeType === 1) note(n);
+      }
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    window.__crsSeen = seen;
+    window.__crsSeenReset = () => { for (const k of Object.keys(seen)) if (k !== 'dmgTexts') delete seen[k]; seen.dmgTexts.length = 0; };
+  });
+}
+
+async function suiteA12(page, log, contentJs) {
+  console.log('--- v1.2: ammo / sniper + scope / loadouts / combat ---');
+  const W = await weaponTable(page);
+  const DMG = W.dmg;
+  const errBefore = log.pageErrors.length;
+  const conBefore = log.consoleErrors.length;
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+  await installWatcher(page);
+  // the figure centre + 500 px must stay inside the viewport (the figure sits on the right half at 1280 wide)
+  const sideOf = (r) => (r.cx + 500 <= VIEWPORT.width - 10 ? 1 : -1);
+
+  // ---- (1) ammo and reloading --------------------------------------------------------------------------
+  await api.debug(page, { fastReload: false, infiniteAmmo: false });
+  await api.restore(page);
+  await sleep(60);
+  let ap = await arenaPt(page);
+  const a1 = await page.evaluate((p) => {
+    const a = window.__crashScreen;
+    if (typeof a.ammo !== 'function') return { missing: 'ammo' };
+    a.setWeapon('pistol');
+    const full = a.ammo();
+    const shots = []; let after12 = null;
+    for (let i = 1; i <= 13; i++) { shots.push(a.smashAt(p.x, p.y)); if (i === 12) after12 = a.ammo(); }
+    return { full, shots, after12, after13: a.ammo(), stats: { mag: a.stats().mag, reloading: a.stats().reloading } };
+  }, ap);
+  check('A.ammo 1: pistol ammo() starts at { mag: 12, size: 12, reloading: false, swapping: false }', !!a1.full && a1.full.mag === 12 && a1.full.size === 12 && a1.full.reloading === false && a1.full.swapping === false, a1.full || a1);
+  check('A.ammo 1: shots 1–12 on #arena return true, the 13th (empty magazine) returns false', Array.isArray(a1.shots) && a1.shots.slice(0, 12).every((s) => s === true) && a1.shots[12] === false, a1.shots);
+  check('A.ammo 1: ammo() after the 12th shot → { mag: 0, reloading: true } (auto-reload starts on the emptying shot), reloadProgress in [0, 1]', !!a1.after12 && a1.after12.mag === 0 && a1.after12.reloading === true && typeof a1.after12.reloadProgress === 'number' && a1.after12.reloadProgress >= 0 && a1.after12.reloadProgress <= 1, a1.after12);
+  check('A.ammo 1: stats().mag / stats().reloading mirror ammo() during the reload', !!a1.stats && a1.stats.mag === 0 && a1.stats.reloading === true, a1.stats);
+  const reloaded1 = await poll(async () => { const m = await api.ammo(page); return m && m.mag === 12 && !m.reloading ? m : null; }, 1200, 30);
+  check('A.ammo 1: magazine back to 12 and not reloading within 1.2 s (pistol reloadMs 900)', !!reloaded1, await api.ammo(page));
+  check('A.ammo 1: reload() with a full magazine → false', (await api.reload(page)) === false, await api.ammo(page));
+  const rk = await page.evaluate((p) => { const a = window.__crashScreen; a.smashAt(p.x, p.y); return a.ammo(); }, ap);
+  await page.keyboard.press('r');
+  const rkReload = await poll(async () => { const m = await api.ammo(page); return m && m.reloading ? m : null; }, 500, 15);
+  check('A.ammo 1: "R" with a partly empty pistol (11/12) starts a manual reload (ammo().reloading === true)', rk.mag === 11 && !!rkReload, { before: rk, after: rkReload || await api.ammo(page) });
+  // switching weapon cancels the reload: the pistol keeps its 11 rounds, still 11 one second later
+  await api.setWeapon(page, 'smg');
+  const smgAmmo = await api.ammo(page);
+  await api.setWeapon(page, 'pistol');
+  const cancel0 = await api.ammo(page);
+  await sleep(1000);
+  const cancel1 = await api.ammo(page);
+  check('A.ammo 1: setWeapon("smg") during the pistol reload cancels it — pistol mag unchanged (11) after switching back and still 11 a second later', !!smgAmmo && smgAmmo.size === 30 && cancel0.mag === 11 && cancel0.reloading === false && cancel1.mag === 11 && cancel1.reloading === false, { smg: smgAmmo, back: cancel0, later: cancel1 });
+  await api.debug(page, { fastReload: true });
+  check('A.ammo 1: reload() on the 11/12 pistol → true', (await api.reload(page)) === true);
+  const refilled = await poll(async () => { const m = await api.ammo(page); return m.mag === 12 && !m.reloading ? m : null; }, 600, 15);
+  check('A.ammo 1: debug.fastReload → magazine full again within 600 ms', !!refilled, await api.ammo(page));
+  await api.debug(page, { infiniteAmmo: true });
+  const inf = await page.evaluate((p) => { const a = window.__crashScreen; const r = []; for (let i = 0; i < 20; i++) r.push(a.smashAt(p.x, p.y)); return { shots: r, ammo: a.ammo() }; }, ap);
+  check('A.ammo 1: debug.infiniteAmmo → 20 shots all true and mag === size (12)', inf.shots.every((s) => s === true) && inf.ammo.mag === inf.ammo.size && inf.ammo.size === 12, inf.ammo);
+  await api.debug(page, { infiniteAmmo: false });
+  const ammoHudPistol = await api.hudQ(page, '.crs-ammo');
+  check('A.ammo 1: .crs-ammo HUD (HUD shadow root, bottom-right) shows "12 / ∞" for a full pistol', !!ammoHudPistol && ammoHudPistol.visible && /12\s*\/\s*∞/.test(ammoHudPistol.text), ammoHudPistol);
+  check('A.ammo 1: .crs-ammo sits bottom-right (right: 16px; bottom: 16px)', !!ammoHudPistol && near(ammoHudPistol.right, ammoHudPistol.vw - 16, 4) && near(ammoHudPistol.bottom, ammoHudPistol.vh - 16, 4), ammoHudPistol && { right: ammoHudPistol.right, bottom: ammoHudPistol.bottom, vw: ammoHudPistol.vw, vh: ammoHudPistol.vh });
+  await api.setWeapon(page, 'hammer');
+  const ammoHudHammer = await poll(async () => { const q = await api.hudQ(page, '.crs-ammo'); return q && /∞/.test(q.text) && !/\d+\s*\/\s*∞/.test(q.text) ? q : null; }, 500, 20);
+  check('A.ammo 1: .crs-ammo shows "∞" (no "n / ∞") for the hammer (melee)', !!ammoHudHammer, await api.hudQ(page, '.crs-ammo'));
+  // empty magazine → the "R 재장전" prompt is visible (fastReload off so the empty state lasts 900 ms)
+  await api.debug(page, { fastReload: false });
+  await api.setWeapon(page, 'pistol');
+  await page.evaluate((p) => { const a = window.__crashScreen; for (let i = 0; i < 12; i++) a.smashAt(p.x, p.y); }, ap);
+  const prompt = await poll(async () => { const q = await api.ammoPrompt(page); return q && q.visible ? q : null; }, 800, 25);
+  check('A.ammo 1: empty magazine → the "R 재장전" prompt inside .crs-ammo is visible', !!prompt && /R\s*재장전|Reload/.test(prompt.text), prompt || await api.ammoPrompt(page));
+  await poll(async () => { const m = await api.ammo(page); return m.mag === 12 && !m.reloading; }, 1300, 30);
+  await api.debug(page, { fastReload: true });
+  await api.setWeapon(page, 'rocket');
+  const rocketAmmo = await api.ammo(page);
+  check('A.ammo 1: setWeapon("rocket") → ammo() { mag: 2, size: 2 } (A1: rocket mag 2 / 1500 ms)', !!rocketAmmo && rocketAmmo.size === 2 && rocketAmmo.mag === 2, rocketAmmo);
+
+  // ---- (2) weapon swap delay ------------------------------------------------------------------------------
+  await api.setWeapon(page, 'pistol');
+  await sleep(300);
+  await api.debug(page, { noCooldown: false });
+  const sw = await page.evaluate((p) => {
+    const a = window.__crashScreen;
+    a.setWeapon('hammer');
+    const immediate = a.smashAt(p.x, p.y);
+    const am = a.ammo();
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const ammoEl = host && host.shadowRoot ? host.shadowRoot.querySelector('.crs-ammo') : null;
+    return { immediate, swapping: am && am.swapping, statsSwapping: a.stats().swapping, hud: ammoEl ? (ammoEl.textContent || '').replace(/\s+/g, ' ').trim() : null };
+  }, ap);
+  check('A.swap 2: with noCooldown off, setWeapon("hammer") then an immediate smashAt → false (250 ms swap delay)', sw.immediate === false, sw);
+  check('A.swap 2: ammo().swapping / stats().swapping === true and the ammo HUD shows 교체 중 during the delay', sw.swapping === true && sw.statsSwapping === true && !!sw.hud && /교체 중|Swapping/.test(sw.hud), sw);
+  await sleep(300);
+  const sw2 = await page.evaluate((p) => { const a = window.__crashScreen; const late = a.smashAt(p.x, p.y); const sameId = a.setWeapon('hammer'); const same = a.smashAt(p.x, p.y); return { late, sameId, same, swapping: a.ammo().swapping }; }, ap);
+  check('A.swap 2: smashAt after 300 ms → true; setWeapon(sameId) sets no delay (immediate smashAt → true, swapping false)', sw2.late === true && sw2.same === true && sw2.swapping === false, sw2);
+  const dbg2 = await api.debug(page, { noCooldown: true });
+  check('A.swap 2: noCooldown re-enabled for the rest of the block', dbg2.noCooldown === true, dbg2);
+
+  // ---- (3) sniper rifle + scope -------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'sniper');
+  const bossR = await api.rect(page, '#boss');
+  const bossPt = { x: bossR.cx, y: bossR.cy };
+  const maxBefore = (await api.hpOf(page, '#boss')).max;
+  // #big-card has not been touched since the restore above, so its first hp contact happens WHILE scoped (A3)
+  const bcUnscaled = await api.rectNoScroll(page, '#big-card');
+  check('A.sniper 3: #boss max HP from its live rect (≈ 253) and sniper damage read from api.weapons() (200)', maxBefore === specMaxHp(bossR.width, bossR.height, 1.0, false) && DMG('sniper') === SPEC_DMG.sniper, { maxBefore, expected: specMaxHp(bossR.width, bossR.height, 1.0, false), dmg: DMG('sniper') });
+  await page.mouse.move(bossPt.x, bossPt.y);
+  await sleep(50);
+  const scOn = await api.scope(page, true);
+  const sc3 = await poll(async () => { const s = await api.stats(page); return s.scoped ? s : null; }, 500, 15);
+  const bodyOn = await api.bodyInline(page);
+  const bossScoped = await api.rectNoScroll(page, '#boss');
+  const hpScoped = await api.hpOf(page, '#boss');
+  const hpFresh = await api.hpOf(page, '#big-card');
+  check('A.sniper 3: scope(true) → .crs-scope in the glass root (document.querySelector) and stats().scoped && stats().magnified', (await api.has(page, '.crs-scope')) && !!sc3 && sc3.magnified === true, { ret: scOn, scoped: sc3 && sc3.scoped, magnified: sc3 && sc3.magnified, hasScope: await api.has(page, '.crs-scope') });
+  check('A.sniper 3: body inline transform contains scale(2) (CSSOM, !important) and no will-change is set', /scale\(2\)/.test(bodyOn.transform) && bodyOn.willChange === '', bodyOn);
+  check('A.sniper 3: #boss getBoundingClientRect doubled under the transform (± 2 px)', near(bossScoped.width, 2 * bossR.width, 2) && near(bossScoped.height, 2 * bossR.height, 2), { before: [bossR.width, bossR.height], scoped: [bossScoped.width, bossScoped.height] });
+  check('A.sniper 3: hpOf(#boss).max unchanged while scoped (the cached record survives scope-in)', hpScoped.max === maxBefore && hpScoped.hp === maxBefore, { maxBefore, scoped: hpScoped });
+  check('A.sniper 3: a FIRST hp contact made while scoped is page-space — hpMax() divides the doubled rect by scopeMag()', hpFresh.max === specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false) && hpFresh.hp === hpFresh.max, { got: hpFresh, expected: specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false), unscaledRect: [bcUnscaled.width, bcUnscaled.height] });
+  const shot3 = await api.smashAt(page, bossPt.x, bossPt.y);
+  const hp3 = (await poll(async () => { const r = await api.hpOf(page, '#boss'); return r.hp < r.max ? r : null; }, 500, 15)) || await api.hpOf(page, '#boss');
+  check('A.sniper 3: one scoped shot at the boss centre → hp === max − dmg(sniper) (253 → 53)', shot3 === true && hp3.hp === hp3.max - DMG('sniper') && hp3.max === maxBefore, { shot: shot3, hp: hp3, dmg: DMG('sniper') });
+  const ls3 = (await api.stats(page)).lastShot;
+  check('A.sniper 3: stats().lastShot records the scoped impact { x, y, offsetX: 0, offsetY: 0, scoped: true }', !!ls3 && ls3.scoped === true && ls3.offsetX === 0 && ls3.offsetY === 0 && near(ls3.x, bossPt.x, 1) && near(ls3.y, bossPt.y, 1), ls3);
+  await sleep(120);
+  await page.screenshot({ path: path.join(OUT, 'sniper.png') });
+  info('screenshot test/out/sniper.png (scoped, after a shot)');
+  await api.scope(page, false);
+  const bodyOff = await api.bodyInline(page);
+  check('A.sniper 3: scope(false) → body inline transform / transform-origin / will-change restored to ""', bodyOff.transform === '' && bodyOff.transformOrigin === '' && bodyOff.willChange === '', bodyOff);
+  check('A.sniper 3: .crs-scope gone and stats().scoped === false after scope(false)', !(await api.has(page, '.crs-scope')) && (await api.stats(page)).scoped === false, { hasScope: await api.has(page, '.crs-scope'), scoped: (await api.stats(page)).scoped });
+  // ADS chrome: the 28 px hammer cursor must not sit on the reticle centre and the opaque panel must not cover the circle
+  const panelPlain = await api.hudQ(page, '.panel');
+  await api.scope(page, true);
+  await poll(async () => (await api.stats(page)).scoped === true, 400, 15);
+  await sleep(220);
+  const adsOn = await page.evaluate(() => {
+    const el = document.elementFromPoint(Math.round(innerWidth / 2), Math.round(innerHeight / 2));
+    return { html: document.documentElement.className, cursor: el ? getComputedStyle(el).cursor : null };
+  });
+  const panelScoped = await api.hudQ(page, '.panel');
+  await api.scope(page, false);
+  await sleep(220);
+  const adsOff = await page.evaluate(() => ({ html: document.documentElement.className, cursor: getComputedStyle(document.body).cursor }));
+  const panelBack = await api.hudQ(page, '.panel');
+  check('A.sniper 3: scoping hides the page cursor (html.crs-scoped) and fades the weapon panel out of the circle; both come back on scope-out', /(^|\s)crs-scoped(\s|$)/.test(adsOn.html) && adsOn.cursor === 'none' && !/(^|\s)crs-scoped(\s|$)/.test(adsOff.html) && /url\(/.test(adsOff.cursor) && !!panelPlain && !!panelScoped && !!panelBack && parseFloat(panelPlain.opacity) > 0.9 && parseFloat(panelScoped.opacity) < 0.5 && parseFloat(panelBack.opacity) > 0.9, { on: adsOn, off: adsOff, panelOpacity: [panelPlain && panelPlain.opacity, panelScoped && panelScoped.opacity, panelBack && panelBack.opacity] });
+  // chord: right button scopes, a left press while RMB is held fires, an RMB release while LMB is held unscopes
+  await api.restore(page);
+  await sleep(60);
+  const bossR2 = await api.rectNoScroll(page, '#boss');
+  await page.mouse.move(bossR2.cx, bossR2.cy);
+  const shots0 = (await api.stats(page)).shots;
+  await page.mouse.down({ button: 'right' });
+  const rmbOn = await poll(async () => (await api.stats(page)).scoped === true, 500, 15);
+  await page.mouse.down();
+  const chordHit = await poll(async () => { const s = await api.stats(page); const h = await api.hpOf(page, '#boss'); return s.shots === shots0 + 1 && h.hp < h.max ? { shots: s.shots, hp: h } : null; }, 600, 15);
+  await page.mouse.up({ button: 'right' });
+  const rmbOff = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
+  await page.mouse.up();
+  check('A.sniper 3: right mouse button down → scoped (pointer-events chord model)', rmbOn === true, (await api.stats(page)).scoped);
+  check('A.sniper 3: left press while RMB is held fires (stats().shots + 1, boss hp decreased)', !!chordHit, chordHit || { shots: [shots0, (await api.stats(page)).shots], hp: await api.hpOf(page, '#boss') });
+  check('A.sniper 3: RMB release while the left button is still down → scope off', rmbOff === true, (await api.stats(page)).scoped);
+  // Shift: 120 ms hold-delay; a chord key within the delay cancels it
+  await page.keyboard.down('Shift');
+  await sleep(200);
+  const shiftOn = (await api.stats(page)).scoped;
+  await page.keyboard.up('Shift');
+  const shiftOff = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
+  check('A.sniper 3: Shift held 200 ms → scoped, Shift up → scope off', shiftOn === true && shiftOff === true, { shiftOn, shiftOff });
+  const pw0 = (await api.stats(page)).power;
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('=');
+  let flashed = false;
+  const tS = Date.now();
+  while (Date.now() - tS < 350) { if ((await api.stats(page)).scoped) { flashed = true; break; } await sleep(10); }
+  await page.keyboard.up('Shift');
+  const pw1 = (await api.stats(page)).power;
+  check('A.sniper 3: Shift + "=" within 100 ms → power changes and the scope never flashes', !flashed && pw1 !== pw0, { flashed, power: [pw0, pw1] });
+  await api.setPower(page, 1);
+  // layered Escape
+  await api.scope(page, true);
+  await poll(async () => (await api.stats(page)).scoped === true, 300, 15);
+  await page.keyboard.press('Escape');
+  const escScope = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
+  check('A.sniper 3: Escape while scoped → scope off AND still active (layered Escape)', escScope === true && (await api.active(page)) === true, { scoped: (await api.stats(page)).scoped, active: await api.active(page) });
+  // spread (unscoped): 20 shots, lastShot recorded hit or miss
+  await api.debug(page, { noSpread: false, infiniteAmmo: true });
+  const spread = await page.evaluate((p) => {
+    const a = window.__crashScreen; const out = [];
+    for (let i = 0; i < 20; i++) { a.smashAt(p.x, p.y); const ls = a.stats().lastShot; out.push(ls ? { ox: ls.offsetX, oy: ls.offsetY, x: ls.x, y: ls.y, scoped: ls.scoped } : null); }
+    return out;
+  }, bossPt);
+  const offs = spread.map((s) => (s ? Math.max(Math.abs(s.ox), Math.abs(s.oy)) : NaN));
+  check('A.sniper 3: 20 unscoped shots with spread → every |offset| ≤ 25 px, at least one > 0, lastShot.scoped === false', spread.every((s) => s && s.scoped === false) && offs.every((o) => o <= 25) && offs.some((o) => o > 0), { offs });
+  check('A.sniper 3: lastShot.x / y === aim point + offset (clamped impact)', spread.every((s) => s && near(s.x, bossPt.x + s.ox, 0.5) && near(s.y, bossPt.y + s.oy, 0.5)), spread.slice(0, 3));
+  await api.debug(page, { noSpread: true });
+  const noSp = await page.evaluate((p) => { const a = window.__crashScreen; const out = []; for (let i = 0; i < 5; i++) { a.smashAt(p.x, p.y); const ls = a.stats().lastShot; out.push(ls ? { ox: ls.offsetX, oy: ls.offsetY, x: ls.x, y: ls.y } : null); } return out; }, bossPt);
+  check('A.sniper 3: noSpread → offsets 0 and the impact equals the aim point', noSp.every((s) => s && s.ox === 0 && s.oy === 0 && near(s.x, bossPt.x, 0.5) && near(s.y, bossPt.y, 0.5)), noSp);
+  // bolt action
+  await api.debug(page, { noCooldown: false });
+  await sleep(650);
+  const bolt = await page.evaluate((p) => { const a = window.__crashScreen; const first = a.smashAt(p.x, p.y); const second = a.smashAt(p.x, p.y); return { first, second }; }, bossPt);
+  check('A.sniper 3: bolt action — first shot true, a second within 100 ms false (cooldown 600 ms)', bolt.first === true && bolt.second === false, bolt);
+  await api.debug(page, { noCooldown: true });
+  // weapon switch while scoped
+  await api.scope(page, true);
+  await poll(async () => (await api.stats(page)).scoped === true, 300, 15);
+  await api.setWeapon(page, 'pistol');
+  const swOff = await poll(async () => (await api.stats(page)).scoped === false, 300, 15);
+  check('A.sniper 3: switching weapons while scoped → scope off and .crs-scope gone', swOff === true && !(await api.has(page, '.crs-scope')), { scoped: (await api.stats(page)).scoped, hasScope: await api.has(page, '.crs-scope') });
+  await api.setWeapon(page, 'sniper');
+  await sleep(50);
+  // tracer
+  await api.seenReset(page);
+  await api.smashAt(page, bossPt.x, bossPt.y);
+  const tracerSeen = await poll(async () => { const s = await api.seen(page); return s['.crs-tracer'] ? s : null; }, 500, 15);
+  check('A.sniper 3: a .crs-tracer line appears after a sniper shot', !!tracerSeen, await api.seen(page));
+  // magazine 5
+  await api.debug(page, { infiniteAmmo: false });
+  await api.restore(page);
+  await sleep(60);
+  const mag5 = await page.evaluate((p) => { const a = window.__crashScreen; const shots = []; let after5 = null; for (let i = 1; i <= 6; i++) { shots.push(a.smashAt(p.x, p.y)); if (i === 5) after5 = a.ammo(); } return { shots, after5, size: a.ammo().size }; }, bossPt);
+  check('A.sniper 3: magazine 5 — shots 1–5 true, ammo() after the 5th { mag: 0, reloading: true }, 6th false', mag5.size === 5 && mag5.shots.slice(0, 5).every((s) => s === true) && !!mag5.after5 && mag5.after5.mag === 0 && mag5.after5.reloading === true && mag5.shots[5] === false, mag5);
+  await poll(async () => { const m = await api.ammo(page); return m.mag === 5 && !m.reloading; }, 600, 15);
+  // A4 + A5: the magazine-emptying round is still fired SCOPED — the auto-reload (which scopes out) runs after it
+  await api.debug(page, { noSpread: false });
+  await api.scope(page, true);
+  await poll(async () => (await api.stats(page)).scoped === true, 400, 15);
+  const magScoped = await page.evaluate((p) => {
+    const a = window.__crashScreen; const shots = [];
+    for (let i = 1; i <= 5; i++) { a.smashAt(p.x, p.y); const ls = a.stats().lastShot; shots.push(ls ? { scoped: ls.scoped, ox: ls.offsetX, oy: ls.offsetY } : null); }
+    return { shots, ammo: a.ammo(), scoped: a.stats().scoped };
+  }, bossPt);
+  check('A.sniper 3: every round of a scoped magazine — the 5th included — is exact (lastShot.scoped, offset 0); only then does the auto-reload scope out', magScoped.shots.length === 5 && magScoped.shots.every((s) => s && s.scoped === true && s.ox === 0 && s.oy === 0) && !!magScoped.ammo && magScoped.ammo.reloading === true && magScoped.scoped === false, magScoped);
+  await api.debug(page, { noSpread: true });
+  await poll(async () => { const m = await api.ammo(page); return m.mag === 5 && !m.reloading; }, 600, 15);
+  // A2: the reload scopes out, but the chord is still held — the scope must come back when the magazine is full
+  await api.restore(page);
+  await sleep(60);
+  await api.debug(page, { fastReload: false });
+  await page.mouse.move(bossPt.x, bossPt.y);
+  await page.mouse.down({ button: 'right' });
+  const rmbScoped6 = await poll(async () => (await api.stats(page)).scoped === true, 500, 15);
+  for (let i = 0; i < 5; i++) { await page.mouse.down(); await page.mouse.up(); }
+  const dryScoped = await api.stats(page);
+  const reScoped = await poll(async () => { const st = await api.stats(page); const m = await api.ammo(page); return st.scoped === true && m.mag === 5 && !m.reloading; }, 3000, 40);
+  await page.mouse.up({ button: 'right' });
+  const afterRelease = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
+  check('A.sniper 3: the auto-reload scopes out, the scope comes back when it finishes with RMB still held, and the RMB release scopes out again', rmbScoped6 === true && dryScoped.scoped === false && dryScoped.reloading === true && reScoped === true && afterRelease === true, { rmbScoped6, dry: { scoped: dryScoped.scoped, reloading: dryScoped.reloading }, reScoped, afterRelease });
+  await api.debug(page, { fastReload: true });
+  // A2: the keyup that releases Shift never reaches a blurred page — the chord must not survive the blur
+  await api.restore(page);
+  await sleep(60);
+  await page.keyboard.down('Shift');
+  const shiftScoped = await poll(async () => (await api.stats(page)).scoped === true, 500, 15);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  const blurOff = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await api.setWeapon(page, 'pistol');
+  await api.setWeapon(page, 'sniper');
+  await sleep(80);
+  const afterBlur = await api.stats(page);
+  await page.keyboard.up('Shift');
+  const bodyBlur = await api.bodyInline(page);
+  check('A.sniper 3: a window blur drops the Shift / RMB chord — a later switch back to the sniper does not re-scope with nothing held', shiftScoped === true && blurOff === true && afterBlur.scoped === false && afterBlur.magnified === false && bodyBlur.transform === '', { shiftScoped, blurOff, after: { scoped: afterBlur.scoped, magnified: afterBlur.magnified }, body: bodyBlur });
+
+  // ---- (4) loadouts and number keys ---------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  const okDefault = await api.applyPreset(page, 'default');
+  const lo = await api.loadout(page);
+  check('A.loadout 4: applyPreset("default") → true and loadout() → 10 unique ids in the default preset order', okDefault === true && Array.isArray(lo) && lo.length === 10 && new Set(lo).size === 10 && lo.join(',') === WEAPON_IDS.join(','), { ret: okDefault, lo });
+  await page.keyboard.press('0');
+  check('A.loadout 4: key "0" selects slot 10 (collapse)', await poll(async () => (await api.weapon(page)) === 'collapse', 400, 15), await api.weapon(page));
+  const okAssault = await api.applyPreset(page, 'assault');
+  await page.keyboard.press('1');
+  const assaultSel = await poll(async () => (await api.weapon(page)) === 'smg', 400, 15);
+  const wAssault = await api.weapons(page);
+  check('A.loadout 4: applyPreset("assault") → true, key "1" → smg', okAssault === true && assaultSel === true, { ret: okAssault, weapon: await api.weapon(page) });
+  check('A.loadout 4: assault order (smg, pistol, sniper, bomb, rocket, flame, hammer, axe, sword, collapse); api.weapons() follows it with slot 1–10 / key 1…9,0', (await api.loadout(page)).join(',') === PRESETS.assault.join(',') && wAssault.map((w) => w.id).join(',') === PRESETS.assault.join(',') && wAssault.every((w, i) => w.slot === i + 1 && String(w.key) === KEYS[i]), { lo: await api.loadout(page), w: wAssault.map((w) => `${w.id}:${w.slot}:${w.key}`) });
+  check('A.loadout 4: crsLoadout / crsLoadoutPreset ("assault") persisted in the shim storage', (await api.store(page)).crsLoadoutPreset === 'assault' && JSON.stringify((await api.store(page)).crsLoadout) === JSON.stringify(PRESETS.assault), await api.store(page));
+  const badLo = await page.evaluate((ids) => { const a = window.__crashScreen; return { dup: a.setLoadout(ids.map(() => 'hammer')), short: a.setLoadout(ids.slice(0, 9)), junk: a.setLoadout('hammer'), after: a.loadout() }; }, WEAPON_IDS);
+  check('A.loadout 4: setLoadout with a non-permutation (duplicates / 9 ids / non-array) → false, loadout unchanged', badLo.dup === false && badLo.short === false && badLo.junk === false && badLo.after.join(',') === PRESETS.assault.join(','), badLo);
+  check('A.loadout 4: applyPreset("nope") → false', (await api.applyPreset(page, 'nope')) === false);
+  // Shift+3 moves the current weapon into slot 3 (the old slot-3 weapon takes the current weapon's slot)
+  await api.applyPreset(page, 'default');
+  await api.setWeapon(page, 'hammer');
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('3');
+  await page.keyboard.up('Shift');
+  const lo3 = await poll(async () => { const l = await api.loadout(page); return l[2] === 'hammer' ? l : null; }, 500, 15);
+  const toast3 = await poll(async () => { const t = await api.hudQ(page, '.crs-toast'); return t && t.visible && /^3 ←/.test(t.text) ? t : null; }, 500, 20);
+  const st3 = await api.store(page);
+  check('A.loadout 4: Shift+3 with the hammer current → loadout()[2] === "hammer" and the old slot-3 weapon (smg) takes slot 1', !!lo3 && lo3[0] === 'smg' && lo3[2] === 'hammer', lo3 || await api.loadout(page));
+  check('A.loadout 4: preset becomes "custom" and crsLoadout persists the new order', st3.crsLoadoutPreset === 'custom' && Array.isArray(st3.crsLoadout) && st3.crsLoadout.join(',') === (lo3 || []).join(','), { preset: st3.crsLoadoutPreset, crsLoadout: st3.crsLoadout });
+  check('A.loadout 4: a .crs-toast whose text starts with "3 ←" is shown', !!toast3, await api.hudQ(page, '.crs-toast'));
+  check('A.loadout 4: the current weapon stays hammer after the swap', (await api.weapon(page)) === 'hammer', await api.weapon(page));
+  const hudLo = await api.hudLoadout(page);
+  check('A.loadout 4: HUD grid shows 10 data-weapon buttons in loadout order with badges 1…9,0', !!hudLo && hudLo.ids.join(',') === (lo3 || []).join(',') && hudLo.badges.join(',') === KEYS.join(','), hudLo && { ids: hudLo.ids, badges: hudLo.badges });
+  check('A.loadout 4: every grid button title contains its weapon name', !!hudLo && hudLo.ids.every((id, i) => hudLo.titles[i].includes(KO_NAME[id])), hudLo && hudLo.titles);
+  check('A.loadout 4: 5 preset buttons, none aria-pressed while custom, and the 사용자 지정 tag shows', !!hudLo && hudLo.presetCount === 5 && hudLo.pressed.length === 0 && hudLo.customTag, hudLo && { presets: hudLo.presetCount, pressed: hudLo.pressed, customTag: hudLo.customTag });
+  await api.applyPreset(page, 'default');
+  const hudLo2 = await api.hudLoadout(page);
+  check('A.loadout 4: applyPreset("default") → the 기본 preset button is aria-pressed and no custom tag', !!hudLo2 && hudLo2.pressed.length === 1 && /기본|Default/.test(hudLo2.pressed[0]) && !hudLo2.customTag && hudLo2.ids.join(',') === WEAPON_IDS.join(','), hudLo2 && { pressed: hudLo2.pressed, customTag: hudLo2.customTag, ids: hudLo2.ids });
+  // Q / E cycle with wrap
+  await api.setWeapon(page, 'hammer');
+  await page.keyboard.press('q');
+  const qWrap = await poll(async () => (await api.weapon(page)) === 'collapse', 400, 15);
+  await page.keyboard.press('e');
+  const eWrap = await poll(async () => (await api.weapon(page)) === 'hammer', 400, 15);
+  await page.keyboard.press('e');
+  const eNext = await poll(async () => (await api.weapon(page)) === 'pistol', 400, 15);
+  check('A.loadout 4: Q wraps from slot 1 to slot 10 (collapse), E wraps back to hammer, E again → pistol', qWrap === true && eWrap === true && eNext === true, { qWrap, eWrap, eNext, weapon: await api.weapon(page) });
+  // drag the hammer button onto the smg button (pointer events inside the shadow DOM)
+  const bA = await api.hudWeaponBtnRect(page, 'hammer');
+  const bB = await api.hudWeaponBtnRect(page, 'smg');
+  check('A.loadout 4: grid buttons for hammer / smg found in the shadow root', !!bA && !!bB, { bA, bB });
+  if (bA && bB) {
+    await page.mouse.move(bA.cx, bA.cy);
+    await page.mouse.down();
+    await page.mouse.move(bA.cx + 10, bA.cy + 2, { steps: 2 });
+    await page.mouse.move(bB.cx, bB.cy, { steps: 8 });
+    await page.mouse.up();
+  }
+  const loDrag = await poll(async () => { const l = await api.loadout(page); return l[0] === 'smg' && l[2] === 'hammer' ? l : null; }, 600, 20);
+  check('A.loadout 4: dragging the hammer button onto the smg button swaps slots 1 and 3', !!loDrag, loDrag || await api.loadout(page));
+  check('A.loadout 4: the drag marks the preset custom and suppresses the click (weapon still pistol)', (await api.store(page)).crsLoadoutPreset === 'custom' && (await api.weapon(page)) === 'pistol', { preset: (await api.store(page)).crsLoadoutPreset, weapon: await api.weapon(page) });
+  await api.applyPreset(page, 'default');
+  await api.setWeapon(page, 'hammer');
+
+  // ---- (5) combat T1 shooter ---------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  const combatOn = await api.setCombat(page, true);
+  await api.debug(page, { noAttacks: true });
+  const clock0 = await api.hudQ(page, '.crs-player');
+  await sleep(1150);
+  const clock1 = await api.hudQ(page, '.crs-player');
+  check('A.combat 5: the 생존 clock refreshes once a second from activation (not frozen until the first 1.5 s selection tick)', !!clock0 && !!clock1 && /생존 0초/.test(clock0.text) && /생존 1초/.test(clock1.text), { at0: clock0 && clock0.text, at1150: clock1 && clock1.text });
+  const fg = await api.rect(page, '#figure');
+  const figArea = fg.width * fg.height;
+  const playerHud = await api.hudQ(page, '.crs-player');
+  check('A.combat 5: #figure is a T1 candidate by page-space area (40 000 ≤ area < 150 000)', figArea >= 40000 && figArea < 150000, { w: fg.width, h: fg.height, area: figArea });
+  check('A.combat 5: setCombat(true) → api.combat / stats().combat === true and the player HUD (.crs-player, bottom-left) is visible', (await api.combat(page)) === true && (await api.stats(page)).combat === true && !!playerHud && playerHud.visible && near(playerHud.left, 16, 4) && near(playerHud.bottom, playerHud.vh - 16, 4), { ret: combatOn, combat: await api.combat(page), hud: playerHud });
+  check('A.combat 5: player HUD shows 체력 / 점수 / 처치 / 생존 / 적', !!playerHud && ['체력', '점수', '처치', '생존', '적'].every((t) => playerHud.text.includes(t)), playerHud && playerHud.text);
+  await api.seenReset(page);
+  await api.setPlayerPos(page, fg.cx, fg.cy);
+  const p0 = await api.player(page);
+  const tier5 = await api.forceAttack(page, '#figure');
+  const hit5 = await poll(async () => { const p = await api.player(page); return p.hp < 100 ? p : null; }, 1000, 15);
+  const seen5 = await api.seen(page);
+  check('A.combat 5: player() → { hp: 100, max: 100, alive: true, score: 0, kills: 0 } at the figure centre', !!p0 && p0.hp === 100 && p0.max === 100 && p0.alive === true && p0.score === 0 && p0.kills === 0 && near(p0.x, fg.cx, 1) && near(p0.y, fg.cy, 1), p0);
+  check('A.combat 5: debug.forceAttack(#figure) → "shooter" and a .crs-orb appears', tier5 === 'shooter' && !!seen5['.crs-orb'], { tier: tier5, seen: seen5 });
+  check('A.combat 5: within 1 s the player takes damage (hp < 100) and a .crs-vignette was seen', !!hit5 && !!seen5['.crs-vignette'], { player: hit5 || await api.player(page), seen: seen5 });
+  check('A.combat 5: orb damage === 8 + round(√area / 60)', !!hit5 && 100 - hit5.hp === 8 + Math.round(Math.sqrt(figArea) / 60), { hp: hit5 && hit5.hp, expected: 8 + Math.round(Math.sqrt(figArea) / 60) });
+  check('A.combat 5: a red floating "−N" number appeared for the player damage', seen5.dmgTexts.some((t) => /^[-−]\d+/.test(t)), seen5.dmgTexts);
+  // 5b dodge: 500 px to the side, then 300 px perpendicular to the orb's path right after the launch
+  await api.restore(page);
+  await sleep(60);
+  const dir5 = sideOf(fg);
+  const far5 = { x: fg.cx + dir5 * 500, y: fg.cy };
+  await api.setPlayerPos(page, far5.x, far5.y);
+  await api.setPlayerHp(page, 100);
+  await api.seenReset(page);
+  const launch5b = await page.evaluate((s) => {
+    const a = window.__crashScreen;
+    const tier = a.debug.forceAttack(document.querySelector(s));
+    return { tier, orbNode: !!document.querySelector('.crs-orb'), orbs: a.stats().orbs };
+  }, '#figure');
+  await api.setPlayerPos(page, far5.x, far5.y + 300);
+  await sleep(3500);
+  const p5b = await api.player(page);
+  const seen5b = await api.seen(page);
+  const tier5b = launch5b.tier;
+  check('A.combat 5b: dodge — an orb IS launched (node + stats().orbs ≥ 1), then player 500 px away and 300 px perpendicular: hp unchanged (100) after 3.5 s and the orb is gone', tier5b === 'shooter' && launch5b.orbNode === true && launch5b.orbs >= 1 && !!seen5b['.crs-orb'] && p5b.hp === 100 && (await api.count(page, '.crs-orb')) === 0 && (await api.stats(page)).orbs === 0, { launch: launch5b, player: p5b, seen: !!seen5b['.crs-orb'], orbs: await api.count(page, '.crs-orb') });
+  // 5c interception: a hammer at the orb centre destroys it and never touches the page under it
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'hammer');
+  await api.setPlayerPos(page, far5.x, far5.y);
+  const img0 = await api.hpOf(page, '#demo-img');
+  const fig0 = await api.hpOf(page, '#figure');
+  const ic = await page.evaluate((sel) => {
+    const a = window.__crashScreen; const d = a.debug;
+    const score0 = a.player().score; const shots0 = a.stats().shots;
+    const tier = d.forceAttack(document.querySelector(sel));
+    const orb = document.querySelector('.crs-orb');
+    if (!orb) return { tier, orb: false };
+    const r = orb.getBoundingClientRect();
+    const c = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    const ret = a.smashAt(c.x, c.y);
+    return { tier, orb: true, c, ret, orbsAfter: document.querySelectorAll('.crs-orb').length, score: a.player().score - score0, shots: a.stats().shots - shots0, orbsStat: a.stats().orbs };
+  }, '#figure');
+  const img1 = await api.hpOf(page, '#demo-img');
+  const fig1 = await api.hpOf(page, '#figure');
+  check('A.combat 5c: hammer smashAt at the orb centre intercepts it — orb removed, score + 5, smashAt true, stats().shots + 1', ic.tier === 'shooter' && ic.orb === true && ic.ret === true && ic.orbsAfter === 0 && ic.score === 5 && ic.shots === 1, ic);
+  check('A.combat 5c: the page under the orb is untouched (#demo-img / #figure hp unchanged)', img1.hp === img0.hp && img1.hp === img1.max && fig1.hp === fig0.hp && fig1.hp === fig1.max, { img: [img0, img1], fig: [fig0, fig1] });
+
+  // ---- (6) combat T2 charger ---------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  const bc6 = await api.rect(page, '#big-card');
+  const area6 = bc6.width * bc6.height;
+  await api.setPlayerPos(page, bc6.cx, bc6.cy);
+  await api.seenReset(page);
+  const t6 = Date.now();
+  const tier6 = await api.forceAttack(page, '#big-card');
+  const hit6 = await poll(async () => { const p = await api.player(page); return p.hp < 100 ? { hp: p.hp, ms: Date.now() - t6 } : null; }, 1600, 15);
+  const seen6 = await api.seen(page);
+  check('A.combat 6: #big-card (≈ 220 400 px²) → "charger"; the player inside the rect takes damage after the 700 ms telegraph and .crs-warn was seen', tier6 === 'charger' && !!hit6 && !!seen6['.crs-warn'] && area6 >= 150000 && area6 < 400000, { tier: tier6, hit: hit6, seen: seen6, area: area6 });
+  check('A.combat 6: slam damage === 18 + round(√area / 50) and lands no earlier than 600 ms', !!hit6 && 100 - hit6.hp === 18 + Math.round(Math.sqrt(area6) / 50) && hit6.ms >= 600, { hit: hit6, expected: 18 + Math.round(Math.sqrt(area6) / 50) });
+  await api.restore(page);
+  await sleep(60);
+  await api.setPlayerPos(page, bc6.right + 50, bc6.cy);   // 50 px out: still INSIDE the 60 px slam band
+  const t6c = Date.now();
+  const tier6c = await api.forceAttack(page, '#big-card');
+  const hit6c = await poll(async () => { const p = await api.player(page); return p.hp < 100 ? { hp: p.hp, ms: Date.now() - t6c } : null; }, 1600, 15);
+  check('A.combat 6: player 50 px outside the rect (inside the rect + 60 px band) → slam damage 18 + round(√area / 50)', tier6c === 'charger' && !!hit6c && 100 - hit6c.hp === 18 + Math.round(Math.sqrt(area6) / 50), { tier: tier6c, hit: hit6c, expected: 18 + Math.round(Math.sqrt(area6) / 50) });
+  await api.restore(page);
+  await sleep(60);
+  await api.setPlayerPos(page, bc6.right + 64, bc6.cy);   // 64 px out: 4 px past the boundary
+  const tier6b = await api.forceAttack(page, '#big-card');
+  const hit6b = await poll(async () => { const p = await api.player(page); return p.hp < 100 ? p : null; }, 1300, 15);
+  const p6b = hit6b || await api.player(page);
+  check('A.combat 6: player 64 px outside the rect (just past the rect + 60 px band) at slam time → no damage', tier6b === 'charger' && p6b.hp === 100, { tier: tier6b, player: p6b });
+
+  // ---- (7) combat T3 laser -----------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  const bo7 = await api.rect(page, '#boss');
+  const area7 = bo7.width * bo7.height;
+  check('A.combat 7: #boss area > 400 000 and ≤ 0.7 × viewport area (T3 window)', area7 > 400000 && area7 <= 0.7 * VIEWPORT.width * VIEWPORT.height, { area: area7, limit: 0.7 * VIEWPORT.width * VIEWPORT.height });
+  await api.setPlayerPos(page, bo7.cx, bo7.cy);
+  await api.seenReset(page);
+  const tier7 = await api.forceAttack(page, '#boss');
+  const hit7 = await poll(async () => { const p = await api.player(page); return p.hp < 100 ? p : null; }, 1500, 15);
+  const seen7 = await api.seen(page);
+  check('A.combat 7a: #boss → "laser"; the player on the line takes 30 within 1.5 s', tier7 === 'laser' && !!hit7 && hit7.hp === 70, { tier: tier7, player: hit7 || await api.player(page) });
+  check('A.combat 7a: .crs-beam telegraph then .fire seen', !!seen7['.crs-beam'] && !!seen7['.crs-beam.telegraph'] && !!seen7['.crs-beam.fire'], seen7);
+  await api.restore(page);
+  await sleep(60);
+  await api.setPlayerPos(page, bo7.cx, bo7.cy);
+  await api.seenReset(page);
+  const tier7b = await api.forceAttack(page, '#boss');
+  const locked7 = await poll(async () => !!(await api.seen(page))['.crs-beam.crs-beam-lock'], 1200, 10);
+  await api.setPlayerPos(page, bo7.cx, bo7.cy + 100);
+  await sleep(900);
+  const p7b = await api.player(page);
+  const seen7b = await api.seen(page);
+  check('A.combat 7b: dodge — step 100 px off the axis as soon as the beam LOCKS; the beam still fires (.crs-beam.fire seen) and misses (hp unchanged)', tier7b === 'laser' && locked7 === true && !!seen7b['.crs-beam.crs-beam-lock'] && !!seen7b['.crs-beam.fire'] && p7b.hp === 100, { tier: tier7b, locked: locked7, seen: seen7b, player: p7b });
+
+  // ---- (8) hostile aura + kill -------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  const fg8 = await api.rect(page, '#figure');
+  await api.setPlayerPos(page, fg8.cx + sideOf(fg8) * 500, fg8.cy);
+  await api.setWeapon(page, 'rocket');
+  await api.seenReset(page);
+  const tier8 = await api.forceAttack(page, '#figure');
+  const aura8 = await page.evaluate(() => {
+    const a = document.querySelector('.crs-hostile');
+    if (!a) return null;
+    const r = a.getBoundingClientRect(); const cs = getComputedStyle(a);
+    return { left: r.left, top: r.top, width: r.width, height: r.height, outline: `${cs.outlineStyle} ${cs.outlineWidth}`, label: (a.textContent || '').trim(), dataCrs: a.hasAttribute('data-crs') };
+  });
+  check('A.combat 8: a .crs-hostile aura (glass root, data-crs) covers the hostile #figure rect (± 3 px) with a 2 px outline and the 👿 FIGURE label', tier8 === 'shooter' && !!aura8 && aura8.dataCrs && near(aura8.left, fg8.left, 3) && near(aura8.top, fg8.top, 3) && near(aura8.width, fg8.width, 3) && near(aura8.height, fg8.height, 3) && /solid 2px/.test(aura8.outline) && /👿/.test(aura8.label) && /FIGURE/.test(aura8.label), { tier: tier8, aura: aura8, fig: fg8 });
+  check('A.combat 8: stats().hostiles === 1 while the figure is hostile', (await api.stats(page)).hostiles === 1, (await api.stats(page)).hostiles);
+  // A3: the glass layer keeps viewport geometry — scope-in / scope-out must re-measure the aura against the 2× page
+  const auraRect = () => page.evaluate(() => {
+    const a = document.querySelector('.crs-hostile'); const el = document.querySelector('#figure');
+    if (!a || !el) return null;
+    const ar = a.getBoundingClientRect(), er = el.getBoundingClientRect();
+    return { aura: [ar.left, ar.top, ar.width, ar.height], el: [er.left, er.top, er.width, er.height] };
+  });
+  await api.setWeapon(page, 'sniper');
+  await page.mouse.move(fg8.cx, fg8.cy);
+  await api.scope(page, true);
+  await poll(async () => (await api.stats(page)).scoped === true, 400, 15);
+  await settleRaf(page);
+  const auraScoped = await auraRect();
+  await api.scope(page, false);
+  await settleRaf(page);
+  const auraPlain = await auraRect();
+  check('A.combat 8: the hostile aura is re-measured on scope-in and scope-out (A3: it stays on the magnified element rect)', !!auraScoped && !!auraPlain && auraScoped.aura.every((v, i) => near(v, auraScoped.el[i], 3)) && auraPlain.aura.every((v, i) => near(v, auraPlain.el[i], 3)), { scoped: auraScoped, unscoped: auraPlain });
+  // §5: a hostile element fights as a unit — a hit on any of its descendants lands on the hostile itself
+  await api.setWeapon(page, 'pistol');
+  const imgIn8 = await api.rectNoScroll(page, '#demo-img');
+  const figB8 = await api.hpOf(page, '#figure');
+  const imgB8 = await api.hpOf(page, '#demo-img');
+  await api.smashAt(page, imgIn8.cx, imgIn8.cy);
+  await sleep(80);
+  const figA8 = await api.hpOf(page, '#figure');
+  const imgA8 = await api.hpOf(page, '#demo-img');
+  check('A.combat 8: a hit on a DESCENDANT of a hostile lands on the hostile itself (#demo-img → #figure takes the damage, the image is untouched)', figA8.hp === figB8.hp - DMG('pistol') && imgA8.hp === imgB8.hp && imgA8.hp === imgA8.max && !(await api.broken(page, '#demo-img')), { fig: [figB8, figA8], img: [imgB8, imgA8], dmg: DMG('pistol') });
+  await api.setWeapon(page, 'rocket');
+  await page.screenshot({ path: path.join(OUT, 'combat.png') });
+  info('screenshot test/out/combat.png (aura + orb + player HUD + ammo HUD)');
+  const max8 = (await api.hpOf(page, '#figure')).max;
+  const score8a = (await api.player(page)).score;
+  const rocketRet = await api.smashAt(page, fg8.left + 6, fg8.top + 6);
+  const killed = await poll(async () => { const p = await api.player(page); return p.kills >= 1 && (await api.broken(page, '#figure')) ? p : null; }, 1200, 20);
+  const seen8 = await api.seen(page);
+  const s8 = await api.stats(page);
+  check('A.combat 8: a rocket on the hostile figure (padding zone) breaks it → player().kills === 1 and the aura is gone', rocketRet === true && !!killed && killed.kills === 1 && (await api.count(page, '.crs-hostile')) === 0, { ret: rocketRet, player: killed || await api.player(page), auras: await api.count(page, '.crs-hostile') });
+  check('A.combat 8: score increased by at least the hostile\'s max HP', !!killed && killed.score - score8a >= max8, { before: score8a, after: killed && killed.score, max: max8 });
+  check('A.combat 8: a .crs-dmg "처치!" floating text was seen', seen8.dmgTexts.some((t) => t.includes('처치')), seen8.dmgTexts);
+  check('A.combat 8: stats() mirrors kills / score / hostiles', !!killed && s8.kills === 1 && s8.score === killed.score && s8.hostiles === 0, { kills: s8.kills, score: s8.score, hostiles: s8.hostiles });
+
+  // ---- (9) KO ----------------------------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  const pendBase9 = await api.pending(page);   // restore() + armCombat(): exactly the grace and the 생존 clock
+  await api.setWeapon(page, 'hammer');
+  const fg9 = await api.rect(page, '#figure');
+  const sc9 = await api.rectNoScroll(page, '#small-card');
+  const scPt9 = { x: sc9.left + 12, y: sc9.top + 12 };
+  await page.evaluate((p) => { const a = window.__crashScreen; a.smashAt(p.x, p.y); a.smashAt(p.x, p.y); }, scPt9);
+  const brokenPre9 = await poll(() => api.broken(page, '#small-card'), 500, 15);
+  await api.setWeapon(page, 'sniper');
+  await page.mouse.move(fg9.cx, fg9.cy);   // the scope magnifies around the pointer, so #figure stays on screen
+  await api.setPlayerPos(page, fg9.cx, fg9.cy);
+  const hp5 = await api.setPlayerHp(page, 5);
+  await api.scope(page, true);
+  const scopedPre9 = await poll(async () => (await api.stats(page)).scoped === true, 500, 15);
+  const tier9 = await api.forceAttack(page, '#figure');
+  const ko = await poll(async () => { const k = await api.hudQ(page, '.crs-ko'); return k && k.visible ? k : null; }, 1500, 20);
+  const pKo = await api.player(page);
+  const smashKo = await api.smashAt(page, fg9.cx, fg9.cy);
+  const sKo = await api.stats(page);
+  const koScope = await api.has(page, '.crs-scope');
+  const koBody = await api.bodyInline(page);
+  check('A.ko 9: setPlayerHp(5) + a T1 hit → .crs-ko visible in the HUD shadow root with the 💀 title, score/kills/time line and both buttons', tier9 === 'shooter' && !!ko && /당신은 부서졌습니다|You got smashed/.test(ko.text) && /점수|Score/.test(ko.text) && /다시 시작|Restart/.test(ko.text) && /종료|Exit/.test(ko.text), { tier: tier9, hp5, ko: ko || await api.hudQ(page, '.crs-ko') });
+  check('A.ko 9: while KO: smashAt → false, player().alive === false, hp ≤ 0, and showKo() scoped out (stats().scoped false, .crs-scope gone, body transform restored)', smashKo === false && pKo.alive === false && pKo.hp <= 0 && scopedPre9 === true && sKo.scoped === false && koScope === false && koBody.transform === '' && koBody.transformOrigin === '', { smash: smashKo, player: pKo, scopedBefore: scopedPre9, scoped: sKo.scoped, scopeNode: koScope, body: koBody });
+  await page.screenshot({ path: path.join(OUT, 'ko.png') });
+  info('screenshot test/out/ko.png');
+  await page.keyboard.press('Enter');
+  const koGone = await poll(async () => { const k = await api.hudQ(page, '.crs-ko'); return !k || !k.visible; }, 800, 20);
+  const p9 = await api.player(page);
+  const s9 = await api.stats(page);
+  const pend9 = await api.pending(page);
+  check('A.ko 9: Enter → .crs-ko gone, hp 100, alive, broken 0 (restore ran), combat still on', brokenPre9 === true && koGone === true && p9.hp === 100 && p9.alive === true && s9.broken === 0 && (await api.count(page, '[data-crs-broken]')) === 0 && s9.combat === true, { brokenPre9, koGone, player: p9, broken: s9.broken, combat: s9.combat });
+  check('A.ko 9: after the restart exactly the timers a fresh restore() arms are live (same count as the pre-KO baseline)', pend9 === pendBase9 && pendBase9 >= 1, { after: pend9, baseline: pendBase9 });
+  // regression: a KO with two orbs in flight used to throw inside the physics loop and freeze debris, orbs,
+  // beams and the scope follow for the rest of the session (kick() stayed blocked by state.animating)
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'hammer');
+  const fg9b = await api.rect(page, '#figure');
+  await api.setPlayerPos(page, fg9b.cx, fg9b.cy);
+  await api.setPlayerHp(page, 5);
+  const twoOrbs = await page.evaluate((s) => {
+    const a = window.__crashScreen; const el = document.querySelector(s);
+    const t1 = a.debug.forceAttack(el);
+    const t2 = a.debug.forceAttack(el);
+    return { t1, t2, orbs: a.stats().orbs };
+  }, '#figure');
+  const ko9b = await poll(async () => { const k = await api.hudQ(page, '.crs-ko'); return !!(k && k.visible); }, 1500, 20);
+  await page.keyboard.press('Enter');
+  await poll(async () => { const k = await api.hudQ(page, '.crs-ko'); return !k || !k.visible; }, 800, 20);
+  const s9b = await api.stats(page);
+  await api.setWeapon(page, 'rocket');
+  const bc9b = await api.rect(page, '#big-card');
+  await api.smashAt(page, bc9b.cx, bc9b.cy);
+  const settled9 = await poll(async () => { const st = await api.stats(page); return st.pieceCount > 0 && st.pieces.some((p) => p.resting) ? st : null; }, 3000, 60);
+  await api.setWeapon(page, 'hammer');
+  check('A.ko 9: a KO with two orbs in flight neither throws nor freezes the physics loop (lastError null, animating cleared by the restart, debris still falls and rests)', twoOrbs.t1 === 'shooter' && twoOrbs.t2 === 'shooter' && twoOrbs.orbs >= 2 && ko9b === true && s9b.animating === false && s9b.lastError === null && !!settled9, { orbs: twoOrbs, ko: ko9b, afterRestart: { animating: s9b.animating, lastError: s9b.lastError }, settled: !!settled9 });
+
+  // ---- (10) combat off / selection tick ----------------------------------------------------------------
+  await api.restore(page);
+  await sleep(60);
+  const fg10 = await api.rect(page, '#figure');
+  await api.setPlayerPos(page, fg10.cx + sideOf(fg10) * 500, fg10.cy);
+  const tier10 = await api.forceAttack(page, '#figure');
+  const hostilesPre = (await api.stats(page)).hostiles;
+  const offRet = await api.setCombat(page, false);
+  const after10 = await page.evaluate(() => { const c = (s) => document.querySelectorAll(s).length; return { hostile: c('.crs-hostile'), orb: c('.crs-orb'), beam: c('.crs-beam'), warn: c('.crs-warn') }; });
+  const playerHud10 = await api.hudQ(page, '.crs-player');
+  const s10 = await api.stats(page);
+  check('A.combat 10: setCombat(false) → no .crs-hostile / .crs-orb / .crs-beam / .crs-warn, stats().hostiles === 0, combat false', tier10 === 'shooter' && hostilesPre >= 1 && after10.hostile === 0 && after10.orb === 0 && after10.beam === 0 && after10.warn === 0 && s10.hostiles === 0 && s10.combat === false && (await api.combat(page)) === false, { ret: offRet, tier: tier10, hostilesPre, after10, stats: { hostiles: s10.hostiles, combat: s10.combat } });
+  check('A.combat 10: player HUD (.crs-player) hidden while combat is off', !playerHud10 || !playerHud10.visible, playerHud10);
+  check('A.combat 10: crsCombat === false persisted', (await api.store(page)).crsCombat === false, await api.store(page));
+  await page.keyboard.press('h');
+  const hOn = await poll(async () => (await api.stats(page)).combat === true, 400, 15);
+  await page.keyboard.press('h');
+  const hOff = await poll(async () => (await api.stats(page)).combat === false, 400, 15);
+  check('A.combat 10: "H" toggles combat on and off again', hOn === true && hOff === true, { hOn, hOff });
+  await api.setCombat(page, true);
+  await api.restore(page);
+  await page.evaluate(() => { try { window.dispatchEvent(new Event('focus')); } catch (e) { /* ignore */ } });
+  await page.mouse.move(VIEWPORT.width / 2, VIEWPORT.height / 2);
+  const t10 = Date.now();
+  await api.debug(page, { noAttacks: false });
+  const sel = await poll(async () => { const s = await api.stats(page); return s.hostiles >= 1 ? { hostiles: s.hostiles, ms: Date.now() - t10 } : null; }, 8000, 100);
+  await api.debug(page, { noAttacks: true });
+  const auraCount = await api.count(page, '.crs-hostile');
+  check('A.combat 10: with noAttacks off the selection tick marks ≥ 1 hostile within 8 s (5 s grace) and draws its aura', !!sel && auraCount >= 1, { sel, auraCount, stats: await api.stats(page).then((s) => ({ hostiles: s.hostiles, paused: s.paused, combat: s.combat })) });
+  info(`selection tick: ${sel ? `${sel.hostiles} hostile(s) after ${sel.ms} ms` : 'none within 8 s'}`);
+  await api.setCombat(page, false);
+  await api.restore(page);
+  await sleep(60);
+
+  // ---- (11) Z restores, R reloads ------------------------------------------------------------------------
+  await api.setWeapon(page, 'hammer');
+  const sc11 = await api.rect(page, '#small-card');
+  const scPt11 = { x: sc11.left + 12, y: sc11.top + 12 };
+  await page.evaluate((p) => { const a = window.__crashScreen; a.smashAt(p.x, p.y); a.smashAt(p.x, p.y); }, scPt11);
+  const broken11 = await poll(() => api.broken(page, '#small-card'), 500, 15);
+  await page.keyboard.press('r');
+  await sleep(150);
+  const stillBroken = await api.broken(page, '#small-card');
+  await page.keyboard.press('z');
+  const zRestored = await poll(async () => (await api.stats(page)).broken === 0 && !(await api.broken(page, '#small-card')), 800, 20);
+  check('A.keys 11: "R" no longer restores (card stays broken); "Z" restores (broken 0, card back)', broken11 === true && stillBroken === true && zRestored === true, { broken11, stillBroken, zRestored });
+  const restoreTitle = await page.evaluate(() => { const h = document.querySelector('crs-hud, .crs-hud-host'); const b = h && h.shadowRoot ? [...h.shadowRoot.querySelectorAll('button')].find((x) => /복구|Restore/.test(x.textContent || '')) : null; return b ? b.title : null; });
+  check('A.keys 11: HUD 복구 button title reads (Z)', typeof restoreTitle === 'string' && /\(Z\)/.test(restoreTitle), restoreTitle);
+  await api.debug(page, { fastReload: false });
+  await api.setWeapon(page, 'pistol');
+  await api.smashAt(page, scPt11.x, scPt11.y);
+  const m11 = await api.ammo(page);
+  await page.keyboard.press('r');
+  const rl11 = await poll(async () => { const m = await api.ammo(page); return m.reloading ? m : null; }, 500, 15);
+  check('A.keys 11: "R" with a partly empty pistol (11/12) → ammo().reloading === true', m11.mag === 11 && !!rl11, { before: m11, after: rl11 || await api.ammo(page) });
+  await poll(async () => !(await api.ammo(page)).reloading, 1300, 30);
+  await api.debug(page, { fastReload: true });
+
+  // ---- (14) stress: 2 s smg hold + 10 sniper shots + 4 s of live combat ----------------------------------
+  await api.setCombat(page, true);
+  await api.restore(page);
+  await sleep(60);
+  await api.debug(page, { infiniteAmmo: true });
+  const err14 = log.pageErrors.length;
+  let peak14 = 0;
+  const sampleNodes = async () => { const n = await api.count(page, '[data-crs]'); if (n > peak14) peak14 = n; return n; };
+  await api.setWeapon(page, 'smg');
+  ap = await arenaPt(page);
+  await holdAt(page, ap, 2000, sampleNodes);
+  await api.setWeapon(page, 'sniper');
+  const sn14 = await page.evaluate((p) => { const a = window.__crashScreen; let n = 0; for (let i = 0; i < 10; i++) if (a.smashAt(p.x, p.y)) n++; return n; }, ap);
+  await api.debug(page, { noAttacks: false });
+  const forced14 = [await api.forceAttack(page, '#arena'), await api.forceAttack(page, '#boss')];
+  const t14 = Date.now();
+  while (Date.now() - t14 < 4000) { await sampleNodes(); await sleep(150); }
+  await api.debug(page, { noAttacks: true, infiniteAmmo: false });
+  const s14 = await api.stats(page);
+  const now14 = await api.count(page, '[data-crs]');
+  info(`stress 14: sniper shots ${sn14}/10, forced ${JSON.stringify(forced14)}, hostiles ${s14.hostiles}, orbs ${s14.orbs}, player hp ${(await api.player(page)).hp}, peak [data-crs] ${peak14}`);
+  check('A.stress 14: 2 s smg hold + 10 sniper shots + 4 s of live combat → no page errors', log.pageErrors.length === err14, log.pageErrors.slice(err14, err14 + 2));
+  check('A.stress 14: stats().lastError === null', s14.lastError === null, s14.lastError);
+  check('A.stress 14: [data-crs] nodes ≤ 400 throughout (peak and now)', peak14 <= 400 && now14 <= 400, { peak: peak14, now: now14 });
+  await api.restore(page);
+  await sleep(60);
+
+  // ---- (12) pause, layered Escape, exit during a hold with combat on --------------------------------------
+  await api.setCombat(page, true);
+  await api.restore(page);
+  await sleep(60);
+  await api.setWeapon(page, 'hammer');
+  const fg12 = await api.rect(page, '#figure');
+  await api.setPlayerPos(page, fg12.cx + sideOf(fg12) * 500, fg12.cy);
+  const tier12 = await api.forceAttack(page, '#figure');
+  const orbLive = await poll(async () => (await api.count(page, '.crs-orb')) >= 1, 300, 10);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  const pausedState = await poll(async () => { const s = await api.stats(page); const n = await api.count(page, '.crs-orb'); return s.paused === true && n === 0 ? { paused: s.paused, orbs: n } : null; }, 100, 10);
+  const forcePaused = await api.forceAttack(page, '#figure');
+  check('A.pause 12: window blur with an orb in flight → within 100 ms no .crs-orb and stats().paused === true', tier12 === 'shooter' && orbLive === true && !!pausedState, { tier: tier12, orbLive, state: pausedState || { paused: (await api.stats(page)).paused, orbs: await api.count(page, '.crs-orb') } });
+  check('A.pause 12: forceAttack while paused → null', forcePaused === null, forcePaused);
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const resumed = await poll(async () => (await api.stats(page)).paused === false, 300, 10);
+  check('A.pause 12: window focus → stats().paused === false', resumed === true, (await api.stats(page)).paused);
+  await api.setWeapon(page, 'sniper');
+  await api.scope(page, true);
+  await poll(async () => (await api.stats(page)).scoped === true, 300, 15);
+  await page.keyboard.press('Escape');
+  const esc1 = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
+  check('A.exit 12: Escape while scoped (combat on) → scope off, still active', esc1 === true && (await api.active(page)) === true, { scoped: (await api.stats(page)).scoped, active: await api.active(page) });
+  await api.restore(page);   // fresh hostile set (restore keeps the page active)
+  await api.setPlayerPos(page, fg12.cx + sideOf(fg12) * 500, fg12.cy);
+  const tier12b = await api.forceAttack(page, '#figure');   // an orb in flight at exit time
+  await api.setWeapon(page, 'smg');
+  ap = await arenaPt(page);
+  await page.mouse.move(ap.x, ap.y);
+  await page.mouse.down();
+  const holding12 = await poll(async () => (await api.stats(page)).holding === true, 300, 10);
+  await page.keyboard.press('Escape');
+  const inactive12 = await poll(async () => !(await api.active(page)), 1500, 20);
+  const nodes12 = await api.count(page, '[data-crs]');
+  const body12 = await api.bodyInline(page);
+  const pend12 = await api.pending(page);
+  await page.mouse.up();
+  await sleep(2000);
+  const orbs12 = await api.count(page, '.crs-orb');
+  const pend12b = await api.pending(page);
+  await settleRaf(page);
+  const raf12 = await api.pendingRaf(page);
+  check('A.exit 12: Escape during an smg hold with combat on and an orb in flight → inactive, zero [data-crs] nodes', tier12b === 'shooter' && holding12 === true && inactive12 === true && nodes12 === 0, { tier: tier12b, holding12, inactive12, nodes12 });
+  check('A.exit 12: body inline transform / transform-origin "" after the exit', body12.transform === '' && body12.transformOrigin === '', body12);
+  check('A.exit 12: no .crs-orb 2 s after the exit, zero live timers / intervals (right after and 2 s later) and zero live animation frames', orbs12 === 0 && pend12 === 0 && pend12b === 0 && raf12 === 0, { orbs12, pend12, pend12b, raf12 });
+  check('A.exit 12: no console errors and no page errors during the v1.2 block', log.consoleErrors.length === conBefore && log.pageErrors.length === errBefore, { console: log.consoleErrors.slice(conBefore, conBefore + 2), page: log.pageErrors.slice(errBefore, errBefore + 2) });
+  // re-activate for the v1 blocks that follow (A.escape 16 needs an active page)
+  const rOn = await page.evaluate(contentJs);
+  check('A.exit 12: re-evaluating content.js after the exit → "on" again', rOn === 'on', rOn);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
+  await api.applyPreset(page, 'default');
+  await api.setWeapon(page, 'hammer');
+  await api.setPower(page, 1);
+  await api.restore(page);
+  await sleep(100);
+}
+
+// ---------------------------------------------------------------------------
+// Suite B — strict CSP + Trusted Types
+// ---------------------------------------------------------------------------
+async function suiteB(browser, origin, contentCss, contentJs) {
+  console.log('\n=== Suite B: strict CSP + Trusted Types (/strict) ===');
+  const page = await browser.newPage();
+  await page.setViewport(VIEWPORT);
+  const log = hookPage(page);
+  await installViolationCounter(page);
+  const resp = await page.goto(`${origin}/strict`, { waitUntil: 'load' });
+  check('B.route: /strict served with the CSP header', (resp.headers()['content-security-policy'] || '') === STRICT_CSP, resp.headers()['content-security-policy']);
+  const styled = await page.evaluate(() => {
+    const big = document.getElementById('big-card');
+    const cs = getComputedStyle(big);
+    return { w: big.getBoundingClientRect().width, radius: cs.borderRadius, btn: window.__btnClicks };
+  });
+  check('B.route: fixture fully styled under strict CSP (fixture.css applied, fixture.js ran)', styled.w >= 500 && styled.radius !== '0px' && styled.btn === 0, styled);
+  const v0 = await violations(page);
+  check('B.route: zero securitypolicyviolation events before injection', v0.length === 0, v0[0]);
+
+  const client = await injectCss(page, contentCss);
+  await page.evaluate(TIMER_LEDGER);
+  await page.evaluate(chromeShim(EN_MESSAGES));   // English locale: the longer labels must fit the HUD (F9)
+  const r1 = await page.evaluate(contentJs);
+  check('B.inject: content.js returns "on" under strict CSP', r1 === 'on', r1);
+  try { await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true }); } catch (_) { /* reported by A.inject */ }
+  check('B.inject: active, canvas and HUD present', (await api.active(page)) && (await api.has(page, '.crs-canvas')) && (await page.evaluate(() => { const h = document.querySelector('crs-hud, .crs-hud-host'); return !!(h && h.shadowRoot); })));
+  check('B.inject: HUD panel is styled (non-transparent background inside the shadow root)', await page.evaluate(() => {
+    const h = document.querySelector('crs-hud, .crs-hud-host');
+    if (!h || !h.shadowRoot) return false;
+    return [...h.shadowRoot.querySelectorAll('*')].some((el) => { const b = getComputedStyle(el).backgroundColor; return b && b !== 'rgba(0, 0, 0, 0)' && b !== 'transparent'; });
+  }));
+  const hudEn = await page.evaluate(() => {
+    const h = document.querySelector('crs-hud, .crs-hud-host');
+    if (!h || !h.shadowRoot) return null;
+    const panel = h.shadowRoot.querySelector('.panel');
+    const pr = panel.getBoundingClientRect();
+    const btns = [...h.shadowRoot.querySelectorAll('button')];
+    return {
+      labels: btns.map((b) => `${b.textContent}|${b.title || b.getAttribute('aria-label') || ''}`),
+      ids: [...h.shadowRoot.querySelectorAll('button[data-weapon]')].map((b) => b.getAttribute('data-weapon')),
+      panelW: pr.width,
+      overflow: btns.filter((b) => b.scrollWidth > b.clientWidth || b.getBoundingClientRect().right > pr.right + 0.5 || b.getBoundingClientRect().left < pr.left - 0.5).map((b) => b.textContent),
+    };
+  });
+  check('B.hud: English labels served through chrome.i18n (button text or title: Hammer / Collapse / Sniper)', !!hudEn && hudEn.labels.some((l) => l.includes('Hammer')) && hudEn.labels.some((l) => l.includes('Collapse')) && hudEn.labels.some((l) => l.includes('Sniper')), hudEn && hudEn.labels);
+  check('B.hud: 10 weapon buttons in the default loadout order', !!hudEn && hudEn.ids.join(',') === WEAPON_IDS.join(','), hudEn && hudEn.ids);
+  check('B.hud: no HUD button overflows its box or the panel in English (panel 284–380 px)', !!hudEn && hudEn.overflow.length === 0 && hudEn.panelW >= 284 && hudEn.panelW <= 380, hudEn);
+
+  // smash a few times with each weapon
+  const sc = await api.rect(page, '#small-card');
+  await page.mouse.click(sc.left + 12, sc.top + 12);
+  const lp = await api.rect(page, '#long-para');
+  await page.mouse.click(lp.cx, lp.cy);
+  await poll(() => api.broken(page, '#long-para'), 1000);
+  const words = await api.count(page, '.crs-word');
+  check('B.hammer: paragraph shattered into word pieces', words >= 5, words);
+  await api.setMode(page, 'bomb');
+  const spot = await api.rect(page, '#bomb-spot');
+  await page.mouse.click(spot.cx, spot.cy);
+  await poll(async () => (await api.count(page, '#cluster .leaf[data-crs-broken]')) >= 2, 500);
+  check('B.bomb: cluster leaves broken', (await api.count(page, '#cluster .leaf[data-crs-broken]')) >= 2);
+  await api.setMode(page, 'gun');
+  check('B.gun: setMode("gun") → pistol (alias)', (await api.weapon(page)) === 'pistol', await api.weapon(page));
+  const ic = await api.rect(page, '#demo-img');
+  const imgMax = (await api.hpOf(page, '#demo-img')).max;
+  const nImg = hitsFor(imgMax, (await weaponTable(page)).dmg('pistol'));
+  for (let k = 0; k < nImg; k++) {
+    await page.mouse.click(ic.cx, ic.cy);
+    await sleep(120);
+  }
+  check(`B.gun: image broken after ${nImg} pistol shots (max ${imgMax} / 25)`, await poll(() => api.broken(page, '#demo-img'), 1000));
+  // v1.1 nodes whose CSSOM styling would be the first to trip style-src / Trusted Types: smg hold (numbers, tints,
+  // chips), a sword slash (preview / streak), a rocket (streak, XL ring, fire-less AoE)
+  const sB0 = await api.stats(page);
+  await api.setWeapon(page, 'smg');
+  const apB = await arenaPt(page);
+  await holdAt(page, apB, 200);
+  await api.setWeapon(page, 'sword');
+  const bcB = await api.rect(page, '#big-card');
+  const scB = await api.rectNoScroll(page, '#small-card');
+  await page.mouse.move(bcB.left + 12, bcB.top + 12);
+  await page.mouse.down();
+  await page.mouse.move(scB.left + 12, scB.top + 12, { steps: 6 });
+  await page.mouse.up();
+  await sleep(300);   // let the slash jolt on #big-card (reactDamage, 260 ms) settle before measuring its rect
+  await api.setWeapon(page, 'rocket');
+  const bcB2 = await api.rect(page, '#big-card');
+  await page.mouse.click(bcB2.left + 12, bcB2.top + 12);
+  await sleep(250);
+  const sB1 = await api.stats(page);
+  check('B.weapons: smg hold, sword drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rocket)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots] });
+  // v1.2 nodes whose CSSOM styling would be the next to trip style-src / Trusted Types: the scope overlay plus the
+  // 2× body transform, the sniper tracer, a hostile aura + orb, the player HUD and the KO overlay
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'sniper');
+  const boB = await api.rect(page, '#boss');
+  await page.mouse.move(boB.cx, boB.cy);
+  await api.scope(page, true);
+  const scopedB = await poll(async () => (await api.stats(page)).scoped === true, 800, 20);
+  const bodyBon = await api.bodyInline(page);
+  await api.smashAt(page, boB.cx, boB.cy);
+  await sleep(80);
+  await api.scope(page, false);
+  const bodyBoff = await api.bodyInline(page);
+  check('B.scope: the scope overlay and the 2× body transform build under strict CSP and restore exactly', scopedB === true && /scale\(2\)/.test(bodyBon.transform) && bodyBoff.transform === '' && bodyBoff.transformOrigin === '' && !(await api.has(page, '.crs-scope')), { scopedB, on: bodyBon, off: bodyBoff });
+  await api.setCombat(page, true);
+  const fgB = await api.rect(page, '#figure');
+  const farB = fgB.cx + 500 <= VIEWPORT.width - 10 ? fgB.cx + 500 : fgB.cx - 500;
+  await api.setPlayerPos(page, farB, fgB.cy);
+  const tierB = await api.forceAttack(page, '#figure');
+  const auraB = await poll(async () => (await api.count(page, '.crs-hostile')) >= 1 && (await api.count(page, '.crs-orb')) >= 1, 1000, 20);
+  const playerHudB = await api.hudQ(page, '.crs-player');
+  await api.setPlayerPos(page, fgB.cx, fgB.cy);
+  await api.setPlayerHp(page, 5);
+  await api.forceAttack(page, '#figure');
+  const koB = await poll(async () => { const k = await api.hudQ(page, '.crs-ko'); return !!(k && k.visible); }, 2500, 30);
+  await page.keyboard.press('Enter');
+  const koGoneB = await poll(async () => { const k = await api.hudQ(page, '.crs-ko'); return !k || !k.visible; }, 1200, 20);
+  await api.setWeapon(page, 'hammer');
+  check('B.combat: hostile aura, orb, player HUD and the KO overlay all build under strict CSP, and Enter restarts', tierB === 'shooter' && auraB === true && !!playerHudB && playerHudB.visible === true && koB === true && koGoneB === true, { tier: tierB, aura: auraB, playerHud: playerHudB && playerHudB.visible, ko: koB, koGone: koGoneB });
+  await api.setMode(page, 'collapse');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.mouse.click(VIEWPORT.width / 2, VIEWPORT.height / 2);
+  await sleep(1200);
+  check('B.collapse: broke several elements', (await api.stats(page)).broken >= 5, (await api.stats(page)).broken);
+  await page.screenshot({ path: path.join(OUT, 'strict.png') });
+  await api.restore(page);
+  await sleep(100);
+  check('B.restore: no debris, no [data-crs-broken]', (await api.count(page, '.crs-debris')) === 0 && (await api.count(page, '[data-crs-broken]')) === 0);
+  await page.keyboard.press('Escape');
+  check('B.exit: Escape → inactive, no [data-crs] nodes', await poll(async () => !(await api.active(page)) && (await api.count(page, '[data-crs]')) === 0, 1500));
+  check('B.exit: zero live content-script timers after Escape (ledger)', (await api.pending(page)) === 0, await api.pending(page));
+  await settleRaf(page);
+  check('B.exit: zero live animation frames after Escape (RAF ledger)', (await api.pendingRaf(page)) === 0, await api.pendingRaf(page));
+
+  const v = await violations(page);
+  check('B.csp: zero securitypolicyviolation events', v.length === 0, v[0]);
+  check('B.console: zero page errors', log.pageErrors.length === 0, log.pageErrors[0]);
+  check('B.console: zero error-level console messages', log.consoleErrors.length === 0, log.consoleErrors[0]);
+  check('B.stats: stats().lastError === null for the whole suite', (await api.stats(page)).lastError === null, (await api.stats(page)).lastError);
+  try { await client.detach(); } catch (_) { /* ignore */ }
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
+// Suite C — real extension wiring
+// ---------------------------------------------------------------------------
+function prepareExtensionCopy() {
+  const dst = path.join(OUT, 'ext');
+  fs.rmSync(dst, { recursive: true, force: true });
+  fs.mkdirSync(dst, { recursive: true });
+  for (const name of ['manifest.json', 'background.js', 'content.js', 'content.css', 'icons', '_locales']) {
+    const src = path.join(ROOT, name);
+    if (fs.existsSync(src)) fs.cpSync(src, path.join(dst, name), { recursive: true });
+  }
+  const manifestPath = path.join(dst, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.host_permissions = ['http://127.0.0.1/*'];   // ONLY in the test copy (activeTab needs a real gesture)
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  return dst;
+}
+
+async function suiteC(puppeteer, origin) {
+  console.log('\n=== Suite C: real extension wiring (test/out/ext) ===');
+  const ext = prepareExtensionCopy();
+  const browser = await puppeteer.launch({
+    headless: true,
+    enableExtensions: true,
+    args: ['--no-first-run', '--no-default-browser-check', `--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport(VIEWPORT);
+    const log = hookPage(page);
+    await page.goto(`${origin}/`, { waitUntil: 'load' });
+    const swTarget = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('/background.js'), { timeout: 10000 });
+    const worker = await swTarget.worker();
+    check('C.sw: service worker target found', !!worker);
+    const reg = await worker.evaluate(() => ({
+      onClicked: chrome.action.onClicked.hasListeners(),
+      onMessage: chrome.runtime.onMessage.hasListeners(),
+      onUpdated: chrome.tabs.onUpdated.hasListeners(),
+    }));
+    check('C.sw: action.onClicked / runtime.onMessage / tabs.onUpdated listeners registered', reg.onClicked && reg.onMessage && reg.onUpdated, reg);
+    const extManifest = JSON.parse(fs.readFileSync(path.join(ext, 'manifest.json'), 'utf8'));
+    check('C.manifest: commands._execute_action declared (keyboard shortcut → action.onClicked)', !!(extManifest.commands && extManifest.commands._execute_action), extManifest.commands);
+
+    const tOnC = Date.now();
+    const r1 = await worker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: 'http://127.0.0.1/*' });
+      if (!tab) return { id: null, res: 'no-tab' };
+      return { id: tab.id, url: tab.url, res: await self.__crashScreenToggle(tab) };
+    });
+    check('C.toggle: __crashScreenToggle(tab) → "on"', r1.res === 'on', r1);
+    const tabId = r1.id;
+    check('C.page: .crs-canvas appears', await poll(() => api.has(page, '.crs-canvas'), 3000));
+    const badgeOn = await poll(async () => {
+      const b = await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId);
+      return b === 'ON' ? b : null;
+    }, 2000, 50);
+    check('C.badge: getBadgeText → "ON"', badgeOn === 'ON', badgeOn);
+    check('C.hud: panel background not transparent', await poll(() => page.evaluate(() => {
+      const h = document.querySelector('crs-hud, .crs-hud-host');
+      if (!h || !h.shadowRoot) return false;
+      return [...h.shadowRoot.querySelectorAll('*')].some((el) => { const b = getComputedStyle(el).backgroundColor; return b && b !== 'rgba(0, 0, 0, 0)' && b !== 'transparent'; });
+    }), 2000));
+
+    // one real hammer click on a 25-hp cluster leaf (isolated world: DOM-only assertions)
+    const LEAF = '#cluster .leaf:first-child';
+    const leaf = await api.rect(page, LEAF);
+    await page.mouse.click(leaf.cx, leaf.cy);
+    check('C.smash: real pointer click → .crs-debris appears', await poll(async () => (await api.count(page, '.crs-debris')) >= 1, 2000));
+    check('C.smash: cluster leaf has data-crs-broken', await api.broken(page, LEAF));
+    await sleep(800);
+    const graceC = await page.evaluate(() => ({ hostiles: document.querySelectorAll('.crs-hostile').length, orbs: document.querySelectorAll('.crs-orb').length }));
+    check('C.grace: the DOM-only assertions and extension.png were taken inside the activation grace (no .crs-hostile / .crs-orb yet)', graceC.hostiles === 0 && graceC.orbs === 0, { ...graceC, msSinceToggleOn: Date.now() - tOnC });
+    await page.screenshot({ path: path.join(OUT, 'extension.png') });
+
+    // same-document navigations report tabs.onUpdated status 'loading' too — the badge must survive them
+    await page.evaluate(() => { location.hash = 'crs-hash'; });
+    await poll(() => worker.evaluate((id) => chrome.tabs.get(id).then((t) => t.status === 'complete' && /#crs-hash/.test(t.url || '')), tabId), 2000, 50);
+    await sleep(300);
+    const badgeHash = await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId);
+    check('C.badge: still "ON" after a hash change (onUpdated loading/complete) while active', badgeHash === 'ON' && (await api.has(page, '.crs-root')), { badge: badgeHash, root: await api.has(page, '.crs-root') });
+    await page.evaluate(() => { history.pushState({}, '', '/spa-route'); });
+    await poll(() => worker.evaluate((id) => chrome.tabs.get(id).then((t) => t.status === 'complete' && /spa-route/.test(t.url || '')), tabId), 2000, 50);
+    await sleep(300);
+    const badgePush = await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId);
+    check('C.badge: still "ON" after history.pushState while active', badgePush === 'ON', badgePush);
+    await page.evaluate(() => { history.replaceState({}, '', '/'); });
+
+    const r2 = await worker.evaluate(async (id) => {
+      const [tab] = await chrome.tabs.query({ url: 'http://127.0.0.1/*' });
+      return self.__crashScreenToggle(tab || { id });
+    }, tabId);
+    check('C.toggle: second toggle → "off"', r2 === 'off', r2);
+    const badgeOff = await poll(async () => {
+      const b = await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId);
+      return b === '' ? 'cleared' : null;
+    }, 2000, 50);
+    check('C.badge: getBadgeText → "" after off', badgeOff === 'cleared', badgeOff);
+    check('C.page: no [data-crs] nodes after off', await poll(async () => (await api.count(page, '[data-crs]')) === 0, 2000));
+    check('C.page: cluster leaf restored (no data-crs-broken, visible)', !(await api.broken(page, LEAF)) && (await api.visibility(page, LEAF)) === 'visible');
+
+    const inj = await worker.evaluate(() => self.__crashScreenIsInjectable('chrome://extensions'));
+    check('C.blocked: __crashScreenIsInjectable("chrome://extensions") === false', inj === false, inj);
+    const blocked = await worker.evaluate(async (id) => self.__crashScreenToggle({ id, url: 'chrome://extensions' }), tabId);
+    check('C.blocked: toggle({id, url:"chrome://extensions"}) → "blocked"', blocked === 'blocked', blocked);
+    const flash = await poll(async () => ((await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId)) === '✕' ? '✕' : null), 1000, 50);
+    check('C.blocked: badge flashes "✕"', flash === '✕', flash);
+    const cleared = await poll(async () => ((await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId)) === '' ? 'cleared' : null), 2500, 50);
+    check('C.blocked: "✕" badge cleared within ~1.5 s', cleared === 'cleared', cleared);
+    const ping = await worker.evaluate(() => new Promise((res) => {
+      try { chrome.runtime.sendMessage({ type: 'crash:ping' }, (r) => res(r)); } catch (e) { res(String(e)); }
+    }));
+    info(`crash:ping → ${JSON.stringify(ping)} (informational; the worker cannot message itself)`);
+    check('C.console: zero page errors', log.pageErrors.length === 0, log.pageErrors[0]);
+    check('C.console: zero error-level console messages', log.consoleErrors.length === 0, log.consoleErrors[0]);
+  } finally {
+    await browser.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+(async () => {
+  const guard = setTimeout(() => {
+    console.log('FAIL runtime budget exceeded (100 s)');
+    console.log(`SUMMARY: ${results.filter((r) => r.ok).length} passed, ${results.filter((r) => !r.ok).length + 1} failed (timeout)`);
+    process.exit(1);
+  }, 99000);
+  guard.unref();
+
+  const found = resolvePuppeteer();
+  if (!found) {
+    console.error('FAIL puppeteer not found. Set PUPPETEER_PATH=/path/to/node_modules/puppeteer (or have it in ~/.npm/_npx/*/node_modules/puppeteer).');
+    process.exit(2);
+  }
+  const { puppeteer } = found;
+  console.log(`puppeteer: ${found.from}`);
+
+  fs.mkdirSync(OUT, { recursive: true });
+  const missing = ['content.js', 'content.css', 'background.js', 'manifest.json'].filter((f) => !fs.existsSync(path.join(ROOT, f)));
+  if (missing.length) {
+    check(`product files present (${missing.join(', ')} missing)`, false);
+    console.log(`SUMMARY: 0 passed, 1 failed in ${elapsed()} s`);
+    process.exit(1);
+  }
+  const contentCss = fs.readFileSync(path.join(ROOT, 'content.css'), 'utf8');
+  const contentJs = fs.readFileSync(path.join(ROOT, 'content.js'), 'utf8');
+
+  const { server, origin } = await startServer();
+  console.log(`server: ${origin}`);
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({ headless: true, args: ['--no-first-run', '--no-default-browser-check'] });
+    try { await suiteA(browser, origin, contentCss, contentJs); } catch (e) { check('Suite A completed without exceptions', false, String(e && e.stack || e)); }
+    try { await suiteB(browser, origin, contentCss, contentJs); } catch (e) { check('Suite B completed without exceptions', false, String(e && e.stack || e)); }
+    await browser.close(); browser = null;
+    try { await suiteC(puppeteer, origin); } catch (e) { check('Suite C completed without exceptions', false, String(e && e.stack || e)); }
+  } finally {
+    if (browser) { try { await browser.close(); } catch (_) { /* ignore */ } }
+    server.close();
+  }
+
+  const secs = elapsed();
+  check('total runtime < 100 s', Number(secs) < 100, secs);
+  const passed = results.filter((r) => r.ok).length;
+  const failed = results.length - passed;
+  console.log(`\nSUMMARY: ${passed} passed, ${failed} failed, ${results.length} total in ${secs} s`);
+  if (failed) for (const r of results.filter((x) => !x.ok)) console.log(`  FAILED: ${r.name}`);
+  process.exit(failed ? 1 : 0);
+})().catch((e) => {
+  console.error('FATAL', e);
+  process.exit(1);
+});
