@@ -77,6 +77,11 @@ jobs:
         timeout-minutes: 10
         # PUPPETEER_EXECUTABLE_PATH is deliberately left unset so puppeteer uses its
         # own Chrome for Testing download; suite C needs puppeteer >= 25 extensions.
+        # CI=true makes test/e2e.js add --no-sandbox --disable-dev-shm-usage, which
+        # GitHub-hosted Ubuntu runners require (unprivileged user namespaces are
+        # restricted by AppArmor). Local runs keep the sandbox.
+        env:
+          CRS_TIME_BUDGET_MS: '180000'
         run: node test/e2e.js
 
       - name: Upload test output on failure

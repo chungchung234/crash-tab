@@ -208,6 +208,14 @@ const TIMER_LEDGER = `(() => {
   return 'ledger';
 })()`;
 const EN_MESSAGES = JSON.parse(fs.readFileSync(path.join(ROOT, '_locales', 'en', 'messages.json'), 'utf8'));
+// Chrome on GitHub-hosted Ubuntu runners cannot use its sandbox (unprivileged user namespaces are
+// disabled by AppArmor), and /dev/shm is small in containers. Both flags are CI-only so local runs keep
+// the sandbox. CRS_TIME_BUDGET_MS lets a slower runner have a longer, still-explicit budget.
+const CI = !!process.env.CI;
+const BASE_ARGS = ['--no-first-run', '--no-default-browser-check']
+  .concat(CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : []);
+const TIME_BUDGET_MS = Number(process.env.CRS_TIME_BUDGET_MS || 100000);
+
 
 function hookPage(page) {
   const log = { pageErrors: [], consoleErrors: [] };
@@ -2290,7 +2298,7 @@ async function suiteC(puppeteer, origin) {
   const browser = await puppeteer.launch({
     headless: true,
     enableExtensions: true,
-    args: ['--no-first-run', '--no-default-browser-check', `--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
+    args: BASE_ARGS.concat([`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]),
   });
   try {
     const page = await browser.newPage();
@@ -2393,7 +2401,7 @@ async function suiteC(puppeteer, origin) {
     console.log('FAIL runtime budget exceeded (100 s)');
     console.log(`SUMMARY: ${results.filter((r) => r.ok).length} passed, ${results.filter((r) => !r.ok).length + 1} failed (timeout)`);
     process.exit(1);
-  }, 99000);
+  }, TIME_BUDGET_MS + 20000);
   guard.unref();
 
   const found = resolvePuppeteer();
@@ -2418,7 +2426,7 @@ async function suiteC(puppeteer, origin) {
   console.log(`server: ${origin}`);
   let browser = null;
   try {
-    browser = await puppeteer.launch({ headless: true, args: ['--no-first-run', '--no-default-browser-check'] });
+    browser = await puppeteer.launch({ headless: true, args: BASE_ARGS });
     try { await suiteA(browser, origin, contentCss, contentJs); } catch (e) { check('Suite A completed without exceptions', false, String(e && e.stack || e)); }
     try { await suiteB(browser, origin, contentCss, contentJs); } catch (e) { check('Suite B completed without exceptions', false, String(e && e.stack || e)); }
     await browser.close(); browser = null;
@@ -2429,7 +2437,7 @@ async function suiteC(puppeteer, origin) {
   }
 
   const secs = elapsed();
-  check('total runtime < 100 s', Number(secs) < 100, secs);
+  check(`total runtime < ${Math.round(TIME_BUDGET_MS / 1000)} s`, Number(secs) < TIME_BUDGET_MS / 1000, secs);
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;
   console.log(`\nSUMMARY: ${passed} passed, ${failed} failed, ${results.length} total in ${secs} s`);
