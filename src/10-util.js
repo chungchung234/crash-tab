@@ -52,7 +52,7 @@
   /* i18n with hard-coded Korean fallbacks */
   const KO = {
     hudTitle: '화면부수기',
-    weaponHammer: '망치', weaponPistol: '권총', weaponSmg: '기관총', weaponSniper: '저격총', weaponAxe: '도끼', weaponSword: '검', weaponBomb: '폭탄',
+    weaponHammer: '망치', weaponPistol: '권총', weaponSmg: '기관총', weaponSniper: '저격총', weaponAxe: '도끼', weaponKatana: '카타나', weaponBomb: '폭탄',
     weaponRocket: '로켓', weaponFlame: '화염방사기', weaponFlameShort: '화염', weaponCollapse: '붕괴',
     hudDamage: '피해', critLabel: '치명타!', headshotLabel: '헤드샷!', unitPerShot: '/발', unitPerTick: '/틱',
     btnSound: '소리', btnMute: '음소거', btnRestore: '복구', btnExit: '종료',

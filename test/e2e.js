@@ -11,7 +11,7 @@
  *   B. strict CSP + TT   — fixture on "/strict" (default-src 'self'; require-trusted-types-for 'script')
  *   C. real extension    — copy of the extension with host_permissions for 127.0.0.1, service worker toggle
  *
- * v1.1: size-based HP (`api.hpOf`), weapons (`api.weapons()`), hold weapons (smg / flame), sword slashes
+ * v1.1: size-based HP (`api.hpOf`), weapons (`api.weapons()`), hold weapons (smg / flame), katana slashes
  * (`api.slash`), rocket AoE, hit feedback (.crs-dmg / .crs-hit).
  * v1.2 (SPEC-v3 §8 / A13): ten weapons incl. the sniper (`api.scope`, RMB / Shift chord, spread, bolt action),
  * ammo + reload (`api.ammo` / `api.reload`, `R`), loadouts (`api.loadout` / `setLoadout` / `applyPreset`, keys
@@ -38,17 +38,17 @@ const T0 = Date.now();
 
 // v1.2 weapon table (SPEC-v3 A1 / A6) — WEAPON_IDS is the DEFAULT PRESET order (slots 1–10 → keys 1…9, 0);
 // damages / cooldowns / magazines are cross-checked against api.weapons()
-const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'sword', 'bomb', 'rocket', 'flame', 'collapse'];
+const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'];
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
-const SPEC_DMG = { hammer: 65, pistol: 25, smg: 22, sniper: 200, axe: 130, sword: 60, bomb: 190, rocket: 260, flame: 15 };
+const SPEC_DMG = { hammer: 65, pistol: 25, smg: 22, sniper: 200, axe: 130, katana: 60, bomb: 190, rocket: 260, flame: 15 };
 const SPEC_COOLDOWN = { hammer: 0, pistol: 0, sniper: 600, axe: 550, bomb: 700, rocket: 1200, collapse: 2000 };
 // mag / reloadMs per weapon (null = melee ∞); flame = 100 fuel, collapse = 1 charge
-const SPEC_MAG = { hammer: [null, null], axe: [null, null], sword: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [5, 2000], bomb: [3, 1800], rocket: [2, 1500], flame: [100, 2500], collapse: [1, 5000] };
+const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [5, 2000], bomb: [3, 1800], rocket: [2, 1500], flame: [100, 2500], collapse: [1, 5000] };
 const PRESETS = {
   default: WEAPON_IDS,
-  assault: ['smg', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'sword', 'collapse'],
+  assault: ['smg', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'katana', 'collapse'],
 };
-const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: '저격총', axe: '도끼', sword: '검', bomb: '폭탄', rocket: '로켓', flame: '화염', collapse: '붕괴' };
+const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: '저격총', axe: '도끼', katana: '카타나', bomb: '폭탄', rocket: '로켓', flame: '화염', collapse: '붕괴' };
 
 // v1.5 per-weapon stats (SPEC-weapons §3.1) read back from api.weapons(); sniper critChance is the
 // UNSCOPED base value (0.10 — the 0.25-while-aiming bonus is behavioural, not a static field, and is not
@@ -60,13 +60,13 @@ const SPEC_STATS = {
   smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40 },
   sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, knockback: 1.3, moveSpeed: 0.75, falloff: 0 },
   axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0 },
-  sword:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0 },
+  katana:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0 },
   bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0, aoeIgnoresCover: true },
   rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0, aoeIgnoresCover: true },
   flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55 },
   collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0 },
 };
-const SPEC_PIERCE = { hammer: 0, pistol: 0, smg: 0, sniper: 2, axe: 0, sword: 0, bomb: 0, rocket: 0, flame: 0, collapse: Infinity };
+const SPEC_PIERCE = { hammer: 0, pistol: 0, smg: 0, sniper: 2, axe: 0, katana: 0, bomb: 0, rocket: 0, flame: 0, collapse: Infinity };
 const pierceMatches = (got, want) => (want === Infinity ? (got === Infinity || got === 'all' || (typeof got === 'number' && got >= 999)) : got === want);
 
 // ---------------------------------------------------------------------------
@@ -170,6 +170,11 @@ const chromeShim = (msgs) => `(() => {
       lastError: undefined,
       sendMessage: (m) => { messages.push(m); return Promise.resolve(undefined); },
       onMessage: { addListener() {}, removeListener() {} },
+      // SPEC-weapon-art §5 / §9 item 5: weaponArt() resolves user PNG art through chrome.runtime.getURL.
+      // Real MV3 hands back a chrome-extension:// URL; the shim mirrors that shape so the <img> branch can
+      // be exercised. Only the §5 probe page ever reaches it (the packaged file does not exist here, so the
+      // <img> fails to load — that page is deliberately NOT one of the console-watched ones).
+      getURL: (p) => 'chrome-extension://crashscreentest/' + String(p == null ? '' : p).replace(/^\\//, ''),
     },
     storage: {
       sync: {
@@ -483,6 +488,55 @@ const api = {
     const paths = [...node.querySelectorAll('path')].map((p) => p.getAttribute('d') || '');
     return { ok: true, tag, childCount: node.children.length, viewBox: node.getAttribute('viewBox') || '', pathCount: paths.length, pathSig: paths.join('|') };
   }, id, size),
+  // SPEC-weapon-art §9: a measuring probe over one weaponArt() result. The node is parked offscreen so
+  // getBBox() is real layout, not a guess; `parts` is the union bbox + path data per [data-part], which is
+  // how the claw V, the axe arc, the body taper, the pick and the haft fraction are checked below without
+  // the test having to trust a number the art module merely claims.
+  weaponArtProbe: (page, id, size, lod) => page.evaluate((i, s, l) => {
+    const a = window.__crashScreen;
+    if (!a || typeof a.weaponArt !== 'function') return 'missing:weaponArt';
+    let node;
+    try { node = l ? a.weaponArt(i, s, l) : a.weaponArt(i, s); } catch (e) { return 'threw:' + String(e && e.message || e); }
+    if (!node || typeof node.tagName !== 'string' || node.tagName.toLowerCase() !== 'svg') return { ok: false, tag: node && node.tagName };
+    const host = document.createElement('div');
+    host.style.position = 'fixed'; host.style.left = '-9999px'; host.style.top = '0';
+    host.appendChild(node);
+    document.body.appendChild(host);
+    const inDefs = new Set(Array.from(node.querySelectorAll('defs, defs *')));
+    const drawn = Array.from(node.querySelectorAll('*')).filter((n) => !inDefs.has(n));
+    const bb = (n) => { try { const b = n.getBBox(); return { x: b.x, y: b.y, w: b.width, h: b.height }; } catch (e) { return null; } };
+    let root = { x: 0, y: 0, w: 0, h: 0 };
+    try { const r = node.getBBox(); root = { x: r.x, y: r.y, w: r.width, h: r.height }; } catch (e) { /* ignore */ }
+    const parts = {};
+    const fills = [];
+    for (const n of drawn) {
+      const f = n.getAttribute('fill');
+      if (f) fills.push(f);
+      const k = n.getAttribute('data-part');
+      if (!k) continue;
+      const b = bb(n);
+      if (!b) continue;
+      const e = parts[k] || (parts[k] = { n: 0, x: 1e9, y: 1e9, x2: -1e9, y2: -1e9, ds: [] });
+      e.n++;
+      e.x = Math.min(e.x, b.x); e.y = Math.min(e.y, b.y);
+      e.x2 = Math.max(e.x2, b.x + b.w); e.y2 = Math.max(e.y2, b.y + b.h);
+      if (n.tagName.toLowerCase() === 'path' && e.ds.length < 2) e.ds.push(n.getAttribute('d') || '');
+    }
+    for (const k of Object.keys(parts)) { const e = parts[k]; e.w = e.x2 - e.x; e.h = e.y2 - e.y; }
+    const area = Math.max(1, root.w * root.h);
+    const strokes = drawn.filter((n) => { const v = n.getAttribute('stroke'); return v && v !== 'none'; })
+      .map((n) => { const b = bb(n); return b ? (b.w * b.h) / area : 0; });
+    const paths = Array.from(node.querySelectorAll('path')).map((p) => p.getAttribute('d') || '');
+    host.remove();
+    return {
+      ok: true, lod: node.getAttribute('data-lod') || '', viewBox: node.getAttribute('viewBox') || '',
+      width: node.getAttribute('width'), height: node.getAttribute('height'),
+      childCount: node.children.length, drawn: drawn.length,
+      grads: node.querySelectorAll('linearGradient, radialGradient').length,
+      strokeCount: strokes.length, strokeMax: strokes.length ? Math.max.apply(null, strokes) : 0,
+      root, parts, fills, pathCount: paths.length, pathSig: paths.join('|')
+    };
+  }, id, size, lod || null),
   // `.crs-viewmodel` presence/shape, plus its live computed transform decomposed into translateX/Y (px) and
   // rotation (deg) via DOMMatrix — robust to whatever transform functions the implementation composes
   // (translate + rotate, a single matrix(), etc.), since items 4/5/14 only care about the net displacement.
@@ -677,7 +731,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   });
   check('A.hud: 10 weapon buttons carry data-weapon ids in default-loadout order, hammer aria-pressed', !!hud && hud.ids.join(',') === WEAPON_IDS.join(',') && hud.pressed.join(',') === 'hammer', hud && { ids: hud.ids, pressed: hud.pressed });
   check('A.hud: grid is 2 × 5 (5 columns) and every button shows its slot badge 1…9, 0', !!hud && hud.cols === 5 && hud.badges.join(',') === KEYS.join(','), hud && { cols: hud.cols, badges: hud.badges });
-  check('A.hud: Korean labels (망치 · 권총 · 기관총 · 저격총 · 도끼 · 검 · 폭탄 · 로켓 · 화염 · 붕괴 · 피해 · 로드아웃 · 전투) present (text or button titles)', !!hud && ['망치', '권총', '기관총', '저격총', '도끼', '검', '폭탄', '로켓', '화염', '붕괴', '피해', '로드아웃', '전투'].every((t) => hud.text.includes(t)), hud && hud.text.slice(0, 300));
+  check('A.hud: Korean labels (망치 · 권총 · 기관총 · 저격총 · 도끼 · 카타나 · 폭탄 · 로켓 · 화염 · 붕괴 · 피해 · 로드아웃 · 전투) present (text or button titles)', !!hud && ['망치', '권총', '기관총', '저격총', '도끼', '카타나', '폭탄', '로켓', '화염', '붕괴', '피해', '로드아웃', '전투'].every((t) => hud.text.includes(t)), hud && hud.text.slice(0, 300));
   check('A.hud: no 공격력 (attack-power) text and no -/+ power buttons anywhere in the HUD (v1.3 §1)', !!hud && hud.noPowerButtons && !hud.text.includes('공격력'), hud && { noPowerButtons: hud.noPowerButtons, hasLabel: hud.text.includes('공격력') });
 
   // --- hammer on the small ("known") card — A31 (99 hp → 2 hits at 65) ---------------------------
@@ -1066,10 +1120,10 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.flame 7: no further ticks after the mid-hold restore (shots stays 0 over 200 ms)', midHold.shots === 0 && midHold2.shots === 0 && midHold2.holding === false, { at0: midHold.shots, at200: midHold2.shots });
   await page.mouse.up();
 
-  // (8) sword: api.slash across both cards, real drag, two-piece split of a leaf (+ sword.png)
+  // (8) katana: api.slash across both cards, real drag, two-piece split of a leaf (+ katana.png)
   await api.restore(page);
   await sleep(60);
-  await api.setWeapon(page, 'sword');
+  await api.setWeapon(page, 'katana');
   const bc8 = await api.rect(page, '#big-card');
   const sc8 = await api.rectNoScroll(page, '#small-card');
   const seg = { x1: bc8.left + 12, y1: bc8.top + 12, x2: sc8.left + 12, y2: sc8.top + 12 };
@@ -1077,9 +1131,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await poll(async () => (await api.hpOf(page, '#small-card')).hp < (await api.hpOf(page, '#small-card')).max, 400, 20);
   const bigS = await api.hpOf(page, '#big-card');
   const smallS = await api.hpOf(page, '#small-card');
-  check('A.sword 8: api.slash across both cards → each at hp === max − 60, neither broken', bigS.hp === bigS.max - DMG('sword') && smallS.hp === smallS.max - DMG('sword') && !(await api.broken(page, '#big-card')) && !(await api.broken(page, '#small-card')), { ret: nSlash, big: bigS, small: smallS });
-  check('A.sword 8: api.slash returns the number of elements damaged (≥ 2)', typeof nSlash === 'number' && nSlash >= 2, nSlash);
-  check('A.sword 8: a slash counts as one action (stats().shots === 1) and draws a crack', (await api.stats(page)).shots === 1 && (await api.stats(page)).cracks >= 1, await api.stats(page).then((s) => ({ shots: s.shots, cracks: s.cracks })));
+  check('A.katana 8: api.slash across both cards → each at hp === max − 60, neither broken', bigS.hp === bigS.max - DMG('katana') && smallS.hp === smallS.max - DMG('katana') && !(await api.broken(page, '#big-card')) && !(await api.broken(page, '#small-card')), { ret: nSlash, big: bigS, small: smallS });
+  check('A.katana 8: api.slash returns the number of elements damaged (≥ 2)', typeof nSlash === 'number' && nSlash >= 2, nSlash);
+  check('A.katana 8: a slash counts as one action (stats().shots === 1) and draws a crack', (await api.stats(page)).shots === 1 && (await api.stats(page)).cracks >= 1, await api.stats(page).then((s) => ({ shots: s.shots, cracks: s.cracks })));
   await api.restore(page);
   await sleep(60);
   await page.mouse.move(seg.x1, seg.y1);
@@ -1088,20 +1142,20 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const previewSeen = await api.count(page, '.crs-slash-preview');
   await page.mouse.up();
   const dragOk = await poll(async () => { const b = await api.hpOf(page, '#big-card'); const s = await api.hpOf(page, '#small-card'); return b.hp < b.max && s.hp < s.max; }, 500, 20);
-  check('A.sword 8: real drag (down/move/up) damages both cards', dragOk, { big: await api.hpOf(page, '#big-card'), small: await api.hpOf(page, '#small-card') });
-  check('A.sword 8: .crs-slash-preview shown while dragging', previewSeen >= 1, previewSeen);
-  check('A.sword 8: preview removed on pointerup (before any restore)', (await api.count(page, '.crs-slash-preview')) === 0, await api.count(page, '.crs-slash-preview'));
-  await page.screenshot({ path: path.join(OUT, 'sword.png') });
-  info('screenshot test/out/sword.png');
+  check('A.katana 8: real drag (down/move/up) damages both cards', dragOk, { big: await api.hpOf(page, '#big-card'), small: await api.hpOf(page, '#small-card') });
+  check('A.katana 8: .crs-slash-preview shown while dragging', previewSeen >= 1, previewSeen);
+  check('A.katana 8: preview removed on pointerup (before any restore)', (await api.count(page, '.crs-slash-preview')) === 0, await api.count(page, '.crs-slash-preview'));
+  await page.screenshot({ path: path.join(OUT, 'katana.png') });
+  info('screenshot test/out/katana.png');
   await api.restore(page);
   await sleep(60);
   const leaf8 = await api.rect(page, '#cluster .leaf:first-child');
   await api.slash(page, leaf8.left + 4, leaf8.cy, leaf8.right - 4, leaf8.cy);
   const leafBroken = await poll(() => api.broken(page, '#cluster .leaf:first-child'), 600, 20);
   const s8 = await api.stats(page);
-  check('A.sword 8: a slash across a leaf breaks it', leafBroken);
-  check('A.sword 8: stats().lastBreakPieces === 2 (geometric two-piece split, no word shattering)', s8.lastBreakPieces === 2, s8.lastBreakPieces);
-  check('A.sword 8: no .crs-slash-preview left after the slashes', (await api.count(page, '.crs-slash-preview')) === 0);
+  check('A.katana 8: a slash across a leaf breaks it', leafBroken);
+  check('A.katana 8: stats().lastBreakPieces === 2 (geometric two-piece split, no word shattering)', s8.lastBreakPieces === 2, s8.lastBreakPieces);
+  check('A.katana 8: no .crs-slash-preview left after the slashes', (await api.count(page, '.crs-slash-preview')) === 0);
 
   // (9) rocket: streak during travel, card broken within 600 ms, XL ring, AoE neighbours (+ rocket.png)
   await api.restore(page);
@@ -1594,6 +1648,396 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     }
     if (presentFiles.length === 0) info('A.weapons 1: static grep skipped — none of the v1.5 weapon modules exist in src/ yet (product not implemented in this worktree snapshot)');
     check('A.weapons 1: static grep — no innerHTML/outerHTML/insertAdjacentHTML/document.write/eval/new Function/setAttribute("style") in the weapon-art/viewmodel/weapon modules that exist so far', bannedHits.length === 0, presentFiles.length ? bannedHits : 'no v1.5 src files present yet');
+    /* ===================================================================================================
+     * SPEC-weapon-art §9 — two LODs, layered gradient art, the §7 hammer/axe rebuild and the §8 katana.
+     *
+     * These assertions MEASURE the emitted geometry rather than trusting a label: path data is parsed out
+     * of the `d` strings the art module actually ships, and bounding boxes come from real layout. The three
+     * little parsers below understand exactly the subset this art uses (absolute M / L / Q / C / A / Z).
+     * ================================================================================================= */
+    const PATH_CMD = /([MLQACZmlqacz])([^MLQACZmlqacz]*)/g;
+    const nums = (t) => (t.match(/-?\d*\.?\d+/g) || []).map(Number);
+    // every ON-CURVE and control point in a path, so a shape's extent can be measured without rasterising
+    function pathPoints(d) {
+      const out = [];
+      PATH_CMD.lastIndex = 0;
+      let m;
+      while ((m = PATH_CMD.exec(d || ''))) {
+        const cmd = m[1].toUpperCase(), a = nums(m[2]);
+        if (cmd === 'M' || cmd === 'L') { for (let i = 0; i + 1 < a.length; i += 2) out.push([a[i], a[i + 1]]); }
+        else if (cmd === 'Q') { for (let i = 0; i + 3 < a.length; i += 4) { out.push([a[i], a[i + 1]]); out.push([a[i + 2], a[i + 3]]); } }
+        else if (cmd === 'C') { for (let i = 0; i + 5 < a.length; i += 6) { out.push([a[i], a[i + 1]]); out.push([a[i + 2], a[i + 3]]); out.push([a[i + 4], a[i + 5]]); } }
+        else if (cmd === 'A') { for (let i = 0; i + 6 < a.length; i += 7) out.push([a[i + 5], a[i + 6]]); }
+      }
+      return out;
+    }
+    const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+    function maxSpan(pts) {
+      let best = 0;
+      for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) best = Math.max(best, dist(pts[i], pts[j]));
+      return best;
+    }
+    // the ON-CURVE vertices only, in order — the body outline's corners, used for the axe taper
+    function pathVerts(d) {
+      const out = [];
+      PATH_CMD.lastIndex = 0;
+      let m;
+      while ((m = PATH_CMD.exec(d || ''))) {
+        const cmd = m[1].toUpperCase(), a = nums(m[2]);
+        if (cmd === 'M' || cmd === 'L') { for (let i = 0; i + 1 < a.length; i += 2) out.push([a[i], a[i + 1]]); }
+        else if (cmd === 'Q') { for (let i = 0; i + 3 < a.length; i += 4) out.push([a[i + 2], a[i + 3]]); }
+        else if (cmd === 'C') { for (let i = 0; i + 5 < a.length; i += 6) out.push([a[i + 4], a[i + 5]]); }
+        else if (cmd === 'A') { for (let i = 0; i + 6 < a.length; i += 7) out.push([a[i + 5], a[i + 6]]); }
+      }
+      return out;
+    }
+    // central angle (deg) of the first elliptical arc: 2·asin(chord / 2r) from the real start point
+    function arcAngleDeg(d) {
+      PATH_CMD.lastIndex = 0;
+      let m, cur = null;
+      while ((m = PATH_CMD.exec(d || ''))) {
+        const cmd = m[1].toUpperCase(), a = nums(m[2]);
+        if (cmd === 'M' || cmd === 'L') cur = [a[a.length - 2], a[a.length - 1]];
+        else if (cmd === 'Q') cur = [a[2], a[3]];
+        else if (cmd === 'C') cur = [a[4], a[5]];
+        else if (cmd === 'A') {
+          const r = a[0], end = [a[5], a[6]];
+          if (!cur || !r) return null;
+          return 2 * Math.asin(Math.min(1, dist(cur, end) / (2 * r))) * 180 / Math.PI;
+        }
+      }
+      return null;
+    }
+    // how far the first quadratic's own midpoint sits off its chord midpoint — 0 for a straight blade
+    function qSagitta(d) {
+      const m = /M\s*(-?[\d.]+)[ ,](-?[\d.]+)\s*Q\s*(-?[\d.]+)[ ,](-?[\d.]+)\s+(-?[\d.]+)[ ,](-?[\d.]+)/.exec(d || '');
+      if (!m) return null;
+      const x0 = +m[1], y0 = +m[2], cx = +m[3], cy = +m[4], x1 = +m[5], y1 = +m[6];
+      return dist([0.25 * x0 + 0.5 * cx + 0.25 * x1, 0.25 * y0 + 0.5 * cy + 0.25 * y1], [(x0 + x1) / 2, (y0 + y1) / 2]);
+    }
+    const diag = (b) => Math.hypot(b.w, b.h);
+
+    const det = {}, ico = {};
+    for (const id of WEAPON_IDS) {
+      det[id] = await api.weaponArtProbe(page, id, 200);
+      ico[id] = await api.weaponArtProbe(page, id, 24);
+    }
+    const allProbed = WEAPON_IDS.every((id) => det[id] && det[id].ok && ico[id] && ico[id].ok);
+    check('A.art 9.1: weaponArt(id, 200) is the `detail` LOD (viewBox 0 0 240 140) and weaponArt(id, 24) the `icon` LOD (0 0 48 48) for all 10 weapons',
+      allProbed && WEAPON_IDS.every((id) => det[id].lod === 'detail' && det[id].viewBox === '0 0 240 140' && ico[id].lod === 'icon' && ico[id].viewBox === '0 0 48 48'),
+      WEAPON_IDS.map((id) => `${id}: ${det[id] && det[id].lod}/${det[id] && det[id].viewBox} | ${ico[id] && ico[id].lod}/${ico[id] && ico[id].viewBox}`));
+    check('A.art 9.1: element counts — detail ≥ 25 drawn nodes, icon ≤ 12 (defs excluded)',
+      allProbed && WEAPON_IDS.every((id) => det[id].drawn >= 25 && ico[id].drawn <= 12 && ico[id].drawn >= 5),
+      WEAPON_IDS.map((id) => `${id}: detail ${det[id] && det[id].drawn}, icon ${ico[id] && ico[id].drawn}`));
+    check('A.art 9.1: an explicit lod argument overrides the size rule (weaponArt(id, 200, "icon") → icon, weaponArt(id, 24, "detail") → detail)',
+      await (async () => {
+        const a = await api.weaponArtProbe(page, 'hammer', 200, 'icon');
+        const b = await api.weaponArtProbe(page, 'hammer', 24, 'detail');
+        return !!(a && a.ok && a.lod === 'icon' && b && b.ok && b.lod === 'detail');
+      })());
+    check('A.art 9.2: every detail drawing uses at least 2 gradients (§1 — no flat fill on a big surface)',
+      allProbed && WEAPON_IDS.every((id) => det[id].grads >= 2),
+      WEAPON_IDS.map((id) => `${id}: ${det[id] && det[id].grads}`));
+    check('A.art 9.3: no contour stroke — zero stroked elements, so nothing can carry an outline covering > 90 % of the drawing (§1 외곽선 없음)',
+      allProbed && WEAPON_IDS.every((id) => det[id].strokeCount === 0 && ico[id].strokeCount === 0 && det[id].strokeMax < 0.9),
+      WEAPON_IDS.map((id) => `${id}: ${det[id] && det[id].strokeCount} stroked`));
+    const sigSet = new Set(WEAPON_IDS.map((id) => det[id] && det[id].pathSig));
+    check('A.art 9.4: all 10 detail drawings ship distinct path data', allProbed && sigSet.size === WEAPON_IDS.length, sigSet.size);
+    // §9.4 second half: literal fills come only from the shared ART palette (everything else is a gradient
+    // url(#…) or one of the rgba() rim/seam helpers §1 defines).
+    const PALETTE = new Set(['#d4dae4', '#8e97a6', '#3f4654', '#e8edf5', '#b9c2d0', '#6d7788',
+      '#a9794e', '#8b6240', '#5a3f28', '#4a4f58', '#33373e', '#1e2127', '#e6c87e', '#c8a24a', '#7f6322',
+      '#ff7a7d', '#e5484d', '#86232a', '#ffe08a', '#ffb224', '#3a4049', '#262a31', '#14171c',
+      '#f6fafe', '#f2f6fd', '#ffe9b0']);
+    const offPalette = [];
+    for (const id of WEAPON_IDS) {
+      for (const f of (det[id] && det[id].fills) || []) {
+        if (/^url\(#/.test(f) || /^rgba?\(/.test(f) || f === 'none') continue;
+        if (!PALETTE.has(String(f).toLowerCase())) offPalette.push(`${id}: ${f}`);
+      }
+    }
+    check('A.art 9.4: every literal fill in the detail drawings comes from the shared ART palette', allProbed && offPalette.length === 0, offPalette.slice(0, 8));
+
+    // ---- §9.7 built with createElementNS only — the static grep above (A.weapons 1) proves no innerHTML /
+    // setAttribute('style') is written anywhere in the module; this is the RUNTIME half. Every node that
+    // comes back really is in the SVG namespace (a document.createElement('path') would land in the XHTML
+    // one and never render), and no node INSIDE the drawing carries inline style at all — the only style
+    // written anywhere is the root's own width/height/display, and that goes through node.style (CSSOM),
+    // never setAttribute('style').
+    const nsProbe = await page.evaluate((ids) => {
+      const a = window.__crashScreen;
+      const SVG = 'http://www.w3.org/2000/svg';
+      const bad = [], styled = [];
+      let nodes = 0, sizedByCssom = 0;
+      for (const id of ids) {
+        for (const lod of ['detail', 'icon']) {
+          const n = a.weaponArt(id, lod === 'detail' ? 200 : 24, lod);
+          if (n.namespaceURI !== SVG) bad.push(id + '/' + lod + ': root ' + n.namespaceURI);
+          if (n.style && n.style.width && n.style.height && n.style.display === 'block') sizedByCssom++;
+          for (const e of n.querySelectorAll('*')) {
+            nodes++;
+            if (e.namespaceURI !== SVG) bad.push(id + '/' + lod + ': <' + e.nodeName + '> ' + e.namespaceURI);
+            if (e.hasAttribute('style')) styled.push(id + '/' + lod + ': <' + e.nodeName + '>');
+          }
+        }
+      }
+      return { bad: bad.slice(0, 6), styled: styled.slice(0, 6), nodes, sizedByCssom };
+    }, WEAPON_IDS);
+    check('A.art 9.7: every node of every drawing is built in the SVG namespace (createElementNS), no child carries inline style, and the root is sized through node.style/CSSOM',
+      nsProbe.bad.length === 0 && nsProbe.styled.length === 0 && nsProbe.nodes > 300 && nsProbe.sizedByCssom === WEAPON_IDS.length * 2, nsProbe);
+
+    // ---- §7.2 the hammer: a split claw with a deep V notch ------------------------------------------------
+    const hc = det.hammer.parts.claw, hn = det.hammer.parts.notch;
+    const clawSpan = hc ? maxSpan(pathPoints(hc.ds[0])) : 0;
+    const notchSpan = hn ? maxSpan(pathPoints(hn.ds[0])) : 0;
+    const notchFrac = clawSpan ? notchSpan / clawSpan : 0;
+    check(`A.art 9.8 (§7.2): hammer detail has a claw, and the V slot cuts ${(notchFrac * 100).toFixed(0)} % of claw length (≥ 55 % required)`,
+      !!hc && !!hn && notchFrac >= 0.55, { clawSpan: +clawSpan.toFixed(1), notchSpan: +notchSpan.toFixed(1), notchFrac: +notchFrac.toFixed(3) });
+    check('A.art 9.13 (§7.2): the hammer ICON keeps the claw and its V slot at 24 px',
+      !!(ico.hammer.parts.claw && ico.hammer.parts.notch), Object.keys(ico.hammer.parts));
+
+    // ---- §7.3 the axe: a 45–60° bit arc, a body that tapers into the eye, a back pick ---------------------
+    const bitD = (det.axe.parts.bit && det.axe.parts.bit.ds[0]) || '';
+    const bitDeg = arcAngleDeg(bitD);
+    check(`A.art 9.9 (§7.3-1): the axe bit's outer arc sweeps ${bitDeg === null ? '—' : bitDeg.toFixed(1)}°, inside the 45–60° band`,
+      bitDeg !== null && bitDeg >= 45 && bitDeg <= 60, { bitDeg, bitD: bitD.slice(0, 80) });
+    const bodyV = pathVerts((det.axe.parts.body && det.axe.parts.body.ds[0]) || '');
+    // body outline is eye-top → edge-top → (arc) edge-bottom → eye-bottom
+    const eyeH = bodyV.length >= 4 ? dist(bodyV[0], bodyV[3]) : 0;
+    const edgeH = bodyV.length >= 4 ? dist(bodyV[1], bodyV[2]) : 0;
+    const taper = edgeH ? eyeH / edgeH : 1;
+    check(`A.art 9.10 (§7.3-2): the axe body tapers 1 : ${taper.toFixed(2)} from the edge into the eye (≤ 0.50 required)`,
+      bodyV.length >= 4 && taper > 0 && taper <= 0.5, { eyeH: +eyeH.toFixed(1), edgeH: +edgeH.toFixed(1), taper: +taper.toFixed(3) });
+    const pickSpan = det.axe.parts.pick ? maxSpan(pathPoints(det.axe.parts.pick.ds[0])) : 0;
+    const pickFrac = edgeH ? pickSpan / edgeH : 0;
+    check(`A.art 9.11 (§7.3-3): the axe has a back pick ${(pickFrac * 100).toFixed(0)} % of head height long (≥ 45 % required)`,
+      !!det.axe.parts.pick && pickFrac >= 0.45, { pickSpan: +pickSpan.toFixed(1), headH: +edgeH.toFixed(1) });
+    check('A.art 9.13 (§7.3): the axe ICON keeps the pick and the arc bit at 24 px',
+      !!(ico.axe.parts.pick && ico.axe.parts.bit), Object.keys(ico.axe.parts));
+
+    // ---- §7.1 both melee tools: the HAFT has to dominate --------------------------------------------------
+    for (const id of ['hammer', 'axe', 'katana']) {
+      const h = det[id].parts.haft || det[id].parts.tsuka;
+      const frac = h ? diag(h) / diag(det[id].root) : 0;
+      check(`A.art 9.12 (§7.1): ${id} — haft/grip is ${(frac * 100).toFixed(0)} % of the drawing's diagonal (≥ 60 % required for the hammer and axe)`,
+        id === 'katana' ? !!h : (!!h && frac >= 0.6), { haft: h && { w: +h.w.toFixed(1), h: +h.h.toFixed(1) }, root: det[id].root });
+    }
+
+    // ---- §8.2 the katana: curvature, hamon, tsuba, wrapped tsuka ------------------------------------------
+    const spineD = (det.katana.parts.spine && det.katana.parts.spine.ds[0]) || '';
+    const sag = qSagitta(spineD);
+    check(`A.art 9.16 (§8.2): the katana's spine is CURVED — its quadratic deviates ${sag === null ? '—' : sag.toFixed(2)} from the chord (a straight blade measures 0)`,
+      sag !== null && sag > 3, { sag, spineD: spineD.slice(0, 70) });
+    check('A.art 9.16 (§8.2): the katana detail carries 10+ hamon arcs',
+      !!det.katana.parts.hamon && det.katana.parts.hamon.n >= 10, det.katana.parts.hamon && det.katana.parts.hamon.n);
+    check('A.art 9 (§8.2): the katana detail has a round tsuba, a wrapped tsuka (8–10 crossed wraps) and a kashira',
+      !!det.katana.parts.tsuba && !!det.katana.parts.tsuka && !!det.katana.parts.kashira &&
+      !!det.katana.parts.wrap && det.katana.parts.wrap.n >= 8 && det.katana.parts.wrap.n <= 10,
+      { wraps: det.katana.parts.wrap && det.katana.parts.wrap.n, parts: Object.keys(det.katana.parts) });
+    const icoSag = qSagitta((ico.katana.parts.spine && ico.katana.parts.spine.ds[0]) || '');
+    check('A.art 9.13 (§8.2): the katana ICON drops the hamon and the lattice but KEEPS the curvature and the tsuba',
+      !!ico.katana.parts.tsuba && !ico.katana.parts.hamon && !ico.katana.parts.wrap && icoSag !== null && icoSag > 0.5,
+      { icoSag, parts: Object.keys(ico.katana.parts) });
+
+    // ---- §8.1 the rename reaches the id set, the presets, the locales and stored settings -----------------
+    const wIds = (await api.weapons(page)).map((w) => w.id);
+    check('A.art 9.14 (§8.1): api.weapons() lists `katana` and no longer lists `sword`',
+      wIds.includes('katana') && !wIds.includes('sword'), wIds);
+    const koMsgs = JSON.parse(fs.readFileSync(path.join(ROOT, '_locales', 'ko', 'messages.json'), 'utf8'));
+    check('A.art 9.15 (§8.1): both locales define weaponKatana (ko 카타나 / en Katana) and neither still defines weaponSword',
+      !!koMsgs.weaponKatana && koMsgs.weaponKatana.message === '카타나' && !koMsgs.weaponSword &&
+      !!EN_MESSAGES.weaponKatana && EN_MESSAGES.weaponKatana.message === 'Katana' && !EN_MESSAGES.weaponSword,
+      { ko: koMsgs.weaponKatana && koMsgs.weaponKatana.message, en: EN_MESSAGES.weaponKatana && EN_MESSAGES.weaponKatana.message, koOld: !!koMsgs.weaponSword, enOld: !!EN_MESSAGES.weaponSword });
+    check('A.art 9.14 (§8.1): every preset is a permutation over the new id set (no preset still names `sword`)',
+      Object.keys(PRESETS).every((k) => PRESETS[k].includes('katana') && !PRESETS[k].includes('sword')), PRESETS);
+    // a stored legacy loadout must MIGRATE, not be discarded: an unmigrated array is not a permutation of
+    // WEAPON_IDS any more, so without §8.1's alias the player would silently lose their slot order.
+    const legacyBoot = await (async () => {
+      const p3 = await browser.newPage();
+      await p3.setViewport(VIEWPORT);
+      await p3.goto(`${origin}/`, { waitUntil: 'load' });
+      const c3 = await injectCss(p3, contentCss);
+      await p3.evaluate(TIMER_LEDGER);
+      await p3.evaluate(CHROME_SHIM);
+      await p3.evaluate(() => {
+        window.__crsStore.crsWeapon = 'sword';
+        window.__crsStore.crsLoadout = ['hammer', 'axe', 'sword', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'flame', 'collapse'];
+        window.__crsStore.crsLoadoutPreset = 'melee';
+      });
+      const on3 = await p3.evaluate(contentJs);
+      await sleep(260);
+      const got = await p3.evaluate(() => ({ weapon: window.__crashScreen.weapon, loadout: window.__crashScreen.loadout() }));
+      try { await c3.detach(); } catch (e) { /* ignore */ }
+      await p3.close();
+      return { on: on3, got };
+    })();
+    check('A.art 9.14 (§8.1): a stored crsWeapon/crsLoadout still saying `sword` migrates to `katana` on read instead of being dropped',
+      legacyBoot.on === 'on' && legacyBoot.got.weapon === 'katana' &&
+      legacyBoot.got.loadout.join(',') === 'hammer,axe,katana,pistol,smg,sniper,bomb,rocket,flame,collapse',
+      legacyBoot.got);
+
+    // ---- §9.5 user-supplied PNG art, §9.6 the emoji escape hatch -----------------------------------------
+    // Both run on their OWN page. §9.5 has to build the <img> branch, whose src points at a packaged file
+    // this build does not ship, so the load fails and Chrome logs it; `page` is the console-watched one
+    // (A.console), this one is not. §9.6 rides along because it needs a live HUD either way.
+    const artOpts = await (async () => {
+      const p5 = await browser.newPage();
+      await p5.setViewport(VIEWPORT);
+      await p5.goto(`${origin}/`, { waitUntil: 'load' });
+      const c5 = await injectCss(p5, contentCss);
+      await p5.evaluate(TIMER_LEDGER);
+      await p5.evaluate(CHROME_SHIM);
+      const on5 = await p5.evaluate(contentJs);
+      await sleep(260);
+      const png = await p5.evaluate(() => {
+        const a = window.__crashScreen;
+        const tag = (n) => (n && n.tagName || '').toLowerCase();
+        const noArt = tag(a.weaponArt('pistol', 24, 'icon'));           // nothing shipped → svg (§5 silent fallback)
+        a.debug.weaponPng('pistol', true);                              // "icons/weapons/pistol.png now ships"
+        const im = a.weaponArt('pistol', 24, 'icon');
+        const withArt = { tag: tag(im), src: String(im.src || ''), cls: String(im.className || ''), crs: im.hasAttribute && im.hasAttribute('data-crs') };
+        const sibling = tag(a.weaponArt('axe', 24, 'icon'));            // only the id that ships art changes
+        a.setOption('weaponArt', 'svg');
+        const forcedSvg = tag(a.weaponArt('pistol', 24, 'icon'));       // §5: 'svg' ignores the PNG
+        a.setOption('weaponArt', 'auto');
+        a.debug.weaponPng('pistol', false);                             // "the file is gone again"
+        const gone = tag(a.weaponArt('pistol', 24, 'icon'));
+        return { noArt, withArt, sibling, forcedSvg, gone };
+      });
+      const hudArt = (p) => p.evaluate(() => {
+        const host = document.querySelector('crs-hud, .crs-hud-host');
+        const sh = host && host.shadowRoot;
+        if (!sh) return null;
+        const btns = [...sh.querySelectorAll('button[data-weapon]')];
+        const vis = (el) => !!el && getComputedStyle(el).display !== 'none';
+        return {
+          n: btns.length,
+          svgShown: btns.filter((b) => vis(b.querySelector('.wart')) && b.querySelector('.wart svg')).length,
+          emojiShown: btns.filter((b) => vis(b.querySelector('.em'))).length,
+          emojiText: btns.map((b) => (b.querySelector('.em') || {}).textContent || '').filter(Boolean).length
+        };
+      });
+      const autoHud = await hudArt(p5);
+      await p5.evaluate(() => window.__crashScreen.setOption('weaponArt', 'emoji'));
+      await sleep(80);
+      const emojiHud = await hudArt(p5);
+      const optsAfter = await p5.evaluate(() => window.__crashScreen.options());
+      await p5.evaluate(() => window.__crashScreen.setOption('weaponArt', 'auto'));
+      await sleep(80);
+      const backHud = await hudArt(p5);
+      const rejected = await p5.evaluate(() => window.__crashScreen.setOption('weaponArt', 'photoreal'));
+      try { await c5.detach(); } catch (e) { /* ignore */ }
+      await p5.close();
+      return { on5, png, autoHud, emojiHud, backHud, optsAfter, rejected };
+    })();
+    check('A.art 9.5 (§5): declaring icons/weapons/pistol.png makes weaponArt return an <img class="crs-art" data-crs> at the packaged URL; undeclaring it falls silently back to the <svg>, and only that one id is affected',
+      artOpts.on5 === 'on' && artOpts.png.noArt === 'svg' && artOpts.png.withArt.tag === 'img' &&
+      /icons\/weapons\/pistol\.png$/.test(artOpts.png.withArt.src) && artOpts.png.withArt.cls === 'crs-art' &&
+      artOpts.png.withArt.crs === true && artOpts.png.sibling === 'svg' && artOpts.png.gone === 'svg',
+      artOpts.png);
+    check("A.art 9.5 (§5): weaponArt: 'svg' keeps the drawing even when user art ships", artOpts.png.forcedSvg === 'svg', artOpts.png.forcedSvg);
+    check("A.art 9.6 (§5): weaponArt: 'emoji' puts the original emoji back in the HUD (all 10 buttons) and hides the svg; switching back to 'auto' restores it. (The viewmodel has no emoji to fall back to and is unaffected by design.)",
+      !!artOpts.autoHud && artOpts.autoHud.n === WEAPON_IDS.length &&
+      artOpts.autoHud.svgShown === WEAPON_IDS.length && artOpts.autoHud.emojiShown === 0 &&
+      artOpts.emojiHud.svgShown === 0 && artOpts.emojiHud.emojiShown === WEAPON_IDS.length &&
+      artOpts.emojiHud.emojiText === WEAPON_IDS.length &&
+      artOpts.backHud.svgShown === WEAPON_IDS.length && artOpts.backHud.emojiShown === 0 &&
+      artOpts.optsAfter && artOpts.optsAfter.weaponArt === 'emoji' && artOpts.rejected === false,
+      { auto: artOpts.autoHud, emoji: artOpts.emojiHud, back: artOpts.backHud, opts: artOpts.optsAfter, badMode: artOpts.rejected });
+
+    // ---- §9.17 the two contact sheets --------------------------------------------------------------------
+    const sheets = await (async () => {
+      const p4 = await browser.newPage();
+      await p4.setViewport({ width: 1180, height: 760, deviceScaleFactor: 1 });
+      await p4.goto(`${origin}/`, { waitUntil: 'load' });
+      await p4.evaluate(TIMER_LEDGER);
+      await p4.evaluate(CHROME_SHIM);
+      await p4.evaluate(contentJs);
+      await p4.evaluate(() => window.__crashScreen.toggle());   // the API object survives deactivation; the overlay/rAF loop must not run while the body is replaced
+      // sheet 1: detail LOD at 200 px, five across
+      const box = await p4.evaluate((ids) => {
+        const a = window.__crashScreen;
+        document.body.replaceChildren();
+        document.body.style.margin = '0';
+        document.body.style.background = '#191d25';
+        document.body.style.font = '14px system-ui, -apple-system, sans-serif';
+        const grid = document.createElement('div');
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = 'repeat(5, 1fr)';
+        grid.style.gap = '4px';
+        grid.style.padding = '10px';
+        document.body.appendChild(grid);
+        for (const id of ids) {
+          const cell = document.createElement('div');
+          cell.style.cssText = '';
+          cell.style.display = 'flex'; cell.style.flexDirection = 'column';
+          cell.style.alignItems = 'center'; cell.style.justifyContent = 'flex-end';
+          cell.style.height = '170px'; cell.style.background = 'rgba(127,127,127,.09)'; cell.style.borderRadius = '6px';
+          const art = document.createElement('div');
+          art.style.flex = '1 1 auto'; art.style.display = 'flex'; art.style.alignItems = 'center';
+          art.appendChild(a.weaponArt(id, 200, 'detail'));
+          const lab = document.createElement('div');
+          lab.textContent = id; lab.style.color = '#c9d2e0'; lab.style.padding = '2px 0 6px';
+          cell.appendChild(art); cell.appendChild(lab);
+          grid.appendChild(cell);
+        }
+        return { w: Math.ceil(document.body.getBoundingClientRect().width), h: Math.ceil(document.body.scrollHeight) };
+      }, WEAPON_IDS);
+      await p4.setViewport({ width: Math.max(320, box.w), height: Math.max(120, box.h), deviceScaleFactor: 1 });
+      await p4.screenshot({ path: path.join(OUT, 'weapons.png') });
+      // sheet 2: icon LOD rasterised at a TRUE 24 px, then magnified 400 % with nearest-neighbour, so a
+      // detail that collapses into one grey pixel collapses here too.
+      const CELL = 34, PAD = 6;
+      await p4.setViewport({ width: WEAPON_IDS.length * CELL + PAD * 2, height: CELL + PAD * 2, deviceScaleFactor: 1 });
+      await p4.evaluate((ids, cell, pad) => {
+        const a = window.__crashScreen;
+        document.body.replaceChildren();
+        document.body.style.background = '#191d25';
+        const row = document.createElement('div');
+        row.style.display = 'flex'; row.style.padding = pad + 'px';
+        document.body.appendChild(row);
+        for (const id of ids) {
+          const c = document.createElement('div');
+          c.style.width = cell + 'px'; c.style.height = cell + 'px';
+          c.style.display = 'flex'; c.style.alignItems = 'center'; c.style.justifyContent = 'center';
+          c.appendChild(a.weaponArt(id, 24, 'icon'));
+          row.appendChild(c);
+        }
+      }, WEAPON_IDS, CELL, PAD);
+      const raw = await p4.screenshot({ encoding: 'base64' });
+      const Z = 4;
+      await p4.setViewport({ width: (WEAPON_IDS.length * CELL + PAD * 2) * Z, height: (CELL + PAD * 2) * Z + 26, deviceScaleFactor: 1 });
+      await p4.evaluate((b64, ids, cell, pad, z) => new Promise((done) => {
+        document.body.replaceChildren();
+        document.body.style.background = '#191d25';
+        document.body.style.font = '13px system-ui, -apple-system, sans-serif';
+        const img = new Image();
+        img.onload = () => {
+          img.style.width = (img.naturalWidth * z) + 'px';
+          img.style.height = (img.naturalHeight * z) + 'px';
+          img.style.imageRendering = 'pixelated';
+          img.style.display = 'block';
+          document.body.appendChild(img);
+          const row = document.createElement('div');
+          row.style.display = 'flex'; row.style.paddingLeft = (pad * z) + 'px'; row.style.color = '#c9d2e0';
+          for (const id of ids) {
+            const t = document.createElement('div');
+            t.textContent = id; t.style.width = (cell * z) + 'px'; t.style.textAlign = 'center';
+            row.appendChild(t);
+          }
+          document.body.appendChild(row);
+          done();
+        };
+        img.src = 'data:image/png;base64,' + b64;
+      }), raw, WEAPON_IDS, CELL, PAD, Z);
+      await p4.screenshot({ path: path.join(OUT, 'weapons-icon.png') });
+      await p4.close();
+      return [path.join(OUT, 'weapons.png'), path.join(OUT, 'weapons-icon.png')].map((f) => fs.existsSync(f) && fs.statSync(f).size > 2000);
+    })();
+    check('A.art 9.17: both contact sheets are written — test/out/weapons.png (detail @200px) and test/out/weapons-icon.png (icon rasterised @24px, shown at 400%)',
+      sheets.every(Boolean), sheets);
+    info('contact sheets: test/out/weapons.png, test/out/weapons-icon.png');
+
 
     // ---- api.weapons() stat-table contract (SPEC §3.1): swapMs/recoil/bloom/critChance/knockback/moveSpeed/
     // falloff/pierce/aoeIgnoresCover for all 10 weapons. moveSpeed is checked as a STAT VALUE ONLY — the
@@ -1785,13 +2229,13 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     await api.scope(page, false);
     await api.debug(page, { noSpread: true });
 
-    // ---- (10) crit rate: 200 sword hits (seeded RNG override of Math.random, so a failure reproduces) land
+    // ---- (10) crit rate: 200 katana hits (seeded RNG override of Math.random, so a failure reproduces) land
     //     a critChance 0.20 ± 0.08 fraction of crits ------------------------------------------------------
     await api.debug(page, { noCrit: false, forceCrit: false });
-    await api.setWeapon(page, 'sword');
+    await api.setWeapon(page, 'katana');
     const pt10 = await arenaPt(page);
     const CRIT_SEED = 0xA53F9021;
-    info(`A.weapons 10: crit-rate seed = 0x${CRIT_SEED.toString(16)} (200 sword hits on #arena, restored fresh each hit) — reproduce a failure by rerunning with the same seed`);
+    info(`A.weapons 10: crit-rate seed = 0x${CRIT_SEED.toString(16)} (200 katana hits on #arena, restored fresh each hit) — reproduce a failure by rerunning with the same seed`);
     // restore() zeroes state.crits (it is a per-session counter, reset for every fresh target along with
     // shots/damageDealt/etc.), so a naive before/after read across the WHOLE loop would only ever see the
     // last iteration's 0-or-1 — each hit's crit flag is read and accumulated BEFORE the next restore() wipes it.
@@ -1814,9 +2258,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
       Math.random = realRandom;
       return { hits };
     }, CRIT_SEED, pt10);
-    const swordCritChance = (W.byId.sword && typeof W.byId.sword.critChance === 'number') ? W.byId.sword.critChance : SPEC_STATS.sword.critChance;
+    const katanaCritChance = (W.byId.katana && typeof W.byId.katana.critChance === 'number') ? W.byId.katana.critChance : SPEC_STATS.katana.critChance;
     const critRate10 = crit10.hits / 200;
-    check(`A.weapons 10: sword crit rate over 200 hits (seeded RNG, no debug.forceCrit) is ${swordCritChance.toFixed(2)} ± 0.08`, Math.abs(critRate10 - swordCritChance) <= 0.08, { seed: '0x' + CRIT_SEED.toString(16), crit10, critRate10, swordCritChance });
+    check(`A.weapons 10: katana crit rate over 200 hits (seeded RNG, no debug.forceCrit) is ${katanaCritChance.toFixed(2)} ± 0.08`, Math.abs(critRate10 - katanaCritChance) <= 0.08, { seed: '0x' + CRIT_SEED.toString(16), crit10, critRate10, katanaCritChance });
     await api.debug(page, { noCrit: true, forceCrit: false });
     await api.restore(page);
 
@@ -1854,7 +2298,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     await api.debug(page, { infiniteAmmo: false, noSpread: true, noFalloff: true });
 
     // ---- (12) moveSpeed — already asserted as a STAT above (see the api.weapons() stat-table check); the
-    //     §6 item 12 movement-DISTANCE ratio (rocket 0.80 vs sword 1.15, holding "D" 400 ms) needs the
+    //     §6 item 12 movement-DISTANCE ratio (rocket 0.80 vs katana 1.15, holding "D" 400 ms) needs the
     //     `survival`-mode drone avatar, which this worktree does not have yet (owned by the parallel combat
     //     workstream) — see v15-handoff.md. Leaving this as an explicit, honest gap rather than a fake pass.
     info('A.weapons 12: movement-distance ratio test deferred — no survival-mode drone avatar exists in this worktree yet (moveSpeed stat values are covered by the api.weapons() table check above; see v15-handoff.md)');
@@ -2665,7 +3109,7 @@ async function suiteA12(page, log, contentJs) {
   const assaultSel = await poll(async () => (await api.weapon(page)) === 'smg', 400, 15);
   const wAssault = await api.weapons(page);
   check('A.loadout 4: applyPreset("assault") → true, key "1" → smg', okAssault === true && assaultSel === true, { ret: okAssault, weapon: await api.weapon(page) });
-  check('A.loadout 4: assault order (smg, pistol, sniper, bomb, rocket, flame, hammer, axe, sword, collapse); api.weapons() follows it with slot 1–10 / key 1…9,0', (await api.loadout(page)).join(',') === PRESETS.assault.join(',') && wAssault.map((w) => w.id).join(',') === PRESETS.assault.join(',') && wAssault.every((w, i) => w.slot === i + 1 && String(w.key) === KEYS[i]), { lo: await api.loadout(page), w: wAssault.map((w) => `${w.id}:${w.slot}:${w.key}`) });
+  check('A.loadout 4: assault order (smg, pistol, sniper, bomb, rocket, flame, hammer, axe, katana, collapse); api.weapons() follows it with slot 1–10 / key 1…9,0', (await api.loadout(page)).join(',') === PRESETS.assault.join(',') && wAssault.map((w) => w.id).join(',') === PRESETS.assault.join(',') && wAssault.every((w, i) => w.slot === i + 1 && String(w.key) === KEYS[i]), { lo: await api.loadout(page), w: wAssault.map((w) => `${w.id}:${w.slot}:${w.key}`) });
   check('A.loadout 4: crsLoadout / crsLoadoutPreset ("assault") persisted in the shim storage', (await api.store(page)).crsLoadoutPreset === 'assault' && JSON.stringify((await api.store(page)).crsLoadout) === JSON.stringify(PRESETS.assault), await api.store(page));
   const badLo = await page.evaluate((ids) => { const a = window.__crashScreen; return { dup: a.setLoadout(ids.map(() => 'hammer')), short: a.setLoadout(ids.slice(0, 9)), junk: a.setLoadout('hammer'), after: a.loadout() }; }, WEAPON_IDS);
   check('A.loadout 4: setLoadout with a non-permutation (duplicates / 9 ids / non-array) → false, loadout unchanged', badLo.dup === false && badLo.short === false && badLo.junk === false && badLo.after.join(',') === PRESETS.assault.join(','), badLo);
@@ -4283,12 +4727,12 @@ async function suiteB(browser, origin, contentCss, contentJs) {
   }
   check(`B.gun: image broken after ${nImg} pistol shots (max ${imgMax} / 25)`, await poll(() => api.broken(page, '#demo-img'), 1000));
   // v1.1 nodes whose CSSOM styling would be the first to trip style-src / Trusted Types: smg hold (numbers, tints,
-  // chips), a sword slash (preview / streak), a rocket (streak, XL ring, fire-less AoE)
+  // chips), a katana slash (preview / streak), a rocket (streak, XL ring, fire-less AoE)
   const sB0 = await api.stats(page);
   await api.setWeapon(page, 'smg');
   const apB = await arenaPt(page);
   await holdAt(page, apB, 200);
-  await api.setWeapon(page, 'sword');
+  await api.setWeapon(page, 'katana');
   const bcB = await api.rect(page, '#big-card');
   const scB = await api.rectNoScroll(page, '#small-card');
   await page.mouse.move(bcB.left + 12, bcB.top + 12);
@@ -4301,7 +4745,7 @@ async function suiteB(browser, origin, contentCss, contentJs) {
   await page.mouse.click(bcB2.left + 12, bcB2.top + 12);
   await sleep(250);
   const sB1 = await api.stats(page);
-  check('B.weapons: smg hold, sword drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rocket)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots] });
+  check('B.weapons: smg hold, katana drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rocket)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots] });
   // v1.2 nodes whose CSSOM styling would be the next to trip style-src / Trusted Types: the scope overlay plus the
   // 2× body transform, the sniper tracer, a hostile aura + orb, the player HUD and the KO overlay
   await api.restore(page);

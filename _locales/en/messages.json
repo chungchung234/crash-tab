@@ -39,9 +39,9 @@
     "message": "Axe",
     "description": "Axe weapon"
   },
-  "weaponSword": {
-    "message": "Sword",
-    "description": "Sword weapon (drag to slash)"
+  "weaponKatana": {
+    "message": "Katana",
+    "description": "Katana weapon (drag to slash)"
   },
   "weaponBomb": {
     "message": "Bomb",
@@ -113,7 +113,7 @@
   },
   "hudHintDrag": {
     "message": "Drag to slash",
-    "description": "HUD hint for the sword"
+    "description": "HUD hint for the katana"
   },
   "hudHintCollapse": {
     "message": "Press Z to restore",

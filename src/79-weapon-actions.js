@@ -1,7 +1,7 @@
-// ── action dispatch: cooldown/swap/ammo gating, smashAt/slashSegment, hold weapons, sword drag, WEAPONS.*.fire wiring ──
+// ── action dispatch: cooldown/swap/ammo gating, smashAt/slashSegment, hold weapons, katana drag, WEAPONS.*.fire wiring ──
 
   WEAPONS.hammer.fire = fireHammer; WEAPONS.pistol.fire = firePistol; WEAPONS.smg.fire = fireSmg; WEAPONS.axe.fire = fireAxe;
-  WEAPONS.sword.fire = fireStab; WEAPONS.bomb.fire = fireBomb; WEAPONS.rocket.fire = fireRocket; WEAPONS.flame.fire = fireFlame;
+  WEAPONS.katana.fire = fireStab; WEAPONS.bomb.fire = fireBomb; WEAPONS.rocket.fire = fireRocket; WEAPONS.flame.fire = fireFlame;
   WEAPONS.sniper.fire = fireSniper;
   WEAPONS.collapse.fire = (x, y) => { state.shots++; doCollapse(x, y); return null; };
 
@@ -27,7 +27,7 @@
     kick();
     return out === undefined ? null : out;
   }
-  /* Single attack at (x, y): click weapons, one tick for smg/flame, a stab for the sword. true if an attack happened. */
+  /* Single attack at (x, y): click weapons, one tick for smg/flame, a stab for the katana. true if an attack happened. */
   function smashAt(x, y, weaponId) {
     if (!state.active) return false;
     x = +x; y = +y;
@@ -37,21 +37,21 @@
     const W = WEAPONS[id];
     const r = action(id, x, y, () => {
       const hit = W.fire(x, y, { hold: false });
-      startCooldown(id, id === 'sword' ? W.stabCooldownMs : W.cooldownMs);
+      startCooldown(id, id === 'katana' ? W.stabCooldownMs : W.cooldownMs);
       return hit;
     });
     return r !== undefined;
   }
-  /* Sword segment (pointer release or api.slash): < 12 px → stab, else slash. Returns elements damaged. */
+  /* Katana segment (pointer release or api.slash): < 12 px → stab, else slash. Returns elements damaged. */
   function slashSegment(x1, y1, x2, y2) {
     if (!state.active) return 0;
     x1 = +x1; y1 = +y1; x2 = +x2; y2 = +y2;
     if (!(isFinite(x1) && isFinite(y1) && isFinite(x2) && isFinite(y2))) return 0;
     if (Math.hypot(x2 - x1, y2 - y1) < 12) {
-      const r = action('sword', x1, y1, () => { const hit = fireStab(x1, y1); startCooldown('sword', WEAPONS.sword.stabCooldownMs); return hit; });
+      const r = action('katana', x1, y1, () => { const hit = fireStab(x1, y1); startCooldown('katana', WEAPONS.katana.stabCooldownMs); return hit; });
       return r ? 1 : 0;
     }
-    const n = action('sword', x2, y2, () => doSlash(x1, y1, x2, y2));
+    const n = action('katana', x2, y2, () => doSlash(x1, y1, x2, y2));
     return n || 0;
   }
 
@@ -115,7 +115,7 @@
     if (!silent) scheduleHud();
   }
 
-  /* --- sword drag (A8): preview line from pointerdown, resolved on release --- */
+  /* --- katana drag (A8): preview line from pointerdown, resolved on release --- */
   function startSlash(x, y, pointerId) {
     if (!state.active || !root) return false;
     if (state.hold) stopHold();

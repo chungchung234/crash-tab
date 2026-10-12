@@ -39,9 +39,9 @@
     "message": "도끼",
     "description": "Axe weapon"
   },
-  "weaponSword": {
-    "message": "검",
-    "description": "Sword weapon (drag to slash)"
+  "weaponKatana": {
+    "message": "카타나",
+    "description": "Katana weapon (drag to slash)"
   },
   "weaponBomb": {
     "message": "폭탄",
@@ -113,7 +113,7 @@
   },
   "hudHintDrag": {
     "message": "드래그해서 베기",
-    "description": "HUD hint for the sword"
+    "description": "HUD hint for the katana"
   },
   "hudHintCollapse": {
     "message": "복구(Z)로 되돌릴 수 있어요",

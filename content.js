@@ -33,14 +33,14 @@
    * `mag` = magazine size (null = ∞ / melee), `reloadMs` (null for melee); the slot KEY is no longer a table
    * field: it comes from the loadout order (v1.2 A6). `fire(x, y, ctx)` entries are attached in section 12.
    * WEAPON_IDS is the canonical SET (validation / persistence); `state.loadout` is the ORDER. */
-  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'sword', 'bomb', 'rocket', 'flame', 'collapse'];
+  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'];
   const WEAPONS = {
     hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     pistol:   { id: 'pistol',   emoji: '🔫', name: 'weaponPistol',   kind: 'gun',      damage: 25,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: 12, reloadMs: 900 },
     smg:      { id: 'smg',      emoji: '💥', name: 'weaponSmg',      kind: 'gun',      damage: 22,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 70, mag: 30, reloadMs: 1400 },
     sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 5, reloadMs: 2000, spread: 25, scope: true },
     axe:      { id: 'axe',      emoji: '🪓', name: 'weaponAxe',      kind: 'hammer',   damage: 130, cooldownMs: 550,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
-    sword:    { id: 'sword',    emoji: '🗡️', name: 'weaponSword',    kind: 'hammer',   damage: 60,  cooldownMs: 0,    radius: 0,   hold: false, input: 'drag', stabCooldownMs: 120, mag: null, reloadMs: null },
+    katana:    { id: 'katana',    emoji: '🗡️', name: 'weaponKatana',    kind: 'hammer',   damage: 60,  cooldownMs: 0,    radius: 0,   hold: false, input: 'drag', stabCooldownMs: 120, mag: null, reloadMs: null },
     bomb:     { id: 'bomb',     emoji: '💣', name: 'weaponBomb',     kind: 'bomb',     damage: 190, cooldownMs: 700,  radius: 240, hold: false, input: 'click', rings: [60, 130, 210], maxTargets: 10, mag: 3, reloadMs: 1800 },
     rocket:   { id: 'rocket',   emoji: '🚀', name: 'weaponRocket',   kind: 'bomb',     damage: 260, cooldownMs: 1200, radius: 360, hold: false, input: 'click', rings: [70, 150, 230, 320], maxTargets: 14, mag: 2, reloadMs: 1500 },
     flame:    { id: 'flame',    emoji: '🔥', name: 'weaponFlame',    kind: 'gun',      damage: 15,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 50, mag: 100, reloadMs: 2500 },
@@ -48,11 +48,11 @@
   };
   /* Loadout presets (v1.2 §4): permutations of WEAPON_IDS mapped onto keys 1 2 3 4 5 6 7 8 9 0. */
   const PRESETS = {
-    default:   ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'sword', 'bomb', 'rocket', 'flame', 'collapse'],
-    assault:   ['smg', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'sword', 'collapse'],
-    sniper:    ['sniper', 'pistol', 'hammer', 'sword', 'axe', 'smg', 'bomb', 'rocket', 'flame', 'collapse'],
-    explosive: ['rocket', 'bomb', 'flame', 'collapse', 'smg', 'pistol', 'sniper', 'hammer', 'axe', 'sword'],
-    melee:     ['hammer', 'axe', 'sword', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']
+    default:   ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'],
+    assault:   ['smg', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'katana', 'collapse'],
+    sniper:    ['sniper', 'pistol', 'hammer', 'katana', 'axe', 'smg', 'bomb', 'rocket', 'flame', 'collapse'],
+    explosive: ['rocket', 'bomb', 'flame', 'collapse', 'smg', 'pistol', 'sniper', 'hammer', 'axe', 'katana'],
+    melee:     ['hammer', 'axe', 'katana', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']
   };
   const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee' };
   const HOLD_WINDOW = 150;           // ms: hold-weapon damage aggregation / fx throttle window (A4, A5)
@@ -163,7 +163,7 @@
   /* i18n with hard-coded Korean fallbacks */
   const KO = {
     hudTitle: '화면부수기',
-    weaponHammer: '망치', weaponPistol: '권총', weaponSmg: '기관총', weaponSniper: '저격총', weaponAxe: '도끼', weaponSword: '검', weaponBomb: '폭탄',
+    weaponHammer: '망치', weaponPistol: '권총', weaponSmg: '기관총', weaponSniper: '저격총', weaponAxe: '도끼', weaponKatana: '카타나', weaponBomb: '폭탄',
     weaponRocket: '로켓', weaponFlame: '화염방사기', weaponFlameShort: '화염', weaponCollapse: '붕괴',
     hudDamage: '피해', critLabel: '치명타!', headshotLabel: '헤드샷!', unitPerShot: '/발', unitPerTick: '/틱',
     btnSound: '소리', btnMute: '음소거', btnRestore: '복구', btnExit: '종료',
@@ -249,6 +249,19 @@
     get() { return state.mode !== 'rampage'; },
     set(v) { state.mode = v ? (state.lastCombatMode || 'survival') : 'rampage'; }
   });
+  /* ── SPEC-weapon-art §8.1: the stored `sword` id ──────────────────────────
+   * The weapon was renamed sword → katana. Anything already in chrome.storage.sync (crsWeapon, and every
+   * entry of crsLoadout) still says `sword`, and an unmigrated loadout is not a permutation of WEAPON_IDS
+   * any more, so it would be silently DISCARDED and the player would lose their slot order on upgrade.
+   * Both read paths in src/99-api.js go through these two, and nothing writes `sword` ever again. */
+  const WEAPON_ID_ALIASES = { sword: 'katana' };
+  function migrateWeaponId(id) {
+    return (typeof id === 'string' && WEAPON_ID_ALIASES[id]) || id;
+  }
+  function migrateWeaponIds(ids) {
+    return Array.isArray(ids) ? ids.map(migrateWeaponId) : ids;
+  }
+
   const handledEvents = new WeakSet();
   const handledKeys = new WeakSet();
 
@@ -1117,7 +1130,7 @@
     node.connect(env(c, t0, g, decay));
     src.start(t0); src.stop(t0 + dur + 0.02);
   }
-  /* Filtered noise whose cutoff sweeps f0 → f1 over dur (sword swish, rocket whoosh — v1.1 A10). */
+  /* Filtered noise whose cutoff sweeps f0 → f1 over dur (katana swish, rocket whoosh — v1.1 A10). */
   function noiseSweep(t0, dur, type, f0, f1, g) {
     const c = audio.ctx;
     const src = c.createBufferSource(); src.buffer = audio.noise;
@@ -1184,7 +1197,7 @@
         }
         if (kind === 'bomb') { tinks(3, 0.03, 0.1 * gm); glass(); }
       }
-      else if (kind === 'swish') { noiseSweep(t, 0.09, 'highpass', 2000, 6000, 0.5 * gm); tinks(1, 0, 0.08 * gm); }   // sword
+      else if (kind === 'swish') { noiseSweep(t, 0.09, 'highpass', 2000, 6000, 0.5 * gm); tinks(1, 0, 0.08 * gm); }   // katana
       else if (kind === 'whoosh') { noiseSweep(t, 0.15, 'bandpass', 200, 1200, 0.6 * gm); }                            // rocket travel
       else if (kind === 'puff') { noiseBurst(t, 0.09, { type: 'lowpass', freq: 900, Q: 0.8 }, 0.3 * gm, 0.09); if (crit) tinks(1, 0, 0.06 * gm); }      // single flame tick
       else if (kind === 'clack') { tone(t, 'square', 320, 300, 0.03, 0.15, 0.03); }                                   // cooldown reject (A3) / bolt clicks
@@ -1208,170 +1221,734 @@
   }
 
 // ── 44-weapon-art.js ──
-// ── v1.5 §1: weapon art — ten side silhouettes assembled node by node with createElementNS ──
+// ── SPEC-weapon-art: ten weapons, two LODs, layered gradient SVG built node by node with createElementNS ──
   /* ===================================================================== */
-  /* 5b. Weapon art (v1.5 §1)                                               */
+  /* 5b. Weapon art (SPEC-weapon-art §1 / §2)                               */
   /*                                                                        */
   /* No binary assets ship: every weapon picture is an <svg> built with      */
   /* document.createElementNS and setAttribute, so it survives a strict CSP  */
   /* / Trusted-Types page exactly like the rest of the overlay, scales to    */
   /* any size and takes the theme colours straight from ART.                 */
   /*                                                                        */
-  /* One picture, three places (§1): the viewmodel (§2), the HUD weapon      */
-  /* grid buttons and the ammo panel. Shapes only — filled paths, rounded    */
-  /* rects and circles, never strokes — because a stroke that scales badly   */
-  /* is the fastest way to turn a 22 px button icon into mud. The goal is a  */
-  /* silhouette you can NAME, not a rendering.                               */
+  /* §1 art direction, applied to all ten so they read as ONE set:           */
+  /*   · light fixed at the top-left 45°: every gradient runs light → dark   */
+  /*     from the top-left face to the bottom-right face;                    */
+  /*   · three tones per material (ART below), never a flat fill on a big    */
+  /*     surface;                                                            */
+  /*   · a 2–3 px dark SEAM wherever two parts meet, and a 1 px RIM light    */
+  /*     along every upward-facing edge — that pair alone is what turns a    */
+  /*     silhouette into a solid;                                            */
+  /*   · cylinders (barrels, tanks, launch tubes) get cyl(), a four-stop     */
+  /*     across-the-axis ramp, never a flat rectangle;                       */
+  /*   · NO outline strokes anywhere. Contour comes from value difference    */
+  /*     only; a stroked contour is the fastest way back to looking like an  */
+  /*     emoji. Nothing in this file calls setAttribute('stroke', …).        */
+  /*                                                                        */
+  /* §2 two LODs, because a 24 px HUD button is not a small 200 px picture:  */
+  /*   detail  viewBox 0 0 240 140, 25–45 elements, used at 64 px and up;    */
+  /*   icon    viewBox 0 0 48 48,    6–12 elements, DRAWN FRESH — the shapes */
+  /*           that survive at 24 px are chosen by hand, not by scaling.     */
   /* ===================================================================== */
+
+  /* Three tones per material: [lit face, body, shadow face]. §1's palette. */
   const ART = {
-    metal: '#b9c2d0',      // bright metal: slides, blades, barrels
-    metalMid: '#7c8696',   // mid metal: shrouds, guards, bodies
-    metalDark: '#4a5361',  // dark metal: grips, magazines, stocks
-    wood: '#8b6240',       // wood: hafts, handles, fuses
-    accent: '#e5484d',     // the one hot colour: warheads, flame, plunger
-    hot: '#ffb224',        // flame / spark core (accent's lighter partner)
-    dark: '#2b3038'        // shadow: bomb body, holes, feet
+    metal:  ['#d4dae4', '#8e97a6', '#3f4654'],   // steel: heads, slides, receivers
+    blade:  ['#e8edf5', '#b9c2d0', '#6d7788'],   // polished edge: katana, axe bit
+    wood:   ['#a9794e', '#8b6240', '#5a3f28'],   // hafts, stocks, crates
+    rubber: ['#4a4f58', '#33373e', '#1e2127'],   // grips, hoses, polymer
+    brass:  ['#e6c87e', '#c8a24a', '#7f6322'],   // tsuba, fittings, cartridges
+    accent: ['#ff7a7d', '#e5484d', '#86232a'],   // the one hot colour: warheads, plungers
+    hot:    ['#ffe08a', '#ffb224', '#e5484d'],   // flame / spark core
+    dark:   ['#3a4049', '#262a31', '#14171c'],   // near-black bodies, bores, holes
+    gloss:  ['#f6fafe', '#f2f6fd', '#ffe9b0']    // specular whites: ground edges, flame core
   };
+  /* Flat helpers for the 1–3 px slivers that do the modelling. */
+  const RIM = 'rgba(255,255,255,.55)';           // §1 림 라이트
+  const RIM2 = 'rgba(255,255,255,.3)';
+  const SEAM = 'rgba(0,0,0,.42)';                // §1 접합부 음영
+  const SEAM2 = 'rgba(0,0,0,.24)';
+  const VB_DETAIL = '0 0 240 140';
+  const VB_ICON = '0 0 48 48';
+  const DETAIL_MIN = 64;                         // §2: size >= 64 picks `detail` when no lod is given
 
   function svgNode(tag, attrs) {
     const n = doc.createElementNS(SVG_NS, tag);
     if (attrs) for (const k of Object.keys(attrs)) n.setAttribute(k, String(attrs[k]));
     return n;
   }
-  function artRect(x, y, w, h, fill, r) {
-    return svgNode('rect', r ? { x, y, width: w, height: h, rx: r, ry: r, fill } : { x, y, width: w, height: h, fill });
+  function artRect(x, y, w, h, fill, r, extra) {
+    const a = { x, y, width: w, height: h, fill };
+    if (r) { a.rx = r; a.ry = r; }
+    if (extra) Object.assign(a, extra);
+    return svgNode('rect', a);
   }
-  function artPath(d, fill, rule) {
-    return rule ? svgNode('path', { d, fill, 'fill-rule': rule }) : svgNode('path', { d, fill });
+  function artPath(d, fill, extra) {
+    const a = { d, fill };
+    if (extra) Object.assign(a, extra);
+    return svgNode('path', a);
   }
-  function artCircle(cx, cy, r, fill) { return svgNode('circle', { cx, cy, r, fill }); }
+  function artCircle(cx, cy, r, fill, extra) {
+    const a = { cx, cy, r, fill };
+    if (extra) Object.assign(a, extra);
+    return svgNode('circle', a);
+  }
+  function artEllipse(cx, cy, rx, ry, fill, extra) {
+    const a = { cx, cy, rx, ry, fill };
+    if (extra) Object.assign(a, extra);
+    return svgNode('ellipse', a);
+  }
+  /* "M x,y L x,y … Z" from a point list — every polygon in this file goes through here. */
+  function poly(pts, fill, extra) {
+    let d = '';
+    for (let i = 0; i < pts.length; i++) d += (i ? ' L' : 'M') + pts[i][0] + ',' + pts[i][1];
+    return artPath(d + ' Z', fill, extra);
+  }
 
-  /* Ten builders. Each pushes its shapes back-to-front into `out`; viewBox is 0 0 120 60 for all of them,
-   * so the HUD can swap one for another without re-measuring anything. */
+  /* Gradient ids are DOCUMENT-global, and ten weapon buttons live in the HUD at once, so every drawing mints
+   * its own. artCtx() hands each builder a tiny palette whose methods return `url(#…)` and lazily fill the
+   * <defs> node the svg is assembled around. */
+  let artSeq = 0;
+  function artCtx() {
+    const defs = svgNode('defs');
+    const uid = 'crsa' + (++artSeq);
+    const cache = new Map();
+    function ref(key, make) {
+      let r = cache.get(key);
+      if (r) return r;
+      const id = uid + '_' + cache.size;
+      defs.append(make(id));
+      r = 'url(#' + id + ')';
+      cache.set(key, r);
+      return r;
+    }
+    function ramp(n, list) {
+      for (const s of list) n.append(svgNode('stop', { offset: s[0], 'stop-color': s[1] }));
+      return n;
+    }
+    /* dir: 'd' top-left → bottom-right (the default 45° key light), 'v' top → bottom, 'h' left → right. */
+    function axis(dir) {
+      if (dir === 'v') return { x1: 0, y1: 0, x2: 0, y2: 1 };
+      if (dir === 'h') return { x1: 0, y1: 0, x2: 1, y2: 0 };
+      if (dir === 'r') return { x1: 1, y1: 0, x2: 0, y2: 1 };     // top-right → bottom-left
+      return { x1: 0, y1: 0, x2: 1, y2: 1 };
+    }
+    return {
+      defs,
+      /* Flat three-tone ramp for a planar face. */
+      mat(name, dir) {
+        const p = ART[name] || ART.metal, d = dir || 'd';
+        return ref('m' + name + d, (id) => ramp(svgNode('linearGradient', Object.assign({ id }, axis(d))),
+          [[0, p[0]], [0.44, p[1]], [1, p[2]]]));
+      },
+      /* §1 원통 표현: a four-stop ramp ACROSS the axis — dark edge, hot band, body, dark edge. */
+      cyl(name, dir) {
+        const p = ART[name] || ART.metal, d = dir || 'v';
+        return ref('c' + name + d, (id) => ramp(svgNode('linearGradient', Object.assign({ id }, axis(d))),
+          [[0, p[1]], [0.18, p[0]], [0.55, p[1]], [1, p[2]]]));
+      },
+      /* A glow for flame / spark cores. */
+      glow(name) {
+        const p = ART[name] || ART.hot;
+        return ref('g' + name, (id) => ramp(svgNode('radialGradient', { id, cx: 0.4, cy: 0.35, r: 0.75 }),
+          [[0, p[0]], [0.5, p[1]], [1, p[2]]]));
+      }
+    };
+  }
+
+  /* A rotated drawing frame: fr(a, b) maps "a along the axis, b across it (positive = down-right)" into
+   * viewBox coordinates. The three melee weapons are composed in one of these so the haft/head proportions
+   * of §7 are written as the numbers the spec states instead of being reverse-engineered from a diagonal. */
+  function frame(x0, y0, deg) {
+    const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+    return (a, b) => [Math.round((x0 + a * c - b * s) * 10) / 10, Math.round((y0 + a * s + b * c) * 10) / 10];
+  }
+
+  /* ===================================================================== */
+  /* The ten weapons. Each entry is { detail(c), icon(c) } and returns its   */
+  /* shapes back-to-front. `c` is the artCtx() palette for THAT drawing.     */
+  /* data-part marks the features §7–§8 and test/e2e.js measure.            */
+  /* ===================================================================== */
+  /* ===================================================================== */
+  /* The ten weapons. Each entry is { detail(c), icon(c) } and returns its   */
+  /* shapes back-to-front. `c` is the artCtx() palette for THAT drawing.     */
+  /* data-part marks the features §7–§8 and test/e2e.js measure.            */
+  /*                                                                        */
+  /* The three melee weapons share one composition rule learned the hard     */
+  /* way: the head is set ACROSS the haft, not along it. A head drawn along  */
+  /* the haft axis is a sledge or a cleaver no matter what is carved into    */
+  /* it, and that is exactly what the first pass of this rework produced.    */
+  /* ===================================================================== */
   const WEAPON_ART = {
-    /* 나무 자루 + 직사각 머리 + 쐐기 뒷날 */
-    hammer: () => [
-      artRect(6, 26, 80, 8, ART.wood, 4),                       // haft
-      artRect(8, 24, 22, 12, ART.metalDark, 5),                 // grip wrap
-      artPath('M86,16 L62,27 L64,35 L86,28 Z', ART.metalMid),   // wedge claw hooking back
-      artRect(84, 9, 28, 42, ART.metal, 4),                     // head block
-      artRect(104, 9, 8, 42, ART.metalMid, 4)                   // striking face
-    ],
-    /* 슬라이드 + 그립 + 방아쇠울 */
-    pistol: () => [
-      artRect(38, 12, 76, 15, ART.metal, 3),                    // slide
-      artRect(104, 16, 12, 7, ART.metalMid, 2),                 // muzzle
-      artRect(38, 27, 58, 8, ART.metalMid, 2),                  // frame
-      artPath('M42,33 L70,33 L58,59 L32,59 Z', ART.metalDark),  // grip
-      artPath('M60,33 h24 v7 a12,12 0 0 1 -24,0 z M64,36 h16 v4 a8,8 0 0 1 -16,0 z', ART.metalMid, 'evenodd'),
-      artRect(69, 35, 4, 8, ART.metal, 1)                       // trigger
-    ],
-    /* 긴 몸체 + 탄창 + 총열덮개 구멍 3개 */
-    smg: () => [
-      artRect(6, 20, 26, 12, ART.metalDark, 3),                 // stock
-      artRect(24, 17, 78, 17, ART.metal, 3),                    // receiver + shroud
-      artRect(100, 22, 18, 7, ART.metalMid, 3),                 // barrel
-      artCircle(64, 25, 4, ART.dark), artCircle(77, 25, 4, ART.dark), artCircle(90, 25, 4, ART.dark),
-      artPath('M44,34 L60,34 L57,57 L41,57 Z', ART.metalDark),  // magazine
-      artPath('M26,34 L40,34 L36,52 L24,52 Z', ART.metalMid)    // grip
-    ],
-    /* 긴 총열 + 조준경 원통 + 개머리판 */
-    sniper: () => [
-      artPath('M2,24 L34,19 L34,41 L16,41 L2,33 Z', ART.wood),  // stock
-      artRect(30, 21, 42, 16, ART.metal, 3),                    // receiver
-      artRect(68, 25, 50, 7, ART.metalMid, 3),                  // barrel
-      artRect(108, 23, 10, 11, ART.metalDark, 2),               // muzzle brake
-      artRect(52, 19, 6, 5, ART.metalDark), artRect(82, 19, 6, 5, ART.metalDark),   // scope mounts
-      artRect(46, 5, 48, 15, ART.metalDark, 7),                 // scope tube
-      artRect(88, 5, 9, 15, ART.metalMid, 4),                   // objective bell
-      artPath('M34,36 L48,36 L44,54 L30,52 Z', ART.metalDark)   // pistol grip
-    ],
-    /* 긴 자루 + 초승달 날 */
-    axe: () => [
-      artPath('M4,40 L72,18 L76,30 L8,52 Z', ART.wood),         // haft, raked down-left
-      artPath('M4,40 L22,34 L26,46 L8,52 Z', ART.metalDark),    // butt wrap
-      artPath('M58,11 L94,3 C110,13 110,47 94,57 L58,49 C70,40 70,20 58,11 Z', ART.metal),   // bit
-      artRect(46, 20, 18, 20, ART.metalMid, 3)                  // poll + eye: where the haft enters the head
-    ],
-    /* 칼날 + 날밑 + 손잡이 + 둥근 자루머리 */
-    sword: () => [
-      artPath('M44,23 L104,25 L118,30 L104,35 L44,37 Z', ART.metal),   // blade
-      artPath('M44,28 L108,29 L108,31 L44,32 Z', ART.metalMid),        // fuller
-      artRect(38, 11, 9, 38, ART.metalMid, 3),                         // crossguard
-      artRect(20, 26, 20, 8, ART.wood, 3),                             // grip
-      artCircle(16, 30, 8, ART.metalMid)                               // pommel
-    ],
-    /* 둥근 몸체 + 심지 + 불꽃 */
-    bomb: () => [
-      artCircle(44, 36, 25, ART.metalDark),                     // rim: the near-black body needs an edge to read on a dark HUD
-      artCircle(44, 36, 23, ART.dark),                          // body
-      artCircle(35, 27, 6, ART.metalDark),                      // highlight
-      artRect(37, 8, 14, 9, ART.metalDark, 3),                  // collar
-      artPath('M45,11 C55,3 64,12 74,5 L77,10 C66,18 57,10 47,18 Z', ART.wood),   // fuse
-      artCircle(84, 7, 7, ART.accent), artCircle(84, 7, 3.4, ART.hot)             // spark
-    ],
-    /* 발사관 + 탄두 원뿔 + 날개 + 조준 손잡이 */
-    rocket: () => [
-      /* the two fins (날개) are drawn FIRST so the warhead cone covers their roots: a fin that visibly
-       * sprouts from under the cone reads as part of the rocket, a floating blade next to it does not. */
-      artPath('M101,22 L89,8 L96,6 L107,21 Z', ART.metal),      // upper fin
-      artPath('M101,36 L89,50 L96,52 L107,37 Z', ART.metal),    // lower fin
-      artRect(16, 20, 80, 18, ART.metalMid, 6),                 // launch tube
-      artPath('M10,10 L24,20 L24,38 L10,48 Z', ART.metalDark),  // rear flare
-      artRect(86, 21, 12, 16, ART.metalDark, 2),                // exposed rocket body + collar
-      artPath('M96,13 L120,29 L96,45 Z', ART.accent),           // warhead cone
-      artRect(58, 10, 9, 11, ART.metal, 2),                     // optical sight
-      artPath('M42,38 L56,38 L52,58 L38,58 Z', ART.metalDark)   // aiming grip
-    ],
-    /* 연료통 2개 + 호스 + 노즐 + 점화구 */
-    flame: () => [
-      artRect(6, 12, 22, 40, ART.metalMid, 10),                 // fuel tank A
-      artRect(26, 15, 18, 34, ART.metalDark, 8),                // fuel tank B
-      artPath('M44,27 C58,13 62,43 76,29 L76,37 C62,51 58,21 44,35 Z', ART.dark),   // hose
-      artRect(70, 23, 30, 12, ART.metal, 5),                    // nozzle
-      artRect(96, 20, 10, 18, ART.metalDark, 3),                // muzzle ring
-      artPath('M74,35 L88,35 L84,53 L70,53 Z', ART.metalMid),   // grip
-      artPath('M106,29 C114,22 112,12 109,6 C120,14 120,34 106,37 Z', ART.accent),  // pilot flame
-      artPath('M108,30 C112,25 111,19 110,15 C117,21 116,31 108,34 Z', ART.hot)
-    ],
-    /* 기폭 장치 상자 + 플런저 + 안테나 */
-    collapse: () => [
-      artRect(36, 2, 38, 9, ART.accent, 4),                     // plunger handle
-      artRect(51, 9, 8, 16, ART.metalMid),                      // plunger shaft
-      artRect(22, 23, 68, 29, ART.metalDark, 5),                // detonator box
-      artRect(26, 27, 60, 9, ART.dark, 3),                      // label plate
-      artCircle(38, 44, 6, ART.metal), artCircle(56, 44, 6, ART.metalMid),   // dials
-      artRect(74, 41, 12, 6, ART.accent, 2),                    // armed lamp
-      artRect(18, 50, 76, 7, ART.dark, 3),                      // feet
-      artPath('M22,44 C12,44 8,34 2,36 L2,42 C6,41 8,50 22,50 Z', ART.dark),   // firing lead
-      artRect(100, 6, 5, 30, ART.metal, 2), artCircle(102, 4, 5, ART.accent) // antenna
-    ]
+
+    /* ───────── 망치 · claw hammer (§7.2) ─────────
+     * Haft 130 of the 195 overall = 67 % (§7.1: 62–68 %). The head crosses the haft at 72°: the striking
+     * face points down-forward, the claw hooks up-back and then down, well clear of the haft, and the V
+     * slot between the two tines runs 0.69 of claw length (§7.2-3 wants ≥ 0.60). */
+    hammer: {
+      detail: (c) => [
+        /* haft: butt (54,128) → eye (164,58), 10.8 thick = 22 % of the 48-high head (§7.1) */
+        poly([[50.8, 123], [161.1, 53.4], [166.9, 62.6], [57.2, 133]], c.mat('wood', 'd'), { 'data-part': 'haft' }),
+        poly([[50.8, 123], [161.1, 53.4], [162.6, 55.8], [52.3, 125.4]], RIM2),
+        poly([[55.7, 130.6], [165.4, 60.2], [166.9, 62.6], [57.2, 133]], SEAM2),
+        poly([[62, 118.4], [150, 62.9], [151, 64.5], [63, 120]], 'rgba(255,255,255,.07)'),
+        poly([[66, 125.6], [154, 70.1], [154.8, 71.4], [66.8, 126.9]], 'rgba(0,0,0,.12)'),
+        poly([[50.8, 123], [81.3, 103.9], [87.5, 113.5], [57.2, 133]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[50.8, 123], [81.3, 103.9], [82.6, 106], [52.1, 125.1]], RIM2),
+        poly([[46.8, 124.2], [55.3, 118.9], [62.9, 130.7], [54.4, 136]], c.mat('rubber', 'v')),
+        poly([[46.8, 124.2], [55.3, 118.9], [56.4, 120.6], [47.9, 125.9]], RIM2),
+        /* claw: back and down off the head's rear, outer radius ≈ 0.8 × head height (§7.2-3) */
+        artPath('M161.5,39.1 Q124,18 109.8,29.6 L123.2,44.4 Q132,33 144.9,59.1 Z', c.mat('metal', 'r'), { 'data-part': 'claw' }),
+        artPath('M161.5,39.1 Q124,18 109.8,29.6 L112.6,32.7 Q126.5,22.5 159.4,41.7 Z', RIM),
+        /* the V slot: 8 across at the tips, pointed, 0.62 of claw length deep (§7.2-3 floor is 0.60) */
+        artPath('M113.8,34 Q126,24 145,42.5 Q132,35 119.2,40 Z', ART.dark[2], { 'data-part': 'notch' }),
+        artPath('M119.2,40 Q132,35 145,42.5 Q133.5,37.6 121,42.3 Z', SEAM),
+        artPath('M123.2,44.4 Q132,33 144.9,59.1 L142.2,60.3 Q130.5,36.5 121.6,46 Z', 'rgba(255,255,255,.18)'),
+        /* collar: a ring around the haft under the eye, not a wedge beside it (§7.1) */
+        poly([[130.7, 69.6], [145.4, 59.2], [155, 74.4], [139.3, 83.2]], c.mat('metal', 'v'), { 'data-part': 'collar' }),
+        poly([[130.7, 69.6], [145.4, 59.2], [146.9, 61.5], [132.1, 71.9]], RIM),
+        poly([[137.8, 80.8], [153.6, 72], [155, 74.4], [139.3, 83.2]], SEAM),
+        /* head: eye block → waisted neck → convex face, axis 72° across the haft */
+        poly([[168.5, 30.6], [188.1, 57.1], [198.6, 69.4], [209.4, 78.3], [202.6, 89.8], [192.6, 98.7], [181.8, 89.8], [167.7, 81.7], [137.9, 67.6]], c.mat('metal', 'd'), { 'data-part': 'head' }),
+        poly([[168.5, 30.6], [188.1, 57.1], [198.6, 69.4], [196.3, 71.9], [185.5, 59.3], [165.9, 33]], RIM),
+        poly([[167.7, 81.7], [181.8, 89.8], [192.6, 98.7], [189.8, 100.9], [179.5, 92.3], [165.6, 84]], SEAM2),
+        poly([[165.9, 33], [185.5, 59.3], [196.3, 71.9], [194.5, 73.9], [183.7, 61.2], [164.2, 35.2]], 'rgba(255,255,255,.14)'),
+        poly([[209.4, 78.3], [202.6, 89.8], [192.6, 98.7], [194.5, 100.5], [204.5, 91.5], [211.2, 80]], SEAM2),
+        /* neck waist: the narrow section 30 % of head length behind the face (§7.2-2) */
+        poly([[188.3, 59.9], [195.8, 66.6], [178.4, 87.6], [170.5, 81.5]], 'rgba(0,0,0,.15)'),
+        /* striking face: a short cylinder section, 26 across = 55 % of head height (§7.2-1) */
+        poly([[198, 68.7], [199.9, 70.3], [182.9, 90.9], [181, 89.3]], SEAM),
+        artPath('M198.6,69.4 L209.4,78.3 Q207.2,85.4 192.6,98.7 L181.8,89.8 Q195,78 198.6,69.4 Z', c.cyl('blade', 'r'), { 'data-part': 'face' }),
+        poly([[198.6, 69.4], [209.4, 78.3], [207.4, 80.8], [196.8, 71.9]], RIM),
+        /* eye wedge across the collar */
+        poly([[139.2, 68.9], [146.6, 63.7], [151.5, 71.5], [144.3, 76.2]], SEAM2)
+      ],
+      /* 48 × 48: face, the claw V, the haft. Drawn fresh at this scale — nothing else survives 24 px. */
+      icon: (c) => [
+        poly([[6.3, 42.6], [31.3, 13.6], [34.7, 16.4], [9.7, 45.4]], c.mat('wood', 'd'), { 'data-part': 'haft' }),
+        poly([[6.3, 42.6], [31.3, 13.6], [32.5, 14.6], [7.5, 43.6]], RIM2),
+        poly([[6.3, 42.6], [15, 32.5], [18.4, 35.3], [9.7, 45.4]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M26.8,10.9 Q14,5 9.3,12.2 L13.7,15 Q17,11 24,17.3 Z', c.mat('metal', 'r'), { 'data-part': 'claw' }),
+        artPath('M10.8,13.2 Q15,8 20.5,12.5 Q16,11.5 12.2,14 Z', ART.dark[2], { 'data-part': 'notch' }),
+        poly([[15.4, 30.5], [20.3, 24.2], [25.7, 29], [20.2, 34.7]], c.mat('metal', 'v'), { 'data-part': 'collar' }),
+        poly([[28.3, 7.2], [37.1, 14.4], [44.5, 17.5], [41.3, 25.3], [33.9, 22.2], [22.5, 21]], c.mat('metal', 'd'), { 'data-part': 'head' }),
+        poly([[37.1, 14.4], [44.5, 17.5], [41.3, 25.3], [33.9, 22.2]], c.cyl('metal', 'r'), { 'data-part': 'face' }),
+        poly([[28.3, 7.2], [37.1, 14.4], [36.2, 15.8], [27.4, 8.6]], RIM)
+      ]
+    },
+
+    /* ───────── 도끼 · fire axe (§7.3) ─────────
+     * Haft 152 — 16 % longer than the hammer's — of 219 overall = 69 %. The bit is ONE A command of radius
+     * 55 sweeping 52°, inside §7.3-1's 45–60° band and nothing like the ~150° fan it replaces. The body
+     * tapers 48 → 22 into the eye (1 : 0.45, §7.3-2) and the back pick, 0.6 × head height, breaks the
+     * silhouette so the axe is still an axe at 24 px (§7.3-3). */
+    axe: {
+      detail: (c) => [
+        /* haft: butt (40,134) → eye (168,52) */
+        poly([[36.8, 128.9], [164.8, 46.9], [171.2, 57.1], [43.2, 139.1]], c.mat('wood', 'd'), { 'data-part': 'haft' }),
+        poly([[36.8, 128.9], [164.8, 46.9], [166.4, 49.4], [38.4, 131.4]], RIM2),
+        poly([[41.6, 136.6], [169.6, 54.6], [171.2, 57.1], [43.2, 139.1]], SEAM2),
+        poly([[50, 124.5], [158, 55.3], [159.1, 57], [51.1, 126.2]], 'rgba(255,255,255,.07)'),
+        poly([[54, 131.5], [162, 62.3], [163, 63.9], [55, 133.1]], 'rgba(0,0,0,.12)'),
+        poly([[36.8, 128.9], [72.2, 106.2], [78.6, 116.4], [43.2, 139.1]], c.mat('accent', 'd'), { 'data-part': 'grip' }),
+        poly([[36.8, 128.9], [72.2, 106.2], [73.6, 108.4], [38.2, 131.1]], RIM2),
+        poly([[32.4, 130.1], [41.4, 124.3], [48.2, 134.9], [39.2, 140.7]], c.mat('rubber', 'v')),
+        poly([[32.4, 130.1], [41.4, 124.3], [42.5, 126], [33.5, 131.8]], RIM2),
+        /* pick: 35 long (0.74 × head height), tapering to a point and hooking down, 32 clear of the haft (§7.3-3) */
+        artPath('M175,43.5 L140.5,27.5 Q134.5,30.5 137,37.5 L166.1,54.3 Z', c.mat('metal', 'r'), { 'data-part': 'pick' }),
+        artPath('M175,43.5 L140.5,27.5 Q137.3,29.1 136.4,32.4 L173,46.3 Z', RIM),
+        artPath('M137,37.5 L166.1,54.3 L163.6,55.6 L136.2,39.6 Z', SEAM),
+        /* collar wrapping the haft under the eye */
+        poly([[152.4, 72.4], [167.9, 62.4], [176.2, 76.1], [160.5, 85.4]], c.mat('metal', 'v'), { 'data-part': 'collar' }),
+        poly([[152.4, 72.4], [167.9, 62.4], [169.4, 64.7], [153.9, 74.7]], RIM),
+        poly([[159, 83], [174.8, 73.7], [176.2, 76.1], [160.5, 85.4]], SEAM),
+        poly([[155.3, 76.9], [171, 67.3], [172, 69], [156.3, 78.6]], 'rgba(255,255,255,.12)'),
+        poly([[166.1, 54.3], [175, 43.5], [177.6, 46.6], [168.3, 57.5]], SEAM2),
+        /* body: taper 1 : 0.45 from the edge chord into the eye (§7.3-2) */
+        artPath('M174.9,43.6 L223.8,66.6 A55,55 0 0 1 193.2,103.9 L161.1,60.4 Z', c.mat('metal', 'd'), { 'data-part': 'body' }),
+        poly([[174.9, 43.6], [223.8, 66.6], [222.5, 69.3], [173.7, 46.4]], RIM),
+        poly([[174.9, 43.6], [198.3, 56.1], [177.9, 80.9], [161.1, 60.4]], 'rgba(0,0,0,.16)'),
+        /* bit: the forward crescent carrying the ground edge */
+        artPath('M215,64.6 A46,46 0 0 1 189.4,95.7 L193.2,103.9 A55,55 0 0 0 223.8,66.6 Z', c.cyl('blade', 'r'), { 'data-part': 'bit' }),
+        artPath('M220.9,65.9 A52,52 0 0 1 191.9,101.2 L193.2,103.9 A55,55 0 0 0 223.8,66.6 Z', ART.gloss[0], { 'data-part': 'edgeline' }),
+        poly([[215, 64.6], [189.4, 95.7], [186.2, 92.3], [212, 61.1]], 'rgba(0,0,0,.13)'),
+        artCircle(192, 64, 2.6, 'rgba(0,0,0,.26)'),
+        /* wedge pin through the eye */
+        artCircle(168, 52, 3.2, ART.dark[2])
+      ],
+      /* 48 × 48: the 52° bit, the taper, the pick, the haft. The pick is what keeps it off the hammer. */
+      icon: (c) => [
+        poly([[5.3, 43.6], [29.3, 15.6], [32.7, 18.4], [8.7, 46.4]], c.mat('wood', 'd'), { 'data-part': 'haft' }),
+        poly([[5.3, 43.6], [29.3, 15.6], [30.5, 16.6], [6.5, 44.6]], RIM2),
+        poly([[5.3, 43.6], [13.5, 34], [16.9, 36.8], [8.7, 46.4]], c.mat('accent', 'd'), { 'data-part': 'grip' }),
+        artPath('M29.3,12.9 L19.5,10.5 Q16,12.5 17.5,16.2 L27.6,16.9 Z', c.mat('metal', 'r'), { 'data-part': 'pick' }),
+        poly([[13.2, 33.1], [18.1, 26.9], [23.3, 31.3], [17.8, 37.1]], c.mat('metal', 'v'), { 'data-part': 'collar' }),
+        artPath('M29.3,13 L46.8,16 A16.5,16.5 0 0 1 41.2,29.4 L26.7,19 Z', c.mat('metal', 'd'), { 'data-part': 'body' }),
+        artPath('M43.8,16.2 A13.5,13.5 0 0 1 39.2,27.1 L41.2,29.4 A16.5,16.5 0 0 0 46.8,16 Z', c.cyl('blade', 'r'), { 'data-part': 'bit' }),
+        poly([[29.3, 13], [46.8, 16], [46.5, 17.6], [29, 14.6]], RIM)
+      ]
+    },
+
+    /* ───────── 카타나 · katana (§8.2) ─────────
+     * Curvature is the identity: the spine is one quadratic whose control point sits 14.3 off the chord,
+     * giving a sagitta of 7.2 on a 158-long blade — the 1/22 §8.2 asks for, and the reason a reader calls
+     * this a katana rather than a sword. Twelve hamon arcs, a round tsuba, a diamond-wrapped tsuka. */
+    katana: {
+      detail: (c) => {
+        const out = [];
+        const P0 = [76, 92], CP = [142.2, 46.9], P2 = [220, 28];
+        const qp = (t) => { const u = 1 - t; return [u * u * P0[0] + 2 * t * u * CP[0] + t * t * P2[0], u * u * P0[1] + 2 * t * u * CP[1] + t * t * P2[1]]; };
+        const qn = (t) => {
+          const u = 1 - t;
+          const dx = 2 * u * (CP[0] - P0[0]) + 2 * t * (P2[0] - CP[0]);
+          const dy = 2 * u * (CP[1] - P0[1]) + 2 * t * (P2[1] - CP[1]);
+          const m = Math.sqrt(dx * dx + dy * dy) || 1;
+          return [-dy / m, dx / m, dx / m, dy / m];        // [nx, ny, tx, ty] — n points to the EDGE side
+        };
+        const wid = (t) => 15 - 4 * t;                      // single-edged: thick at the base, fine at the tip
+        const at = (t, f) => { const p = qp(t), n = qn(t), w = wid(t) * f; return [p[0] + n[0] * w, p[1] + n[1] * w]; };
+        const f2 = (p) => p[0].toFixed(1) + ',' + p[1].toFixed(1);
+        const N = 12;
+        const nt = qn(1);
+        const TIP = [qp(1)[0] + nt[2] * 15, qp(1)[1] + nt[3] * 15];
+        /* --- blade body --- */
+        let d = 'M' + f2(at(0, 0));
+        for (let i = 1; i <= N; i++) d += ' L' + f2(at(i / N, 0));
+        d += ' L' + f2(TIP);
+        for (let i = N; i >= 0; i--) d += ' L' + f2(at(i / N, 1));
+        out.push(artPath(d + ' Z', c.mat('blade', 'd'), { 'data-part': 'blade' }));
+        /* --- spine: one literal Q, so the curvature is readable straight off the path data --- */
+        out.push(artPath('M' + f2(P0) + ' Q' + f2(CP) + ' ' + f2(P2) +
+          ' L' + f2(at(1, 0.26)) + ' Q143.6,50 ' + f2(at(0, 0.26)) + ' Z', c.mat('metal', 'h'), { 'data-part': 'spine' }));
+        out.push(artPath('M' + f2(P0) + ' Q' + f2(CP) + ' ' + f2(P2) +
+          ' L' + f2(at(1, 0.07)) + ' Q142.6,47.7 ' + f2(at(0, 0.07)) + ' Z', RIM));
+        /* --- hamon: 12 shallow wave arcs down the edge side (§8.2) --- */
+        for (let i = 0; i < 12; i++) {
+          const t0 = i / 12, t1 = (i + 1) / 12, tm = (t0 + t1) / 2;
+          const fa = 0.50 + (i % 2 ? 0.08 : -0.04), fb = fa + 0.17;
+          out.push(artPath('M' + f2(at(t0, fa)) + ' Q' + f2(at(tm, fa - 0.14)) + ' ' + f2(at(t1, fa)) +
+            ' L' + f2(at(t1, fb)) + ' Q' + f2(at(tm, fb - 0.14)) + ' ' + f2(at(t0, fb)) + ' Z',
+            'rgba(255,255,255,.35)', { 'data-part': 'hamon' }));
+        }
+        /* --- the ground edge: a bright band along the bottom of the blade --- */
+        let de = 'M' + f2(at(0, 0.82));
+        for (let i = 1; i <= N; i++) de += ' L' + f2(at(i / N, 0.82));
+        de += ' L' + f2(TIP);
+        for (let i = N; i >= 0; i--) de += ' L' + f2(at(i / N, 1));
+        out.push(artPath(de + ' Z', ART.gloss[1], { 'data-part': 'edge' }));
+        /* kissaki: the point gets its own facet */
+        out.push(poly([[qp(1)[0], qp(1)[1]], [TIP[0], TIP[1]], [at(1, 1)[0], at(1, 1)[1]]], c.mat('blade', 'r'), { 'data-part': 'kissaki' }));
+        /* --- habaki (brass collar) --- */
+        out.push(poly([[70, 95], [82, 89], [87, 99], [75, 105]], c.mat('brass', 'd'), { 'data-part': 'habaki' }));
+        out.push(poly([[70, 95], [82, 89], [83, 91], [71, 97]], RIM));
+        /* --- tsuba: small round disc with a centre hole (§8.2) --- */
+        out.push(artEllipse(68, 99, 7.5, 14, c.mat('brass', 'd'), { 'data-part': 'tsuba' }));
+        out.push(artPath('M60.5,99 A7.5,14 0 0 1 64.5,86.8 L66,88.6 A5.9,11.8 0 0 0 62.6,99 Z', RIM));
+        out.push(artEllipse(68, 99, 2.6, 5.2, ART.dark[2]));
+        /* --- tsuka: 10 crossed wraps = the diamond lattice (§8.2) --- */
+        const gf = (a, b) => [18 + 0.895 * a + 0.447 * b, 122 - 0.447 * a + 0.895 * b];
+        out.push(poly([gf(0, -7.5), gf(57, -7.5), gf(57, 7.5), gf(0, 7.5)], c.mat('rubber', 'd'), { 'data-part': 'tsuka' }));
+        out.push(poly([gf(0, -7.5), gf(57, -7.5), gf(57, -5.3), gf(0, -5.3)], RIM2));
+        for (let i = 0; i < 5; i++) {
+          const a0 = 2 + i * 10.6;
+          out.push(poly([gf(a0, 7.5), gf(a0 + 2.8, 7.5), gf(a0 + 11.8, -7.5), gf(a0 + 9, -7.5)], 'rgba(220,228,242,.5)', { 'data-part': 'wrap' }));
+          out.push(poly([gf(a0 + 9, 7.5), gf(a0 + 11.8, 7.5), gf(a0 + 2.8, -7.5), gf(a0, -7.5)], 'rgba(0,0,0,.42)', { 'data-part': 'wrap' }));
+        }
+        /* --- kashira: the metal butt cap --- */
+        out.push(poly([gf(-6, -7.5), gf(2, -7.5), gf(2, 7.5), gf(-6, 7.5)], c.mat('brass', 'v'), { 'data-part': 'kashira' }));
+        out.push(poly([gf(-6, -7.5), gf(2, -7.5), gf(2, -5.6), gf(-6, -5.6)], RIM));
+        return out;
+      },
+      /* 48 × 48: curve, tsuba, grip. The hamon and the lattice drop; the curvature does NOT (§8.2). */
+      icon: (c) => [
+        artPath('M17,33 Q28,16 43,7 L46,12 Q31,22 21,38 Z', c.mat('blade', 'd'), { 'data-part': 'blade' }),
+        artPath('M17,33 Q28,16 43,7 L44.2,9 Q29.5,18 18.6,34 Z', c.mat('metal', 'h'), { 'data-part': 'spine' }),
+        artPath('M19.4,36.5 Q30,21 45.1,10.5 L46,12 Q31,22 21,38 Z', ART.gloss[1], { 'data-part': 'edge' }),
+        artEllipse(14.5, 36.5, 4, 7.2, c.mat('brass', 'd'), { 'data-part': 'tsuba' }),
+        artEllipse(14.5, 36.5, 1.4, 2.6, ART.dark[2]),
+        poly([[3.5, 42], [12.5, 33.5], [16.5, 38], [7.5, 46.5]], c.mat('rubber', 'd'), { 'data-part': 'tsuka' }),
+        poly([[3.5, 42], [12.5, 33.5], [13.6, 34.7], [4.6, 43.2]], RIM2),
+        poly([[1.5, 43.5], [5.5, 39.7], [9.3, 44], [5.3, 47.8]], c.mat('brass', 'v'), { 'data-part': 'kashira' })
+      ]
+    },
+
+    /* ───────── 권총 · semi-auto pistol (§3) ─────────
+     * Slide / frame split line, raked grip, trigger guard, front and rear sights. */
+    pistol: {
+      detail: (c) => [
+        poly([[60, 118], [100, 118], [97, 128], [57, 128]], c.mat('metal', 'v'), { 'data-part': 'magbase' }),
+        poly([[74, 70], [122, 70], [102, 124], [54, 124]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[74, 70], [122, 70], [120.6, 74], [72.6, 74]], RIM2),
+        artRect(72, 82, 42, 4, 'rgba(255,255,255,.1)', 2),
+        artRect(68, 94, 42, 4, 'rgba(255,255,255,.1)', 2),
+        artRect(64, 106, 42, 4, 'rgba(255,255,255,.1)', 2),
+        poly([[66, 60], [196, 60], [196, 80], [120, 80], [112, 72], [66, 72]], c.mat('metal', 'v'), { 'data-part': 'frame' }),
+        artPath('M118,70 L166,70 L166,80 A24,24 0 0 1 118,80 Z M126,76 L158,76 L158,80 A16,16 0 0 1 126,80 Z', c.mat('metal', 'd'), { 'data-part': 'guard', 'fill-rule': 'evenodd' }),
+        poly([[130, 66], [142, 66], [140, 86], [132, 86]], c.mat('metal', 'r'), { 'data-part': 'trigger' }),
+        poly([[64, 28], [214, 28], [222, 36], [222, 58], [64, 58]], c.mat('metal', 'd'), { 'data-part': 'slide' }),
+        poly([[64, 28], [214, 28], [215.6, 30], [64, 30]], RIM),
+        poly([[64, 56.4], [222, 56.4], [222, 58], [64, 58]], SEAM),
+        poly([[64, 58], [196, 58], [196, 61.4], [64, 61.4]], SEAM, { 'data-part': 'split' }),
+        artRect(70, 34, 5, 18, 'rgba(0,0,0,.25)', 2),
+        artRect(80, 34, 5, 18, 'rgba(0,0,0,.25)', 2),
+        artRect(90, 34, 5, 18, 'rgba(0,0,0,.25)', 2),
+        artRect(140, 33, 40, 13, ART.dark[1], 3, { 'data-part': 'port' }),
+        artRect(140, 33, 40, 3, 'rgba(0,0,0,.4)', 1.5),
+        artRect(214, 36, 10, 16, c.cyl('metal', 'v'), 2, { 'data-part': 'muzzle' }),
+        artCircle(219, 44, 3.4, ART.dark[2]),
+        poly([[70, 20], [82, 20], [82, 28], [70, 28]], c.mat('metal', 'v'), { 'data-part': 'sight' }),
+        poly([[74, 20], [78, 20], [78, 25], [74, 25]], ART.dark[2]),
+        poly([[202, 20], [210, 20], [210, 28], [202, 28]], c.mat('metal', 'v')),
+        poly([[56, 32], [66, 30], [66, 44], [58, 44]], c.mat('metal', 'r'), { 'data-part': 'hammer' }),
+        artRect(96, 62, 30, 7, c.mat('metal', 'r'), 3, { 'data-part': 'slidestop' }),
+        poly([[60, 118], [100, 118], [99, 121], [59, 121]], RIM2)
+      ],
+      icon: (c) => [
+        poly([[14, 24], [26, 24], [20, 44], [8, 44]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[11, 22], [44, 22], [44, 29], [11, 29]], c.mat('metal', 'v'), { 'data-part': 'frame' }),
+        artPath('M24,24 L36,24 L36,30 A7,7 0 0 1 24,30 Z M28,27 L32,27 L32,30 A3.4,3.4 0 0 1 28,30 Z', c.mat('metal', 'd'), { 'data-part': 'guard', 'fill-rule': 'evenodd' }),
+        poly([[10, 10], [42, 10], [46, 14], [46, 22], [10, 22]], c.mat('metal', 'd'), { 'data-part': 'slide' }),
+        poly([[10, 10], [42, 10], [43, 11.4], [10, 11.4]], RIM),
+        artRect(13, 13, 2, 6, 'rgba(0,0,0,.3)', 1),
+        artRect(17, 13, 2, 6, 'rgba(0,0,0,.3)', 1),
+        artRect(41, 14, 5, 7, c.cyl('metal', 'v'), 1.5, { 'data-part': 'muzzle' })
+      ]
+    },
+
+    /* ───────── 기관총 · submachine gun (§3) ─────────
+     * Vertical magazine, vented barrel shroud, folding stock. */
+    smg: {
+      detail: (c) => [
+        poly([[14, 46], [60, 42], [60, 49], [14, 53]], c.mat('metal', 'v'), { 'data-part': 'stock' }),
+        poly([[14, 68], [60, 66], [60, 73], [14, 75]], c.mat('metal', 'v')),
+        poly([[12, 44], [22, 44], [22, 76], [12, 76]], c.mat('metal', 'd'), { 'data-part': 'butt' }),
+        poly([[12, 44], [22, 44], [22, 46.4], [12, 46.4]], RIM),
+        poly([[92, 76], [118, 76], [116, 132], [94, 132]], c.mat('metal', 'v'), { 'data-part': 'mag' }),
+        poly([[92, 76], [118, 76], [117.4, 80], [92.6, 80]], RIM2),
+        artRect(96, 90, 16, 3, 'rgba(0,0,0,.3)', 1.5),
+        artRect(96, 104, 16, 3, 'rgba(0,0,0,.3)', 1.5),
+        artRect(96, 118, 16, 3, 'rgba(0,0,0,.3)', 1.5),
+        poly([[52, 74], [78, 74], [70, 118], [46, 116]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[52, 74], [78, 74], [77.2, 78], [51.2, 78]], RIM2),
+        poly([[46, 38], [160, 38], [160, 78], [46, 78]], c.mat('metal', 'd'), { 'data-part': 'receiver' }),
+        poly([[46, 38], [160, 38], [160, 41], [46, 41]], RIM),
+        poly([[46, 75], [160, 75], [160, 78], [46, 78]], SEAM),
+        artRect(120, 44, 32, 12, ART.dark[1], 3, { 'data-part': 'port' }),
+        artRect(158, 44, 58, 24, c.cyl('metal', 'v'), 6, { 'data-part': 'shroud' }),
+        artCircle(172, 56, 5.2, ART.dark[2]),
+        artCircle(188, 56, 5.2, ART.dark[2]),
+        artCircle(204, 56, 5.2, ART.dark[2]),
+        artRect(158, 45, 58, 2.6, RIM2, 1.3),
+        artRect(214, 50, 18, 12, c.cyl('metal', 'v'), 3, { 'data-part': 'muzzle' }),
+        artCircle(228, 56, 3.4, ART.dark[2]),
+        poly([[58, 28], [68, 28], [68, 38], [58, 38]], c.mat('metal', 'v'), { 'data-part': 'sight' }),
+        poly([[198, 32], [206, 32], [206, 44], [198, 44]], c.mat('metal', 'v')),
+        artRect(84, 32, 22, 7, c.mat('metal', 'r'), 3, { 'data-part': 'charge' })
+      ],
+      icon: (c) => [
+        poly([[3, 17], [13, 15], [13, 20], [3, 22]], c.mat('metal', 'v'), { 'data-part': 'stock' }),
+        poly([[17, 28], [28, 28], [27, 46], [18, 46]], c.mat('metal', 'v'), { 'data-part': 'mag' }),
+        poly([[7, 27], [16, 27], [13, 41], [5, 40]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[7, 13], [32, 13], [32, 28], [7, 28]], c.mat('metal', 'd'), { 'data-part': 'receiver' }),
+        poly([[7, 13], [32, 13], [32, 15], [7, 15]], RIM),
+        artRect(31, 16, 13, 9, c.cyl('metal', 'v'), 2.5, { 'data-part': 'shroud' }),
+        artCircle(35, 20.5, 2, ART.dark[2]),
+        artCircle(40, 20.5, 2, ART.dark[2]),
+        artRect(43, 18.5, 5, 5, c.cyl('metal', 'v'), 1, { 'data-part': 'muzzle' })
+      ]
+    },
+
+    /* ───────── 저격총 · bolt-action rifle (§3) ─────────
+     * Long barrel, scope tube on rings, bolt handle, cheek-piece stock. */
+    sniper: {
+      detail: (c) => [
+        poly([[6, 64], [60, 56], [60, 96], [34, 98], [10, 86]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        poly([[6, 64], [60, 56], [60, 60], [7, 68]], RIM2),
+        poly([[18, 52], [62, 46], [62, 60], [18, 66]], c.mat('wood', 'd'), { 'data-part': 'cheek' }),
+        poly([[18, 52], [62, 46], [62, 49], [18, 55]], RIM),
+        poly([[58, 76], [82, 74], [76, 108], [54, 106]], c.mat('wood', 'd'), { 'data-part': 'grip' }),
+        poly([[78, 74], [112, 74], [112, 82], [78, 82]], c.mat('metal', 'v')),
+        poly([[86, 72], [94, 72], [92, 86], [86, 86]], c.mat('metal', 'r'), { 'data-part': 'trigger' }),
+        poly([[96, 76], [122, 76], [120, 102], [98, 102]], c.mat('metal', 'v'), { 'data-part': 'mag' }),
+        poly([[56, 50], [136, 50], [136, 78], [56, 78]], c.mat('metal', 'd'), { 'data-part': 'receiver' }),
+        poly([[56, 50], [136, 50], [136, 53], [56, 53]], RIM),
+        poly([[56, 75], [136, 75], [136, 78], [56, 78]], SEAM),
+        poly([[104, 66], [116, 66], [128, 86], [118, 92]], c.mat('metal', 'r'), { 'data-part': 'bolt' }),
+        artCircle(126, 90, 8, c.mat('metal', 'd'), { 'data-part': 'boltknob' }),
+        artPath('M120,86 A8,8 0 0 1 130,84 L128,87 A5,5 0 0 0 121.6,88 Z', RIM),
+        artRect(134, 56, 84, 16, c.cyl('metal', 'v'), 4, { 'data-part': 'barrel' }),
+        artRect(134, 57.5, 84, 2.6, RIM2, 1.3),
+        artRect(214, 52, 20, 24, c.cyl('metal', 'v'), 3, { 'data-part': 'muzzle' }),
+        artRect(219, 52, 3, 24, 'rgba(0,0,0,.35)'),
+        artRect(227, 52, 3, 24, 'rgba(0,0,0,.35)'),
+        artRect(74, 40, 10, 14, c.mat('metal', 'v'), 2, { 'data-part': 'ring' }),
+        artRect(140, 40, 10, 18, c.mat('metal', 'v'), 2, { 'data-part': 'ring' }),
+        artRect(62, 14, 110, 26, c.cyl('metal', 'v'), 12, { 'data-part': 'scope' }),
+        artRect(62, 16, 110, 3.6, RIM2, 1.8),
+        artRect(164, 10, 22, 34, c.cyl('metal', 'v'), 6, { 'data-part': 'bell' }),
+        artEllipse(180, 27, 5, 15, ART.dark[2]),
+        artEllipse(178, 22, 2.4, 5, 'rgba(120,180,255,.5)'),
+        artRect(100, 8, 18, 8, c.mat('metal', 'd'), 3, { 'data-part': 'turret' })
+      ],
+      icon: (c) => [
+        poly([[2, 27], [13, 25], [13, 36], [4, 35]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        poly([[11, 28], [18, 28], [16, 42], [9, 41]], c.mat('wood', 'd'), { 'data-part': 'grip' }),
+        artRect(13, 13, 3, 9, c.mat('metal', 'v'), 1, { 'data-part': 'ring' }),
+        artRect(24, 13, 3, 9, c.mat('metal', 'v'), 1, { 'data-part': 'ring' }),
+        poly([[9, 21], [28, 21], [28, 29], [9, 29]], c.mat('metal', 'd'), { 'data-part': 'receiver' }),
+        poly([[21, 26], [25, 26], [29, 35], [25, 37]], c.mat('metal', 'r'), { 'data-part': 'bolt' }),
+        artRect(27, 22.5, 20, 4, c.cyl('metal', 'v'), 2, { 'data-part': 'barrel' }),
+        artRect(7, 6, 25, 8, c.cyl('metal', 'v'), 4, { 'data-part': 'scope' }),
+        artRect(31, 4, 7, 12, c.cyl('metal', 'v'), 3, { 'data-part': 'bell' }),
+        artEllipse(34.5, 10, 1.8, 4.6, ART.dark[2])
+      ]
+    },
+
+    /* ───────── 폭탄 · pineapple grenade (§3) ─────────
+     * Lattice grooves, safety lever, pin ring. */
+    bomb: {
+      detail: (c) => [
+        artEllipse(104, 82, 46, 50, c.mat('dark', 'd'), { 'data-part': 'body' }),
+        artPath('M58,82 A46,50 0 0 1 104,32 L104,39 A40,43 0 0 0 65,82 Z', RIM2),
+        artPath('M60,62 Q104,52 148,62 L148,68 Q104,58 60,68 Z', 'rgba(0,0,0,.42)', { 'data-part': 'groove' }),
+        artPath('M58,84 Q104,74 150,84 L150,90 Q104,80 58,90 Z', 'rgba(0,0,0,.42)', { 'data-part': 'groove' }),
+        artPath('M64,106 Q104,98 144,106 L144,112 Q104,104 64,112 Z', 'rgba(0,0,0,.42)', { 'data-part': 'groove' }),
+        artPath('M64,46 Q104,38 144,46 L144,52 Q104,44 64,52 Z', 'rgba(0,0,0,.42)', { 'data-part': 'groove' }),
+        artPath('M70,120 Q104,114 138,120 L138,126 Q104,120 70,126 Z', 'rgba(0,0,0,.42)', { 'data-part': 'groove' }),
+        poly([[81, 36], [87, 36], [87, 128], [81, 128]], 'rgba(0,0,0,.34)', { 'data-part': 'rib' }),
+        poly([[119, 36], [125, 36], [125, 128], [119, 128]], 'rgba(0,0,0,.34)', { 'data-part': 'rib' }),
+        artPath('M66,54 Q62,82 70,110 L75,108 Q68,82 71,56 Z', 'rgba(0,0,0,.3)', { 'data-part': 'rib' }),
+        artPath('M140,56 Q144,82 136,110 L131,108 Q138,82 135,56 Z', 'rgba(0,0,0,.3)', { 'data-part': 'rib' }),
+        artEllipse(104, 130, 38, 6, 'rgba(0,0,0,.3)'),
+        artEllipse(82, 58, 15, 12, 'rgba(255,255,255,.09)'),
+        artRect(88, 20, 32, 18, c.mat('metal', 'v'), 4, { 'data-part': 'collar' }),
+        artRect(88, 21, 32, 3, RIM, 1.5),
+        poly([[116, 18], [132, 22], [142, 74], [130, 76]], c.mat('metal', 'r'), { 'data-part': 'lever' }),
+        poly([[116, 18], [132, 22], [131, 26], [116, 22]], RIM),
+        artRect(88, 35, 32, 3.4, SEAM, 1.7),
+        poly([[130, 28], [136, 30], [144, 72], [138, 73]], SEAM2),
+        artEllipse(92, 46, 9, 6, 'rgba(255,255,255,.1)'),
+        artRect(96, 10, 18, 12, c.mat('metal', 'd'), 3, { 'data-part': 'striker' }),
+        artRect(96, 11, 18, 2.4, RIM, 1.2),
+        artPath('M74,14 A18,18 0 1 0 92,-4 L92,4 A10,10 0 1 1 82,14 Z', c.mat('brass', 'd'), { 'data-part': 'ring' }),
+        poly([[80, 11], [98, 11], [98, 18], [80, 18]], c.mat('brass', 'v'), { 'data-part': 'pin' }),
+        poly([[80, 11], [98, 11], [98, 13], [80, 13]], RIM),
+        artEllipse(76, 92, 6, 14, 'rgba(255,255,255,.06)')
+      ],
+      icon: (c) => [
+        artEllipse(23, 29, 16, 17, c.mat('dark', 'd'), { 'data-part': 'body' }),
+        artPath('M7,29 A16,17 0 0 1 23,12 L23,15 A13,14 0 0 0 10,29 Z', RIM2),
+        artPath('M8,23 Q23,19 38,23 L38,25.6 Q23,21.6 8,25.6 Z', 'rgba(0,0,0,.45)', { 'data-part': 'groove' }),
+        artPath('M8,34 Q23,30 38,34 L38,36.6 Q23,32.6 8,36.6 Z', 'rgba(0,0,0,.45)', { 'data-part': 'groove' }),
+        poly([[20, 13], [26, 13], [26, 45], [20, 45]], 'rgba(0,0,0,.35)', { 'data-part': 'rib' }),
+        artRect(18, 7, 11, 7, c.mat('metal', 'v'), 2, { 'data-part': 'collar' }),
+        poly([[27, 6], [33, 8], [37, 26], [32, 27]], c.mat('metal', 'r'), { 'data-part': 'lever' }),
+        artPath('M11,7 A7,7 0 1 0 18,0 L18,3.4 A3.6,3.6 0 1 1 14.4,7 Z', c.mat('brass', 'd'), { 'data-part': 'ring' })
+      ]
+    },
+
+    /* ───────── 로켓 · shoulder-fired launcher (§3) ─────────
+     * Launch tube, exhaust bell, optical sight, front grip. */
+    rocket: {
+      detail: (c) => [
+        poly([[188, 44], [174, 20], [184, 18], [198, 42]], c.mat('metal', 'r'), { 'data-part': 'fin' }),
+        poly([[188, 76], [174, 100], [184, 102], [198, 78]], c.mat('metal', 'r'), { 'data-part': 'fin' }),
+        poly([[6, 28], [34, 46], [34, 76], [6, 94]], c.mat('metal', 'r'), { 'data-part': 'bell' }),
+        poly([[6, 28], [34, 46], [34, 50], [8, 34]], RIM2),
+        artEllipse(9, 61, 5, 32, ART.dark[2]),
+        artRect(30, 42, 152, 38, c.cyl('metal', 'v'), 10, { 'data-part': 'tube' }),
+        artRect(30, 44.5, 152, 4, RIM2, 2),
+        artRect(30, 75, 152, 3.4, SEAM2, 1.7),
+        artRect(56, 42, 7, 38, 'rgba(0,0,0,.22)'),
+        artRect(150, 42, 7, 38, 'rgba(0,0,0,.22)'),
+        artRect(96, 38, 30, 46, c.mat('rubber', 'v'), 5, { 'data-part': 'shield' }),
+        artRect(96, 39, 30, 3, RIM2, 1.5),
+        artRect(178, 46, 20, 30, c.cyl('metal', 'v'), 4, { 'data-part': 'body' }),
+        poly([[194, 42], [236, 61], [194, 80]], c.mat('accent', 'r'), { 'data-part': 'warhead' }),
+        poly([[194, 42], [236, 61], [231, 61], [194, 45.6]], RIM2),
+        poly([[194, 70], [231, 61], [236, 61], [194, 80]], SEAM2),
+        artRect(104, 16, 34, 14, c.mat('metal', 'd'), 3, { 'data-part': 'sight' }),
+        artRect(104, 17, 34, 2.6, RIM, 1.3),
+        artRect(116, 28, 10, 12, c.mat('metal', 'v'), 2),
+        artEllipse(134, 23, 4, 5, 'rgba(120,180,255,.45)'),
+        poly([[122, 84], [146, 84], [140, 124], [118, 122]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[122, 84], [146, 84], [145, 88], [121, 88]], RIM2),
+        poly([[52, 80], [74, 80], [68, 112], [48, 110]], c.mat('rubber', 'd')),
+        poly([[52, 80], [74, 80], [73, 84], [51, 84]], RIM2),
+        artRect(36, 42, 5, 38, 'rgba(255,255,255,.12)'),
+        artRect(168, 42, 5, 38, 'rgba(255,255,255,.12)')
+      ],
+      icon: (c) => [
+        poly([[33, 16], [28, 6], [33, 5], [38, 15]], c.mat('metal', 'r'), { 'data-part': 'fin' }),
+        poly([[3, 12], [11, 17], [11, 31], [3, 36]], c.mat('metal', 'r'), { 'data-part': 'bell' }),
+        artRect(9, 17, 26, 14, c.cyl('metal', 'v'), 4, { 'data-part': 'tube' }),
+        artRect(9, 18, 26, 2.4, RIM2, 1.2),
+        poly([[34, 15], [47, 24], [34, 33]], c.mat('accent', 'r'), { 'data-part': 'warhead' }),
+        artRect(18, 8, 12, 6, c.mat('metal', 'd'), 2, { 'data-part': 'sight' }),
+        poly([[20, 31], [28, 31], [25, 45], [18, 44]], c.mat('rubber', 'd'), { 'data-part': 'grip' })
+      ]
+    },
+
+    /* ───────── 화염방사기 · backpack flamethrower (§3) ─────────
+     * Two fuel tanks, a corrugated hose, an igniter nozzle. */
+    flame: {
+      detail: (c) => {
+        const out = [];
+        out.push(artRect(10, 24, 42, 92, c.cyl('metal', 'h'), 20, { 'data-part': 'tank' }));
+        out.push(artRect(46, 32, 34, 78, c.cyl('metal', 'h'), 16, { 'data-part': 'tank' }));
+        out.push(artRect(14, 26, 7, 88, RIM2, 3.5));
+        out.push(artRect(49, 34, 6, 74, RIM2, 3));
+        out.push(artRect(10, 50, 70, 6, 'rgba(0,0,0,.3)', 3, { 'data-part': 'strap' }));
+        out.push(artRect(10, 88, 70, 6, 'rgba(0,0,0,.3)', 3, { 'data-part': 'strap' }));
+        out.push(artRect(22, 12, 14, 14, c.mat('brass', 'd'), 3, { 'data-part': 'valve' }));
+        out.push(artCircle(29, 12, 7, c.mat('brass', 'v')));
+        /* corrugated hose, with 7 ribs sampled off its own curve so they sit ON it (§3) */
+        const H0 = [78, 54], H1 = [106, 36], H2 = [112, 94], H3 = [140, 72];
+        const cub = (t) => {
+          const u = 1 - t;
+          return [u * u * u * H0[0] + 3 * u * u * t * H1[0] + 3 * u * t * t * H2[0] + t * t * t * H3[0],
+            u * u * u * H0[1] + 3 * u * u * t * H1[1] + 3 * u * t * t * H2[1] + t * t * t * H3[1]];
+        };
+        out.push(artPath('M78,54 C106,36 112,94 140,72 L140,86 C112,108 106,50 78,68 Z', c.mat('rubber', 'd'), { 'data-part': 'hose' }));
+        for (let i = 0; i < 7; i++) {
+          const p = cub((i + 0.6) / 7.6);
+          out.push(artRect(p[0] - 1.8, p[1], 3.6, 14, 'rgba(0,0,0,.3)', 1.8, { 'data-part': 'rib' }));
+        }
+        out.push(artRect(136, 58, 64, 22, c.cyl('metal', 'v'), 7, { 'data-part': 'nozzle' }));
+        out.push(artRect(136, 60, 64, 3, RIM, 1.5));
+        out.push(artRect(196, 54, 16, 30, c.mat('metal', 'd'), 4, { 'data-part': 'ring' }));
+        out.push(artEllipse(204, 69, 4, 11, ART.dark[2]));
+        out.push(poly([[146, 78], [170, 78], [164, 116], [142, 114]], c.mat('rubber', 'd'), { 'data-part': 'grip' }));
+        out.push(poly([[146, 78], [170, 78], [169, 82], [145, 82]], RIM2));
+        out.push(poly([[152, 76], [160, 76], [158, 90], [152, 90]], c.mat('metal', 'r'), { 'data-part': 'trigger' }));
+        out.push(artPath('M212,70 C226,58 222,40 216,30 C240,44 240,82 212,86 Z', c.glow('hot'), { 'data-part': 'flame' }));
+        out.push(artPath('M214,70 C224,62 221,50 218,44 C232,54 232,74 214,78 Z', ART.gloss[2]));
+        return out;
+      },
+      icon: (c) => [
+        artRect(3, 10, 13, 28, c.cyl('metal', 'h'), 6, { 'data-part': 'tank' }),
+        artRect(14, 13, 10, 22, c.cyl('metal', 'h'), 5, { 'data-part': 'tank' }),
+        artPath('M22,19 C29,13 30,31 37,25 L37,30 C29,36 28,20 22,25 Z', c.mat('rubber', 'd'), { 'data-part': 'hose' }),
+        artRect(33, 20, 12, 7, c.cyl('metal', 'v'), 2, { 'data-part': 'nozzle' }),
+        poly([[35, 26], [41, 26], [39, 40], [33, 39]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M44,24 C48,19 47,13 45,9 C53,15 53,28 44,30 Z', c.glow('hot'), { 'data-part': 'flame' }),
+        artRect(5, 11, 3, 26, RIM2, 1.5)
+      ]
+    },
+
+    /* ───────── 붕괴 · T-handle blasting machine (§3) ─────────
+     * Wooden case, T plunger, wire terminals. */
+    collapse: {
+      detail: (c) => [
+        artRect(66, 8, 92, 16, c.mat('accent', 'd'), 7, { 'data-part': 'tbar' }),
+        artRect(66, 9.5, 92, 3.4, RIM, 1.7),
+        artRect(102, 22, 20, 30, c.cyl('metal', 'v'), 3, { 'data-part': 'shaft' }),
+        artRect(104, 22, 4, 30, RIM2, 2),
+        artPath('M34,74 C20,72 22,54 8,52 L8,60 C16,62 12,78 34,80 Z', ART.dark[2], { 'data-part': 'wire' }),
+        artPath('M34,96 C20,100 22,116 10,120 L10,128 C26,122 22,106 34,102 Z', ART.dark[2], { 'data-part': 'wire' }),
+        poly([[38, 50], [186, 50], [186, 116], [38, 116]], c.mat('wood', 'd'), { 'data-part': 'case' }),
+        poly([[38, 50], [186, 50], [186, 54], [38, 54]], RIM),
+        poly([[38, 112], [186, 112], [186, 116], [38, 116]], SEAM),
+        poly([[38, 50], [54, 50], [54, 116], [38, 116]], 'rgba(200,162,74,.26)'),
+        poly([[170, 50], [186, 50], [186, 116], [170, 116]], 'rgba(200,162,74,.26)'),
+        artRect(44, 56, 136, 22, c.mat('dark', 'v'), 3, { 'data-part': 'plate' }),
+        artRect(44, 57, 136, 2.4, RIM2, 1.2),
+        artCircle(72, 94, 11, c.mat('metal', 'd'), { 'data-part': 'dial' }),
+        artPath('M63,88 A11,11 0 0 1 80,86 L77,89 A7,7 0 0 0 65.6,90.4 Z', RIM),
+        artCircle(72, 94, 3.4, ART.dark[2]),
+        artCircle(104, 94, 11, c.mat('metal', 'v'), { 'data-part': 'dial' }),
+        artCircle(104, 94, 3.4, ART.dark[2]),
+        artRect(134, 86, 32, 16, c.mat('accent', 'd'), 4, { 'data-part': 'lamp' }),
+        artRect(134, 87, 32, 2.6, RIM, 1.3),
+        artCircle(36, 74, 7, c.mat('brass', 'd'), { 'data-part': 'terminal' }),
+        artCircle(36, 96, 7, c.mat('brass', 'd'), { 'data-part': 'terminal' }),
+        artRect(30, 116, 164, 10, c.mat('dark', 'v'), 3, { 'data-part': 'feet' }),
+        artRect(30, 117, 164, 2.2, RIM2, 1.1),
+        artRect(198, 28, 8, 58, c.cyl('metal', 'h'), 3, { 'data-part': 'antenna' }),
+        artCircle(202, 24, 8, c.mat('accent', 'd'))
+      ],
+      icon: (c) => [
+        artRect(13, 3, 22, 6, c.mat('accent', 'd'), 3, { 'data-part': 'tbar' }),
+        artRect(21, 8, 6, 10, c.cyl('metal', 'v'), 1.5, { 'data-part': 'shaft' }),
+        poly([[7, 17], [41, 17], [41, 38], [7, 38]], c.mat('wood', 'd'), { 'data-part': 'case' }),
+        poly([[7, 17], [41, 17], [41, 19], [7, 19]], RIM),
+        artRect(10, 20, 28, 7, c.mat('dark', 'v'), 2, { 'data-part': 'plate' }),
+        artCircle(17, 32, 4, c.mat('metal', 'd'), { 'data-part': 'dial' }),
+        artRect(27, 29, 11, 6, c.mat('accent', 'd'), 2, { 'data-part': 'lamp' }),
+        artRect(5, 38, 38, 4, c.mat('dark', 'v'), 1.5, { 'data-part': 'feet' }),
+        artCircle(5, 23, 3, c.mat('brass', 'd'), { 'data-part': 'terminal' })
+      ]
+    }
   };
 
-  /* weaponArt(id, size) → a fresh <svg>. `size` is the WIDTH in px; the 2:1 viewBox fixes the height.
-   * Unknown ids fall back to the hammer so a caller can never get null back. */
-  function weaponArt(id, size) {
-    const build = WEAPON_ART[id] || WEAPON_ART.hammer;
-    const w = Math.max(8, +size || 24), h = w / 2;
+  /* ── §5: user-supplied PNG art ───────────────────────────────────────────
+   * icons/weapons/<id>.png (256 × 256, transparent) wins over the SVG when the file ships, and §5 requires
+   * the fallback to be SILENT when it does not.
+   *
+   * That rules out discovering the file at runtime. A content script cannot stat its own package, so the
+   * only probe available is loading the URL — and loading a packaged resource that is not there prints
+   * "Failed to load resource: net::ERR_FAILED" into the page console on every weapon, every activation.
+   * (An earlier revision of this file did exactly that and suite C's zero-console-errors assertion caught
+   * it.) An <img> that errors is also still an <img>: there is no in-band way to fall back afterwards
+   * without a second layout pass.
+   *
+   * So the shipped set is DECLARED here instead. It is empty because this build packages no weapon PNGs;
+   * dropping art in means adding its id to this set in the same commit, which is also what gives
+   * tools/validate.js (existence + 256 × 256) and tools/package.js something to check and include. */
+  const WEAPON_PNG_IDS = new Set([]);
+  function artPngUrl(id) {
+    try { return chrome.runtime.getURL('icons/weapons/' + id + '.png'); } catch (e) { return ''; }
+  }
+  function hasArtPng(id) { return WEAPON_PNG_IDS.has(id) && !!artPngUrl(id); }
+  /* §9 item 5 — "drop icons/weapons/pistol.png in and weaponArt returns an <img>; take it away and it
+   * returns an <svg> again". Because shipping a PNG means adding its id to the set above (the whole point
+   * of the declared set: no runtime probe, no console noise), the switch the test needs to flip IS that
+   * set. A function, so api.debug's flag-copying helpers skip it. */
+  debug.weaponPng = (id, on) => {
+    if (on) WEAPON_PNG_IDS.add(id); else WEAPON_PNG_IDS.delete(id);
+    return Array.from(WEAPON_PNG_IDS);
+  };
+
+  /* weaponArt(id, size, lod) → a fresh <svg> (or an <img> when §5 art exists and weaponArt !== 'svg').
+   * `size` is the WIDTH in px; `lod` is 'detail' | 'icon', defaulting by size (§2). Unknown ids fall back to
+   * the hammer so a caller can never get null back. */
+  function weaponArt(id, size, lod) {
+    const entry = WEAPON_ART[id] || WEAPON_ART.hammer;
+    const w = Math.max(8, +size || 24);
+    const useIcon = (lod ? lod === 'icon' : w < DETAIL_MIN);
+    const h = useIcon ? w : Math.round(w * 140 / 240 * 100) / 100;
+    if (wpnOpts.weaponArt !== 'svg' && hasArtPng(id)) {
+      const im = doc.createElement('img');
+      im.src = artPngUrl(id);
+      im.alt = '';
+      im.className = 'crs-art';
+      im.setAttribute('data-crs', '1');
+      im.setAttribute('aria-hidden', 'true');
+      im.style.width = px(w); im.style.height = px(w); im.style.display = 'block';
+      return im;
+    }
+    const c = artCtx();
     const svg = svgNode('svg', {
-      viewBox: '0 0 120 60', width: String(w), height: String(h),
+      viewBox: useIcon ? VB_ICON : VB_DETAIL, width: String(w), height: String(h),
       fill: 'none', focusable: 'false', 'aria-hidden': 'true',
-      class: 'crs-art', 'data-crs': '1'
+      class: 'crs-art', 'data-crs': '1', 'data-lod': useIcon ? 'icon' : 'detail'
     });
     svg.style.width = px(w); svg.style.height = px(h); svg.style.display = 'block';
     svg.style.overflow = 'visible';
-    for (const node of build()) svg.append(node);
+    const nodes = (useIcon ? entry.icon : entry.detail)(c);
+    if (c.defs.firstChild) svg.append(c.defs);
+    for (const node of nodes) svg.append(node);
     return svg;
   }
   const weaponArtIds = () => Object.keys(WEAPON_ART);
 
-  /* ── v1.5 §1 / §3.3: the same picture in the HUD grid and the ammo panel ──
+  /* ── the same picture in the HUD grid and the ammo panel ──
    * The HUD lives in a shadow root with its own constructed stylesheet, so the
    * sizes are set through node.style (CSSOM only — the literal style ATTRIBUTE
    * is banned on hostile pages) and src/45-hud.js needs no edit at all. `weaponArt: 'emoji'` simply shows the
-   * original emoji span again and hides the svg. */
-  const wpnOpts = { weaponArt: 'svg', viewmodel: true, loaded: false };
-  const WEAPON_ART_MODES = ['svg', 'emoji'];
+   * original emoji span again and hides the svg. Both call sites ask for the ICON lod explicitly: they are
+   * 24–28 px, exactly what §2 drew that lod for. */
+  const wpnOpts = { weaponArt: 'auto', viewmodel: true, loaded: false };
+  const WEAPON_ART_MODES = ['auto', 'svg', 'emoji'];
 
   function statLine(W) {
     const pct = Math.round((W.critChance == null ? 0.1 : W.critChance) * 100);
@@ -1379,7 +1956,7 @@
     return msg('hudDamage') + ' ' + weaponLabel(W) + ' · ' + msg('statCrit') + ' ' + pct + '% · ' + msg('statSwap') + ' ' + swap + msg('unitSec');
   }
   /* One <span class="wart"> per weapon button, built once and kept; the emoji span stays in the DOM so the
-   * option can flip back without rebuilding anything. Also (re)writes title / aria-label with §3.3's stats. */
+   * option can flip back without rebuilding anything. Also (re)writes title / aria-label with the stats. */
   function syncWeaponArt() {
     if (!hudEls.weaponBtns) return;
     const svgMode = wpnOpts.weaponArt !== 'emoji';
@@ -1395,11 +1972,11 @@
           art.style.display = 'inline-flex';
           art.style.alignItems = 'center';
           art.style.justifyContent = 'center';
-          art.append(weaponArt(id, 26));
-          const em = b.querySelector('.em');
-          if (em) b.insertBefore(art, em); else b.append(art);
+          const em0 = b.querySelector('.em');
+          if (em0) b.insertBefore(art, em0); else b.append(art);
           hudEls.weaponArts[id] = art;
         }
+        if (!art.firstChild) art.append(weaponArt(id, 26, 'icon'));
         art.style.display = svgMode ? 'inline-flex' : 'none';
         const em = b.querySelector('.em');
         if (em) em.style.display = svgMode ? 'none' : '';
@@ -1427,7 +2004,7 @@
       if (hudEls.aArtFor !== state.weapon) {
         hudEls.aArtFor = state.weapon;
         while (hudEls.aArt.firstChild) hudEls.aArt.removeChild(hudEls.aArt.firstChild);
-        hudEls.aArt.append(weaponArt(state.weapon, 28));
+        hudEls.aArt.append(weaponArt(state.weapon, 28, 'icon'));
       }
       hudEls.aArt.style.display = svgMode ? 'inline-flex' : 'none';
       hudEls.aEmoji.style.display = svgMode ? 'none' : '';
@@ -1872,6 +2449,8 @@
   /* ===================================================================== */
   /* The layer is 200 × 100 (§2); the picture is drawn WIDER than the layer and allowed to overflow it, because
    * a weapon that only fills the middle band of its own 120 × 60 viewBox reads as a distant toy at 1:1. */
+  /* The layer is 200 × 100 and the `detail` drawing is 240 × 140, so at VM_W the picture is 268 × 156 and
+   * overflows its own layer on purpose (§2) — a weapon that fits inside the layer reads as a distant toy. */
   const VM_W = 268;
   const vm = {
     node: null, holder: null, mag: null, shot: null,
@@ -1948,7 +2527,7 @@
     vm.weapon = id;
     try {
       while (vm.holder.firstChild) vm.holder.removeChild(vm.holder.firstChild);
-      vm.holder.append(weaponArt(id, VM_W));
+      vm.holder.append(weaponArt(id, VM_W, 'detail'));   // SPEC-weapon-art §2: the viewmodel is ALWAYS the detail LOD — never left to VM_W happening to clear the 64 px threshold
     } catch (e) { /* ignore */ }
   }
   function vmIdle() {
@@ -3305,7 +3884,7 @@
    *   pierce    extra elements hit down the same stack, ×0.6 damage per layer
    *   aoeIgnoresCover   blasts sample by radius, so depth never shields (§10.3)
    * Melee-ness is NOT a new field: `kind === 'hammer'` already means hammer / axe
-   * / sword, and that is what the viewmodel swing and the no-spread rule read. */
+   * / katana, and that is what the viewmodel swing and the no-spread rule read. */
   /* 붕괴's pierce is "전부" (all). A sentinel integer, not Infinity: Infinity does not survive the structured
    * clone / JSON hop that api.weapons() takes to reach an extension page or a test harness. */
   const PIERCE_ALL = 999;
@@ -3315,7 +3894,7 @@
     smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40, pierce: 0 },
     sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.75, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
     axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0,    pierce: 0 },
-    sword:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
+    katana:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
     bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
     rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
     flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55, pierce: 0 },
@@ -3788,7 +4367,7 @@
   }
 
 // ── 76-weapon-fire.js ──
-// ── the nine fire() entries (melee/gun/bomb/rocket/flame/sword) + collapse chain ──
+// ── the nine fire() entries (melee/gun/bomb/rocket/flame/katana) + collapse chain ──
   /* --- fire(x, y, ctx) entries. ctx.hold: fired by a hold tick (ctx.h = the hold session); each returns the element hit --- */
   function fireHammer(x, y) {
     state.shots++;
@@ -3857,12 +4436,12 @@
     if (el) applyHit(el, dmg, 'hammer', x, y, { crit, pieces: 2, textSplit: false, splitLine: { angle: (90 + rand(-15, 15)) * DEG, cx: x, cy: y } });
     return el;
   }
-  function fireStab(x, y) {   // sword click / drag shorter than 12 px
+  function fireStab(x, y) {   // katana click / drag shorter than 12 px
     state.shots++;
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit('sword') : false;
-    const dmg = rollDamage(WEAPONS.sword.damage, crit);
+    const crit = el ? rollCrit('katana') : false;
+    const dmg = rollDamage(WEAPONS.katana.damage, crit);
     sfx('swish', { crit });
     flash(x, y, 'hammer', { size: 90, dur: 200 }); shake('hammer', { amp: crit ? 4.2 : 3 });
     drawCrack(x, y, 'hammer', { rays: [4, 6], lenScale: 0.45, ink: 0.5 });
@@ -3918,7 +4497,7 @@
     }
     interceptOrbsAlong(x1, y1, x2, y2, 18);   // v1.2 A9: orbs within 18 px of the segment pop; the page is still hit
     // roll every element's crit before any sound / effect (A4) so the swish can carry the crit sparkle
-    const plan = hits.map((el) => { const crit = rollCrit('sword'); return { el, crit, dmg: rollDamage(WEAPONS.sword.damage, crit) }; });
+    const plan = hits.map((el) => { const crit = rollCrit('katana'); return { el, crit, dmg: rollDamage(WEAPONS.katana.damage, crit) }; });
     sfx('swish', { crit: plan.some((p) => p.crit) });
     slashFx(x1, y1, x2, y2);
     drawSlash(x1, y1, x2, y2);
@@ -4102,10 +4681,10 @@
   }
 
 // ── 79-weapon-actions.js ──
-// ── action dispatch: cooldown/swap/ammo gating, smashAt/slashSegment, hold weapons, sword drag, WEAPONS.*.fire wiring ──
+// ── action dispatch: cooldown/swap/ammo gating, smashAt/slashSegment, hold weapons, katana drag, WEAPONS.*.fire wiring ──
 
   WEAPONS.hammer.fire = fireHammer; WEAPONS.pistol.fire = firePistol; WEAPONS.smg.fire = fireSmg; WEAPONS.axe.fire = fireAxe;
-  WEAPONS.sword.fire = fireStab; WEAPONS.bomb.fire = fireBomb; WEAPONS.rocket.fire = fireRocket; WEAPONS.flame.fire = fireFlame;
+  WEAPONS.katana.fire = fireStab; WEAPONS.bomb.fire = fireBomb; WEAPONS.rocket.fire = fireRocket; WEAPONS.flame.fire = fireFlame;
   WEAPONS.sniper.fire = fireSniper;
   WEAPONS.collapse.fire = (x, y) => { state.shots++; doCollapse(x, y); return null; };
 
@@ -4131,7 +4710,7 @@
     kick();
     return out === undefined ? null : out;
   }
-  /* Single attack at (x, y): click weapons, one tick for smg/flame, a stab for the sword. true if an attack happened. */
+  /* Single attack at (x, y): click weapons, one tick for smg/flame, a stab for the katana. true if an attack happened. */
   function smashAt(x, y, weaponId) {
     if (!state.active) return false;
     x = +x; y = +y;
@@ -4141,21 +4720,21 @@
     const W = WEAPONS[id];
     const r = action(id, x, y, () => {
       const hit = W.fire(x, y, { hold: false });
-      startCooldown(id, id === 'sword' ? W.stabCooldownMs : W.cooldownMs);
+      startCooldown(id, id === 'katana' ? W.stabCooldownMs : W.cooldownMs);
       return hit;
     });
     return r !== undefined;
   }
-  /* Sword segment (pointer release or api.slash): < 12 px → stab, else slash. Returns elements damaged. */
+  /* Katana segment (pointer release or api.slash): < 12 px → stab, else slash. Returns elements damaged. */
   function slashSegment(x1, y1, x2, y2) {
     if (!state.active) return 0;
     x1 = +x1; y1 = +y1; x2 = +x2; y2 = +y2;
     if (!(isFinite(x1) && isFinite(y1) && isFinite(x2) && isFinite(y2))) return 0;
     if (Math.hypot(x2 - x1, y2 - y1) < 12) {
-      const r = action('sword', x1, y1, () => { const hit = fireStab(x1, y1); startCooldown('sword', WEAPONS.sword.stabCooldownMs); return hit; });
+      const r = action('katana', x1, y1, () => { const hit = fireStab(x1, y1); startCooldown('katana', WEAPONS.katana.stabCooldownMs); return hit; });
       return r ? 1 : 0;
     }
-    const n = action('sword', x2, y2, () => doSlash(x1, y1, x2, y2));
+    const n = action('katana', x2, y2, () => doSlash(x1, y1, x2, y2));
     return n || 0;
   }
 
@@ -4219,7 +4798,7 @@
     if (!silent) scheduleHud();
   }
 
-  /* --- sword drag (A8): preview line from pointerdown, resolved on release --- */
+  /* --- katana drag (A8): preview line from pointerdown, resolved on release --- */
   function startSlash(x, y, pointerId) {
     if (!state.active || !root) return false;
     if (state.hold) stopHold();
@@ -4549,9 +5128,10 @@
     return true;
   }
   function setLoadout(ids, opts) {
-    if (!isPermutation(ids)) return false;
+    const list = migrateWeaponIds(ids);   // §8.1: a caller (or a stored array) still saying 'sword' is accepted once
+    if (!isPermutation(list)) return false;
     const silent = !!(opts && opts.silent);
-    state.loadout = ids.slice();
+    state.loadout = list.slice();
     state.preset = (opts && opts.preset) || 'custom';
     if (!silent) { state.loadoutTouched = true; safe(() => chrome.storage.sync.set({ crsLoadout: state.loadout.slice(), crsLoadoutPreset: state.preset })); }
     reorderHud();
@@ -7267,12 +7847,13 @@
   }
   /* setWeapon (v1.2 A5): a CHANGE that is user-driven cancels the reload and the scope and starts the 250 ms swap
    * delay; `{ silent: true }` (loadPrefs) sets no delay; the same id is a no-op. */
-  function setWeapon(id, opts) {
+  function setWeapon(rawId, opts) {
+    const id = migrateWeaponId(rawId);   // §8.1: api.setWeapon('sword') keeps working, once
     if (!WEAPON_IDS.includes(id)) return false;
     const silent = !!(opts && opts.silent);
     if (id === state.weapon) { if (!silent) state.weaponTouched = true; return id; }
     if (state.hold) stopHold();
-    if (state.slash && id !== 'sword') cancelSlash();   // a drag in progress must not fire on release under the new weapon
+    if (state.slash && id !== 'katana') cancelSlash();   // a drag in progress must not fire on release under the new weapon
     if (WEAPONS[id].hold || WEAPONS[id].input === 'drag') state.hintCollapse = false;   // the hold / drag instruction beats the lingering collapse hint
     if (!silent) {
       stopReload();
@@ -7303,13 +7884,14 @@
     safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
     safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
-      if (!state.loadoutTouched && isPermutation(res.crsLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
+      const storedLoadout = migrateWeaponIds(res.crsLoadout);   // §8.1: a stored 'sword' becomes 'katana' on read
+      if (!state.loadoutTouched && isPermutation(storedLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
-        setLoadout(res.crsLoadout, { preset: (p === 'custom' || PRESETS[p]) ? p : 'custom', silent: true });
+        setLoadout(storedLoadout, { preset: (p === 'custom' || PRESETS[p]) ? p : 'custom', silent: true });
       }
       if (!state.weaponTouched) {   // crsWeapon wins; a legacy crsMode 'gun' maps to 'pistol'
-        let w = res.crsWeapon;
-        if (!WEAPON_IDS.includes(w)) w = res.crsMode === 'gun' ? 'pistol' : res.crsMode;
+        let w = migrateWeaponId(res.crsWeapon);
+        if (!WEAPON_IDS.includes(w)) w = res.crsMode === 'gun' ? 'pistol' : migrateWeaponId(res.crsMode);
         if (WEAPON_IDS.includes(w)) setWeapon(w, { silent: true });   // no swap delay, no reload cancel, no scope-out (A5)
       }
       if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
@@ -7481,7 +8063,7 @@
     scope: (on) => { if (on) scopeOn(); else scopeOff(); return state.scoped; },
     player: playerInfo, setCombat: (v) => setCombat(v),
     // ── v1.5: the weapon picture (§1) and the two switches that have no options page yet (§1 / §2) ──
-    weaponArt: (id, size) => weaponArt(id, size), options: weaponOptions, setOption: setWeaponOption,
+    weaponArt: (id, size, lod) => weaponArt(id, size, lod), options: weaponOptions, setOption: setWeaponOption,
     // ── v1.4 §0.5 / §9.2: the mode setting and the debris lifetime ──
     // (api.mode / api.setMode stay the v1 WEAPON alias; the combat mode has its own pair.)
     get combatMode() { return state.mode; },

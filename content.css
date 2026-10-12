@@ -947,3 +947,55 @@ crs-hud:popover-open {
   opacity: 1;
   transform: translate(0px, 0px);
 }
+
+/* ===================================================================== */
+/* art                                                                    */
+/* ===================================================================== */
+/* ---- weapon art (SPEC-weapon-art §1 / §2) ----
+   weaponArt() returns one <svg class="crs-art"> (or an <img class="crs-art"> when §5 user art
+   ships). The same node is used in three places: the viewmodel layer above, the HUD weapon grid
+   and the ammo panel. The HUD copies live in a shadow root the page cannot reach, but the
+   viewmodel copy sits in the glass root in the page's own DOM, where a hostile sheet's
+   `svg { max-width: 100%; vertical-align: baseline }` or `img { border: 1px solid }` would
+   otherwise reshape it.
+
+   CASCADE NOTE — this sheet is injected at USER origin, where !important outranks inline styles.
+   weaponArt() writes `width` / `height` / `display` / `overflow` on the node itself, and the
+   viewmodel's mirror + tilt is animated on .crs-viewmodel-art, so NONE of those four properties
+   may be marked here. Everything the product never writes is pinned. ---- */
+.crs-art {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+  box-sizing: content-box !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  float: none !important;
+  clear: none !important;
+  position: static !important;
+  vertical-align: middle !important;
+  object-fit: contain !important;
+  image-rendering: auto !important;
+  visibility: visible !important;
+  /* NOT !important: weaponArt() writes these inline per call site (26 / 28 / 268 px). */
+  width: auto;
+  height: auto;
+  display: block;
+  overflow: visible;
+  opacity: 1;
+  filter: none;
+  transform: none;
+}
+/* The viewmodel picture is the `detail` LOD, 240 × 140, drawn WIDER and TALLER than the 200 × 100
+   layer on purpose (§2) — a weapon that fits inside its own layer reads as a distant toy. The
+   holder already allows that overflow; this just stops a host page's `* { overflow: hidden }`
+   from cropping the head off the hammer. */
+.crs-viewmodel-art {
+  overflow: visible !important;
+}

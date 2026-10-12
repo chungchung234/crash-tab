@@ -19,7 +19,7 @@
    *   pierce    extra elements hit down the same stack, ×0.6 damage per layer
    *   aoeIgnoresCover   blasts sample by radius, so depth never shields (§10.3)
    * Melee-ness is NOT a new field: `kind === 'hammer'` already means hammer / axe
-   * / sword, and that is what the viewmodel swing and the no-spread rule read. */
+   * / katana, and that is what the viewmodel swing and the no-spread rule read. */
   /* 붕괴's pierce is "전부" (all). A sentinel integer, not Infinity: Infinity does not survive the structured
    * clone / JSON hop that api.weapons() takes to reach an extension page or a test harness. */
   const PIERCE_ALL = 999;
@@ -29,7 +29,7 @@
     smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40, pierce: 0 },
     sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.75, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
     axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0,    pierce: 0 },
-    sword:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
+    katana:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
     bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
     rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
     flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55, pierce: 0 },

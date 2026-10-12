@@ -6,9 +6,10 @@
     return true;
   }
   function setLoadout(ids, opts) {
-    if (!isPermutation(ids)) return false;
+    const list = migrateWeaponIds(ids);   // §8.1: a caller (or a stored array) still saying 'sword' is accepted once
+    if (!isPermutation(list)) return false;
     const silent = !!(opts && opts.silent);
-    state.loadout = ids.slice();
+    state.loadout = list.slice();
     state.preset = (opts && opts.preset) || 'custom';
     if (!silent) { state.loadoutTouched = true; safe(() => chrome.storage.sync.set({ crsLoadout: state.loadout.slice(), crsLoadoutPreset: state.preset })); }
     reorderHud();

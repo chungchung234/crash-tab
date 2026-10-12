@@ -1,4 +1,4 @@
-// ── the nine fire() entries (melee/gun/bomb/rocket/flame/sword) + collapse chain ──
+// ── the nine fire() entries (melee/gun/bomb/rocket/flame/katana) + collapse chain ──
   /* --- fire(x, y, ctx) entries. ctx.hold: fired by a hold tick (ctx.h = the hold session); each returns the element hit --- */
   function fireHammer(x, y) {
     state.shots++;
@@ -67,12 +67,12 @@
     if (el) applyHit(el, dmg, 'hammer', x, y, { crit, pieces: 2, textSplit: false, splitLine: { angle: (90 + rand(-15, 15)) * DEG, cx: x, cy: y } });
     return el;
   }
-  function fireStab(x, y) {   // sword click / drag shorter than 12 px
+  function fireStab(x, y) {   // katana click / drag shorter than 12 px
     state.shots++;
     if (interceptOrb(x, y)) return null;
     const el = pickTarget(x, y);
-    const crit = el ? rollCrit('sword') : false;
-    const dmg = rollDamage(WEAPONS.sword.damage, crit);
+    const crit = el ? rollCrit('katana') : false;
+    const dmg = rollDamage(WEAPONS.katana.damage, crit);
     sfx('swish', { crit });
     flash(x, y, 'hammer', { size: 90, dur: 200 }); shake('hammer', { amp: crit ? 4.2 : 3 });
     drawCrack(x, y, 'hammer', { rays: [4, 6], lenScale: 0.45, ink: 0.5 });
@@ -128,7 +128,7 @@
     }
     interceptOrbsAlong(x1, y1, x2, y2, 18);   // v1.2 A9: orbs within 18 px of the segment pop; the page is still hit
     // roll every element's crit before any sound / effect (A4) so the swish can carry the crit sparkle
-    const plan = hits.map((el) => { const crit = rollCrit('sword'); return { el, crit, dmg: rollDamage(WEAPONS.sword.damage, crit) }; });
+    const plan = hits.map((el) => { const crit = rollCrit('katana'); return { el, crit, dmg: rollDamage(WEAPONS.katana.damage, crit) }; });
     sfx('swish', { crit: plan.some((p) => p.crit) });
     slashFx(x1, y1, x2, y2);
     drawSlash(x1, y1, x2, y2);
