@@ -17,6 +17,8 @@
   /* ===================================================================== */
   /* The layer is 200 × 100 (§2); the picture is drawn WIDER than the layer and allowed to overflow it, because
    * a weapon that only fills the middle band of its own 120 × 60 viewBox reads as a distant toy at 1:1. */
+  /* The layer is 200 × 100 and the `detail` drawing is 240 × 140, so at VM_W the picture is 268 × 156 and
+   * overflows its own layer on purpose (§2) — a weapon that fits inside the layer reads as a distant toy. */
   const VM_W = 268;
   const vm = {
     node: null, holder: null, mag: null, shot: null,
@@ -93,7 +95,7 @@
     vm.weapon = id;
     try {
       while (vm.holder.firstChild) vm.holder.removeChild(vm.holder.firstChild);
-      vm.holder.append(weaponArt(id, VM_W));
+      vm.holder.append(weaponArt(id, VM_W, 'detail'));   // SPEC-weapon-art §2: the viewmodel is ALWAYS the detail LOD — never left to VM_W happening to clear the 64 px threshold
     } catch (e) { /* ignore */ }
   }
   function vmIdle() {

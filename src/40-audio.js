@@ -37,7 +37,7 @@
     node.connect(env(c, t0, g, decay));
     src.start(t0); src.stop(t0 + dur + 0.02);
   }
-  /* Filtered noise whose cutoff sweeps f0 → f1 over dur (sword swish, rocket whoosh — v1.1 A10). */
+  /* Filtered noise whose cutoff sweeps f0 → f1 over dur (katana swish, rocket whoosh — v1.1 A10). */
   function noiseSweep(t0, dur, type, f0, f1, g) {
     const c = audio.ctx;
     const src = c.createBufferSource(); src.buffer = audio.noise;
@@ -104,7 +104,7 @@
         }
         if (kind === 'bomb') { tinks(3, 0.03, 0.1 * gm); glass(); }
       }
-      else if (kind === 'swish') { noiseSweep(t, 0.09, 'highpass', 2000, 6000, 0.5 * gm); tinks(1, 0, 0.08 * gm); }   // sword
+      else if (kind === 'swish') { noiseSweep(t, 0.09, 'highpass', 2000, 6000, 0.5 * gm); tinks(1, 0, 0.08 * gm); }   // katana
       else if (kind === 'whoosh') { noiseSweep(t, 0.15, 'bandpass', 200, 1200, 0.6 * gm); }                            // rocket travel
       else if (kind === 'puff') { noiseBurst(t, 0.09, { type: 'lowpass', freq: 900, Q: 0.8 }, 0.3 * gm, 0.09); if (crit) tinks(1, 0, 0.06 * gm); }      // single flame tick
       else if (kind === 'clack') { tone(t, 'square', 320, 300, 0.03, 0.15, 0.03); }                                   // cooldown reject (A3) / bolt clicks

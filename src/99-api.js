@@ -83,12 +83,13 @@
   }
   /* setWeapon (v1.2 A5): a CHANGE that is user-driven cancels the reload and the scope and starts the 250 ms swap
    * delay; `{ silent: true }` (loadPrefs) sets no delay; the same id is a no-op. */
-  function setWeapon(id, opts) {
+  function setWeapon(rawId, opts) {
+    const id = migrateWeaponId(rawId);   // §8.1: api.setWeapon('sword') keeps working, once
     if (!WEAPON_IDS.includes(id)) return false;
     const silent = !!(opts && opts.silent);
     if (id === state.weapon) { if (!silent) state.weaponTouched = true; return id; }
     if (state.hold) stopHold();
-    if (state.slash && id !== 'sword') cancelSlash();   // a drag in progress must not fire on release under the new weapon
+    if (state.slash && id !== 'katana') cancelSlash();   // a drag in progress must not fire on release under the new weapon
     if (WEAPONS[id].hold || WEAPONS[id].input === 'drag') state.hintCollapse = false;   // the hold / drag instruction beats the lingering collapse hint
     if (!silent) {
       stopReload();
@@ -119,13 +120,14 @@
     safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
     safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
-      if (!state.loadoutTouched && isPermutation(res.crsLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
+      const storedLoadout = migrateWeaponIds(res.crsLoadout);   // §8.1: a stored 'sword' becomes 'katana' on read
+      if (!state.loadoutTouched && isPermutation(storedLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
-        setLoadout(res.crsLoadout, { preset: (p === 'custom' || PRESETS[p]) ? p : 'custom', silent: true });
+        setLoadout(storedLoadout, { preset: (p === 'custom' || PRESETS[p]) ? p : 'custom', silent: true });
       }
       if (!state.weaponTouched) {   // crsWeapon wins; a legacy crsMode 'gun' maps to 'pistol'
-        let w = res.crsWeapon;
-        if (!WEAPON_IDS.includes(w)) w = res.crsMode === 'gun' ? 'pistol' : res.crsMode;
+        let w = migrateWeaponId(res.crsWeapon);
+        if (!WEAPON_IDS.includes(w)) w = res.crsMode === 'gun' ? 'pistol' : migrateWeaponId(res.crsMode);
         if (WEAPON_IDS.includes(w)) setWeapon(w, { silent: true });   // no swap delay, no reload cancel, no scope-out (A5)
       }
       if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
@@ -297,7 +299,7 @@
     scope: (on) => { if (on) scopeOn(); else scopeOff(); return state.scoped; },
     player: playerInfo, setCombat: (v) => setCombat(v),
     // ── v1.5: the weapon picture (§1) and the two switches that have no options page yet (§1 / §2) ──
-    weaponArt: (id, size) => weaponArt(id, size), options: weaponOptions, setOption: setWeaponOption,
+    weaponArt: (id, size, lod) => weaponArt(id, size, lod), options: weaponOptions, setOption: setWeaponOption,
     // ── v1.4 §0.5 / §9.2: the mode setting and the debris lifetime ──
     // (api.mode / api.setMode stay the v1 WEAPON alias; the combat mode has its own pair.)
     get combatMode() { return state.mode; },

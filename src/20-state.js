@@ -53,6 +53,19 @@
     get() { return state.mode !== 'rampage'; },
     set(v) { state.mode = v ? (state.lastCombatMode || 'survival') : 'rampage'; }
   });
+  /* ── SPEC-weapon-art §8.1: the stored `sword` id ──────────────────────────
+   * The weapon was renamed sword → katana. Anything already in chrome.storage.sync (crsWeapon, and every
+   * entry of crsLoadout) still says `sword`, and an unmigrated loadout is not a permutation of WEAPON_IDS
+   * any more, so it would be silently DISCARDED and the player would lose their slot order on upgrade.
+   * Both read paths in src/99-api.js go through these two, and nothing writes `sword` ever again. */
+  const WEAPON_ID_ALIASES = { sword: 'katana' };
+  function migrateWeaponId(id) {
+    return (typeof id === 'string' && WEAPON_ID_ALIASES[id]) || id;
+  }
+  function migrateWeaponIds(ids) {
+    return Array.isArray(ids) ? ids.map(migrateWeaponId) : ids;
+  }
+
   const handledEvents = new WeakSet();
   const handledKeys = new WeakSet();
 
