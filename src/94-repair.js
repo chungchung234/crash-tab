@@ -136,9 +136,13 @@
     const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } };
     if (reducedMotion()) { kill(); return; }
     try {
+      /* SPEC-material §4: the node's left/top is where the piece was born ON SCREEN, so both keyframes carry
+       * the scroll travelled since — the piece starts where it is drawn now and lands on where its element
+       * has scrolled to, not on a stale spot. Both deltas are 0 for a viewport-anchored piece. */
+      const hx = trackDx(p), hy = trackDy(p);
       const a = trackAnim(node.animate([
-        { transform: 'translate(' + p.x.toFixed(2) + 'px, ' + p.y.toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)', opacity: 1 },
-        { transform: 'translate(0px, 0px) rotate(0deg)', opacity: 0 }
+        { transform: 'translate(' + (p.x + hx).toFixed(2) + 'px, ' + (p.y + hy).toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)', opacity: 1 },
+        { transform: 'translate(' + hx.toFixed(2) + 'px, ' + hy.toFixed(2) + 'px) rotate(0deg)', opacity: 0 }
       ], { duration: REPAIR_PIECE_MS, easing: 'ease-in-out', fill: 'forwards' }));
       a.addEventListener('finish', kill); a.addEventListener('cancel', kill);
     } catch (e) { kill(); return; }
@@ -153,8 +157,9 @@
     const r = rectOf(el);
     const out = [];
     if (!r || r.width < 1 || r.height < 1) return out;
+    readScroll(true);   // SPEC-material §4: ox/oy are anchor-frame; rectOf() is a viewport rect
     for (const p of state.pieces) {
-      const sx = p.ox + p.cx, sy = p.oy + p.cy;
+      const sx = viewOx(p) + p.cx, sy = viewOy(p) + p.cy;
       if (sx >= r.left - 2 && sx <= r.right + 2 && sy >= r.top - 2 && sy <= r.bottom + 2) out.push(p);
     }
     return out;

@@ -40,8 +40,9 @@
     targetBar.append(targetFill);
     targetBox.append(targetLabel, targetBar);
     targetBox.style.display = 'none';
-    canvas = mk('canvas', 'crs-canvas');
-    root.append(targetBox, canvas);
+    /* SPEC-material §9.1: the viewport-fixed crack canvas is gone — damage marks are per-element decals
+     * created on demand by src/31-decal.js, so nothing full-screen is mounted here any more. */
+    root.append(targetBox);
     hud = buildHud();
     docEl.append(shield, root, hud);
     raise(shield); raise(root); raise(hud);

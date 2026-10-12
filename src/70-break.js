@@ -63,6 +63,7 @@
     return n;
   }
   function spawnGeometric(el, rect, ix, iy, mode, n, opts) {
+    const mp = matPieceProps(materialOf(el));   // SPEC-material §5: the debris falls as what it was made of
     const ow = (el.offsetWidth || rect.width) || 1, oh = (el.offsetHeight || rect.height) || 1;
     const sx = rect.width / ow || 1, sy = rect.height / oh || 1;
     const sl = opts.splitLine ? { angle: opts.splitLine.angle, cx: (opts.splitLine.cx - rect.left) / sx, cy: (opts.splitLine.cy - rect.top) / sy } : null;
@@ -84,8 +85,8 @@
       if (opts.burnt) clip.style.filter = BURNT_FILTER;   // flame (A9): on the clip node, never the wrapper
       const cx = rect.left + poly.cx * sx, cy = rect.top + poly.cy * sy;
       const v = velocityFor(mode, ix, iy, cx, cy, opts);
-      const p = { ox: rect.left, oy: rect.top, w: rect.width, h: rect.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: poly.cx * sx, cy: poly.cy * sy,
-        bb: { minX: poly.minX * sx, minY: poly.minY * sy, maxX: poly.maxX * sx, maxY: poly.maxY * sy } };
+      const p = Object.assign({ ox: rect.left, oy: rect.top, w: rect.width, h: rect.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: poly.cx * sx, cy: poly.cy * sy,
+        bb: { minX: poly.minX * sx, minY: poly.minY * sy, maxX: poly.maxX * sx, maxY: poly.maxY * sy } }, mp);
       nodes.push([piece, p]); made++;
     }
     enforceCap(nodes.length, batchGpu(nodes));
@@ -94,6 +95,9 @@
   }
 
   /* --- text shattering (§12.2 / A23) --- */
+  /* SPEC-material §5: word pieces only exist for text-dominant elements, which are paper by definition —
+   * they sway down instead of dropping like a pane. Read once per build rather than per word. */
+  function wordMatProps() { return matPieceProps('paper'); }
   const CJK_RE = /[ᄀ-ᇿ぀-ヿ㄰-㆏㐀-䶿一-鿿가-힯豈-﫿]/;
   function graphemes(text) {
     try {
@@ -175,6 +179,7 @@
     } catch (e) { /* ignore */ }
   }
   function spawnWordPieces(el, rect, ix, iy, mode, opts) {
+    const wordMat = wordMatProps();
     const txt = (el.textContent || '').trim();
     const tag = tagOf(el);
     const len = graphemes(txt).length;
@@ -231,8 +236,8 @@
       if (opts.burnt) span.style.filter = BURNT_FILTER;
       const cx = vis.left + vis.width / 2, cy = vis.top + vis.height / 2;
       const v = velocityFor(mode, ix, iy, cx, cy, Object.assign({ word: true }, opts));
-      const p = { ox: vis.left, oy: vis.top, w: vis.width, h: vis.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: vis.width / 2, cy: vis.height / 2,
-        bb: { minX: 0, minY: 0, maxX: vis.width, maxY: vis.height }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 };
+      const p = Object.assign({ ox: vis.left, oy: vis.top, w: vis.width, h: vis.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: vis.width / 2, cy: vis.height / 2,
+        bb: { minX: 0, minY: 0, maxX: vis.width, maxY: vis.height }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 }, wordMat);
       made.push([span, p]);
     }
     if (!made.length) return 0;
@@ -241,6 +246,7 @@
     return made.length;
   }
   function spawnFieldSpill(el, rect, ix, iy, mode, opts) {
+    const wordMat = wordMatProps();
     const tag = tagOf(el);
     let value = '';
     try { value = String(el.value || ''); } catch (e) { value = ''; }
@@ -269,7 +275,7 @@
         styleWordPiece(span, cs, { height: lineH }, 1);
         if (opts && opts.burnt) span.style.filter = BURNT_FILTER;
         const v = velocityFor(mode, ix, iy, x + w / 2, y + lineH / 2, { word: true });
-        made.push([span, { ox: x, oy: y, w, h: lineH, vx: v.vx, vy: v.vy, vr: v.vr, cx: w / 2, cy: lineH / 2, bb: { minX: 0, minY: 0, maxX: w, maxY: lineH }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 }]);
+        made.push([span, Object.assign({ ox: x, oy: y, w, h: lineH, vx: v.vx, vy: v.vy, vr: v.vr, cx: w / 2, cy: lineH / 2, bb: { minX: 0, minY: 0, maxX: w, maxY: lineH }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 }, wordMat)]);
         x += w + spaceW;
       }
       y += lineH;
@@ -303,6 +309,13 @@
       made += spawnGeometric(el, rect, ix, iy, mode, pieceCount(el, mode, rect, descendants, opts.pieces), opts);
       if ((tag === 'input' || tag === 'textarea')) made += spawnFieldSpill(el, rect, ix, iy, mode, opts);
     }
+    /* SPEC-material §5 / SPEC-destruction §1: the break SOUNDS and PUFFS like what it was made of, and the
+     * element's damage decal dies with it — the marks are on the falling pieces now, not on a sheet of
+     * glass left hanging in front of the hole. */
+    const matId = materialOf(el);
+    dropDecal(el);
+    try { matSfx(matId, { gain: 0.5 }); } catch (e) { /* ignore */ }
+    try { matBurst(matId, ix, iy); } catch (e) { /* ignore */ }
     // hide the original in the same synchronous task (A17)
     const rec = hideOriginal(el);
     rec.wasPlaying = !!opts.wasPlaying;

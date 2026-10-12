@@ -26,6 +26,72 @@
     for (const p of state.pieces) if (!p.chip) n++;
     return n;
   }
+  /* ── SPEC-material §4: the rubble belongs to the PAGE, not to the screen ──────────────────────────────
+   * A piece's ox/oy are expressed in its own anchor frame, named once at spawn by `p.docAnchor`:
+   *   document (the default)  ox/oy are DOCUMENT coordinates and p.sx/p.sy hold the scroll the frame was
+   *                           captured at, so the floor it falls to — `p.sy + viewH()` — is the document
+   *                           position the viewport bottom had AT SPAWN, exactly as §4 asks. Scroll down
+   *                           and the pile near the top rides up out of view.
+   *   viewport                p.sx = p.sy = 0, so every term below collapses to the pre-§4 H / 0 / W and
+   *                           the old behaviour is bit-for-bit intact.
+   * The node keeps the `left`/`top` it was born with; only the translate carries the scroll delta, so a
+   * scroll costs ONE transform write per piece — no layout, no second RAF loop, no per-piece listener. */
+  let scrollReadAt = -1e9;
+  function readScroll(force) {
+    /* Reading window.scrollY can flush layout, and addPiece() runs in batches of dozens with a style write
+     * between every call — so the un-forced reading is throttled to once per 4 ms. Everything that must be
+     * exact (the frame loop, the scroll handler, the public readers) passes force. */
+    const t = now();
+    if (!force && t - scrollReadAt < 4) return state.scrollY;
+    scrollReadAt = t;
+    try {
+      state.scrollX = win.scrollX || win.pageXOffset || 0;
+      state.scrollY = win.scrollY || win.pageYOffset || 0;
+    } catch (e) { /* keep the previous reading */ }
+    return state.scrollY;
+  }
+  /* Two different deltas, and they are NOT the same number — keep them apart:
+   *  trackDx/trackDy  what the TRANSFORM must carry. The node's left/top is the viewport spot the piece was
+   *                   born at, so the translate has to make up the page travel since: p.sx - scrollNow.
+   *  viewOx/viewOy    the piece's origin ON SCREEN. ox/oy are document coordinates for a document-anchored
+   *                   piece, so getting to the viewport is a plain subtraction of the live scroll.
+   * Both collapse to the pre-§4 identity for a viewport-anchored piece (p.sx = p.sy = 0). */
+  function trackDx(p) { return p.docAnchor ? p.sx - state.scrollX : 0; }
+  function trackDy(p) { return p.docAnchor ? p.sy - state.scrollY : 0; }
+  function viewOx(p) { return p.docAnchor ? p.ox - state.scrollX : p.ox; }
+  function viewOy(p) { return p.docAnchor ? p.oy - state.scrollY : p.oy; }
+  /* Where a piece is ON SCREEN right now. stats() and debug.pieceBoxes() report this, so every reader
+   * outside the integrator keeps seeing viewport numbers exactly as it did before §4. */
+  function pieceBox(p) {
+    const ox = viewOx(p), oy = viewOy(p);
+    return { l: ox + p.x + p.bb.minX, r: ox + p.x + p.bb.maxX, top: oy + p.y + p.bb.minY, bottom: oy + p.y + p.bb.maxY };
+  }
+  /* The ONE passive scroll handler (src/95-events.js) lands here. It rewrites transforms and nothing else:
+   * scrolling a page is not an impulse, so a piece that has come to rest stays resting. */
+  function anchorPieces() {
+    readScroll(true);
+    for (const p of state.pieces) if (p.docAnchor) applyTransform(p);
+  }
+  /* SPEC-material §4: the anchor is a persisted setting. Flipping it while rubble is on the floor re-frames
+   * every live piece WITHOUT moving it on screen — ox/oy and x/y change together so the rendered position is
+   * identical on both sides of the switch. */
+  function setDebrisAnchor(v, silent) {
+    const want = v === 'viewport' ? 'viewport' : (v === 'document' ? 'document' : null);
+    if (!want) return state.debrisAnchor;
+    if (want !== state.debrisAnchor) {
+      state.debrisAnchor = want;
+      readScroll(true);
+      const toDoc = want === 'document';
+      for (const p of state.pieces) {
+        if (!!p.docAnchor === toDoc) continue;
+        if (toDoc) { p.sx = state.scrollX; p.sy = state.scrollY; p.ox += p.sx; p.oy += p.sy; p.docAnchor = true; }
+        else { p.x += p.sx - state.scrollX; p.y += p.sy - state.scrollY; p.ox -= p.sx; p.oy -= p.sy; p.sx = 0; p.sy = 0; p.docAnchor = false; }
+        applyTransform(p);
+      }
+    }
+    if (!silent) safe(() => chrome.storage.sync.set({ crsDebrisAnchor: want }));
+    return state.debrisAnchor;
+  }
   function addPiece(node, p) {
     const t = now();
     const dpr = Math.min(win.devicePixelRatio || 1, 2);
@@ -35,19 +101,28 @@
     p.tilt = rand(-12, 12);
     p.gpu = p.w * p.h * dpr * dpr;
     p.big = p.w * p.h > 200000;
-    // clip the AABB to the viewport at spawn (A12)
+    /* SPEC-material §4: adopt the anchor frame BEFORE anything else reads ox/oy. The callers hand ox/oy in
+     * viewport coordinates; a document-anchored piece carries the spawn scroll from here on. */
+    readScroll();
+    p.docAnchor = state.debrisAnchor !== 'viewport';
+    p.sx = p.docAnchor ? state.scrollX : 0; p.sy = p.docAnchor ? state.scrollY : 0;
+    p.ox += p.sx; p.oy += p.sy;
+    // clip the AABB to the viewport at spawn (A12) — the viewport edges in the piece's own frame
     const W = viewW(), H = viewH();
-    p.bb = { minX: Math.max(p.bb.minX, -p.ox), minY: Math.max(p.bb.minY, -p.oy), maxX: Math.min(p.bb.maxX, W - p.ox), maxY: Math.min(p.bb.maxY, H - p.oy) };
+    p.bb = { minX: Math.max(p.bb.minX, p.sx - p.ox), minY: Math.max(p.bb.minY, p.sy - p.oy), maxX: Math.min(p.bb.maxX, p.sx + W - p.ox), maxY: Math.min(p.bb.maxY, p.sy + H - p.oy) };
     if (p.bb.maxX < p.bb.minX) p.bb.maxX = p.bb.minX; if (p.bb.maxY < p.bb.minY) p.bb.maxY = p.bb.minY;
     node.style.willChange = p.big ? 'auto' : 'transform';
     node.style.contain = 'layout paint';
     node.style.transform = 'translate(0px, 0px) rotate(0deg)';
     const area = (p.bb.maxX - p.bb.minX) * (p.bb.maxY - p.bb.minY);
     const shadow = (!p.word && area > 2500) ? 'drop-shadow(0 3px 4px rgba(0,0,0,.35))' : '';
-    if (shadow) node.style.filter = shadow;
+    /* SPEC-material §5: the material's own sheen (glass rims, metal's cold edge, a panel's paper-white lip)
+     * rides the SAME filter chain as the drop shadow, so the flash animation below still composites both. */
+    const base = [shadow, p.matFilter || ''].filter(Boolean).join(' ');
+    if (base) node.style.filter = base;
     if (!node.isConnected) root.append(node);
     try {
-      trackAnim(node.animate([{ filter: (shadow ? shadow + ' ' : '') + 'brightness(1.7)' }, { filter: (shadow ? shadow + ' ' : '') + 'brightness(1)' }], { duration: 90, easing: 'ease-out' }));
+      trackAnim(node.animate([{ filter: (base ? base + ' ' : '') + 'brightness(1.7)' }, { filter: (base ? base + ' ' : '') + 'brightness(1)' }], { duration: 90, easing: 'ease-out' }));
     } catch (e) { /* ignore */ }
     // v1.4 §9.1: a piece that is still flying has no lifetime; the hard cut-off only stops one escaping forever
     p.expireAt = 0; p.restedFirstAt = 0; p.jitter = null; p.hardExpireAt = t + DEBRIS_HARD_MS;
@@ -56,7 +131,9 @@
     return p;
   }
   function applyTransform(p) {
-    p.node.style.transform = 'translate(' + p.x.toFixed(2) + 'px, ' + p.y.toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)';
+    // SPEC-material §4: the node's left/top is where the piece was BORN on screen; the delta rides the translate
+    const tx = p.x + trackDx(p), ty = p.y + trackDy(p);
+    p.node.style.transform = 'translate(' + tx.toFixed(2) + 'px, ' + ty.toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)';
   }
   function restPiece(p) {
     p.resting = true; p.grounded = true; p.vx = 0; p.vy = 0; p.vr = 0;
@@ -84,14 +161,13 @@
    * getBoundingClientRect() therefore misses real pairs at random. evictPieces() wakes a piece from
    * p.ox/p.x/p.bb, and this hook hands a test exactly those numbers plus a stable per-piece id, so the
    * §9.4.4 check can follow one identified piece across the eviction of the piece under it. */
-  debug.pieceBoxes = () => state.pieces.map((p) => ({
-    pid: p.pid,
-    resting: !!p.resting,
-    l: p.ox + p.x + p.bb.minX,
-    r: p.ox + p.x + p.bb.maxX,
-    top: p.oy + p.y + p.bb.minY,
-    bottom: p.oy + p.y + p.bb.maxY,
-  }));
+  debug.pieceBoxes = () => {
+    readScroll(true);   // SPEC-material §4: ox/oy are anchor-frame, so report what is actually on screen
+    return state.pieces.map((p) => {
+      const b = pieceBox(p);
+      return { pid: p.pid, resting: !!p.resting, anchor: p.docAnchor ? 'document' : 'viewport', l: b.l, r: b.r, top: b.top, bottom: b.bottom };
+    });
+  };
   /* Retire ONE identified piece on the next sweep, as if its §9.1 lifetime had just run out. §9.4.1 already
    * covers the clock; this is how §9.3's "wake whatever was stacked on it" is checked without the pieces above
    * expiring in the very same batch. */
@@ -124,16 +200,30 @@
     state.debrisTimer = 0;
     if (!state.active || !state.pieces.length) return;
     const t = now();
-    const victims = [];
+    const victims = [], lost = [];
+    /* SPEC-material §4: rubble the page has been scrolled away from is retired here rather than integrated,
+     * frame after frame, for nobody. The margin is a whole viewport past each edge (and never less than
+     * 1200 px), so debris that is merely just-off-screen — one flick of the wheel from being seen again —
+     * is kept. Only a document-anchored piece can ever leave the screen. It goes SILENTLY (there is no one
+     * to watch it fade) and without the support pass: the pile it was part of is off-screen with it, so
+     * nothing visible is standing on it. */
+    readScroll(true);
+    const vh = viewH(), margin = Math.max(1200, vh);
     for (const p of state.pieces) {
-      if (victims.length >= DEBRIS_BATCH) break;   // §9.1: at most twelve at a time, so no frame carries them all
+      if (victims.length + lost.length >= DEBRIS_BATCH) break;   // §9.1: at most twelve at a time, so no frame carries them all
+      if (p.docAnchor) {
+        const b = pieceBox(p);
+        if (b.bottom < -margin || b.top > vh + margin) { lost.push(p); continue; }
+      }
       if ((p.expireAt && t >= p.expireAt) || (p.hardExpireAt && t >= p.hardExpireAt)) victims.push(p);
     }
+    if (lost.length) evictPieces(lost, true, { noWake: true });
     if (victims.length) evictPieces(victims, false, { dur: DEBRIS_FADE_MS, shrink: true });
     scheduleDebrisSweep();
   }
   /* opts (v1.4 §9.1): { dur, shrink } — a lifetime expiry fades over 500 ms AND shrinks to 0.88. The scale is a
-   * separate composite:'add' animation so it stacks onto the inline translate/rotate instead of replacing it. */
+   * separate composite:'add' animation so it stacks onto the inline translate/rotate instead of replacing it.
+   * SPEC-material §4 adds { noWake }: skip the support pass for rubble that left the screen rather than the pile. */
   function evictPieces(victims, silent, opts) {
     if (!victims.length) return;
     const dur = (opts && opts.dur) || 350;
@@ -156,6 +246,7 @@
       later(kill, dur + 150);
     }
     // wake resting pieces that were supported by an evicted piece (A1)
+    if (opts && opts.noWake) { kick(); return; }
     for (const q of state.pieces) {
       if (!q.resting) continue;
       const ql = q.ox + q.x + q.bb.minX, qr = q.ox + q.x + q.bb.maxX, qb = q.oy + q.y + q.bb.maxY;

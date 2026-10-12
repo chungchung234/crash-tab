@@ -233,6 +233,10 @@
     repairs: [], repaired: 0, ratio: 0, ratioTimer: 0, ratioNodes: null,
     // §9 debris lifetime (0 = keep until the cap evicts, as before)
     debrisLifeMs: 6000, debrisTimer: 0,
+    /* SPEC-material §4: debris is nailed to the DOCUMENT by default — a piece keeps the place it fell on the
+     * page and scrolls out of view with everything else. 'viewport' is the old sheet-of-glass behaviour, kept
+     * as an option. scrollX/scrollY are the last reading of the page scroll, taken by readScroll(). */
+    debrisAnchor: 'document', scrollX: 0, scrollY: 0,
     // §10 depth tiers, §4 boss stages, §3.2 ratio freshness
     depthTimer: 0, bossMode: false, ratioDirty: true, ratioAt: 0, ratioBrokenN: -1
   };
@@ -321,8 +325,9 @@
     targetBar.append(targetFill);
     targetBox.append(targetLabel, targetBar);
     targetBox.style.display = 'none';
-    canvas = mk('canvas', 'crs-canvas');
-    root.append(targetBox, canvas);
+    /* SPEC-material §9.1: the viewport-fixed crack canvas is gone — damage marks are per-element decals
+     * created on demand by src/31-decal.js, so nothing full-screen is mounted here any more. */
+    root.append(targetBox);
     hud = buildHud();
     docEl.append(shield, root, hud);
     raise(shield); raise(root); raise(hud);
@@ -332,61 +337,52 @@
 
 // ── 30-canvas.js ──
   /* ===================================================================== */
-  /* 3. Crack canvas (persistent, DPR aware, resize-preserving)             */
+  /* 3. Damage marks (SPEC-material §2–§4)                                   */
+  /*    Rewritten from the viewport-fixed crack canvas. Nothing is painted    */
+  /*    on the screen any more: every mark is composited into the decal of    */
+  /*    the element it landed on (src/31-decal.js), in that element's own     */
+  /*    local coordinates, and is therefore clipped to its bounds and         */
+  /*    carried by it when the page scrolls or reflows.                       */
   /* ===================================================================== */
-  function setupCanvas(preserve) {
-    const dpr = Math.min(win.devicePixelRatio || 1, 2);
-    const cssW = viewW(), cssH = viewH();
-    const bw = Math.max(1, Math.min(4096, Math.round(cssW * dpr)));
-    const bh = Math.max(1, Math.min(4096, Math.round(cssH * dpr)));
-    let tmp = null;
-    if (preserve && ctx && canvas.width > 0 && canvas.height > 0) {
-      try {
-        tmp = doc.createElement('canvas');
-        tmp.width = canvas.width; tmp.height = canvas.height;
-        tmp.getContext('2d').drawImage(canvas, 0, 0);
-      } catch (e) { tmp = null; }
-    }
-    const oldW = canvas.width, oldH = canvas.height;
-    const oldCssW = canvasCssW || cssW, oldCssH = canvasCssH || cssH;   // CSS size the old bitmap covered
-    canvas.width = bw; canvas.height = bh;
-    canvas.style.width = cssW + 'px';
-    canvas.style.height = cssH + 'px';
-    ctx = canvas.getContext('2d');
-    canvasCssW = cssW; canvasCssH = cssH;
-    canvasSX = bw / cssW; canvasSY = bh / cssH;
-    if (tmp && ctx) {
-      try {
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        // destination in NEW device px: the old CSS area at the new ratio (a DPR change would otherwise rescale the cracks)
-        ctx.drawImage(tmp, 0, 0, oldW, oldH, 0, 0, Math.max(1, Math.round(oldCssW * canvasSX)), Math.max(1, Math.round(oldCssH * canvasSY)));
-      } catch (e) { /* ignore */ }
-    }
-    if (ctx) ctx.setTransform(canvasSX, 0, 0, canvasSY, 0, 0);
-  }
+  /* setupCanvas()/clearCanvas() keep their names and their call sites (activate, onResize, restore):
+   * "set the marks up for the current layout" and "take every mark away" are still the two operations,
+   * they just act on a set of per-element decals instead of one shared bitmap. */
+  function setupCanvas() { syncDecals(); }
   function clearCanvas() {
-    if (!ctx) return;
-    try {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.setTransform(canvasSX, 0, 0, canvasSY, 0, 0);
-    } catch (e) { /* ignore */ }
     state.fxQueue.length = 0;
+    clearDecals();
+    clearMatFx();
   }
 
+  /* Per-WEAPON profile: how big the mark is and how many strands it has (unchanged from v1). */
   const CRACK = {
     hammer: { rays: [9, 14], len: [90, 190], rings: [0.3, 0.62], w0: 2.0, w1: 0.6, alpha: 0.55 },
     bomb: { rays: [14, 22], len: [220, 420], rings: [0.28, 0.55, 0.8], w0: 2.6, w1: 0.7, alpha: 0.55 },
     gun: { rays: [5, 8], len: [22, 60], rings: [0.18, 0.35, 0.6], w0: 1.3, w1: 0.4, alpha: 0.4 },
     smg: { rays: [3, 5], len: [8, 20], rings: [0.3, 0.6], w0: 1.0, w1: 0.35, alpha: 0.4 }   // per smg shot (A6)
   };
-  function makeRay(base, len) {
+  /* Per-MATERIAL profile (§4): the weapon says how hard it was hit, the material says what that leaves
+   * behind. Glass radiates and sparkles; a panel dents and splits into a few blunt fractures; paper tears
+   * along a short, very ragged line; plastic whitens around a stubby crack; metal dents and scratches and
+   * barely cracks at all. `jag` feeds the per-step deviation of a strand, so paper wanders and metal does not. */
+  const MARK = {
+    glass:   { rayMul: 1.00, lenMul: 1.00, branches: 2, jag: 1.0, rings: true,  dust: true,  sheen: true,  dent: 0,    scratch: 0, blotch: 0,    core: 'spark' },
+    panel:   { rayMul: 0.50, lenMul: 0.60, branches: 1, jag: 0.6, rings: true,  dust: false, sheen: false, dent: 0.55, scratch: 0, blotch: 0.30, core: 'dent' },
+    paper:   { rayMul: 0.60, lenMul: 0.75, branches: 2, jag: 2.2, rings: false, dust: false, sheen: false, dent: 0,    scratch: 0, blotch: 0,    core: 'tear' },
+    plastic: { rayMul: 0.45, lenMul: 0.55, branches: 1, jag: 0.8, rings: false, dust: false, sheen: false, dent: 0.35, scratch: 0, blotch: 0.85, core: 'dent' },
+    metal:   { rayMul: 0.28, lenMul: 0.35, branches: 0, jag: 0.5, rings: false, dust: false, sheen: true,  dent: 1.00, scratch: 1, blotch: 0,    core: 'dent' }
+  };
+  function markOf(mat) { return MARK[mat] || MARK.panel; }
+
+  function makeRay(base, len, jag) {
+    const j = (jag == null || !(jag > 0)) ? 1 : jag;
     const pts = [[0, 0]], cum = [0];
     let x = 0, y = 0, dev = 0, traveled = 0, heading = base;
-    while (traveled < len) {
-      const step = Math.min(rand(8, 18), len - traveled + 0.01);
-      dev += rand(-14, 14) * DEG; dev *= 0.7;
-      heading = base + clamp(dev, -32 * DEG, 32 * DEG);
+    let guard = 0;
+    while (traveled < len && guard++ < 400) {
+      const step = Math.min(rand(8, 18) / Math.max(0.6, j), len - traveled + 0.01);
+      dev += rand(-14, 14) * j * DEG; dev *= 0.7;
+      heading = base + clamp(dev, -32 * j * DEG, 32 * j * DEG);
       x += Math.cos(heading) * step; y += Math.sin(heading) * step; traveled += step;
       pts.push([x, y]); cum.push(traveled);
     }
@@ -404,28 +400,27 @@
     const l = ray.pts[ray.pts.length - 1];
     return [l[0], l[1], ray.heading];
   }
-  /* opts (v1.1 A10): { rays: [min, max], lenScale, ink }. `cracks` counts every drawn crack (A3);
-   * `crackInk` (hammer/axe/bomb/rocket 1, pistol/smg .25, sword .5) drives the light-pass fade instead of `cracks`. */
-  function drawCrack(x, y, kind, opts) {
-    opts = opts || {};
-    state.cracks++;
-    state.crackInk += (opts.ink != null ? opts.ink : 1);
-    if (!ctx) return;
+
+  /* Build one mark tile for one material, as an offscreen bitmap at device resolution. Returns
+   * { off, minX, minY, bw, bh, maxLen } in CSS px relative to the impact point, or null. */
+  function buildMarkTile(kind, mat, opts) {
     const P = CRACK[kind] || CRACK.hammer;
-    const raysR = opts.rays || P.rays, lenScale = opts.lenScale || 1, lenR = opts.len || P.len;   // len: sniper 30–70 (v1.2 §2)
+    const M = markOf(mat);
+    const ink = matOf(mat);
+    const raysR = opts.rays || P.rays, lenScale = opts.lenScale || 1, lenR = opts.len || P.len;
     const gunlike = kind === 'gun' || kind === 'smg';
-    const nRays = randInt(raysR[0], raysR[1]);
+    const nRays = Math.max(2, Math.round(randInt(raysR[0], raysR[1]) * M.rayMul));
     const rays = [], branches = [];
     let maxLen = 0;
     for (let i = 0; i < nRays; i++) {
       const base = (i / nRays) * Math.PI * 2 + rand(-1, 1) * (Math.PI / nRays) * 0.6;
-      const r = makeRay(base, rand(lenR[0], lenR[1]) * lenScale);
+      const r = makeRay(base, rand(lenR[0], lenR[1]) * lenScale * M.lenMul, M.jag);
       rays.push(r); maxLen = Math.max(maxLen, r.len);
-      const nb = randInt(0, 2);
+      const nb = M.branches ? randInt(0, M.branches) : 0;
       for (let b = 0; b < nb; b++) {
         const start = pointAt(r, rand(0.35, 0.75));
         const ang = start[2] + (Math.random() < 0.5 ? -1 : 1) * rand(30, 60) * DEG;
-        const br = makeRay(ang, r.len * rand(0.25, 0.55));
+        const br = makeRay(ang, r.len * rand(0.25, 0.55), M.jag);
         br.ox = start[0]; br.oy = start[1];
         branches.push(br);
       }
@@ -438,34 +433,58 @@
     const margin = (kind === 'bomb' ? 96 : 20);
     minX -= margin; minY -= margin; maxX += margin; maxY += margin;
     const bw = Math.ceil(maxX - minX), bh = Math.ceil(maxY - minY);
+    const D = decalDpr();
     let off, octx;
     try {
       off = doc.createElement('canvas');
-      off.width = Math.max(1, Math.round(bw * canvasSX)); off.height = Math.max(1, Math.round(bh * canvasSY));
+      off.width = Math.max(1, Math.min(DECAL_MAX_PX, Math.round(bw * D)));
+      off.height = Math.max(1, Math.min(DECAL_MAX_PX, Math.round(bh * D)));
       octx = off.getContext('2d');
-      octx.setTransform(canvasSX, 0, 0, canvasSY, -minX * canvasSX, -minY * canvasSY);
-    } catch (e) { return; }
+      if (!octx) return null;
+      octx.setTransform(D, 0, 0, D, -minX * D, -minY * D);
+    } catch (e) { return null; }
     octx.lineCap = 'round'; octx.lineJoin = 'round';
-    // bomb scorch under the cracks
+    // bomb scorch under the mark
     if (kind === 'bomb') {
       const g = octx.createRadialGradient(0, 0, 0, 0, 0, 90);
       g.addColorStop(0, 'rgba(20,15,10,0.45)'); g.addColorStop(1, 'rgba(20,15,10,0)');
       octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, 90, 0, Math.PI * 2); octx.fill();
     }
-    // sheen wedges between random adjacent ray pairs, out to ring 2
-    const ringF2 = P.rings[Math.min(1, P.rings.length - 1)];
-    const nW = randInt(2, 3);
-    octx.fillStyle = 'rgba(255,255,255,0.07)';
-    for (let k = 0; k < nW; k++) {
-      const i = randInt(0, nRays - 1), r1 = rays[i], r2 = rays[(i + 1) % nRays];
-      octx.beginPath(); octx.moveTo(0, 0);
-      for (let f = 0.1; f <= ringF2 + 1e-6; f += 0.1) { const p = pointAt(r1, f); octx.lineTo(p[0], p[1]); }
-      for (let f = ringF2; f >= 0.1 - 1e-6; f -= 0.1) { const p = pointAt(r2, f); octx.lineTo(p[0], p[1]); }
-      octx.closePath(); octx.fill();
+    // §4 plastic / panel: the material whitens around the impact before it cracks
+    if (M.blotch > 0) {
+      const r0 = Math.max(12, maxLen * 0.45);
+      const g = octx.createRadialGradient(0, 0, 0, 0, 0, r0);
+      g.addColorStop(0, 'rgba(255,255,255,' + (0.30 * M.blotch).toFixed(3) + ')');
+      g.addColorStop(0.6, 'rgba(255,255,255,' + (0.12 * M.blotch).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, r0, 0, Math.PI * 2); octx.fill();
+    }
+    // §4 metal / panel: a dent — a dark crescent with a lit rim, no glass at all
+    if (M.dent > 0) {
+      const rd = Math.max(7, maxLen * 0.3 * M.dent);
+      const a = rand(0, Math.PI * 2);
+      const g = octx.createRadialGradient(Math.cos(a) * rd * 0.3, Math.sin(a) * rd * 0.3, 0, 0, 0, rd);
+      g.addColorStop(0, 'rgba(10,14,20,' + (0.34 * M.dent).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(10,14,20,0)');
+      octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, rd, 0, Math.PI * 2); octx.fill();
+      octx.strokeStyle = ink.light; octx.lineWidth = 1;
+      octx.beginPath(); octx.arc(0, 0, rd * 0.8, a - 1.1, a + 1.1); octx.stroke();
+    }
+    // sheen wedges between random adjacent ray pairs, out to ring 2 (glass / metal only)
+    if (M.sheen && nRays > 1) {
+      const ringF2 = P.rings[Math.min(1, P.rings.length - 1)];
+      const nW = randInt(2, 3);
+      octx.fillStyle = 'rgba(255,255,255,0.07)';
+      for (let k = 0; k < nW; k++) {
+        const i = randInt(0, nRays - 1), r1 = rays[i], r2 = rays[(i + 1) % nRays];
+        octx.beginPath(); octx.moveTo(0, 0);
+        for (let f = 0.1; f <= ringF2 + 1e-6; f += 0.1) { const p = pointAt(r1, f); octx.lineTo(p[0], p[1]); }
+        for (let f = ringF2; f >= 0.1 - 1e-6; f -= 0.1) { const p = pointAt(r2, f); octx.lineTo(p[0], p[1]); }
+        octx.closePath(); octx.fill();
+      }
     }
     // accumulate strokes into width buckets (taper w0 → w1)
     const wMid = (P.w0 + P.w1) / 2;
-    // branches/rings keep a >= 0.8-0.9 px dark stroke: sub-pixel widths rasterise as faint dashes at 1x DPR
     const buckets = [[new Path2D(), P.w0], [new Path2D(), wMid], [new Path2D(), P.w1], [new Path2D(), Math.max(0.9, P.w1 * 0.9)], [new Path2D(), Math.max(0.8, P.w1 * 0.7)]];
     const addPoly = (path, pts, ox, oy) => { path.moveTo(ox + pts[0][0], oy + pts[0][1]); for (let i = 1; i < pts.length; i++) path.lineTo(ox + pts[i][0], oy + pts[i][1]); };
     for (const r of rays) {
@@ -480,95 +499,537 @@
       for (let b = 0; b < 3; b++) if (segs[b].length > 1) addPoly(buckets[b][0], segs[b], 0, 0);
     }
     for (const b of branches) addPoly(buckets[3][0], b.pts, b.ox, b.oy);
-    for (const f0 of P.rings) {
-      const ringPts = rays.map((r) => pointAt(r, f0 * rand(0.88, 1.12)));
-      ringPts.push(ringPts[0]);
-      addPoly(buckets[4][0], ringPts, 0, 0);
+    if (M.rings) {
+      for (const f0 of P.rings) {
+        const ringPts = rays.map((r) => pointAt(r, f0 * rand(0.88, 1.12)));
+        ringPts.push(ringPts[0]);
+        addPoly(buckets[4][0], ringPts, 0, 0);
+      }
+    }
+    // §4 metal: short straight scratches instead of a web
+    if (M.scratch > 0) {
+      const ns = randInt(3, 6);
+      for (let i = 0; i < ns; i++) {
+        const a = rand(0, Math.PI * 2), d0 = rand(3, Math.max(6, maxLen * 0.4)), L = rand(6, Math.max(10, maxLen * 0.6));
+        const sxp = Math.cos(a) * d0, syp = Math.sin(a) * d0;
+        buckets[4][0].moveTo(sxp, syp);
+        buckets[4][0].lineTo(sxp + Math.cos(a) * L, syp + Math.sin(a) * L);
+      }
     }
     const alpha = P.alpha * Math.max(0.35, 1 - state.crackInk / 60);
     octx.shadowColor = 'rgba(0,0,0,0.35)'; octx.shadowBlur = 2;
-    octx.strokeStyle = 'rgba(255,255,255,' + alpha.toFixed(3) + ')';
+    octx.strokeStyle = ink.light.replace(/[\d.]+\)$/, alpha.toFixed(3) + ')');
     for (const [path, w] of buckets) { octx.lineWidth = w * 2.4; octx.stroke(path); }
     octx.shadowBlur = 0; octx.shadowColor = 'rgba(0,0,0,0)';
-    octx.strokeStyle = 'rgba(15,25,35,0.75)';
+    octx.strokeStyle = ink.ink;
     for (const [path, w] of buckets) { octx.lineWidth = w; octx.stroke(path); }
-    // glass dust
-    const nd = randInt(10, 25);
-    octx.fillStyle = 'rgba(255,255,255,0.7)';
-    for (let i = 0; i < nd; i++) {
-      const a = rand(0, Math.PI * 2), d = rand(4, maxLen * 0.5), s = rand(1, 2);
-      octx.fillRect(Math.cos(a) * d, Math.sin(a) * d, s, s);
+    // §4 glass: the dust of a shattered pane
+    if (M.dust) {
+      const nd = randInt(10, 25);
+      octx.fillStyle = 'rgba(255,255,255,0.7)';
+      for (let i = 0; i < nd; i++) {
+        const a = rand(0, Math.PI * 2), d = rand(4, Math.max(6, maxLen * 0.5)), s = rand(1, 2);
+        octx.fillRect(Math.cos(a) * d, Math.sin(a) * d, s, s);
+      }
     }
-    // centre
+    // the impact core
     if (gunlike) {
       const g = octx.createRadialGradient(0, 0, 0, 0, 0, 7);
       g.addColorStop(0, '#111'); g.addColorStop(0.7, 'rgba(17,17,17,0.85)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, 7, 0, Math.PI * 2); octx.fill();
       octx.strokeStyle = 'rgba(255,255,255,0.8)'; octx.lineWidth = 0.8; octx.beginPath(); octx.arc(0, 0, 8, 0, Math.PI * 2); octx.stroke();
-    } else {
+    } else if (M.core === 'spark') {
       const r0 = kind === 'bomb' ? 26 : 14;
       const g = octx.createRadialGradient(0, 0, 0, 0, 0, r0);
       g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(1, 'rgba(255,255,255,0)');
       octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, r0, 0, Math.PI * 2); octx.fill();
+    } else if (M.core === 'tear') {
+      // paper: the hole itself, a ragged opening with a pale torn lip
+      const n = randInt(7, 11), rr = Math.max(4, maxLen * 0.12);
+      octx.beginPath();
+      for (let i = 0; i <= n; i++) {
+        const a = (i / n) * Math.PI * 2, d = rr * rand(0.5, 1.5);
+        const xx = Math.cos(a) * d, yy = Math.sin(a) * d;
+        if (i === 0) octx.moveTo(xx, yy); else octx.lineTo(xx, yy);
+      }
+      octx.closePath();
+      octx.fillStyle = ink.ink; octx.fill();
+      octx.strokeStyle = ink.light; octx.lineWidth = 1.2; octx.stroke();
     }
-    // grow over three frames through annulus clips (A18)
-    state.fxQueue.push({ off, x, y, bx: x + minX, by: y + minY, bw, bh, radii: [maxLen * 0.4, maxLen * 0.75, Infinity], stage: 0 });
+    return { off, minX, minY, bw, bh, maxLen };
+  }
+
+  /* ── which elements one shot marks ──
+   * A point weapon marks exactly the element it hit. A blast marks the elements it actually DAMAGED: the
+   * same aoeCandidates() set the weapon itself resolves, so the mark and the damage agree, and the blast
+   * breaks along the real boundaries between things instead of being painted over them (§3). */
+  function blastWeapon() {
+    const W = WEAPONS[state.weapon];
+    const ok = W && typeof W.radius === 'number' && isFinite(W.radius) && W.radius > 0 && Array.isArray(W.rings);
+    return ok ? W : WEAPONS.bomb;   // collapse's radius is Infinity: fall back to the bomb's 240 px
+  }
+  function decalTargetsForBlast(x, y) {
+    const W = blastWeapon();
+    let cands = [];
+    try { cands = aoeCandidates(x, y, W.radius, Math.min(W.maxTargets || 10, DECAL_MAX_TARGETS), W.rings, true); } catch (e) { cands = []; }
+    const out = [];
+    for (const c of cands) { const rec = ensureDecal(c.el); if (rec) out.push(rec); }
+    if (!out.length) { const rec0 = ensureDecal(decalTargetAt(x, y)); if (rec0) out.push(rec0); }
+    return out;
+  }
+  function decalTargetsFor(x, y, radius) {
+    if (radius > 0) return decalTargetsForBlast(x, y);
+    const rec = ensureDecal(decalTargetAt(x, y));
+    return rec ? [rec] : [];
+  }
+
+  /* opts (v1.1 A10): { rays: [min, max], lenScale, len, ink, radius }. `cracks` counts every drawn mark (A3);
+   * `crackInk` (hammer/axe/bomb/rocket 1, pistol/smg .25, sword .5) drives the light-pass fade.
+   * The mark is cut per ELEMENT: every element the shot reaches gets the mark in its own material, drawn in
+   * its own local space, so a blast splits along the real boundaries between things (§3). */
+  function drawCrack(x, y, kind, opts) {
+    opts = opts || {};
+    state.cracks++;
+    state.crackInk += (opts.ink != null ? opts.ink : 1);
+    if (!root) return;
+    const radius = opts.radius != null ? opts.radius : (kind === 'bomb' ? BOMB_RADIUS : 0);
+    const recs = decalTargetsFor(x, y, radius);
+    if (!recs.length) return;
+    const tiles = new Map();      // material id -> tile
+    let pushed = 0;
+    for (const rec of recs) {
+      const mat = materialOf(rec.el);
+      let tile = tiles.get(mat);
+      if (tile === undefined) { tile = buildMarkTile(kind, mat, opts); tiles.set(mat, tile); }
+      if (!tile) continue;
+      const lx = x - rec.left, ly = y - rec.top;
+      state.fxQueue.push({
+        rec, off: tile.off, lx, ly,
+        bx: lx + tile.minX, by: ly + tile.minY, bw: tile.bw, bh: tile.bh,
+        radii: [tile.maxLen * 0.4, tile.maxLen * 0.75, Infinity], stage: 0
+      });
+      pushed++;
+    }
+    if (!pushed) return;
+    runFx();      // the impact core lands in the same task as the hit; the web grows over the next two frames
     kick();
   }
   function runFx() {
-    if (!ctx) { state.fxQueue.length = 0; return; }
+    if (!state.fxQueue.length) return;
     for (let i = state.fxQueue.length - 1; i >= 0; i--) {
       const f = state.fxQueue[i];
+      const rec = f.rec;
+      if (!rec || !rec.ctx || !rec.node.isConnected || decals.get(rec.el) !== rec) { state.fxQueue.splice(i, 1); continue; }
       const rIn = f.stage === 0 ? 0 : f.radii[f.stage - 1];
       const rOut = f.radii[f.stage];
       try {
-        ctx.save();
-        ctx.beginPath();
-        if (rOut === Infinity) ctx.rect(f.bx - 1, f.by - 1, f.bw + 2, f.bh + 2); else ctx.arc(f.x, f.y, rOut, 0, Math.PI * 2);
-        if (rIn > 0) ctx.arc(f.x, f.y, rIn, 0, Math.PI * 2, true);
-        ctx.clip('evenodd');
-        ctx.drawImage(f.off, f.bx, f.by, f.bw, f.bh);
-        ctx.restore();
+        const c = rec.ctx;
+        c.save();
+        c.beginPath();
+        if (rOut === Infinity) c.rect(f.bx - 1, f.by - 1, f.bw + 2, f.bh + 2); else c.arc(f.lx, f.ly, rOut, 0, Math.PI * 2);
+        if (rIn > 0) c.arc(f.lx, f.ly, rIn, 0, Math.PI * 2, true);
+        c.clip('evenodd');
+        c.drawImage(f.off, f.bx, f.by, f.bw, f.bh);
+        c.restore();
       } catch (e) { /* ignore */ }
       f.stage++;
       if (f.stage >= f.radii.length) state.fxQueue.splice(i, 1);
     }
   }
-  /* Sword slash (A8): drawn straight on the persistent ctx — light underlay, dark line, perpendicular ticks. */
+  /* Sword slash (A8): the cut is drawn into every decal it crosses, each in that element's own local space,
+   * so one drag across three cards leaves three cuts that stop at the cards' edges. */
   function drawSlash(x1, y1, x2, y2) {
     state.cracks++; state.crackInk += 0.5;
-    if (!ctx) return;
-    try {
-      const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
-      const ticks = [];
-      const nt = randInt(6, 14);
-      for (let i = 0; i < nt; i++) {
-        const f = rand(0.04, 0.96), L = rand(4, 10), s = Math.random() < 0.5 ? -1 : 1;
-        const bx = x1 + dx * f, by = y1 + dy * f;
-        ticks.push([bx, by, bx + nx * L * s, by + ny * L * s]);
-      }
-      ctx.save();
-      ctx.lineCap = 'round';
-      const pass = (color, w) => {
-        ctx.strokeStyle = color; ctx.lineWidth = w;
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-        for (const t of ticks) { ctx.moveTo(t[0], t[1]); ctx.lineTo(t[2], t[3]); }
-        ctx.stroke();
-      };
-      pass('rgba(255,255,255,0.7)', 2.4);
-      pass('rgba(15,25,35,0.75)', 1.0);
-      ctx.restore();
-    } catch (e) { /* ignore */ }
+    if (!root) return;
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+    const seen = new Set(), recs = [];
+    const steps = Math.max(2, Math.min(12, Math.round(len / 40) + 2));
+    for (let i = 0; i <= steps; i++) {
+      const f = i / steps;
+      const el = decalTargetAt(x1 + dx * f, y1 + dy * f);
+      if (!el || seen.has(el)) continue;
+      seen.add(el);
+      const rec = ensureDecal(el);
+      if (rec) recs.push(rec);
+      if (recs.length >= 6) break;
+    }
+    if (!recs.length) return;
+    const ticks = [];
+    const nt = randInt(6, 14);
+    for (let i = 0; i < nt; i++) {
+      const f = rand(0.04, 0.96), L = rand(4, 10), s = Math.random() < 0.5 ? -1 : 1;
+      const bx = x1 + dx * f, by = y1 + dy * f;
+      ticks.push([bx, by, bx + nx * L * s, by + ny * L * s]);
+    }
+    for (const rec of recs) {
+      const ink = matOf(materialOf(rec.el));
+      const ox = rec.left, oy = rec.top;
+      try {
+        const c = rec.ctx;
+        c.save();
+        c.lineCap = 'round';
+        const pass = (color, w) => {
+          c.strokeStyle = color; c.lineWidth = w;
+          c.beginPath(); c.moveTo(x1 - ox, y1 - oy); c.lineTo(x2 - ox, y2 - oy);
+          for (const t of ticks) { c.moveTo(t[0] - ox, t[1] - oy); c.lineTo(t[2] - ox, t[3] - oy); }
+          c.stroke();
+        };
+        pass(ink.light, 2.4);
+        pass(ink.ink, 1.0);
+        c.restore();
+      } catch (e) { /* ignore */ }
+    }
+    kick();
   }
-  /* Scorch dab on the persistent canvas (flame every 4th tick r 24 / rocket impact r 140, A7 / A9). */
+  /* Scorch dab (flame every 4th tick r 24 / rocket impact r 140, A7 / A9) — burnt into the elements it
+   * touches, never onto the page behind them. */
   function scorchDab(x, y, r, a) {
-    if (!ctx) return;
-    try {
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, 'rgba(30,20,10,' + a + ')'); g.addColorStop(1, 'rgba(30,20,10,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-    } catch (e) { /* ignore */ }
+    if (!root) return;
+    const recs = decalTargetsFor(x, y, r > 60 ? r : 0);
+    for (const rec of recs) {
+      try {
+        const c = rec.ctx;
+        const lx = x - rec.left, ly = y - rec.top;
+        const g = c.createRadialGradient(lx, ly, 0, lx, ly, r);
+        g.addColorStop(0, 'rgba(30,20,10,' + a + ')'); g.addColorStop(1, 'rgba(30,20,10,0)');
+        c.fillStyle = g; c.beginPath(); c.arc(lx, ly, r, 0, Math.PI * 2); c.fill();
+      } catch (e) { /* ignore */ }
+    }
   }
+
+// ── 31-decal.js ──
+  /* ===================================================================== */
+  /* 3a. Damage decals (SPEC-material §1–§3)                                 */
+  /*     A damage mark belongs to the ELEMENT that was hit, not to the        */
+  /*     screen. Each marked element owns a decal canvas sized to its own      */
+  /*     rect, positioned over it, clipped to it and moved with it — so a      */
+  /*     mark scrolls, resizes and dies with the thing it was made on. The     */
+  /*     viewport-fixed sheet of glass (.crs-canvas) is gone (§9.1).           */
+  /* ===================================================================== */
+  /* SPEC-material §3: 40 live decal canvases, 12 in performance mode. Least-recently-damaged is
+     retired first (a 200 ms fade), so the one you are actively hitting is never the one evicted. */
+  const DECAL_CAP = 40;
+  const DECAL_CAP_PERF = 12;
+  function decalCap() { return safe(() => state.perf && state.perf.mode === 'performance') ? DECAL_CAP_PERF : DECAL_CAP; }
+  const DECAL_MAX_PX = 4096;       // device-pixel clamp per axis (same ceiling the old sheet used)
+  const DECAL_HOLD_MS = 600;       // keep the frame loop syncing decals this long after a fresh mark
+  const decals = new Map();        // el -> rec; Map iteration order is insertion order, oldest first
+  let decalRaf = 0;
+  let decalHold = 0;               // the hit element wobbles (reactDamage, 260 ms) — ride it out, see decalBusy()
+
+  function decalDpr() { return Math.min(win.devicePixelRatio || 1, 2); }
+
+  /* The element a mark at (x, y) belongs to. pickTarget() is the SAME walk-up the weapons use to decide what
+   * they damaged, so a mark always lands on exactly the element that took the hit. It returns null over the
+   * page background, over a broken element and over a viewport-sized container — precisely the three places a
+   * mark must never be painted (§8: the background is not a material). */
+  function decalTargetAt(x, y) {
+    try { return pickTarget(x, y, null, { noLock: true }); } catch (e) { return null; }
+  }
+  function decalUsable(el) {
+    if (!el || el.nodeType !== 1 || !el.isConnected) return false;
+    if (isOurs(el)) return false;
+    try { if (el.hasAttribute('data-crs-broken')) return false; } catch (e) { return false; }
+    const r = rectOf(el);
+    return !!(r && r.width >= 1 && r.height >= 1);
+  }
+  /* The box a decal covers. getBoundingClientRect() is the visual box, which is what a mark must sit on —
+   * but a hit makes the element itself wobble for 260 ms (reactDamage) and the page shake on top of that, so
+   * a rect read inside that window is a fraction of a pixel wider and taller than the element really is.
+   * Baking that into the bitmap would leave the mark permanently mis-sized, so the UNTRANSFORMED layout box
+   * wins whenever the two agree to within a pixel; a genuinely transformed element keeps its visual rect. */
+  function decalBox(el) {
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return null;
+    let w = r.width, h = r.height, ow = 0, oh = 0;
+    try { ow = el.offsetWidth || 0; oh = el.offsetHeight || 0; } catch (e) { ow = oh = 0; }
+    if (ow > 0 && oh > 0 && Math.abs(ow - w) <= 1.5 && Math.abs(oh - h) <= 1.5) { w = ow; h = oh; }
+    return { left: r.left, top: r.top, width: w, height: h };
+  }
+  function destroyDecal(rec) {
+    if (!rec) return;
+    try { rec.node.remove(); } catch (e) { /* ignore */ }
+    decals.delete(rec.el);
+  }
+  /* A broken element takes its damage with it (SPEC-destruction.md §1): the pieces carry the look now. */
+  function dropDecal(el) { const rec = el && decals.get(el); if (rec) destroyDecal(rec); }
+  function clearDecals() {
+    if (decalRaf) { try { caf(decalRaf); } catch (e) { /* ignore */ } decalRaf = 0; }
+    decalHold = 0;
+    for (const rec of Array.from(decals.values())) destroyDecal(rec);
+    decals.clear();
+  }
+  function decalCount() { return decals.size; }
+  /* True while a freshly marked element may still be moving under its own hit reaction. tickFrame() reads
+   * this to keep the loop awake for exactly that window, so the mark rides the wobble and then settles
+   * pixel-exact on the element — instead of freezing wherever the element happened to be mid-animation. */
+  function decalBusy() { return decals.size > 0 && now() < decalHold; }
+
+  /* Re-size the bitmap to the element's current rect, keeping the marks already on it at the same LOCAL
+   * position (copied back unscaled from the top-left, which is where they were drawn from). */
+  function resizeDecal(rec, r) {
+    const dpr = decalDpr();
+    const bw = clamp(Math.round(r.width * dpr), 1, DECAL_MAX_PX);
+    const bh = clamp(Math.round(r.height * dpr), 1, DECAL_MAX_PX);
+    let tmp = null;
+    try {
+      if (rec.node.width > 0 && rec.node.height > 0) {
+        tmp = doc.createElement('canvas');
+        tmp.width = rec.node.width; tmp.height = rec.node.height;
+        tmp.getContext('2d').drawImage(rec.node, 0, 0);
+      }
+    } catch (e) { tmp = null; }
+    rec.node.width = bw; rec.node.height = bh;
+    rec.node.style.width = px(r.width);
+    rec.node.style.height = px(r.height);
+    rec.cssW = r.width; rec.cssH = r.height;
+    rec.sx = bw / Math.max(1, r.width); rec.sy = bh / Math.max(1, r.height);
+    try { rec.ctx = rec.node.getContext('2d'); } catch (e) { rec.ctx = null; }
+    if (tmp && rec.ctx) {
+      try { rec.ctx.setTransform(1, 0, 0, 1, 0, 0); rec.ctx.drawImage(tmp, 0, 0); } catch (e) { /* ignore */ }
+    }
+    if (rec.ctx) { try { rec.ctx.setTransform(rec.sx, 0, 0, rec.sy, 0, 0); } catch (e) { /* ignore */ } }
+  }
+  /* Put the decal back over its element. Returns false when the element no longer has a usable box. */
+  function placeDecal(rec) {
+    const r = decalBox(rec.el);
+    if (!r) return false;
+    if (rec.left !== r.left || rec.top !== r.top) {
+      rec.left = r.left; rec.top = r.top;
+      rec.node.style.left = px(r.left);
+      rec.node.style.top = px(r.top);
+    }
+    if (Math.abs(rec.cssW - r.width) > 0.5 || Math.abs(rec.cssH - r.height) > 0.5) resizeDecal(rec, r);
+    return !!rec.ctx;
+  }
+  function ensureDecal(el) {
+    if (!root || !decalUsable(el)) return null;
+    decalHold = now() + DECAL_HOLD_MS;
+    let rec = decals.get(el);
+    if (rec) {
+      if (rec.node.isConnected) return placeDecal(rec) ? rec : null;
+      decals.delete(el);
+    }
+    const r = decalBox(el);
+    if (!r) return null;
+    let node;
+    try { node = mk('canvas', 'crs-decal'); } catch (e) { return null; }
+    rec = { el, node, ctx: null, cssW: 0, cssH: 0, sx: 1, sy: 1, left: r.left, top: r.top };
+    node.style.left = px(r.left);
+    node.style.top = px(r.top);
+    resizeDecal(rec, r);
+    if (!rec.ctx) { try { node.remove(); } catch (e) { /* ignore */ } return null; }
+    try { root.append(node); } catch (e) { return null; }
+    decals.set(el, rec);
+    while (decals.size > decalCap()) {
+      const oldest = decals.keys().next().value;
+      if (oldest === el) break;
+      destroyDecal(decals.get(oldest));
+    }
+    return rec;
+  }
+  /* Every marked element re-reads its own rect: this is what makes a mark follow a scroll, a reflow, a
+   * resize or an element that moves on its own. Elements that are gone or broken drop their decal here. */
+  function syncDecals() {
+    if (!decals.size) return;
+    for (const rec of Array.from(decals.values())) {
+      if (!decalUsable(rec.el) || !rec.node.isConnected) { destroyDecal(rec); continue; }
+      if (!placeDecal(rec)) destroyDecal(rec);
+    }
+  }
+  function scheduleDecalSync() {
+    if (decalRaf || !state.active || !decals.size) return;
+    decalRaf = raf(() => {
+      decalRaf = 0;
+      if (state.active) { try { syncDecals(); } catch (e) { state.lastError = String((e && e.stack) || e); } }
+    });
+  }
+  const DECAL_MAX_TARGETS = 12;
+  debug.decals = () => Array.from(decals.values()).map((rec) => {
+    const r = rectOf(rec.el) || { left: 0, top: 0, width: 0, height: 0 };
+    return {
+      tag: tagOf(rec.el).toUpperCase(), id: rec.el.id || null,
+      left: Math.round(rec.left), top: Math.round(rec.top),
+      w: Math.round(rec.cssW), h: Math.round(rec.cssH),
+      elLeft: Math.round(r.left), elTop: Math.round(r.top)
+    };
+  });
+
+// ── 32-material.js ──
+  /* ===================================================================== */
+  /* 3b. Materials (SPEC-material §5)                                        */
+  /*     "everything is glass" is gone. What an element is MADE OF decides     */
+  /*     how it marks, how its debris falls and what it sounds like; the        */
+  /*     per-weapon destruction profile stays and the material multiplies on     */
+  /*     top of it (a hammer on paper is still a wedge — it just tears and       */
+  /*     flutters down instead of shattering).                                   */
+  /* ===================================================================== */
+  const MAT_GLASS_TAGS = new Set(['img', 'picture', 'video', 'canvas', 'svg']);
+  const MAT_PLASTIC_TAGS = new Set(['button', 'input', 'select', 'textarea']);
+  const MAT_THIN_PX = 12;            // §5 rule 3: shorter side under 12 px is a divider / icon → metal
+  const MAT_DEFAULT = 'panel';
+
+  /* Per material: the two ink colours its marks are drawn with, the debris physics the pieces inherit
+   * (gMul = gravity multiplier, hdrag = per-second horizontal velocity retention WHILE AIRBORNE, bounce =
+   * restitution, flutter = the lateral sway of something light), the piece-count multiplier, the CSS filter
+   * the piece wrapper carries, and the puff of particles the break throws off.
+   *
+   * The physics numbers are deliberately close to the single old profile (which was exactly `panel`): the
+   * material changes how debris READS — paper sways and lands dead, metal skates and rings, glass is
+   * numerous and brittle — without changing how long a floor takes to settle. Terminal-velocity damping on
+   * the VERTICAL axis is not part of this: a sheet that floats instead of falling leaves debris hanging in
+   * the viewport long after the hit, which is the opposite of the feeling §5 asks for. */
+  const MATERIALS = {
+    panel: {
+      id: 'panel', mark: 'panel',
+      ink: 'rgba(20,24,30,.76)', light: 'rgba(255,255,255,.40)',
+      gMul: 1, hdrag: 0.6, bounce: 0.32, flutter: null, pieceMul: 1, extraBounce: false,
+      filter: 'drop-shadow(1px 1px 0 rgba(255,255,255,.7))',
+      puff: { n: [4, 7], size: [8, 16], rise: [12, 26], life: [380, 620], color: 'rgba(216,214,206,.72)', round: true }
+    },
+    paper: {
+      id: 'paper', mark: 'paper',
+      ink: 'rgba(86,72,56,.6)', light: 'rgba(255,252,244,.88)',
+      gMul: 0.82, hdrag: 0.45, bounce: 0.12, flutter: { amp: 46, period: 520 }, pieceMul: 1, extraBounce: false,
+      filter: '',
+      puff: { n: [3, 6], size: [4, 9], rise: [10, 22], life: [520, 820], color: 'rgba(238,230,212,.8)', round: false }
+    },
+    glass: {
+      id: 'glass', mark: 'glass',
+      ink: 'rgba(15,25,35,.75)', light: 'rgba(255,255,255,.55)',
+      gMul: 1.08, hdrag: 0.75, bounce: 0.30, flutter: null, pieceMul: 1.6, extraBounce: false,
+      filter: 'drop-shadow(0 0 1.5px rgba(255,255,255,.9))',
+      puff: { n: [5, 9], size: [2, 4], rise: [6, 16], life: [240, 420], color: 'rgba(255,255,255,.95)', round: false }
+    },
+    plastic: {
+      id: 'plastic', mark: 'plastic',
+      ink: 'rgba(28,30,36,.72)', light: 'rgba(255,255,255,.8)',
+      gMul: 1, hdrag: 0.82, bounce: 0.42, flutter: null, pieceMul: 0.55, extraBounce: false,
+      filter: '',
+      puff: { n: [2, 4], size: [3, 6], rise: [8, 18], life: [260, 420], color: 'rgba(255,255,255,.7)', round: true }
+    },
+    metal: {
+      id: 'metal', mark: 'metal',
+      ink: 'rgba(16,20,26,.7)', light: 'rgba(226,236,252,.9)',
+      gMul: 1.15, hdrag: 0.86, bounce: 0.40, flutter: null, pieceMul: 0.6, extraBounce: true,
+      filter: 'drop-shadow(0 0 1px rgba(205,220,240,.85))',
+      puff: { n: [3, 6], size: [2, 4], rise: [10, 24], life: [220, 380], color: 'rgba(214,230,255,.95)', round: false }
+    }
+  };
+  const MATERIAL_IDS = ['panel', 'paper', 'glass', 'plastic', 'metal'];
+  const matCache = new WeakMap();
+  function matOf(name) { return MATERIALS[name] || MATERIALS[MAT_DEFAULT]; }
+
+  /* §5 rule 1 reads "img/picture/video/canvas/svg OR an element with a background-image". The sentence it
+   * exists to serve is the one right under the table — "glass is left on images and video, not on the
+   * screen" — so a background that is only a GRADIENT (every other card on the web) is not a picture and
+   * does not make its card glass. A real picture (url() / image-set()) does. */
+  function matHasPicture(s) {
+    if (!s) return false;
+    const bg = s.backgroundImage;
+    if (!bg || bg === 'none') return false;
+    return /(^|[\s,(])(url|image-set|-webkit-image-set)\s*\(/i.test(bg);
+  }
+  function matRoleButton(el) {
+    let role = null;
+    try { role = el.getAttribute('role'); } catch (e) { role = null; }
+    return role === 'button';
+  }
+  /* materialOf(el) — SPEC-material §5, checked in order. Cached per element: an element's material is a
+   * property of what it IS, and re-reading computed styles on every bullet would cost a layout per shot. */
+  function materialOf(el) {
+    if (!el || el.nodeType !== 1) return MAT_DEFAULT;
+    const hit = matCache.get(el);
+    if (hit) return hit;
+    const tag = tagOf(el);
+    const s = gcs(el);
+    const r = rectOf(el);
+    let m = MAT_DEFAULT;
+    let stable = true;
+    if (MAT_GLASS_TAGS.has(tag) || matHasPicture(s)) m = 'glass';
+    else if (MAT_PLASTIC_TAGS.has(tag) || tag === 'summary' || matRoleButton(el)) m = 'plastic';
+    else if (tag === 'hr') m = 'metal';
+    else if (r && r.width > 0 && r.height > 0 && Math.min(r.width, r.height) < MAT_THIN_PX) m = 'metal';
+    else if (!r || r.width <= 0 || r.height <= 0) stable = false;   // not laid out yet: decide again next time
+    else if (safe(() => textDominant(el))) m = 'paper';
+    if (stable) { try { matCache.set(el, m); } catch (e) { /* ignore */ } }
+    return m;
+  }
+  function materialAt(x, y) {
+    const el = decalTargetAt(x, y);
+    return el ? materialOf(el) : MAT_DEFAULT;
+  }
+  function materialOfPublic(el) {
+    if (!el || el.nodeType !== 1) return null;
+    const id = materialOf(el);
+    const M = matOf(id);
+    return { material: id, gravity: M.gMul, bounce: M.bounce, pieces: M.pieceMul };
+  }
+
+  /* ── the break sound (§5 column 4) ──
+   * Composed from the existing voices in src/40-audio.js rather than new ones, so no audio graph changes:
+   * glass = bright tinks over a high noise burst, panel = a double dull thud, paper = two noise sweeps,
+   * plastic = a double square clack, metal = a sine ring with a tink on top. */
+  function matSfx(mat, opts) {
+    const g = (opts && opts.gain) || 1;
+    if (state.muted) return;
+    if (mat === 'glass') { sfx('gun', { gain: 0.45 * g }); sfx('crit', { gain: 1.2 * g }); later(() => sfx('crit', { gain: 0.6 * g }), 70); }
+    else if (mat === 'paper') { sfx('whiff', { gain: 0.85 * g }); later(() => sfx('whiff', { gain: 0.45 * g }), 70); }
+    else if (mat === 'plastic') { sfx('clack', { gain: 1.2 * g }); later(() => sfx('clack', { gain: 0.6 * g }), 45); }
+    else if (mat === 'metal') { sfx('alert', { gain: 0.5 * g }); sfx('crit', { gain: 0.6 * g }); later(() => sfx('alert', { gain: 0.22 * g }), 110); }
+    else { sfx('thump', { gain: 1.05 * g, pitch: 0.82 }); later(() => sfx('thump', { gain: 0.45 * g, pitch: 0.72 }), 60); }
+  }
+
+  /* ── the puff a break throws off (§5: panel = dust, glass = sparkle, paper = fibres, metal = sparks) ──
+   * Plain fading divs in our own root, capped, tracked, and swept by clearCanvas() — restore() cancels every
+   * animation, so the nodes are removed by hand there rather than by the finish handler. */
+  const MATFX_CAP = 40;
+  const matFx = [];
+  function clearMatFx() {
+    for (const n of matFx) { try { n.remove(); } catch (e) { /* ignore */ } }
+    matFx.length = 0;
+  }
+  function matBurst(mat, x, y) {
+    if (!root || reducedMotion()) return;
+    const P = matOf(mat).puff;
+    if (!P) return;
+    const n = randInt(P.n[0], P.n[1]);
+    for (let i = 0; i < n; i++) {
+      const s = rand(P.size[0], P.size[1]);
+      const node = mk('div', 'crs-matfx');
+      node.style.left = px(x + rand(-14, 14) - s / 2);
+      node.style.top = px(y + rand(-14, 14) - s / 2);
+      node.style.width = px(s); node.style.height = px(s);
+      node.style.borderRadius = P.round ? '50%' : '1px';
+      node.style.background = P.color;
+      if (P.round) node.style.filter = 'blur(1.5px)';
+      root.append(node);
+      matFx.push(node);
+      while (matFx.length > MATFX_CAP) { const old = matFx.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = matFx.indexOf(node); if (k >= 0) matFx.splice(k, 1); };
+      const dur = rand(P.life[0], P.life[1]);
+      try {
+        const a = trackAnim(node.animate([
+          { transform: 'translate(0px, 0px) scale(1)', opacity: 0.95 },
+          { transform: 'translate(' + px(rand(-18, 18)) + ', ' + px(-rand(P.rise[0], P.rise[1])) + ') scale(' + rand(0.3, 0.8).toFixed(2) + ')', opacity: 0 }
+        ], { duration: dur, easing: 'ease-out', fill: 'forwards' }));
+        a.addEventListener('finish', kill);
+      } catch (e) { /* ignore */ }
+      later(kill, dur + 300);
+    }
+  }
+
+  /* Debris physics a piece inherits from the element it came off (§5 column 3), read by addPiece()/tickFrame(). */
+  function matPieceProps(mat) {
+    const M = matOf(mat);
+    return { mat: M.id, gMul: M.gMul, hdrag: M.hdrag, bounce: M.bounce, flutter: M.flutter, matFilter: M.filter, extraBounce: M.extraBounce };
+  }
+  debug.materialOf = (el) => materialOfPublic(el);
+  debug.materialAt = (x, y) => {
+    const el = decalTargetAt(+x, +y);
+    if (!el) return null;
+    return { tag: tagOf(el).toUpperCase(), id: el.id || null, material: materialOf(el) };
+  };
 
 // ── 35-effects.js ──
   /* ===================================================================== */
@@ -2194,6 +2655,72 @@
     for (const p of state.pieces) if (!p.chip) n++;
     return n;
   }
+  /* ── SPEC-material §4: the rubble belongs to the PAGE, not to the screen ──────────────────────────────
+   * A piece's ox/oy are expressed in its own anchor frame, named once at spawn by `p.docAnchor`:
+   *   document (the default)  ox/oy are DOCUMENT coordinates and p.sx/p.sy hold the scroll the frame was
+   *                           captured at, so the floor it falls to — `p.sy + viewH()` — is the document
+   *                           position the viewport bottom had AT SPAWN, exactly as §4 asks. Scroll down
+   *                           and the pile near the top rides up out of view.
+   *   viewport                p.sx = p.sy = 0, so every term below collapses to the pre-§4 H / 0 / W and
+   *                           the old behaviour is bit-for-bit intact.
+   * The node keeps the `left`/`top` it was born with; only the translate carries the scroll delta, so a
+   * scroll costs ONE transform write per piece — no layout, no second RAF loop, no per-piece listener. */
+  let scrollReadAt = -1e9;
+  function readScroll(force) {
+    /* Reading window.scrollY can flush layout, and addPiece() runs in batches of dozens with a style write
+     * between every call — so the un-forced reading is throttled to once per 4 ms. Everything that must be
+     * exact (the frame loop, the scroll handler, the public readers) passes force. */
+    const t = now();
+    if (!force && t - scrollReadAt < 4) return state.scrollY;
+    scrollReadAt = t;
+    try {
+      state.scrollX = win.scrollX || win.pageXOffset || 0;
+      state.scrollY = win.scrollY || win.pageYOffset || 0;
+    } catch (e) { /* keep the previous reading */ }
+    return state.scrollY;
+  }
+  /* Two different deltas, and they are NOT the same number — keep them apart:
+   *  trackDx/trackDy  what the TRANSFORM must carry. The node's left/top is the viewport spot the piece was
+   *                   born at, so the translate has to make up the page travel since: p.sx - scrollNow.
+   *  viewOx/viewOy    the piece's origin ON SCREEN. ox/oy are document coordinates for a document-anchored
+   *                   piece, so getting to the viewport is a plain subtraction of the live scroll.
+   * Both collapse to the pre-§4 identity for a viewport-anchored piece (p.sx = p.sy = 0). */
+  function trackDx(p) { return p.docAnchor ? p.sx - state.scrollX : 0; }
+  function trackDy(p) { return p.docAnchor ? p.sy - state.scrollY : 0; }
+  function viewOx(p) { return p.docAnchor ? p.ox - state.scrollX : p.ox; }
+  function viewOy(p) { return p.docAnchor ? p.oy - state.scrollY : p.oy; }
+  /* Where a piece is ON SCREEN right now. stats() and debug.pieceBoxes() report this, so every reader
+   * outside the integrator keeps seeing viewport numbers exactly as it did before §4. */
+  function pieceBox(p) {
+    const ox = viewOx(p), oy = viewOy(p);
+    return { l: ox + p.x + p.bb.minX, r: ox + p.x + p.bb.maxX, top: oy + p.y + p.bb.minY, bottom: oy + p.y + p.bb.maxY };
+  }
+  /* The ONE passive scroll handler (src/95-events.js) lands here. It rewrites transforms and nothing else:
+   * scrolling a page is not an impulse, so a piece that has come to rest stays resting. */
+  function anchorPieces() {
+    readScroll(true);
+    for (const p of state.pieces) if (p.docAnchor) applyTransform(p);
+  }
+  /* SPEC-material §4: the anchor is a persisted setting. Flipping it while rubble is on the floor re-frames
+   * every live piece WITHOUT moving it on screen — ox/oy and x/y change together so the rendered position is
+   * identical on both sides of the switch. */
+  function setDebrisAnchor(v, silent) {
+    const want = v === 'viewport' ? 'viewport' : (v === 'document' ? 'document' : null);
+    if (!want) return state.debrisAnchor;
+    if (want !== state.debrisAnchor) {
+      state.debrisAnchor = want;
+      readScroll(true);
+      const toDoc = want === 'document';
+      for (const p of state.pieces) {
+        if (!!p.docAnchor === toDoc) continue;
+        if (toDoc) { p.sx = state.scrollX; p.sy = state.scrollY; p.ox += p.sx; p.oy += p.sy; p.docAnchor = true; }
+        else { p.x += p.sx - state.scrollX; p.y += p.sy - state.scrollY; p.ox -= p.sx; p.oy -= p.sy; p.sx = 0; p.sy = 0; p.docAnchor = false; }
+        applyTransform(p);
+      }
+    }
+    if (!silent) safe(() => chrome.storage.sync.set({ crsDebrisAnchor: want }));
+    return state.debrisAnchor;
+  }
   function addPiece(node, p) {
     const t = now();
     const dpr = Math.min(win.devicePixelRatio || 1, 2);
@@ -2203,19 +2730,28 @@
     p.tilt = rand(-12, 12);
     p.gpu = p.w * p.h * dpr * dpr;
     p.big = p.w * p.h > 200000;
-    // clip the AABB to the viewport at spawn (A12)
+    /* SPEC-material §4: adopt the anchor frame BEFORE anything else reads ox/oy. The callers hand ox/oy in
+     * viewport coordinates; a document-anchored piece carries the spawn scroll from here on. */
+    readScroll();
+    p.docAnchor = state.debrisAnchor !== 'viewport';
+    p.sx = p.docAnchor ? state.scrollX : 0; p.sy = p.docAnchor ? state.scrollY : 0;
+    p.ox += p.sx; p.oy += p.sy;
+    // clip the AABB to the viewport at spawn (A12) — the viewport edges in the piece's own frame
     const W = viewW(), H = viewH();
-    p.bb = { minX: Math.max(p.bb.minX, -p.ox), minY: Math.max(p.bb.minY, -p.oy), maxX: Math.min(p.bb.maxX, W - p.ox), maxY: Math.min(p.bb.maxY, H - p.oy) };
+    p.bb = { minX: Math.max(p.bb.minX, p.sx - p.ox), minY: Math.max(p.bb.minY, p.sy - p.oy), maxX: Math.min(p.bb.maxX, p.sx + W - p.ox), maxY: Math.min(p.bb.maxY, p.sy + H - p.oy) };
     if (p.bb.maxX < p.bb.minX) p.bb.maxX = p.bb.minX; if (p.bb.maxY < p.bb.minY) p.bb.maxY = p.bb.minY;
     node.style.willChange = p.big ? 'auto' : 'transform';
     node.style.contain = 'layout paint';
     node.style.transform = 'translate(0px, 0px) rotate(0deg)';
     const area = (p.bb.maxX - p.bb.minX) * (p.bb.maxY - p.bb.minY);
     const shadow = (!p.word && area > 2500) ? 'drop-shadow(0 3px 4px rgba(0,0,0,.35))' : '';
-    if (shadow) node.style.filter = shadow;
+    /* SPEC-material §5: the material's own sheen (glass rims, metal's cold edge, a panel's paper-white lip)
+     * rides the SAME filter chain as the drop shadow, so the flash animation below still composites both. */
+    const base = [shadow, p.matFilter || ''].filter(Boolean).join(' ');
+    if (base) node.style.filter = base;
     if (!node.isConnected) root.append(node);
     try {
-      trackAnim(node.animate([{ filter: (shadow ? shadow + ' ' : '') + 'brightness(1.7)' }, { filter: (shadow ? shadow + ' ' : '') + 'brightness(1)' }], { duration: 90, easing: 'ease-out' }));
+      trackAnim(node.animate([{ filter: (base ? base + ' ' : '') + 'brightness(1.7)' }, { filter: (base ? base + ' ' : '') + 'brightness(1)' }], { duration: 90, easing: 'ease-out' }));
     } catch (e) { /* ignore */ }
     // v1.4 §9.1: a piece that is still flying has no lifetime; the hard cut-off only stops one escaping forever
     p.expireAt = 0; p.restedFirstAt = 0; p.jitter = null; p.hardExpireAt = t + DEBRIS_HARD_MS;
@@ -2224,7 +2760,9 @@
     return p;
   }
   function applyTransform(p) {
-    p.node.style.transform = 'translate(' + p.x.toFixed(2) + 'px, ' + p.y.toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)';
+    // SPEC-material §4: the node's left/top is where the piece was BORN on screen; the delta rides the translate
+    const tx = p.x + trackDx(p), ty = p.y + trackDy(p);
+    p.node.style.transform = 'translate(' + tx.toFixed(2) + 'px, ' + ty.toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)';
   }
   function restPiece(p) {
     p.resting = true; p.grounded = true; p.vx = 0; p.vy = 0; p.vr = 0;
@@ -2252,14 +2790,13 @@
    * getBoundingClientRect() therefore misses real pairs at random. evictPieces() wakes a piece from
    * p.ox/p.x/p.bb, and this hook hands a test exactly those numbers plus a stable per-piece id, so the
    * §9.4.4 check can follow one identified piece across the eviction of the piece under it. */
-  debug.pieceBoxes = () => state.pieces.map((p) => ({
-    pid: p.pid,
-    resting: !!p.resting,
-    l: p.ox + p.x + p.bb.minX,
-    r: p.ox + p.x + p.bb.maxX,
-    top: p.oy + p.y + p.bb.minY,
-    bottom: p.oy + p.y + p.bb.maxY,
-  }));
+  debug.pieceBoxes = () => {
+    readScroll(true);   // SPEC-material §4: ox/oy are anchor-frame, so report what is actually on screen
+    return state.pieces.map((p) => {
+      const b = pieceBox(p);
+      return { pid: p.pid, resting: !!p.resting, anchor: p.docAnchor ? 'document' : 'viewport', l: b.l, r: b.r, top: b.top, bottom: b.bottom };
+    });
+  };
   /* Retire ONE identified piece on the next sweep, as if its §9.1 lifetime had just run out. §9.4.1 already
    * covers the clock; this is how §9.3's "wake whatever was stacked on it" is checked without the pieces above
    * expiring in the very same batch. */
@@ -2292,16 +2829,30 @@
     state.debrisTimer = 0;
     if (!state.active || !state.pieces.length) return;
     const t = now();
-    const victims = [];
+    const victims = [], lost = [];
+    /* SPEC-material §4: rubble the page has been scrolled away from is retired here rather than integrated,
+     * frame after frame, for nobody. The margin is a whole viewport past each edge (and never less than
+     * 1200 px), so debris that is merely just-off-screen — one flick of the wheel from being seen again —
+     * is kept. Only a document-anchored piece can ever leave the screen. It goes SILENTLY (there is no one
+     * to watch it fade) and without the support pass: the pile it was part of is off-screen with it, so
+     * nothing visible is standing on it. */
+    readScroll(true);
+    const vh = viewH(), margin = Math.max(1200, vh);
     for (const p of state.pieces) {
-      if (victims.length >= DEBRIS_BATCH) break;   // §9.1: at most twelve at a time, so no frame carries them all
+      if (victims.length + lost.length >= DEBRIS_BATCH) break;   // §9.1: at most twelve at a time, so no frame carries them all
+      if (p.docAnchor) {
+        const b = pieceBox(p);
+        if (b.bottom < -margin || b.top > vh + margin) { lost.push(p); continue; }
+      }
       if ((p.expireAt && t >= p.expireAt) || (p.hardExpireAt && t >= p.hardExpireAt)) victims.push(p);
     }
+    if (lost.length) evictPieces(lost, true, { noWake: true });
     if (victims.length) evictPieces(victims, false, { dur: DEBRIS_FADE_MS, shrink: true });
     scheduleDebrisSweep();
   }
   /* opts (v1.4 §9.1): { dur, shrink } — a lifetime expiry fades over 500 ms AND shrinks to 0.88. The scale is a
-   * separate composite:'add' animation so it stacks onto the inline translate/rotate instead of replacing it. */
+   * separate composite:'add' animation so it stacks onto the inline translate/rotate instead of replacing it.
+   * SPEC-material §4 adds { noWake }: skip the support pass for rubble that left the screen rather than the pile. */
   function evictPieces(victims, silent, opts) {
     if (!victims.length) return;
     const dur = (opts && opts.dur) || 350;
@@ -2324,6 +2875,7 @@
       later(kill, dur + 150);
     }
     // wake resting pieces that were supported by an evicted piece (A1)
+    if (opts && opts.noWake) { kick(); return; }
     for (const q of state.pieces) {
       if (!q.resting) continue;
       const ql = q.ox + q.x + q.bb.minX, qr = q.ox + q.x + q.bb.maxX, qb = q.oy + q.y + q.bb.maxY;
@@ -2434,6 +2986,7 @@
     return n;
   }
   function spawnGeometric(el, rect, ix, iy, mode, n, opts) {
+    const mp = matPieceProps(materialOf(el));   // SPEC-material §5: the debris falls as what it was made of
     const ow = (el.offsetWidth || rect.width) || 1, oh = (el.offsetHeight || rect.height) || 1;
     const sx = rect.width / ow || 1, sy = rect.height / oh || 1;
     const sl = opts.splitLine ? { angle: opts.splitLine.angle, cx: (opts.splitLine.cx - rect.left) / sx, cy: (opts.splitLine.cy - rect.top) / sy } : null;
@@ -2455,8 +3008,8 @@
       if (opts.burnt) clip.style.filter = BURNT_FILTER;   // flame (A9): on the clip node, never the wrapper
       const cx = rect.left + poly.cx * sx, cy = rect.top + poly.cy * sy;
       const v = velocityFor(mode, ix, iy, cx, cy, opts);
-      const p = { ox: rect.left, oy: rect.top, w: rect.width, h: rect.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: poly.cx * sx, cy: poly.cy * sy,
-        bb: { minX: poly.minX * sx, minY: poly.minY * sy, maxX: poly.maxX * sx, maxY: poly.maxY * sy } };
+      const p = Object.assign({ ox: rect.left, oy: rect.top, w: rect.width, h: rect.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: poly.cx * sx, cy: poly.cy * sy,
+        bb: { minX: poly.minX * sx, minY: poly.minY * sy, maxX: poly.maxX * sx, maxY: poly.maxY * sy } }, mp);
       nodes.push([piece, p]); made++;
     }
     enforceCap(nodes.length, batchGpu(nodes));
@@ -2465,6 +3018,9 @@
   }
 
   /* --- text shattering (§12.2 / A23) --- */
+  /* SPEC-material §5: word pieces only exist for text-dominant elements, which are paper by definition —
+   * they sway down instead of dropping like a pane. Read once per build rather than per word. */
+  function wordMatProps() { return matPieceProps('paper'); }
   const CJK_RE = /[ᄀ-ᇿ぀-ヿ㄰-㆏㐀-䶿一-鿿가-힯豈-﫿]/;
   function graphemes(text) {
     try {
@@ -2546,6 +3102,7 @@
     } catch (e) { /* ignore */ }
   }
   function spawnWordPieces(el, rect, ix, iy, mode, opts) {
+    const wordMat = wordMatProps();
     const txt = (el.textContent || '').trim();
     const tag = tagOf(el);
     const len = graphemes(txt).length;
@@ -2602,8 +3159,8 @@
       if (opts.burnt) span.style.filter = BURNT_FILTER;
       const cx = vis.left + vis.width / 2, cy = vis.top + vis.height / 2;
       const v = velocityFor(mode, ix, iy, cx, cy, Object.assign({ word: true }, opts));
-      const p = { ox: vis.left, oy: vis.top, w: vis.width, h: vis.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: vis.width / 2, cy: vis.height / 2,
-        bb: { minX: 0, minY: 0, maxX: vis.width, maxY: vis.height }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 };
+      const p = Object.assign({ ox: vis.left, oy: vis.top, w: vis.width, h: vis.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: vis.width / 2, cy: vis.height / 2,
+        bb: { minX: 0, minY: 0, maxX: vis.width, maxY: vis.height }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 }, wordMat);
       made.push([span, p]);
     }
     if (!made.length) return 0;
@@ -2612,6 +3169,7 @@
     return made.length;
   }
   function spawnFieldSpill(el, rect, ix, iy, mode, opts) {
+    const wordMat = wordMatProps();
     const tag = tagOf(el);
     let value = '';
     try { value = String(el.value || ''); } catch (e) { value = ''; }
@@ -2640,7 +3198,7 @@
         styleWordPiece(span, cs, { height: lineH }, 1);
         if (opts && opts.burnt) span.style.filter = BURNT_FILTER;
         const v = velocityFor(mode, ix, iy, x + w / 2, y + lineH / 2, { word: true });
-        made.push([span, { ox: x, oy: y, w, h: lineH, vx: v.vx, vy: v.vy, vr: v.vr, cx: w / 2, cy: lineH / 2, bb: { minX: 0, minY: 0, maxX: w, maxY: lineH }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 }]);
+        made.push([span, Object.assign({ ox: x, oy: y, w, h: lineH, vx: v.vx, vy: v.vy, vr: v.vr, cx: w / 2, cy: lineH / 2, bb: { minX: 0, minY: 0, maxX: w, maxY: lineH }, word: true, launchAt: now() + Math.min(v.dist, 240) / 2 }, wordMat)]);
         x += w + spaceW;
       }
       y += lineH;
@@ -2674,6 +3232,13 @@
       made += spawnGeometric(el, rect, ix, iy, mode, pieceCount(el, mode, rect, descendants, opts.pieces), opts);
       if ((tag === 'input' || tag === 'textarea')) made += spawnFieldSpill(el, rect, ix, iy, mode, opts);
     }
+    /* SPEC-material §5 / SPEC-destruction §1: the break SOUNDS and PUFFS like what it was made of, and the
+     * element's damage decal dies with it — the marks are on the falling pieces now, not on a sheet of
+     * glass left hanging in front of the hole. */
+    const matId = materialOf(el);
+    dropDecal(el);
+    try { matSfx(matId, { gain: 0.5 }); } catch (e) { /* ignore */ }
+    try { matBurst(matId, ix, iy); } catch (e) { /* ignore */ }
     // hide the original in the same synchronous task (A17)
     const rec = hideOriginal(el);
     rec.wasPlaying = !!opts.wasPlaying;
@@ -5721,6 +6286,8 @@
     let dt = clamp((t - state.lastT) / 1000, 0, 0.05);
     state.lastT = t;
     const W = viewW(), H = viewH();
+    // SPEC-material §4: one reading per frame feeds every piece's anchor-frame → screen conversion below
+    if (state.pieces.length) readScroll(true);
     let busy = false;
     /* v1.3 §3.5 hitstop: for 70 ms after the player is hit the integrator advances NO time. Frames still run and
      * still consume their timestamps — dt is clamped to zero rather than the frame being skipped — so pieces,
@@ -5734,12 +6301,19 @@
       busy = true;
       if (t < p.launchAt) continue;
       const prevBottom = p.oy + p.y + p.bb.maxY;
-      if (!p.grounded) p.vy += GRAVITY * dt;
-      p.vx *= Math.pow(0.6, dt);
+      /* SPEC-material §5: a piece falls as the thing it came off. gMul / hdrag / bounce default to the old
+       * single profile (1 / 0.6 / 0.32 — `panel`), so an element whose material was never resolved behaves
+       * exactly as it did before. `flutter` is the lateral sway of something light: it moves the piece
+       * sideways without touching vx, so the resting test (|vx| and |vr| near zero) is unchanged. */
+      if (!p.grounded) p.vy += GRAVITY * (p.gMul || 1) * dt;
+      p.vx *= Math.pow(p.hdrag != null ? p.hdrag : 0.6, dt);
       p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+      if (p.flutter && !p.grounded) p.x += Math.sin(((t - p.bornAt) / p.flutter.period) * Math.PI * 2) * p.flutter.amp * dt;
       const newBottom = p.oy + p.y + p.bb.maxY;
       const pl = p.ox + p.x + p.bb.minX, pr = p.ox + p.x + p.bb.maxX, pw = pr - pl;
-      let support = H;
+      /* SPEC-material §4: the floor is the document position the viewport bottom had when THIS piece
+       * spawned (p.sy + H); a viewport-anchored piece has p.sy = 0, so it is the live bottom as before. */
+      let support = p.sy + H;
       for (const q of resting) {
         if (q === p) continue;
         const ql = q.ox + q.x + q.bb.minX, qr = q.ox + q.x + q.bb.maxX;
@@ -5750,7 +6324,7 @@
       }
       if (newBottom >= support) {
         p.y = support - p.oy - p.bb.maxY;
-        if (p.vy > 30) { p.vy = -p.vy * 0.32; p.vx *= 0.75; p.vr *= 0.45; p.grounded = false; }
+        if (p.vy > 30) { p.vy = -p.vy * (p.bounce != null ? p.bounce : 0.32); p.vx *= 0.75; p.vr *= 0.45; p.grounded = false; }
         else {
           p.vy = 0; p.grounded = true;
           p.vx *= Math.pow(0.001, dt); p.vr *= Math.pow(0.0005, dt);
@@ -5761,10 +6335,11 @@
           if (p.vx === 0 && p.vr === 0) { restPiece(p); resting.push(p); continue; }
         }
       } else p.grounded = false;
+      const wallL = p.sx, wallR = p.sx + W;   // §4: the walls are that spawn moment's viewport edges
       const left = p.ox + p.x + p.bb.minX;
-      if (left < 0) { p.x -= left; p.vx = -p.vx * 0.5; }
+      if (left < wallL) { p.x -= (left - wallL); p.vx = -p.vx * 0.5; }
       const right = p.ox + p.x + p.bb.maxX;
-      if (right > W) { p.x -= (right - W); p.vx = -p.vx * 0.5; }
+      if (right > wallR) { p.x -= (right - wallR); p.vx = -p.vx * 0.5; }
       if (t - p.bornAt > 6000 && Math.abs(p.vy) < 60 && Math.abs(p.vx) < 20) { restPiece(p); resting.push(p); continue; }
       applyTransform(p);
     }
@@ -5784,6 +6359,10 @@
     if (state.self) selfStep();
     if (state.aimlines.length) { stepAimLines(); busy = true; }
     if (busy && state.combat && !state.paused && state.player.hp < state.player.max) regenStep();
+    /* SPEC-material §3: while the loop is already awake, every decal re-reads its element's rect, so a mark
+     * also follows an element that is being animated, repaired or reflowed — not just one that scrolled.
+     * It deliberately does NOT set `busy`: decals alone never keep a frame loop alive. */
+    if (decalCount()) { syncDecals(); if (decalBusy()) busy = true; }
     return busy;
   }
   function onResize() {
@@ -5791,15 +6370,18 @@
     state.resizeRaf = raf(() => {
       state.resizeRaf = 0;
       if (!state.active) return;
-      setupCanvas(true);
+      setupCanvas();      // SPEC-material §3: every decal re-reads its element's new rect
       applyZoom();
       const W = viewW(), H = viewH();
+      readScroll(true);   // SPEC-material §4: a resize moves the page under the rubble as well
       for (const p of state.pieces) {
+        // §4: walls and floor in the piece's own anchor frame (p.sx = p.sy = 0 for a viewport-anchored one)
+        const wallL = p.sx, wallR = p.sx + W, floor = p.sy + H;
         const left = p.ox + p.x + p.bb.minX, right = p.ox + p.x + p.bb.maxX;
-        if (right > W) p.x -= (right - W);
-        if (left < 0) p.x -= left;
-        if (p.oy + p.y + p.bb.maxY > H) { p.y = H - p.oy - p.bb.maxY; }
-        else if (p.resting && p.oy + p.y + p.bb.maxY < H - 1) { wakePiece(p); }
+        if (right > wallR) p.x -= (right - wallR);
+        if (left < wallL) p.x -= (left - wallL);
+        if (p.oy + p.y + p.bb.maxY > floor) { p.y = floor - p.oy - p.bb.maxY; }
+        else if (p.resting && p.oy + p.y + p.bb.maxY < floor - 1) { wakePiece(p); }
         applyTransform(p);
       }
       refreshHover();
@@ -6194,9 +6776,13 @@
     const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } };
     if (reducedMotion()) { kill(); return; }
     try {
+      /* SPEC-material §4: the node's left/top is where the piece was born ON SCREEN, so both keyframes carry
+       * the scroll travelled since — the piece starts where it is drawn now and lands on where its element
+       * has scrolled to, not on a stale spot. Both deltas are 0 for a viewport-anchored piece. */
+      const hx = trackDx(p), hy = trackDy(p);
       const a = trackAnim(node.animate([
-        { transform: 'translate(' + p.x.toFixed(2) + 'px, ' + p.y.toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)', opacity: 1 },
-        { transform: 'translate(0px, 0px) rotate(0deg)', opacity: 0 }
+        { transform: 'translate(' + (p.x + hx).toFixed(2) + 'px, ' + (p.y + hy).toFixed(2) + 'px) rotate(' + p.rot.toFixed(2) + 'deg)', opacity: 1 },
+        { transform: 'translate(' + hx.toFixed(2) + 'px, ' + hy.toFixed(2) + 'px) rotate(0deg)', opacity: 0 }
       ], { duration: REPAIR_PIECE_MS, easing: 'ease-in-out', fill: 'forwards' }));
       a.addEventListener('finish', kill); a.addEventListener('cancel', kill);
     } catch (e) { kill(); return; }
@@ -6211,8 +6797,9 @@
     const r = rectOf(el);
     const out = [];
     if (!r || r.width < 1 || r.height < 1) return out;
+    readScroll(true);   // SPEC-material §4: ox/oy are anchor-frame; rectOf() is a viewport rect
     for (const p of state.pieces) {
-      const sx = p.ox + p.cx, sy = p.oy + p.cy;
+      const sx = viewOx(p) + p.cx, sy = viewOy(p) + p.cy;
       if (sx >= r.left - 2 && sx <= r.right + 2 && sy >= r.top - 2 && sy <= r.bottom + 2) out.push(p);
     }
     return out;
@@ -6442,7 +7029,12 @@
   }
   function onPointerLeave(e) { if (state.active && e.relatedTarget == null) state.player.inWindow = false; }
   function onPointerEnter() { if (state.active) state.player.inWindow = true; }
-  function onScroll() { if (state.active && state.hostiles.size) scheduleAura(); }
+  /* SPEC-material §3: scrolling moves the ELEMENTS, so every decal re-reads its element's rect here —
+   * that is what makes a damage mark ride the page instead of staying put on the screen. */
+  /* SPEC-material §4: the SAME passive handler moves the rubble. anchorPieces() only rewrites transforms —
+   * a resting piece is never woken by a scroll — and the integrator is not kicked, so scrolling past a
+   * settled pile costs no frames at all. */
+  function onScroll() { if (!state.active) return; anchorPieces(); scheduleDecalSync(); if (state.hostiles.size) scheduleAura(); }
   function onMove(e) {
     if (!state.active) return;
     state.hoverX = e.clientX; state.hoverY = e.clientY;   // hold ticks fire here
@@ -6709,7 +7301,7 @@
   function loadPrefs() {
     // ── v1.4 §5: crsSeenCombatHelp is a LOCAL flag (the control card is shown once per machine, not synced) ──
     safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
-    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife']), (res) => {
+    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
       if (!state.loadoutTouched && isPermutation(res.crsLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
@@ -6730,6 +7322,8 @@
       // §9.2: crsDebrisLifeMs is the setting; crsDebrisLife is read too so an early build's key still loads
       const dl = (typeof res.crsDebrisLifeMs === 'number') ? res.crsDebrisLifeMs : res.crsDebrisLife;
       if (typeof dl === 'number' && dl >= 0) state.debrisLifeMs = dl;
+      // SPEC-material §4: the debris anchor is persisted like the rest; anything else stored keeps the default
+      if (res.crsDebrisAnchor === 'viewport' || res.crsDebrisAnchor === 'document') setDebrisAnchor(res.crsDebrisAnchor, true);
       updateHud();
       updateAmmoHud();
       updatePlayerHud();
@@ -6820,7 +7414,8 @@
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
       lastBreakPieces: state.lastBreakPieces, lastError: state.lastError || null,
-      pieces: state.pieces.map((p) => ({ bottom: p.oy + p.y + p.bb.maxY, resting: p.resting })),
+      // SPEC-material §4: `bottom` stays a VIEWPORT number — pieceBox() converts out of the anchor frame
+      pieces: (readScroll(true), state.pieces.map((p) => ({ bottom: pieceBox(p).bottom, resting: p.resting }))),
       pieceCount: state.pieces.length,
       // v1.2
       mag: WEAPONS[id].mag == null ? null : state.ammo[id], reloading: isReloading(id), swapping: swapActive(),
@@ -6842,6 +7437,7 @@
       repairs: state.repairs.length, repaired: state.repaired,
       destroyRatio: ratioNow(), hostilesByTier: hostilesByTier(),
       avatar: state.avatar ? avatarInfo() : null, debrisLifeMs: state.debrisLifeMs,
+      debrisAnchor: state.debrisAnchor,   // SPEC-material §4: 'document' (default) | 'viewport'
       dashReadyAt: dashReadyWallClock()
     };
   }
@@ -6891,6 +7487,9 @@
     get combatMode() { return state.mode; },
     setCombatMode: (id) => setPlayMode(id),
     cycleMode,
+    // SPEC-material §4: where the rubble lives — 'document' (default, scrolls with the page) | 'viewport'
+    get debrisAnchor() { return state.debrisAnchor; },
+    setDebrisAnchor: (v) => setDebrisAnchor(v),
     setDebrisLife: (ms) => {
       ms = +ms;
       if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;

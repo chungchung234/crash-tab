@@ -37,6 +37,10 @@
     repairs: [], repaired: 0, ratio: 0, ratioTimer: 0, ratioNodes: null,
     // §9 debris lifetime (0 = keep until the cap evicts, as before)
     debrisLifeMs: 6000, debrisTimer: 0,
+    /* SPEC-material §4: debris is nailed to the DOCUMENT by default — a piece keeps the place it fell on the
+     * page and scrolls out of view with everything else. 'viewport' is the old sheet-of-glass behaviour, kept
+     * as an option. scrollX/scrollY are the last reading of the page scroll, taken by readScroll(). */
+    debrisAnchor: 'document', scrollX: 0, scrollY: 0,
     // §10 depth tiers, §4 boss stages, §3.2 ratio freshness
     depthTimer: 0, bossMode: false, ratioDirty: true, ratioAt: 0, ratioBrokenN: -1
   };

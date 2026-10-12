@@ -5,6 +5,8 @@
     "20-state.js",
     "25-layers.js",
     "30-canvas.js",
+    "31-decal.js",
+    "32-material.js",
     "35-effects.js",
     "40-audio.js",
     "44-weapon-art.js",

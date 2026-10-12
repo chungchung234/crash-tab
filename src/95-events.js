@@ -93,7 +93,12 @@
   }
   function onPointerLeave(e) { if (state.active && e.relatedTarget == null) state.player.inWindow = false; }
   function onPointerEnter() { if (state.active) state.player.inWindow = true; }
-  function onScroll() { if (state.active && state.hostiles.size) scheduleAura(); }
+  /* SPEC-material §3: scrolling moves the ELEMENTS, so every decal re-reads its element's rect here —
+   * that is what makes a damage mark ride the page instead of staying put on the screen. */
+  /* SPEC-material §4: the SAME passive handler moves the rubble. anchorPieces() only rewrites transforms —
+   * a resting piece is never woken by a scroll — and the integrator is not kicked, so scrolling past a
+   * settled pile costs no frames at all. */
+  function onScroll() { if (!state.active) return; anchorPieces(); scheduleDecalSync(); if (state.hostiles.size) scheduleAura(); }
   function onMove(e) {
     if (!state.active) return;
     state.hoverX = e.clientX; state.hoverY = e.clientY;   // hold ticks fire here

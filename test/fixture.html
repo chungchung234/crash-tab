@@ -174,6 +174,25 @@
     <div id="depth-tank-front" class="depth-tank depth-tank-z2">앞 (튼튼)</div>
     <div id="depth-tank-back" class="depth-tank depth-tank-z1">뒤 (튼튼)</div>
   </section>
+
+  <!-- feat/material (SPEC-material.md §9): fixture additions for the element-local damage model.
+       Appended after everything above; nothing existing is reordered.
+       - #mat-hr: a thin divider for the materialOf "short side < 12px / hr" → metal rule (item 5).
+       - #mat-gap-left / #mat-gap-right: a panel pair with a real, wide empty gap between them so a
+         single explosion can be aimed at one of them while the blast still reaches the other, leaving
+         the gap itself (background, never hit directly) checkable for "no marks" (item 8).
+       - #mat-tall-spacer / #mat-scroll-target: a tall spacer followed by its own small target, so the
+         scroll-follow checks (items 2 and 4) have a real, uncluttered distance to scroll without first
+         having to fight the rest of the page's layout. -->
+  <h2 class="section-title">재질 테스트</h2>
+  <section id="material-lab" class="material-lab">
+    <hr id="mat-hr">
+    <div id="mat-gap-left" class="mat-gap-panel">왼쪽 패널</div>
+    <div id="mat-gap-right" class="mat-gap-panel">오른쪽 패널</div>
+  </section>
+
+  <div id="mat-tall-spacer" aria-hidden="true"></div>
+  <div id="mat-scroll-target" class="mat-scroll-target">스크롤 추적 테스트 카드</div>
 </main>
 </body>
 </html>

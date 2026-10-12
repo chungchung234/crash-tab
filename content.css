@@ -889,3 +889,61 @@ crs-hud:popover-open {
   height: 2px;
   opacity: 1;
 }
+
+/* ===================================================================== */
+/* material (SPEC-material §2–§5)                                         */
+/* ===================================================================== */
+
+/* ---- per-element damage decal (§2/§3) ----
+   One canvas per marked element, laid over that element's own rect inside .crs-root. The renderer
+   (src/31-decal.js) writes left/top/width/height every time the element moves, so those four
+   properties must stay NON-important: content.css is injected at USER origin, where !important
+   outranks inline styles, and an !important left/top here would pin every mark to 0,0. */
+.crs-decal {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  z-index: 3 !important;
+  display: block !important;
+  background: transparent !important;
+  image-rendering: auto !important;
+  box-sizing: border-box !important;
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  float: none !important;
+  transform: none !important;
+  /* NOT !important: placeDecal() / resizeDecal() write the element's own rect here */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 1;
+}
+
+/* ---- material puff (§5): dust, sparkle, fibres, sparks ----
+   matBurst() writes the box, the colour and the shape, and animates transform / opacity,
+   so none of those may be !important either. */
+.crs-matfx {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  z-index: 4 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  /* NOT !important: matBurst() writes these and animates transform / opacity */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  background: transparent;
+  border-radius: 0;
+  filter: none;
+  opacity: 1;
+  transform: translate(0px, 0px);
+}

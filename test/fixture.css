@@ -255,3 +255,62 @@ footer { padding: 20px; color: #6a7389; font-size: 13px; border-top: 1px solid #
 .depth-tank-z1 { z-index: 1; }
 #depth-tank-front { background: #e4f3ec; border: 1px solid #8fcf8a; }
 #depth-tank-back { background: #fdf0df; border: 1px solid #e3b341; }
+
+/* feat/material (SPEC-material.md §9) — fixture additions for the element-local damage model. Appended
+   at the end; nothing above is reordered. */
+
+/* #mat-hr: materialOf rule 3 ("짧은 변 12px 미만 또는 hr → metal") — explicit height well under 12px so
+   the short-side test can't accidentally pass on an hr whose computed height happens to be larger. */
+#mat-hr {
+  width: 300px;
+  height: 0;
+  margin: 24px 0;
+  border: none;
+  border-top: 3px solid #8a8f9c;
+}
+
+/* #mat-gap-left / #mat-gap-right: a real 160px gap between two panels (item 8) — well inside the bomb's
+   240px AoE radius from an impact point on #mat-gap-left's near edge, so the blast still visibly reaches
+   #mat-gap-right, while the gap itself is never a hit point and gets no decal of its own. */
+.material-lab {
+  display: flex;
+  align-items: stretch;
+  gap: 160px;
+  margin: 20px 0;
+}
+.mat-gap-panel {
+  width: 220px;
+  height: 160px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  background: #2b2f3a;
+  color: #fff;
+  border: 2px solid #556;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+/* #mat-tall-spacer: plain scroll distance for the mark/debris scroll-follow checks (items 2 and 4) —
+   tall enough that a 300-600px scroll never nears either end of it. */
+#mat-tall-spacer {
+  height: 2400px;
+}
+.mat-scroll-target {
+  width: 260px;
+  height: 140px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+  background: #eef0f4;
+  border: 2px solid #9aa3b5;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #1f2430;
+}

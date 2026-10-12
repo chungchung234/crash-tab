@@ -117,7 +117,7 @@
   function loadPrefs() {
     // ── v1.4 §5: crsSeenCombatHelp is a LOCAL flag (the control card is shown once per machine, not synced) ──
     safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
-    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife']), (res) => {
+    safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
       if (!state.loadoutTouched && isPermutation(res.crsLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
@@ -138,6 +138,8 @@
       // §9.2: crsDebrisLifeMs is the setting; crsDebrisLife is read too so an early build's key still loads
       const dl = (typeof res.crsDebrisLifeMs === 'number') ? res.crsDebrisLifeMs : res.crsDebrisLife;
       if (typeof dl === 'number' && dl >= 0) state.debrisLifeMs = dl;
+      // SPEC-material §4: the debris anchor is persisted like the rest; anything else stored keeps the default
+      if (res.crsDebrisAnchor === 'viewport' || res.crsDebrisAnchor === 'document') setDebrisAnchor(res.crsDebrisAnchor, true);
       updateHud();
       updateAmmoHud();
       updatePlayerHud();
@@ -228,7 +230,8 @@
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
       lastBreakPieces: state.lastBreakPieces, lastError: state.lastError || null,
-      pieces: state.pieces.map((p) => ({ bottom: p.oy + p.y + p.bb.maxY, resting: p.resting })),
+      // SPEC-material §4: `bottom` stays a VIEWPORT number — pieceBox() converts out of the anchor frame
+      pieces: (readScroll(true), state.pieces.map((p) => ({ bottom: pieceBox(p).bottom, resting: p.resting }))),
       pieceCount: state.pieces.length,
       // v1.2
       mag: WEAPONS[id].mag == null ? null : state.ammo[id], reloading: isReloading(id), swapping: swapActive(),
@@ -250,6 +253,7 @@
       repairs: state.repairs.length, repaired: state.repaired,
       destroyRatio: ratioNow(), hostilesByTier: hostilesByTier(),
       avatar: state.avatar ? avatarInfo() : null, debrisLifeMs: state.debrisLifeMs,
+      debrisAnchor: state.debrisAnchor,   // SPEC-material §4: 'document' (default) | 'viewport'
       dashReadyAt: dashReadyWallClock()
     };
   }
@@ -299,6 +303,9 @@
     get combatMode() { return state.mode; },
     setCombatMode: (id) => setPlayMode(id),
     cycleMode,
+    // SPEC-material §4: where the rubble lives — 'document' (default, scrolls with the page) | 'viewport'
+    get debrisAnchor() { return state.debrisAnchor; },
+    setDebrisAnchor: (v) => setDebrisAnchor(v),
     setDebrisLife: (ms) => {
       ms = +ms;
       if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;

@@ -632,7 +632,10 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const r1 = await page.evaluate(contentJs);
   check('A.inject: content.js completion value is "on"', r1 === 'on', r1);
   check('A.inject: window.__crashScreen.active === true', await api.active(page));
-  check('A.inject: .crs-canvas present', await api.has(page, '.crs-canvas'));
+  // SPEC-material.md §2/§3/§8: the viewport-fixed glass sheet is gone — damage marks now live on
+  // per-element decal nodes, never on a single full-screen canvas (rewritten from "A.inject: .crs-canvas
+  // present", SPEC-material §9 item 1).
+  check('A.inject: no viewport-fixed .crs-canvas (damage marks are element-local decals now, SPEC-material §9.1)', !(await api.has(page, '.crs-canvas')));
   check('A.inject: HUD host present with open shadow root', await page.evaluate(() => {
     const h = document.querySelector('crs-hud[data-crs], .crs-hud-host[data-crs]');
     return !!(h && h.shadowRoot);
@@ -703,16 +706,32 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await page.screenshot({ path: path.join(OUT, 'hammer.png') });
   info(`screenshot test/out/hammer.png (${words} word pieces)`);
 
-  // canvas has ink at the small-card impact point before restore
+  // SPEC-material.md §1/§3/§9.1: damage marks now live on a per-element `.crs-decal` node (an absolutely
+  // positioned canvas over the element's own rect), not on the removed viewport-fixed `.crs-canvas`.
+  // #small-card and #long-para are both already broken by this point in the suite, and a broken element's
+  // decal is destroyed along with it (SPEC-destruction.md §1), so there is nothing left to sample ink from
+  // on either of them — #big-card (still intact, undamaged so far) is the element this check uses instead:
+  // one sub-break hammer hit, then ink is read back from ITS decal at the local impact point.
+  await api.setWeapon(page, 'hammer');
+  const inkCard = await api.rect(page, '#big-card');
+  const inkMax = (await api.hpOf(page, '#big-card')).max;
+  const inkPt = { x: inkCard.left + 12, y: inkCard.top + 12 };
+  await page.mouse.click(inkPt.x, inkPt.y);
+  await poll(async () => (await api.hpOf(page, '#big-card')).hp < inkMax, 400, 20);
   const inkBefore = await page.evaluate((pt) => {
-    const c = document.querySelector('.crs-canvas');
-    const ctx = c.getContext('2d');
-    const sx = c.width / c.clientWidth, sy = c.height / c.clientHeight;
-    const d = ctx.getImageData(Math.round(pt.x * sx) - 4, Math.round(pt.y * sy) - 4, 9, 9).data;
+    const host = document.querySelector('.crs-decal');
+    if (!host) return -1;
+    const canvas = host.tagName === 'CANVAS' ? host : host.querySelector('canvas');
+    if (!canvas) return -2;
+    const r = host.getBoundingClientRect();
+    const sx = canvas.width / (canvas.clientWidth || r.width || 1), sy = canvas.height / (canvas.clientHeight || r.height || 1);
+    const lx = Math.round((pt.x - r.left) * sx), ly = Math.round((pt.y - r.top) * sy);
+    const ctx = canvas.getContext('2d');
+    const d = ctx.getImageData(Math.max(0, lx - 4), Math.max(0, ly - 4), 9, 9).data;
     let a = 0; for (let i = 3; i < d.length; i += 4) a += d[i];
     return a;
-  }, smallPt);
-  check('A.canvas: crack drawn at impact point (alpha > 0)', inkBefore > 0, inkBefore);
+  }, inkPt);
+  check('A.decal: #big-card\'s own decal has ink at the impact point before restore (rewritten from the removed .crs-canvas check, SPEC-material §9.1)', inkBefore > 0, inkBefore);
 
   // --- restore ------------------------------------------------------------------------------
   await api.restore(page);
@@ -722,14 +741,10 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.restore: no [data-crs-broken]', (await api.count(page, '[data-crs-broken]')) === 0);
   check('A.restore: small card visibility restored', (await api.visibility(page, '#small-card')) === 'visible');
   check('A.restore: stats().broken === 0', sr.broken === 0, sr.broken);
-  const inkAfter = await page.evaluate(() => {
-    const c = document.querySelector('.crs-canvas');
-    const ctx = c.getContext('2d');
-    const d = ctx.getImageData(0, 0, c.width, c.height).data;
-    for (let i = 3; i < d.length; i += 4) if (d[i] !== 0) return d[i];
-    return 0;
-  });
-  check('A.restore: canvas cleared (every sampled pixel transparent)', inkAfter === 0, inkAfter);
+  // rewritten from sampling the removed .crs-canvas for leftover ink: restore() must tear down every
+  // per-element decal node too, not just clear a shared bitmap (SPEC-material §9.1 / §9.11).
+  const decalsAfter = await api.count(page, '.crs-decal');
+  check('A.restore: every .crs-decal node removed (no decal canvas survives restore)', decalsAfter === 0, decalsAfter);
   check('A.restore: still active', await api.active(page));
 
   // --- hammer ON the small card's link: smashed (card is the pick target), never followed (§9A / A31) ---
@@ -1487,7 +1502,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   // --- re-evaluate toggles ----------------------------------------------------------------------
   const r2 = await page.evaluate(contentJs);
   check('A.toggle: re-evaluating content.js returns "on"', r2 === 'on', r2);
-  check('A.toggle: active again, .crs-canvas present', (await api.active(page)) && (await api.has(page, '.crs-canvas')));
+  // rewritten from "active again, .crs-canvas present": the glass sheet is gone, so re-activation is
+  // instead checked by its absence plus the HUD (the one host that always exists while active) being back.
+  check('A.toggle: active again, no .crs-canvas reappears (SPEC-material §9.1), HUD host back', (await api.active(page)) && !(await api.has(page, '.crs-canvas')) && (await page.evaluate(() => !!document.querySelector('crs-hud, .crs-hud-host'))));
   check('A.toggle: api.debug flags survive the toggle (plain object, A12)', await page.evaluate(() => { const d = window.__crashScreen.debug; return !!d && d.noCrit === true && d.noCooldown === true; }));
   const r3 = await page.evaluate(contentJs);
   check('A.toggle: evaluating again returns "off"', r3 === 'off', r3);
@@ -1930,6 +1947,357 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   }
   // --- v1.4: combat v2 / debris lifetime / depth-of-stack (SPEC-combat-v2 §7, §9.4, §10.6) -----------
   await suiteA14(page, log, contentJs);
+
+  // =============================================================================================
+  // SPEC-material §9 — a damage mark belongs to the ELEMENT that was hit, not to the screen.
+  // Appended at the END of suite A. suiteA14 leaves the page ACTIVE, restored, hammer / rampage, scrolled
+  // wherever its last rect() put it; this block puts all of that back before it returns, so the
+  // console / CSP / lastError checks below see exactly the state they always saw.
+  // =============================================================================================
+  {
+    await api.restore(page);
+    await api.setWeapon(page, 'pistol');
+    await sleep(80);
+
+    // ---- (1) one hit → one decal, laid exactly over the element it hit, owned by US (§9.1) ----
+    const mt = await api.rect(page, '#mat-scroll-target');
+    await page.mouse.click(mt.left + 24, mt.top + 24);
+    await poll(async () => (await api.count(page, '.crs-decal')) > 0, 2000, 25);
+    // A hit deliberately WOBBLES the element it landed on (reactDamage, 260 ms) and shakes the page on top
+    // of that; pixel-exact alignment is asserted once that reaction has played out, not in the middle of it.
+    await sleep(500);
+    const d1 = await page.evaluate(() => {
+      const el = document.getElementById('mat-scroll-target');
+      const r = el.getBoundingClientRect();
+      const list = [...document.querySelectorAll('.crs-decal')];
+      const n = list.find((q) => {
+        const b = q.getBoundingClientRect();
+        return Math.abs(b.left - r.left) <= 1 && Math.abs(b.top - r.top) <= 1 && Math.abs(b.width - r.width) <= 1 && Math.abs(b.height - r.height) <= 1;
+      }) || null;
+      return {
+        total: list.length, onElement: !!n, broken: el.hasAttribute('data-crs-broken'),
+        inRoot: !!(n && n.closest('.crs-root')), inPage: !!(n && el.contains(n)),
+        tagged: !!(n && n.getAttribute('data-crs') === '1' && /(^|\s)crs-decal(\s|$)/.test(String(n.className))),
+        position: n ? getComputedStyle(n).position : null,
+      };
+    });
+    check('A.material 1: one pistol hit puts exactly ONE decal on #mat-scroll-target, sized to that element\'s own rect (SPEC-material §9.1)', d1.total === 1 && d1.onElement === true && d1.broken === false, d1);
+    check('A.material 1: the decal is our own node (data-crs + .crs-decal, position fixed) inside .crs-root — never injected into the page element', d1.tagged === true && d1.inRoot === true && d1.inPage === false && d1.position === 'fixed', d1);
+
+    // ---- (2) the mark rides the page: scroll and it is still on its element (§9.2) ----
+    await sleep(200);
+    const beforeTop2 = await page.evaluate(() => document.getElementById('mat-scroll-target').getBoundingClientRect().top);
+    await page.evaluate(() => window.scrollBy(0, -300));
+    await settleRaf(page);
+    await settleRaf(page);
+    const sc2 = await page.evaluate((before) => {
+      const el = document.getElementById('mat-scroll-target');
+      const r = el.getBoundingClientRect();
+      const n = document.querySelector('.crs-decal');
+      const b = n ? n.getBoundingClientRect() : null;
+      return { alive: !!n, moved: r.top - before, dTop: b ? b.top - r.top : null, dLeft: b ? b.left - r.left : null };
+    }, beforeTop2);
+    check('A.material 2: after a 300 px scroll the decal moved WITH its element and still sits exactly on its rect (§9.2)', sc2.alive === true && Math.abs(sc2.moved - 300) <= 2 && Math.abs(sc2.dTop) <= 1.5 && Math.abs(sc2.dLeft) <= 1.5, sc2);
+
+    // ---- (3) nothing persistent is painted on the viewport itself (§9.1) ----
+    const vp3 = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      const ours = [...document.querySelectorAll('canvas[data-crs]')];
+      const pageEls = [...document.querySelectorAll('body *')].filter((el) => !el.hasAttribute('data-crs'));
+      const boxes = ours.map((c) => c.getBoundingClientRect());
+      return {
+        sheet: document.querySelectorAll('.crs-canvas').length,
+        ours: ours.length,
+        oversize: boxes.filter((b) => b.width * b.height > 0.8 * vw * vh).length,
+        allOnElements: boxes.every((b) => pageEls.some((el) => {
+          const r = el.getBoundingClientRect();
+          return Math.abs(r.left - b.left) <= 1 && Math.abs(r.top - b.top) <= 1 && Math.abs(r.width - b.width) <= 1 && Math.abs(r.height - b.height) <= 1;
+        })),
+      };
+    });
+    check('A.material 3: every canvas we own is element-shaped — no .crs-canvas sheet, nothing viewport-sized, each one matching a real page element\'s rect (§9.1)', vp3.sheet === 0 && vp3.ours >= 1 && vp3.oversize === 0 && vp3.allOnElements === true, vp3);
+
+    // ---- (4) an explosion breaks at element boundaries, and the empty gap between them is never marked (§9.3 / §9.8) ----
+    // The two panels die to the blast, taking their decals with them (SPEC-destruction §1), so the decals are
+    // recorded as they are CREATED rather than counted afterwards.
+    await api.restore(page);
+    await api.setWeapon(page, 'bomb');
+    await sleep(60);
+    await page.evaluate(() => {
+      window.__matDecals = [];
+      const mo = new MutationObserver((muts) => {
+        for (const m of muts) {
+          for (const n of m.addedNodes) {
+            if (n.nodeType !== 1 || !n.classList || !n.classList.contains('crs-decal')) continue;
+            const b = n.getBoundingClientRect();
+            window.__matDecals.push({ l: b.left, t: b.top, w: b.width, h: b.height });
+          }
+        }
+      });
+      mo.observe(document.documentElement, { childList: true, subtree: true });
+      window.__matDecalsStop = () => { try { mo.disconnect(); } catch (e) { /* ignore */ } };
+    });
+    const gl4 = await api.rect(page, '#mat-gap-left');
+    const gr4 = await api.rectNoScroll(page, '#mat-gap-right');
+    await page.mouse.click(gl4.right - 10, gl4.cy);
+    await poll(async () => (await page.evaluate(() => window.__matDecals.length)) >= 2, 2500, 30);
+    const gapX4 = (gl4.right + gr4.left) / 2, gapY4 = gl4.cy;
+    const d4 = await page.evaluate((gx, gy) => {
+      const list = window.__matDecals || [];
+      try { window.__matDecalsStop(); } catch (e) { /* ignore */ }
+      return {
+        n: list.length,
+        covering: list.filter((b) => gx >= b.l && gx <= b.l + b.w && gy >= b.t && gy <= b.t + b.h).length,
+        widest: list.reduce((m, b) => Math.max(m, b.w), 0),
+        boxes: list.slice(0, 8).map((b) => [Math.round(b.l), Math.round(b.t), Math.round(b.w), Math.round(b.h)]),
+      };
+    }, gapX4, gapY4);
+    check('A.material 4: one bomb leaves SEPARATE element-local marks (≥ 2 decals), and not one of them covers the empty 160 px gap between the two panels (§9.3 / §9.8)', d4.n >= 2 && d4.covering === 0, { ...d4, gapX4: Math.round(gapX4), gapY4: Math.round(gapY4) });
+
+    // ---- (5) what an element is MADE OF (§5) ----
+    const mats5 = await page.evaluate(() => {
+      const d = window.__crashScreen.debug;
+      const of = (sel) => { const el = document.querySelector(sel); const r = el && d.materialOf(el); return r ? r.material : null; };
+      return { hr: of('#mat-hr'), img: of('#demo-img'), para: of('#long-para'), btn: of('#test-btn'), box: of('#mat-tall-spacer') };
+    });
+    check('A.material 5: materialOf — <hr> metal, <img> glass, a text block paper, a <button> plastic, a plain box panel (§5)', mats5.hr === 'metal' && mats5.img === 'glass' && mats5.para === 'paper' && mats5.btn === 'plastic' && mats5.box === 'panel', mats5);
+
+    // ---- (5b) scroll.png: marks made on three different materials, then the page scrolled 300 px ----
+    // Sub-lethal pistol hits, so nothing breaks and every mark is still on its own element in the frame.
+    await api.restore(page);
+    await api.setWeapon(page, 'pistol');
+    await sleep(80);
+    const figShot = await api.rect(page, '#figure');
+    const imgShot = await api.rectNoScroll(page, '#demo-img');
+    await page.mouse.click(imgShot.cx - 30, imgShot.cy - 10);
+    await page.mouse.click(imgShot.cx + 28, imgShot.cy + 16);
+    const cardShot = await api.rectNoScroll(page, '#big-card');
+    if (cardShot.width > 0 && cardShot.top > 0 && cardShot.bottom < 900) {
+      await page.mouse.click(cardShot.left + 60, cardShot.top + 40);
+      await page.mouse.click(cardShot.left + 140, cardShot.top + 90);
+    }
+    await settleRaf(page);
+    await settleRaf(page);
+    await page.evaluate(() => window.scrollBy(0, 300));
+    await settleRaf(page);
+    await settleRaf(page);
+    await sleep(120);
+    await page.screenshot({ path: path.join(OUT, 'scroll.png') });
+    const shot5b = await page.evaluate(() => {
+      const list = [...document.querySelectorAll('.crs-decal')];
+      const pageEls = [...document.querySelectorAll('body *')].filter((el) => !el.hasAttribute('data-crs'));
+      const onEl = list.filter((n) => {
+        const b = n.getBoundingClientRect();
+        return pageEls.some((el) => {
+          const r = el.getBoundingClientRect();
+          return Math.abs(r.left - b.left) <= 1 && Math.abs(r.top - b.top) <= 1 && Math.abs(r.width - b.width) <= 1 && Math.abs(r.height - b.height) <= 1;
+        });
+      }).length;
+      return { decals: list.length, onEl };
+    });
+    info(`screenshot test/out/scroll.png (${shot5b.decals} decals, ${shot5b.onEl} still exactly on their element after the scroll)`);
+    check('A.material 5b: after scrolling 300 px every surviving mark is still exactly on the element it was made on (scroll.png)', shot5b.decals >= 1 && shot5b.onEl === shot5b.decals, { ...shot5b, fig: Math.round(figShot.top) });
+
+    // ---- (6) the marks are torn down with everything else (§9.1 / §9.11) ----
+    await api.restore(page);
+    await sleep(60);
+    check('A.material 6: restore() removes every decal', (await api.count(page, '.crs-decal')) === 0, await api.count(page, '.crs-decal'));
+    const off6 = await page.evaluate(contentJs);
+    const decals6 = await api.count(page, '.crs-decal');
+    const nodes6 = await api.count(page, '[data-crs]');
+    const pend6 = await api.pending(page);
+    await settleRaf(page);
+    const raf6 = await api.pendingRaf(page);
+    check('A.material 6: deactivate leaves no decal, no [data-crs] node, no live timer and no live animation frame', off6 === 'off' && decals6 === 0 && nodes6 === 0 && pend6 === 0 && raf6 === 0, { off6, decals6, nodes6, pend6, raf6 });
+    const on6 = await page.evaluate(contentJs);
+    check('A.material 6: re-activation comes back with no viewport canvas and no stale decal', on6 === 'on' && !(await api.has(page, '.crs-canvas')) && (await api.count(page, '.crs-decal')) === 0, on6);
+
+    // back to the state suiteA14 handed over
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
+    await api.setWeapon(page, 'hammer');
+    await api.restore(page);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await sleep(100);
+  }
+
+  // =============================================================================================
+  // SPEC-material §4 — the rubble belongs to the PAGE, not to the screen (§9 item 4).
+  // The §9 decal block above hands over: ACTIVE, restored, hammer / rampage, the suite's baseline debug
+  // flags and scrollTo(0, 0). This block puts every one of those back before it returns, so the
+  // console / CSP / lastError checks below still see exactly the state they always saw.
+  // =============================================================================================
+  {
+    // debug.pieceBoxes() reports VIEWPORT-space boxes (§4 keeps ox/oy in the piece's own anchor frame and
+    // converts on the way out), keyed here by the stable per-piece id so one piece can be followed across a
+    // scroll without relying on a DOM order that eviction reshuffles.
+    const boxesByPid = async () => {
+      const list = await page.evaluate(() => {
+        const d = window.__crashScreen.debug;
+        return (d && typeof d.pieceBoxes === 'function') ? d.pieceBoxes() : [];
+      });
+      const m = new Map();
+      for (const b of Array.isArray(list) ? list : []) m.set(b.pid, b);
+      return m;
+    };
+    // How the same pieces moved on screen between two readings: the extremes of the vertical shift, the
+    // worst horizontal drift, whether anything stopped resting, and how far the pile deviates from moving
+    // as ONE rigid body (max spread of the per-piece dy).
+    const moveOf = (a, b) => {
+      let n = 0, minDy = Infinity, maxDy = -Infinity, maxDx = 0, resting = true, ref = null, rigid = 0;
+      for (const [pid, nb] of b) {
+        const ob = a.get(pid);
+        if (!ob) continue;
+        n++;
+        const dy = nb.top - ob.top;
+        if (dy < minDy) minDy = dy;
+        if (dy > maxDy) maxDy = dy;
+        maxDx = Math.max(maxDx, Math.abs(nb.l - ob.l));
+        if (!nb.resting) resting = false;
+        if (ref === null) ref = dy; else rigid = Math.max(rigid, Math.abs(dy - ref));
+      }
+      return { n, minDy: n ? minDy : null, maxDy: n ? maxDy : null, maxDx, resting, rigid };
+    };
+    // The product's own support rule (evictPieces(): ≥ 40 % horizontal overlap, bottom edge at or above the
+    // supporting piece's top), used to pick one genuinely stacked pair out of the pile.
+    const supportPair = (boxes) => {
+      const arr = [...boxes.values()].filter((b) => b.resting);
+      let best = null;
+      for (const lower of arr) {
+        for (const upper of arr) {
+          if (upper === lower) continue;
+          const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
+          if (ov < 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l)) continue;
+          const gap = lower.top - upper.bottom;
+          if (gap < -1) continue;
+          if (!best || gap < best.gap) best = { lower: lower.pid, upper: upper.pid, gap };
+        }
+      }
+      return best;
+    };
+    const gapOf = (boxes, pair) => {
+      const lo = boxes.get(pair.lower), up = boxes.get(pair.upper);
+      return (lo && up) ? { gap: lo.top - up.bottom, resting: !!(lo.resting && up.resting) } : null;
+    };
+    const baseDebug = { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false };
+
+    // ---- (1) `debrisAnchor` is a real setting: default `document`, `viewport` still available, persisted ----
+    const anch1 = await page.evaluate(() => ({ api: window.__crashScreen.debrisAnchor, stats: window.__crashScreen.stats().debrisAnchor }));
+    check('A.debris 1: debrisAnchor defaults to "document" and is readable through api.debrisAnchor and stats() (§4)', anch1.api === 'document' && anch1.stats === 'document', anch1);
+    const setVp1 = await api.call(page, 'setDebrisAnchor', 'viewport');
+    const storeVp1 = (await api.store(page)).crsDebrisAnchor;
+    const setBad1 = await api.call(page, 'setDebrisAnchor', 'sideways');
+    const setDoc1 = await api.call(page, 'setDebrisAnchor', 'document');
+    const storeDoc1 = (await api.store(page)).crsDebrisAnchor;
+    check('A.debris 1: setDebrisAnchor round-trips "viewport" / "document", writes crsDebrisAnchor to storage and ignores anything else (§4)',
+      setVp1 === 'viewport' && storeVp1 === 'viewport' && setBad1 === 'viewport' && setDoc1 === 'document' && storeDoc1 === 'document',
+      { setVp1, storeVp1, setBad1, setDoc1, storeDoc1 });
+    // and it is loaded back on the next activation, exactly like crsWeapon / crsDebrisLifeMs
+    await page.evaluate(() => { window.__crsStore.crsDebrisAnchor = 'viewport'; });
+    const off1 = await page.evaluate(contentJs);
+    const on1 = await page.evaluate(contentJs);
+    const loaded1 = await poll(async () => (((await api.stats(page)).debrisAnchor === 'viewport') ? true : null), 2000, 40);
+    check('A.debris 1: a stored crsDebrisAnchor is read back by loadPrefs() on the next activation (§4)', off1 === 'off' && on1 === 'on' && loaded1 === true, { off1, on1, loaded1 });
+    await api.call(page, 'setDebrisAnchor', 'document');
+    await api.debug(page, baseDebug);
+    await api.setWeapon(page, 'hammer');
+    await api.restore(page);
+    // the pile has to outlive the scrolling below; the 6 s default goes back on at the end of the block
+    await api.call(page, 'setDebrisLife', 0);
+    await sleep(80);
+
+    // ---- (2) the core of §9 item 4: a resting piece keeps its place ON THE PAGE ----
+    // The three stacked blocks, centred so there is scroll room in both directions, give a real pile rather
+    // than one lonely shard — which is also what items 3 and 4 below need.
+    const allResting2 = () => poll(async () => { const s = await api.stats(page); return (s.pieceCount > 0 && s.pieces.every((q) => q.resting)) ? s : null; }, 10000, 80);
+    const s2a = await api.rect(page, '#stack-1');
+    const colX2 = s2a.cx;
+    const brk2 = [await clickUntilBroken(page, '#stack-1', colX2, s2a.cy)];
+    await allResting2();   // §9.4.4's order: the first block's debris is ON THE FLOOR before the next two fall
+    const s2b = await api.rectNoScroll(page, '#stack-2');
+    const s2c = await api.rectNoScroll(page, '#stack-3');
+    brk2.push(await clickUntilBroken(page, '#stack-2', colX2, s2b.cy));
+    brk2.push(await clickUntilBroken(page, '#stack-3', colX2, s2c.cy));
+    const rested2 = await allResting2();
+    check('A.debris 2: the three #stack blocks break and their debris comes to rest before anything is scrolled', brk2.every((n) => n > 0) && !!rested2 && rested2.pieceCount >= 3, { brk2, pieceCount: rested2 && rested2.pieceCount });
+    await page.screenshot({ path: path.join(OUT, 'debris-anchor-before.png') });
+    let pair2 = supportPair(await boxesByPid());
+    for (let i = 0; i < 4 && !pair2; i++) { await sleep(250); pair2 = supportPair(await boxesByPid()); }
+    const before2 = await boxesByPid();
+    const animBefore2 = (await api.stats(page)).animating;
+    const y2a = await page.evaluate(() => { const y0 = window.scrollY; window.scrollBy(0, 300); return y0; });
+    await settleRaf(page);
+    await settleRaf(page);
+    await sleep(120);
+    const y2b = await page.evaluate(() => window.scrollY);
+    await page.screenshot({ path: path.join(OUT, 'debris-anchor-after.png') });
+    const after2 = await boxesByPid();
+    const move2 = moveOf(before2, after2);
+    check('A.debris 2: the page really scrolled the full 300 px for this measurement', Math.abs((y2b - y2a) - 300) <= 1, { y2a, y2b });
+    check('A.debris 2 (§9 item 4): after a 300 px scroll every resting piece\'s viewport top has moved by −300 px (±4) — the rubble stayed where it fell ON THE PAGE',
+      move2.n >= 3 && move2.minDy >= -304 && move2.maxDy <= -296 && move2.maxDx <= 2,
+      { ...move2, screenshots: 'test/out/debris-anchor-before.png → debris-anchor-after.png' });
+
+    // ---- (3) a scroll is not an impulse: nothing resting wakes up, and no frame loop is started ----
+    const st3 = await api.stats(page);
+    check('A.debris 3: scrolling does NOT wake a resting piece — every piece is still resting and the integrator is still idle (§4)',
+      animBefore2 === false && move2.resting === true && st3.animating === false && st3.pieces.length > 0 && st3.pieces.every((q) => q.resting),
+      { animBefore2, restingAfter: move2.resting, animating: st3.animating, n: st3.pieces.length });
+
+    // ---- (4) stacking survives the scroll: the pile moves as ONE body, contacts intact ----
+    const gap4 = pair2 ? gapOf(after2, pair2) : null;
+    check('A.debris 4: the pile travels as one rigid body and a stacked pair keeps its contact across the scroll (§4)',
+      !!pair2 && move2.rigid <= 1.5 && !!gap4 && gap4.resting === true && Math.abs(gap4.gap - pair2.gap) <= 1.5,
+      { pair2, gapAfter: gap4, rigid: move2.rigid });
+
+    // ---- (5) `viewport` still works: the same scroll moves nothing ----
+    await api.restore(page);
+    await api.call(page, 'setDebrisAnchor', 'viewport');
+    await sleep(80);
+    const s5 = await api.rect(page, '#stack-1');
+    const brk5 = await clickUntilBroken(page, '#stack-1', s5.cx, s5.cy);
+    const rested5 = await poll(async () => { const s = await api.stats(page); return (s.pieceCount > 0 && s.pieces.every((q) => q.resting)) ? s : null; }, 8000, 80);
+    const before5 = await boxesByPid();
+    const y5a = await page.evaluate(() => { const y0 = window.scrollY; window.scrollBy(0, 300); return y0; });
+    await settleRaf(page);
+    await settleRaf(page);
+    await sleep(120);
+    const y5b = await page.evaluate(() => window.scrollY);
+    const move5 = moveOf(before5, await boxesByPid());
+    check('A.debris 5: with debrisAnchor "viewport" the very same 300 px scroll leaves the debris exactly where it was on screen (§4 keeps the option)',
+      brk5 > 0 && !!rested5 && Math.abs((y5b - y5a) - 300) <= 1 && move5.n >= 1 && Math.abs(move5.minDy) <= 2 && Math.abs(move5.maxDy) <= 2 && move5.maxDx <= 2 && move5.resting === true,
+      { ...move5, y5a, y5b });
+
+    // ---- (6) teardown is unaffected by where the rubble ended up (§9 item 11) ----
+    await api.call(page, 'setDebrisAnchor', 'document');
+    await api.restore(page);
+    await sleep(80);
+    const left6 = await api.count(page, '.crs-piece, .crs-word, .crs-fading');
+    check('A.debris 6: restore() clears every piece even while the page is scrolled far from where they fell', left6 === 0 && (await api.stats(page)).pieceCount === 0, { left6 });
+    const s6 = await api.rect(page, '#stack-1');
+    const brk6 = await clickUntilBroken(page, '#stack-1', s6.cx, s6.cy);
+    await poll(async () => ((await api.stats(page)).pieceCount > 0 ? true : null), 4000, 60);
+    await page.evaluate(() => window.scrollBy(0, 300));
+    await settleRaf(page);
+    await page.keyboard.press('Escape');
+    const inactive6 = await poll(async () => (!(await api.active(page)) ? true : null), 2000, 25);
+    const nodes6b = await api.count(page, '[data-crs]');
+    await settleRaf(page);
+    const pend6b = await api.pending(page);
+    const raf6c = await api.pendingRaf(page);
+    check('A.debris 6: Escape with document-anchored rubble on a scrolled page leaves no [data-crs] node, no live timer and no live animation frame (§9 item 11)',
+      brk6 > 0 && inactive6 === true && nodes6b === 0 && pend6b === 0 && raf6c === 0, { brk6, inactive6, nodes6b, pend6b, raf6c });
+
+    // back to the state the §9 decal block handed over
+    const on6b = await page.evaluate(contentJs);
+    check('A.debris 6: content.js reactivates cleanly after the §4 block', on6b === 'on', on6b);
+    await api.call(page, 'setDebrisLife', 6000);
+    await api.call(page, 'setDebrisAnchor', 'document');
+    await api.debug(page, baseDebug);
+    await api.setWeapon(page, 'hammer');
+    await api.restore(page);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await sleep(100);
+  }
 
   // --- console / CSP -----------------------------------------------------------------------------
   const v = await violations(page);
@@ -3865,7 +4233,10 @@ async function suiteB(browser, origin, contentCss, contentJs) {
   const r1 = await page.evaluate(contentJs);
   check('B.inject: content.js returns "on" under strict CSP', r1 === 'on', r1);
   try { await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true }); } catch (_) { /* reported by A.inject */ }
-  check('B.inject: active, canvas and HUD present', (await api.active(page)) && (await api.has(page, '.crs-canvas')) && (await page.evaluate(() => { const h = document.querySelector('crs-hud, .crs-hud-host'); return !!(h && h.shadowRoot); })));
+  // SPEC-material §9.1: the viewport-fixed .crs-canvas is gone — damage marks are per-element .crs-decal
+  // canvases created on demand. The overlay host (.crs-root) is what "injection worked" means now, and the
+  // sheet of glass must NOT come back under a strict CSP either.
+  check('B.inject: active, overlay host and HUD present, no .crs-canvas (SPEC-material §9.1)', (await api.active(page)) && (await api.has(page, '.crs-root')) && !(await api.has(page, '.crs-canvas')) && (await page.evaluate(() => { const h = document.querySelector('crs-hud, .crs-hud-host'); return !!(h && h.shadowRoot); })));
   check('B.inject: HUD panel is styled (non-transparent background inside the shadow root)', await page.evaluate(() => {
     const h = document.querySelector('crs-hud, .crs-hud-host');
     if (!h || !h.shadowRoot) return false;
@@ -4036,7 +4407,9 @@ async function suiteC(puppeteer, origin) {
     });
     check('C.toggle: __crashScreenToggle(tab) → "on"', r1.res === 'on', r1);
     const tabId = r1.id;
-    check('C.page: .crs-canvas appears', await poll(() => api.has(page, '.crs-canvas'), 3000));
+    // SPEC-material §9.1: rewritten from waiting for the removed .crs-canvas — the real extension's content
+    // script announces itself with the overlay host, and no viewport-fixed sheet is mounted any more.
+    check('C.page: .crs-root appears and no .crs-canvas is mounted (SPEC-material §9.1)', (await poll(() => api.has(page, '.crs-root'), 3000)) && !(await api.has(page, '.crs-canvas')));
     const badgeOn = await poll(async () => {
       const b = await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId);
       return b === 'ON' ? b : null;
