@@ -9,7 +9,7 @@
       const AC = win.AudioContext || win.webkitAudioContext;
       if (!AC) return;
       const c = new AC();
-      const master = c.createGain(); master.gain.value = 0.28;
+      const master = c.createGain(); master.gain.value = soundGain();   // SPEC-settings §1.2: soundVolume (0–100, default 28)
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -12; comp.ratio.value = 6;
       master.connect(comp); comp.connect(c.destination);

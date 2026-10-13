@@ -95,7 +95,7 @@
       stopReload();
       scopeOff();
       const swapMs = swapMsOf(id);   // v1.5 §3: per-weapon draw time replaces the flat SWAP_MS
-      state.swapUntil = now() + swapMs;
+      state.swapUntil = now() + scaleMs(swapMs);   // SPEC-test-speed §3: deadline comparison in swapActive()
       untrack(state.swapTimer); state.swapTimer = 0;
       if (!debug.noCooldown) state.swapTimer = later(() => { state.swapTimer = 0; updateAmmoHud(); }, swapMs + 5);   // clears the 교체 중 readout
     }
@@ -319,6 +319,127 @@
     }
   };
   window.__crashScreen = api;
+
+  /* ═════════════════════════════════════════════════════════════════════ */
+  /* ── settings: public surface, legacy mirroring and lifecycle ──        */
+  /*                                                                       */
+  /* SPEC-settings §1–§3. Everything above this line is untouched: the new  */
+  /* behaviour is attached by wrapping the function bindings the generated  */
+  /* bundle already shares (the whole file is one closure, and a function   */
+  /* declaration's binding is writable — the same device src/46-viewmodel.js*/
+  /* uses for updateHud). The originals are kept in ONE object so this      */
+  /* block adds exactly one new top-level name.                             */
+  /* ═════════════════════════════════════════════════════════════════════ */
+  const SETTINGS_BASE = {
+    stats, activate, deactivate, restore,
+    setWeapon, setMuted, setPlayMode, setDebrisAnchor, setWeaponOption, setLoadout
+  };
+
+  /* ---- §1.3 the two entry points, plus the schema for the options page (step 10) ---- */
+  api.settings = () => settingsNow();
+  api.setSetting = (key, value) => setSettingValue(key, value);
+  api.settingsSchema = () => settingsSchema();
+  api.settingGroups = () => SETTING_GROUPS.slice();
+
+  /* stats() gains §2.3's perf block and the resolved settings; `cap` becomes the LIVE piece cap, which is
+   * the debrisCap setting and comes down to min(cap, 80) while the guard has us in performance mode. */
+  stats = function () {
+    const s = SETTINGS_BASE.stats();
+    s.cap = pieceCap();
+    s.perf = perfInfo();
+    s.settings = settingsNow();
+    return s;
+  };
+  api.stats = stats;
+
+  /* ---- the v1 setters keep their storage keys AND now feed the schema ----------
+   * §1.2 absorbs these keys, but the v1 write paths are what the HUD, the hotkeys and the public API still
+   * call. Each one mirrors into the matching setting so the two storage forms can never disagree while the
+   * migration window is open; settingsApply() in turn defers to the v1 key for as long as one is on disk,
+   * which is what makes loadPrefs() and the settings read order-independent. */
+  setWeapon = function (rawId, opts) {
+    const prev = state.weapon;
+    const r = SETTINGS_BASE.setWeapon(rawId, opts);
+    if (!r) return r;
+    const silent = !!(opts && opts.silent);
+    if (!silent) settingsMirror('defaultWeapon', r);
+    if (r !== prev && !silent) announceWeapon(r);   // §3.4: the weapon is announced, not just drawn
+    return r;
+  };
+  setMuted = function (v) {
+    SETTINGS_BASE.setMuted(v);
+    settingsMirror('muted', state.muted);
+  };
+  setPlayMode = function (id, opts) {
+    const prev = state.mode;
+    const r = SETTINGS_BASE.setPlayMode(id, opts);
+    if (r !== prev) {
+      if (!(opts && opts.silent)) settingsMirror('mode', r);
+      announceMode(r);                              // §3.4: mode changes are announced
+    }
+    return r;
+  };
+  setDebrisAnchor = function (v, silent) {
+    const r = SETTINGS_BASE.setDebrisAnchor(v, silent);
+    if (!silent) settingsMirror('debrisAnchor', r);
+    return r;
+  };
+  setWeaponOption = function (name, value) {
+    const r = SETTINGS_BASE.setWeaponOption(name, value);
+    if (r) settingsMirror(name === 'viewmodel' ? 'viewmodel' : name, name === 'viewmodel' ? !!value : value);
+    return r;
+  };
+  setLoadout = function (ids, opts) {
+    const r = SETTINGS_BASE.setLoadout(ids, opts);
+    if (r && !(opts && opts.silent)) settingsMirror('loadoutPreset', state.preset);
+    return r;
+  };
+  /* api.setDebrisLife() stays the RUNTIME escape hatch it has always been: any non-negative number of ms is
+   * accepted and persisted under the v1 key. The SETTING is an enum (3000 / 6000 / 12000 / 0), so a value
+   * outside it applies and persists but is not mirrored — settingsMirror() validates before it writes. */
+  api.setDebrisLife = (ms) => {
+    ms = +ms;
+    if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;
+    applyDebrisLife(ms);
+    safe(() => chrome.storage.sync.set({ crsDebrisLifeMs: ms, crsDebrisLife: ms }));
+    settingsMirror('debrisLifeMs', ms);
+    return state.debrisLifeMs;
+  };
+
+  /* ---- lifecycle: the perf guard and the accessibility layer come up and go down with the page ---- */
+  activate = function () {
+    SETTINGS_BASE.activate();
+    /* synchronous, so it lands before the first frame; loadPrefs()' own async read resolves afterwards and
+     * still owns every key whose v1 storage key is still on disk (settingsApply skips those) */
+    try { settingsApply(); } catch (e) { /* ignore */ }
+    try { perfStart(); } catch (e) { /* ignore */ }
+    try { a11yStart(); } catch (e) { /* ignore */ }
+  };
+  deactivate = function (silent) {
+    try { a11yStop(); } catch (e) { /* ignore */ }
+    try { perfStop(); } catch (e) { /* ignore */ }
+    const r = SETTINGS_BASE.deactivate(silent);
+    /* belt and braces: restore() re-armed nothing we own, but clearTimers() only empties the SET */
+    untrack(state.perfTimer); state.perfTimer = 0;
+    return r;
+  };
+  /* restore() runs clearTimers(), which takes the 10 s perf sample with it; re-arm while still active. */
+  restore = function () {
+    SETTINGS_BASE.restore();
+    if (!state.active) return;
+    try { perfArm(); } catch (e) { /* ignore */ }
+    try { a11yStart(); } catch (e) { /* ignore */ }
+  };
+
+  /* `api` captured activate / restore / stats BY VALUE in its object literal, so the wrappers above have to
+   * be published too. (deactivate and toggle are reached through arrows / a binding lookup and follow on
+   * their own; weapons / smashAt / … were never wrapped.) */
+  api.activate = activate;
+  api.restore = restore;
+
+  /* One storage read and one chrome.storage.onChanged subscription per page, before the first activate(). */
+  settingsBoot();
+
   try {
     activate();
     return 'on';

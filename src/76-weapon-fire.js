@@ -174,6 +174,7 @@
     sfx('whoosh');
     if (!root) { rocketImpact(x, y); return null; }
     const sx = viewW() / 2, sy = viewH() + 20;
+    const flightMs = reducedMotion() ? 40 : 150;   // SPEC-settings §3.1: the flight is shortened, never skipped
     const ang = Math.atan2(y - sy, x - sx);
     const n = mk('div', 'crs-rocket');
     n.style.left = px(sx); n.style.top = px(sy); n.style.width = '28px'; n.style.height = '8px';
@@ -183,11 +184,12 @@
     const rot = ' translate(-50%, -50%) rotate(' + ang.toFixed(4) + 'rad)';
     n.style.transform = 'translate(0px, 0px)' + rot;
     root.append(n);
-    try { trackAnim(n.animate([{ transform: 'translate(0px, 0px)' + rot }, { transform: 'translate(' + px(x - sx) + ', ' + px(y - sy) + ')' + rot }], { duration: 150, easing: 'ease-in', fill: 'forwards' })); } catch (e) { /* ignore */ }
-    later(() => { try { n.remove(); } catch (e) { /* ignore */ } rocketImpact(x, y); }, 150);
+    try { trackAnim(n.animate([{ transform: 'translate(0px, 0px)' + rot }, { transform: 'translate(' + px(x - sx) + ', ' + px(y - sy) + ')' + rot }], { duration: flightMs, easing: 'ease-in', fill: 'forwards' })); } catch (e) { /* ignore */ }
+    later(() => { try { n.remove(); } catch (e) { /* ignore */ } rocketImpact(x, y); }, flightMs);
     return null;
   }
-  /* Fire particles (A9): 12–26 px radial gradients rising 30–60 px over 350–500 ms, cap 40 live. */
+  /* Fire particles (A9): 12–26 px radial gradients rising 30–60 px over 350–500 ms, cap 40 live
+   * (30 in performance mode, SPEC-settings §2.2; the COUNT is halved under reduced motion, §3.1). */
   function spawnFire(x, y, count) {
     if (!root) return;
     for (let i = 0; i < count; i++) {
@@ -198,7 +200,7 @@
       n.style.background = 'radial-gradient(circle, #ffd166 0%, #ff6b35 45%, rgba(255,107,53,0) 72%)';
       root.append(n);
       state.fire.push(n);
-      while (state.fire.length > 40) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
       const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(n); if (k >= 0) state.fire.splice(k, 1); };
       try {
         const an = trackAnim(n.animate([{ transform: 'translateY(0px) scale(1)', opacity: 0.95 }, { transform: 'translateY(' + px(-rand(30, 60)) + ') scale(.4)', opacity: 0 }], { duration: rand(350, 500), easing: 'ease-out', fill: 'forwards' }));
@@ -230,7 +232,9 @@
   /* One BFS for collapse AND the hostile picker (v1.2 A7). opts: { limit: max area to COLLECT, minArea,
    * descendCollected: keep walking into collected elements (hostile: nested cards), skip(el) }. Same visited
    * cap 2000 / out cap 60 / viewport-intersection and visibility rules as the v1 collapseCandidates. */
-  function walkCandidates(x, y, opts) {
+  /* The RAW traversal. src/22-perf.js wraps it as walkCandidates() with the §2.3 300 ms memo — every
+   * caller keeps calling walkCandidates() and gets the cache for free. */
+  function walkCandidatesRaw(x, y, opts) {
     const vw = viewW(), vh = viewH();
     const limit = opts.limit, minArea = opts.minArea || 0, deep = !!opts.descendCollected, skip = opts.skip || null;
     const out = [], queue = [];
@@ -253,7 +257,8 @@
       if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
       const area = r.width * r.height;
       if (area <= limit) {
-        if (area >= minArea && !(skip && skip(el))) out.push({ el, d: edgeDist(r, x, y), cx: r.left + r.width / 2, cy: r.top + r.height / 2, area });
+        // `r` rides along so the §2.3 memo can re-measure the distance from a new point without re-walking
+        if (area >= minArea && !(skip && skip(el))) out.push({ el, d: edgeDist(r, x, y), cx: r.left + r.width / 2, cy: r.top + r.height / 2, area, r: { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } });
         if (deep) descend(el);
         continue;
       }

@@ -5,6 +5,21 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const px = (v) => (Math.round(v * 100) / 100) + 'px';
 
+  /* ── SPEC-test-speed §3: the debug time scale ──────────────────────────────
+   * Spec names this pair `dur()`; it is `scaleMs()` here because `dur` is already a local variable in five
+   * product functions (32-material, 35-effects, 40-audio, 46-viewmodel, 65-pieces) and every fragment shares
+   * ONE closure — a top-level `dur` would be shadowed inside exactly the functions that schedule timers.
+   * Clamped to [0.05, 1]: a test may speed the product up, never slow it down. Non-numeric / NaN reads as 1. */
+  function timeScale() {
+    const s = Number(debug.timeScale);
+    return isFinite(s) ? clamp(s, 0.05, 1) : 1;
+  }
+  function scaleMs(ms) { return (typeof ms === 'number' && isFinite(ms)) ? ms * timeScale() : ms; }
+  /* Read-back for SPEC-test-speed §8 test 2: debug.scaledMs(3000) reports what the clamp actually applied,
+   * so a test can prove `timeScale = 2` behaves as 1 without timing a three-second lock to find out. */
+  debug.scaledMs = (ms) => scaleMs(ms);
+  debug.timeScaleNow = () => timeScale();
+
   /* safe(): run fn in try/catch; swallow promise rejections too (A3). */
   function safe(fn) {
     try {
@@ -75,7 +90,14 @@
     lockBlocked: '차단!', labelRatio: '파괴율', labelDominating: '제압!',
     hintCovered: '가려짐', hintPierce: '관통 가능', hintEnemyBehind: '뒤에 적',
     helpMove: '이동', helpDash: '대시', helpAim: '마우스로 조준',
-    setDebrisLife: '파편이 사라지는 시간'
+    setDebrisLife: '파편이 사라지는 시간',
+    // ── SPEC-settings §2.3 / §3.3 / §3.4: the only new strings content.js itself renders ──
+    // (the other setting labels are read from settings-schema.json by the options page, step 10)
+    setPerfMode: '성능 모드', perfBadge: '성능 모드',
+    toastKeyboardAim: '키보드 조준: 방향키로 이동 · Space 발사 · Enter 조준경 · Tab 다음 대상',
+    a11yWeapon: '무기', a11yReloadStart: '재장전 시작', a11yReloadDone: '재장전 완료',
+    a11yMode: '모드', a11yKo: '패배', a11yRepair: '복구',
+    a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));

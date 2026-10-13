@@ -3,6 +3,8 @@
     "00-prelude.js",
     "10-util.js",
     "20-state.js",
+    "21-settings.js",
+    "22-perf.js",
     "25-layers.js",
     "30-canvas.js",
     "31-decal.js",
@@ -35,6 +37,7 @@
     "93-lock.js",
     "94-repair.js",
     "95-events.js",
+    "96-a11y.js",
     "99-api.js"
   ]
 }

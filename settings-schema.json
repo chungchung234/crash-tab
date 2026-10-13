@@ -1,0 +1,17 @@
+[
+  { "key": "mode", "type": "enum", "default": "rampage", "options": ["rampage", "quickdraw", "survival"], "labelKey": "setMode", "group": "general" },
+  { "key": "defaultWeapon", "type": "enum", "default": "hammer", "options": ["hammer", "pistol", "smg", "sniper", "axe", "katana", "bomb", "rocket", "flame", "collapse"], "labelKey": "setDefaultWeapon", "group": "general" },
+  { "key": "loadoutPreset", "type": "enum", "default": "default", "options": ["default", "assault", "sniper", "explosive", "melee", "custom"], "labelKey": "setLoadoutPreset", "group": "general" },
+  { "key": "debrisAnchor", "type": "enum", "default": "document", "options": ["document", "viewport"], "labelKey": "setDebrisAnchor", "group": "general" },
+  { "key": "debrisLifeMs", "type": "enum", "default": 6000, "options": [3000, 6000, 12000, 0], "labelKey": "setDebrisLife", "group": "general" },
+  { "key": "debrisCap", "type": "int", "default": 160, "min": 20, "max": 300, "labelKey": "setDebrisCap", "group": "advanced" },
+  { "key": "soundVolume", "type": "int", "default": 28, "min": 0, "max": 100, "labelKey": "setSoundVolume", "group": "general" },
+  { "key": "muted", "type": "bool", "default": false, "labelKey": "setMuted", "group": "general" },
+  { "key": "weaponArt", "type": "enum", "default": "auto", "options": ["auto", "svg", "emoji"], "labelKey": "setWeaponArt", "group": "general" },
+  { "key": "viewmodel", "type": "bool", "default": true, "labelKey": "setViewmodel", "group": "general" },
+  { "key": "combatDifficulty", "type": "enum", "default": "normal", "options": ["easy", "normal", "hard"], "labelKey": "setCombatDifficulty", "group": "combat" },
+  { "key": "reduceMotion", "type": "enum", "default": "auto", "options": ["auto", "on", "off"], "labelKey": "setReduceMotion", "group": "accessibility" },
+  { "key": "highContrastMarkers", "type": "bool", "default": false, "labelKey": "setHighContrastMarkers", "group": "accessibility" },
+  { "key": "keyboardAim", "type": "bool", "default": false, "labelKey": "setKeyboardAim", "group": "accessibility" },
+  { "key": "perfMode", "type": "enum", "default": "auto", "options": ["auto", "quality", "performance"], "labelKey": "setPerfMode", "group": "advanced" }
+]

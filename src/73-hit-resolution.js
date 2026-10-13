@@ -3,7 +3,7 @@
   function onCooldown() { return !debug.noCooldown && now() < state.cooldownUntil; }
   function startCooldown(id, ms) {
     if (!(ms > 0) || debug.noCooldown) return;   // nothing recorded while cooldowns are disabled (a later flip starts clean)
-    state.cooldownUntil = now() + ms;
+    state.cooldownUntil = now() + scaleMs(ms);   // SPEC-test-speed §3: deadline comparison in onCooldown()
     if (ms < 500) return;   // the dim reads as a real timer only on axe / bomb / rocket / collapse
     try { const b = weaponBtn(id); if (b) trackAnim(b.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: ms, easing: 'linear' })); } catch (e) { /* ignore */ }
   }
@@ -33,9 +33,14 @@
     const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const i = state.dmgNodes.indexOf(n); if (i >= 0) state.dmgNodes.splice(i, 1); };
     try {
       const base = 'translate(-50%, -50%) ';
-      const kf = crit
-        ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: 1, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
-        : [{ transform: base + 'translateY(0px)', opacity: 1 }, { transform: base + 'translateY(-44px)', opacity: 0 }];
+      /* SPEC-settings §3.1: "피해 숫자가 이동 없이 페이드만" — reduced motion keeps the number (the
+       * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
+       * centring transform the node already carries is left exactly where it is. */
+      const kf = reducedMotion()
+        ? [{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0 }]
+        : (crit
+          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: 1, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
+          : [{ transform: base + 'translateY(0px)', opacity: 1 }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
       const a = trackAnim(n.animate(kf, { duration: 650, easing: 'ease-out', fill: 'forwards' }));
       a.addEventListener('finish', kill);
     } catch (e) { /* ignore */ }

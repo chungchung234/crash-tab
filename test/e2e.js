@@ -93,6 +93,20 @@ function resolvePuppeteer() {
 // tiny test harness
 // ---------------------------------------------------------------------------
 const results = [];
+// SPEC-test-speed §4 (suite concurrency): suites A, B and C run at the same time, each on its own browser.
+// Their output would otherwise interleave into noise, so every line a suite prints is captured into that
+// suite's own buffer and the buffers are flushed in A, B, C order once each finishes. AsyncLocalStorage is
+// what makes that possible without threading a sink through ~600 call sites: the store follows the await
+// chain of whichever suite is currently running, so plain console.log() inside a suite still lands in the
+// right buffer. Outside a suite (startup, the summary) the store is empty and output goes straight out.
+const { AsyncLocalStorage } = require('async_hooks');
+const util = require('util');
+const CHANNEL = new AsyncLocalStorage();
+const rawLog = console.log.bind(console);
+console.log = (...args) => {
+  const ch = CHANNEL.getStore();
+  if (ch) ch.lines.push(util.format(...args)); else rawLog(...args);
+};
 function check(name, cond, detail) {
   const ok = !!cond;
   results.push({ name, ok, detail });
@@ -186,6 +200,8 @@ const chromeShim = (msgs) => `(() => {
           return Promise.resolve(out);
         },
         set: (obj) => { Object.assign(store, obj); return Promise.resolve(); },
+        // SPEC-settings §1.3: the one-time migration drops the old flat keys via chrome.storage.sync.remove().
+        remove: (keys) => { for (const k of (Array.isArray(keys) ? keys : [keys])) delete store[k]; return Promise.resolve(); },
       },
       onChanged: { addListener() {}, removeListener() {} },
     },
@@ -267,6 +283,28 @@ const SUITES = String(process.env.CRS_SUITES || SUITE_ARG || 'ABC').toUpperCase(
 const PARTIAL = SUITES !== 'ABC';
 const WANT = (id) => SUITES.includes(id);
 
+// SPEC-test-speed §5 (block selection). Suite A is the long pole; it is cut into named blocks that each
+// open their OWN page and build their OWN preconditions, so any one of them can run alone:
+//   CRS_BLOCKS=material,settings node test/e2e.js
+// Blocks also run CONCURRENTLY, one browser each — that, not the sleeps, is what makes the wall clock.
+// A typo must not look green: an unknown name is a hard error, never a silent zero-block run.
+const BLOCK_ARG = (process.argv.find((a) => a.startsWith('--blocks=')) || '').slice(9);
+const BLOCKS_RAW = String(process.env.CRS_BLOCKS || BLOCK_ARG || '').trim().toLowerCase();
+const BLOCK_NAMES = ['core', 'ammo', 'combat', 'settings'];
+const BLOCKS_PICKED = BLOCKS_RAW ? BLOCKS_RAW.split(/[,\s]+/).filter(Boolean) : null;
+if (BLOCKS_PICKED) {
+  const bad = BLOCKS_PICKED.filter((b) => !BLOCK_NAMES.includes(b));
+  if (bad.length) {
+    rawLog(`unknown block(s): ${bad.join(', ')} — known blocks are ${BLOCK_NAMES.join(', ')}`);
+    process.exit(2);
+  }
+}
+const WANT_BLOCK = (name) => !BLOCKS_PICKED || BLOCKS_PICKED.includes(name);
+const PARTIAL_BLOCKS = !!BLOCKS_PICKED;
+// How many browsers may be alive at once. Each block lane owns one. The default leaves room for the
+// machine itself; CRS_LANES=1 serialises them when a loaded box starts dropping targets.
+const LANE_CAP = Math.max(1, Number(process.env.CRS_LANES || Math.min(4, Math.max(1, require('os').cpus().length - 1))));
+
 
 function hookPage(page) {
   const log = { pageErrors: [], consoleErrors: [] };
@@ -315,6 +353,42 @@ async function injectCss(page, cssText) {
   const { styleSheetId } = await client.send('CSS.createStyleSheet', { frameId: frameTree.frame.id });
   await client.send('CSS.setStyleSheetText', { styleSheetId, text: cssText });
   return client;
+}
+
+// SPEC-test-speed §5: the precondition every block shares — fixture loaded, content.css injected at USER
+// origin, timer ledger + chrome shim in place, content.js active, and the deterministic debug flags the
+// exact-damage assertions are written against. Blocks that want a different state say so themselves.
+// This is the silent twin of what the `core` block asserts its way through at the top of suite A.
+async function freshPage(browser, origin, contentCss, contentJs, opts = {}) {
+  const page = await browser.newPage();
+  await page.setViewport(VIEWPORT);
+  const log = hookPage(page);
+  await installViolationCounter(page);
+  await page.goto(`${origin}/`, { waitUntil: 'load' });
+  const client = await injectCss(page, contentCss);
+  await page.evaluate(TIMER_LEDGER);
+  await page.evaluate(CHROME_SHIM);
+  // content.js TOGGLES: evaluating it on an active page turns the page off. A block that activates for
+  // itself (and asserts the completion value while doing so) asks for `activate: false` and gets a page
+  // that is injected and shimmed but not yet on.
+  const on = opts.activate === false ? null : await page.evaluate(contentJs);
+  if (opts.activate !== false && opts.debug !== false) {
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true });
+  }
+  return { page, log, client, on };
+}
+
+// Closes a block's page after tallying the console / CSP / lastError evidence for it. Every block owns
+// its own tally now — the single suite-wide tally at the end of suite A could only ever cover one page.
+async function closeBlockPage(label, h) {
+  const v = await violations(h.page);
+  check(`${label}: zero error-level console messages`, h.log.consoleErrors.length === 0, h.log.consoleErrors[0]);
+  check(`${label}: zero page errors`, h.log.pageErrors.length === 0, h.log.pageErrors[0]);
+  check(`${label}: zero securitypolicyviolation events`, v.length === 0, v[0]);
+  const st = await h.page.evaluate(() => (window.__crashScreen && window.__crashScreen.stats ? window.__crashScreen.stats().lastError : null));
+  check(`${label}: stats().lastError === null for the whole block`, st === null, st);
+  try { await h.client.detach(); } catch (e) { /* ignore */ }
+  try { await h.page.close(); } catch (e) { /* ignore */ }
 }
 
 const api = {
@@ -554,7 +628,38 @@ const api = {
   // is still in the document — once deactivate() removes the glass root, any WAAPI animation on it drops
   // out on its own, independent of the setTimeout/RAF ledger).
   animCount: (page) => page.evaluate(() => (document.getAnimations ? document.getAnimations().length : -1)),
+  // SPEC-test-speed §3: debug.timeScale. api.debug() would do, but going through setTimeScale() keeps the
+  // test's own idea of the scale (SCALE below) and the product's in step — they must not drift, because
+  // every tsleep() length is computed from the test's copy.
+  timeScale: (page, v) => page.evaluate((x) => { const d = window.__crashScreen.debug; d.timeScale = x; return { set: d.timeScale, effective: typeof d.timeScaleNow === 'function' ? d.timeScaleNow() : null, ms3000: typeof d.scaledMs === 'function' ? d.scaledMs(3000) : null }; }, v),
 };
+
+// ---------------------------------------------------------------------------
+// SPEC-test-speed §3/§4 — the debug time scale, from the test side
+// ---------------------------------------------------------------------------
+// Keyed by page, not a module global: suites A, B and C run concurrently (§4) and a shared mutable scale
+// would leak across lanes. Only the lane that set it ever reads it back.
+const SCALE = new WeakMap();
+const scaleOf = (page) => SCALE.get(page) || 1;
+// A sleep expressed in PRODUCT milliseconds: tsleep(page, 3000) waits out as much product time as 3000 ms
+// does at scale 1, i.e. 750 ms of wall clock at scale 0.25. Use it for every wait whose length is "however
+// long the product takes"; keep a plain sleep() where the wall clock itself is what an assertion measures.
+const tsleep = (page, ms) => sleep(Math.max(0, Math.round(ms * scaleOf(page))));
+// Same conversion for a poll() timeout or any other product-time budget.
+const tms = (page, ms) => Math.max(0, Math.round(ms * scaleOf(page)));
+async function setTimeScale(page, v) {
+  const want = clamp(Number(v), 0.05, 1);
+  await api.timeScale(page, want);
+  SCALE.set(page, want);
+  return want;
+}
+// Run fn with the product sped up, then put the scale back to 1 no matter how fn ends. Spec §4: "블록 진입
+// 시 설정하고 나갈 때 1 로 되돌린다" — a scale left on would silently speed up the next block, and an
+// assertion that is supposed to measure a real duration would quietly stop measuring anything.
+async function withScale(page, v, fn) {
+  await setTimeScale(page, v);
+  try { return await fn(); } finally { await setTimeScale(page, 1); }
+}
 
 // Click until the element reports data-crs-broken (hp-aware), at most `max` clicks.
 async function clickUntilBroken(page, sel, x, y, max = 3) {
@@ -1297,9 +1402,12 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await page.evaluate(() => window.scrollTo(0, 0));
   await sleep(100);
   await page.mouse.click(VIEWPORT.width / 2, VIEWPORT.height / 2);
-  await sleep(2500);
+  // SPEC-test-speed §2: "at least ten things broke" is a POSITIVE condition, so it polls out rather than
+  // always paying the full cascade. The 2.5 s ceiling is unchanged — a collapse that is genuinely too slow
+  // still fails the assertion below.
+  await poll(async () => (((await api.stats(page)).broken >= 10) ? true : null), 2500, 80);
   const cs = await api.stats(page);
-  check('A.collapse: stats().broken ≥ 10 after 2.5 s (ignores HP)', cs.broken >= 10, cs.broken);
+  check('A.collapse: stats().broken ≥ 10 within 2.5 s (ignores HP)', cs.broken >= 10, cs.broken);
   check('A.collapse: stats().lastError === null (no swallowed exception)', cs.lastError === null, cs.lastError);
   await api.restore(page);
   await sleep(100);
@@ -1316,13 +1424,15 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const c2 = await clickUntilBroken(page, '#stack-2', sx, st2.cy);
   const c3 = await clickUntilBroken(page, '#stack-3', sx, st3.cy);
   check('A.stack: three stacked blocks broken at the same x', c1 && c2 && c3, { c1, c2, c3 });
-  await sleep(3000);
+  // SPEC-test-speed §2: settling is a positive condition. Same 3 s ceiling, but a clean settle no longer
+  // costs the whole 3 s. (Physics runs on rAF, not on later(), so timeScale would not have helped here.)
+  await poll(async () => { const s = await api.stats(page); return (Array.isArray(s.pieces) && s.pieces.length >= 3 && s.pieces.every((p) => p.resting) && s.animating === false) ? s : null; }, 3000, 80);
   const ss = await api.stats(page);
   const clientH = await page.evaluate(() => document.documentElement.clientHeight);
   const pieces = Array.isArray(ss.pieces) ? ss.pieces : [];
   const bad = pieces.filter((p) => !(p.bottom <= clientH + 1 && p.resting));
   check('A.stack: stats().pieces present', pieces.length >= 3, pieces.length);
-  check('A.stack: every piece bottom ≤ clientHeight + 1 and resting after 3 s', pieces.length > 0 && bad.length === 0, { bad: bad.slice(0, 5), clientH });
+  check('A.stack: every piece bottom ≤ clientHeight + 1 and resting within 3 s', pieces.length > 0 && bad.length === 0, { bad: bad.slice(0, 5), clientH });
   check('A.stack: stats().animating === false', ss.animating === false, ss.animating);
   check('A.stats: cap === 160', ss.cap === 160, ss.cap);
   check('A.stats: pieceCount === pieces.length', ss.pieceCount === pieces.length, { pieceCount: ss.pieceCount, len: pieces.length });
@@ -1513,10 +1623,11 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.button: click handler NOT invoked while active', (await page.evaluate(() => window.__btnClicks)) === 0, await page.evaluate(() => window.__btnClicks));
 
   // =============================================================================================
-  // v1.2 — ammo / sniper + scope / loadouts / hostile components (SPEC-v3 §8 / A13; ends with the exit test
-  // and re-activates the page)
+  // v1.2 — ammo / sniper + scope / loadouts / hostile components (SPEC-v3 §8 / A13) moved out to the
+  // `ammo` block (SPEC-test-speed §5): it builds its own page and ran here only because it used to share
+  // one. It entered ACTIVE and left ACTIVE, which is exactly the state the code below already expects,
+  // so lifting the call out changes nothing for this block.
   // =============================================================================================
-  await suiteA12(page, log, contentJs);
 
   // --- (16) Escape DURING an smg hold exits cleanly: no nodes, no intervals, shots stop -------------------
   await api.setWeapon(page, 'smg');
@@ -2390,15 +2501,19 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check('A.weapons 13: Escape during the viewmodel idle animation → inactive, zero [data-crs] nodes, zero live timers/RAF frames, zero running animations', inactive13 === true && nodes13 === 0 && pend13 === 0 && raf13 === 0 && anims13 === 0, { inactive13, nodes13, pend13, raf13, anims13 });
   }
   // --- v1.4: combat v2 / debris lifetime / depth-of-stack (SPEC-combat-v2 §7, §9.4, §10.6) -----------
-  await suiteA14(page, log, contentJs);
+  // Moved out to the `combat` block (SPEC-test-speed §5); it always built its own state anyway
+  // (it re-evaluates content.js on entry) and tidied back to the suite baseline on exit.
 
   // =============================================================================================
   // SPEC-material §9 — a damage mark belongs to the ELEMENT that was hit, not to the screen.
-  // Appended at the END of suite A. suiteA14 leaves the page ACTIVE, restored, hammer / rampage, scrolled
-  // wherever its last rect() put it; this block puts all of that back before it returns, so the
-  // console / CSP / lastError checks below see exactly the state they always saw.
   // =============================================================================================
   {
+    // Precondition, built here rather than inherited (SPEC-test-speed §5): the v1.5 weapons block above
+    // ends on its Escape test, which leaves content.js INACTIVE with zero nodes. suiteA14 used to sit in
+    // between and reactivate as a side effect; with it lifted out, this block reactivates for itself.
+    if (!(await api.active(page))) await page.evaluate(contentJs);
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true });
+    await page.evaluate(() => window.scrollTo(0, 0));
     await api.restore(page);
     await api.setWeapon(page, 'pistol');
     await sleep(80);
@@ -2743,15 +2858,463 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     await sleep(100);
   }
 
-  // --- console / CSP -----------------------------------------------------------------------------
-  const v = await violations(page);
-  check('A.console: zero error-level console messages', log.consoleErrors.length === 0, log.consoleErrors[0]);
-  check('A.console: zero page errors', log.pageErrors.length === 0, log.pageErrors[0]);
-  check('A.csp: zero securitypolicyviolation events', v.length === 0, v[0]);
-  check('A.stats: stats().lastError === null for the whole suite', (await api.stats(page)).lastError === null, (await api.stats(page)).lastError);
+  // --- console / CSP (this block's own page; every block tallies its own, SPEC-test-speed §5) -------
+  await closeBlockPage('A.core', { page, log, client });
+}
 
-  try { await client.detach(); } catch (_) { /* ignore */ }
-  await page.close();
+// ---------------------------------------------------------------------------
+// Block `settings` — docs/specs/settings.md: schema + storage plumbing (§1), the performance guard
+// under a heavy page (§2.4) and the accessibility switches (§3.5). It opened its own pages from the
+// day it was written, so it lifts out of suite A whole; `browser` is now a parameter rather than a
+// closed-over local.
+// ---------------------------------------------------------------------------
+async function suiteASettings(browser, origin, contentCss, contentJs) {
+  console.log('--- settings: schema / storage / performance guard / accessibility ---');
+  // =============================================================================================
+  // docs/specs/settings.md — schema + storage plumbing (§1), the performance guard under a heavy
+  // page (§2.4) and the accessibility switches (§3.5). Appended at the END of suite A per the
+  // shared-file rule. Every block below opens its OWN fresh page (and, where a migration needs a
+  // store with legacy keys already on it, its own store) rather than touching `page` — a product
+  // gap here (api.settings / api.setSetting not built yet, or a key simply missing) fails loudly
+  // in its own check without disturbing `page`'s long-running console/CSP/lastError tally below,
+  // and each block hooks its OWN console/page-error listeners so "no errors" is still verified.
+  // =============================================================================================
+  // `seed`, when given, runs on window.__crsStore AFTER the chrome shim but BEFORE content.js's first
+  // injection — exactly where a legacy-key migration fixture or a carried-over store needs to land.
+  // `seedData` is passed through verbatim (puppeteer serializes function args, never outer closures).
+  const openSettingsPage = async (seed, seedData) => {
+    const p = await browser.newPage();
+    await p.setViewport(VIEWPORT);
+    const logP = hookPage(p);
+    await installViolationCounter(p);
+    await p.goto(`${origin}/`, { waitUntil: 'load' });
+    const client = await injectCss(p, contentCss);
+    await p.evaluate(TIMER_LEDGER);
+    await p.evaluate(CHROME_SHIM);
+    if (seed) await p.evaluate(seed, seedData);
+    const on = await p.evaluate(contentJs);
+    await sleep(150);
+    return { page: p, client, on, log: logP };
+  };
+  const closeSettingsPage = async (h) => {
+    check(`A.settings: zero console/page errors on this page (store: ${h.on})`, h.log.pageErrors.length === 0 && h.log.consoleErrors.length === 0, { pageErrors: h.log.pageErrors, consoleErrors: h.log.consoleErrors });
+    try { await h.client.detach(); } catch (e) { /* ignore */ }
+    try { await h.page.close(); } catch (e) { /* ignore */ }
+  };
+
+  // ---------------------------------------------------------------------------------------------
+  // §1 — defaults, setSetting validation, and the round trip (§4: 저장 → 재활성화 → 유지).
+  // ---------------------------------------------------------------------------------------------
+  {
+    const h = await openSettingsPage();
+    const { page: p } = h;
+
+    const defaults = {
+      mode: 'rampage', defaultWeapon: 'hammer', loadoutPreset: 'default', debrisAnchor: 'document',
+      debrisLifeMs: 6000, debrisCap: 160, soundVolume: 28, muted: false, weaponArt: 'auto',
+      viewmodel: true, combatDifficulty: 'normal', reduceMotion: 'auto', highContrastMarkers: false,
+      keyboardAim: false, perfMode: 'auto',
+    };
+    const got1 = await api.call(p, 'settings');
+    const mism1 = (got1 && typeof got1 === 'object') ? Object.keys(defaults).filter((k) => got1[k] !== defaults[k]) : Object.keys(defaults);
+    check('A.settings 1 (§1.2): api.settings() resolves every documented key to its documented default on a brand-new store',
+      got1 && typeof got1 === 'object' && mism1.length === 0,
+      { got: got1, mismatched: mism1.map((k) => ({ key: k, expected: defaults[k], got: got1 && got1[k] })) });
+
+    // ---- setSetting(key, value): a VALID value is reflected back by settings() right away --------
+    const setDc = await api.call(p, 'setSetting', 'debrisCap', 240);
+    const setMuted = await api.call(p, 'setSetting', 'muted', true);
+    const setAnchor = await api.call(p, 'setSetting', 'debrisAnchor', 'viewport');
+    const setWeaponDef = await api.call(p, 'setSetting', 'defaultWeapon', 'sniper');
+    const afterSet = await api.call(p, 'settings');
+    check('A.settings 2 (§1.3): setSetting(key, value) with a VALID value round-trips through settings() immediately (debrisCap/muted/debrisAnchor/defaultWeapon)',
+      !!afterSet && afterSet.debrisCap === 240 && afterSet.muted === true && afterSet.debrisAnchor === 'viewport' && afterSet.defaultWeapon === 'sniper',
+      { calls: { setDc, setMuted, setAnchor, setWeaponDef }, afterSet });
+    const debrisAnchorGetter = await p.evaluate(() => window.__crashScreen.debrisAnchor);
+    check('A.settings 2 (§1.3): the existing api.debrisAnchor getter agrees with settings().debrisAnchor after setSetting — ONE resolved value, not two sources of truth',
+      debrisAnchorGetter === 'viewport', debrisAnchorGetter);
+
+    // ---- setSetting(key, value) with an INVALID value is ignored and recorded, not applied --------
+    const errBefore3 = (await api.stats(p)).lastError;
+    const badCap = await api.call(p, 'setSetting', 'debrisCap', 9999);   // out of the 20–300 range (§1.1)
+    const afterBadCap = await api.call(p, 'settings');
+    const errAfterCap = (await api.stats(p)).lastError;
+    check('A.settings 3 (§1.3): setSetting(\'debrisCap\', 9999) — out of range — leaves settings().debrisCap at 240 (the last VALID value) and sets stats().lastError',
+      !!afterBadCap && afterBadCap.debrisCap === 240 && errAfterCap != null && errAfterCap !== errBefore3,
+      { badCap, debrisCap: afterBadCap && afterBadCap.debrisCap, errBefore: errBefore3, errAfter: errAfterCap });
+    const badMode = await api.call(p, 'setSetting', 'mode', 'turbo');     // not one of the enum's options
+    const afterBadMode = await api.call(p, 'settings');
+    check('A.settings 3 (§1.3): setSetting(\'mode\', \'turbo\') — not one of rampage/quickdraw/survival — is ignored (settings().mode stays \'rampage\')',
+      !!afterBadMode && afterBadMode.mode === 'rampage', { badMode, mode: afterBadMode && afterBadMode.mode });
+
+    // ---- round trip (§4 완료 기준: 저장 → 재활성화 → 유지) --------------------------------------------
+    // A same-page toggle() is NOT the right probe: settingsBoot()/settingsRead() runs once per PAGE LOAD
+    // (module evaluation) — window.__crashScreen already exists, so a same-page toggle() short-circuits
+    // straight to activate()/deactivate() and never touches storage again. An in-memory value would thus
+    // "survive" even if nothing had actually reached disk. The real test is a SECOND page/activation
+    // carrying over exactly what this page wrote to chrome.storage.sync — the §8.1 legacy-loadout block
+    // above uses this same reload-equivalent recipe, and its own FIRST activation already is the
+    // "재활성화" the completion bar asks for (no extra toggle() needed on top of it).
+    await api.call(p, 'setSetting', 'mode', 'quickdraw');
+    const storeToCarry = await api.store(p);
+    const h2 = await openSettingsPage((seedObj) => { Object.assign(window.__crsStore, seedObj); }, storeToCarry);
+    const afterReload = await api.call(h2.page, 'settings');
+    const weaponAfterReload = await h2.page.evaluate(() => window.__crashScreen.weapon);
+    check('A.settings 4 (§4 완료 기준): a SECOND page/activation reading the SAME storage sees every value set above (debrisCap/muted/debrisAnchor/defaultWeapon/mode) — NOT the hard defaults',
+      h2.on === 'on' && !!afterReload &&
+      afterReload.debrisCap === 240 && afterReload.muted === true && afterReload.debrisAnchor === 'viewport' &&
+      afterReload.defaultWeapon === 'sniper' && afterReload.mode === 'quickdraw',
+      { on: h2.on, storeToCarry, afterReload });
+    check('A.settings 4 (§1.2): defaultWeapon governs the weapon a FRESH activation actually starts with (\'sniper\' persisted above → \'sniper\' on this new page, not the hard default \'hammer\')',
+      weaponAfterReload === 'sniper', weaponAfterReload);
+    await closeSettingsPage(h2);
+
+    await closeSettingsPage(h);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // §1.2 — migration: values already on disk under the OLD (pre-schema) keys survive the move to
+  // the unified schema, and the migration DELETES those old keys rather than merely shadowing them
+  // (mirrors the existing sword→katana / crsCombat→mode legacy-key pattern already proven above).
+  // ---------------------------------------------------------------------------------------------
+  {
+    const seed = () => {
+      window.__crsStore.crsMuted = true;
+      window.__crsStore.crsDebrisAnchor = 'viewport';
+      window.__crsStore.crsDebrisLifeMs = 12000;
+    };
+    const h = await openSettingsPage(seed);
+    const { page: p } = h;
+    const settingsM = await api.call(p, 'settings');
+    const storeAfter = await api.store(p);
+    check('A.settings 5 (§1.2): a pre-existing crsMuted / crsDebrisAnchor / crsDebrisLifeMs on disk is ABSORBED into the new schema on first activation (settings() shows the migrated values, not the hard defaults)',
+      h.on === 'on' && !!settingsM && settingsM.muted === true && settingsM.debrisAnchor === 'viewport' && settingsM.debrisLifeMs === 12000,
+      { on: h.on, settings: settingsM });
+    check('A.settings 5 (§1.2): the one-time migration DELETES the old keys from storage — it MOVES them, it does not merely read-and-shadow them',
+      !('crsMuted' in storeAfter) && !('crsDebrisAnchor' in storeAfter) && !('crsDebrisLifeMs' in storeAfter), storeAfter);
+    await closeSettingsPage(h);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // §2.4 — the performance guard under a heavy page. The ~9000 fixture nodes are built FROM THIS
+  // TEST (one innerHTML parse — this is the HARNESS building the host page's own DOM to simulate a
+  // heavy page, not the content script; the hostile-page DOM rules bind what src/*.js itself may
+  // write, not this fixture) into a container removed again before the block ends, so no other
+  // suite or fixture file carries the cost. Added wall time: one extra page (~0.3–0.5 s) + a single
+  // sub-millisecond DOM build + a few short polls — nowhere near the ~8 s budget §2.4 allows.
+  // ---------------------------------------------------------------------------------------------
+  {
+    const h = await openSettingsPage();
+    const { page: p } = h;
+    const fullSettings = await api.call(p, 'settings');
+    const debrisCapFull = fullSettings && fullSettings.debrisCap;
+
+    const build9k = await p.evaluate(() => {
+      const t0 = performance.now();
+      const host = document.createElement('div');
+      host.id = 'crs-perf-fixture';
+      let html = '';
+      for (let i = 0; i < 1800; i++) html += '<div class="pf"><span>x</span><span>y</span><span>z</span><span>w</span><span>v</span></div>';
+      host.innerHTML = html;   // 1800 × 5 children = 9000 element nodes from ONE parse, not 9000 DOM calls
+      document.body.appendChild(host);
+      return { count: document.getElementsByTagName('*').length, ms: performance.now() - t0 };
+    });
+    check('A.perf 1 (§2.4): the generated fixture clears the 8000-element threshold, built cheaply (one innerHTML parse, < 300 ms)',
+      build9k.count > 8000 && build9k.ms < 300, build9k);
+
+    // openSettingsPage() left the page ACTIVE, so toggle() ONCE would merely deactivate it — two calls
+    // (off, then on) are what actually deactivates and reactivates OVER the now-heavy DOM.
+    const toggledOff = await p.evaluate(() => window.__crashScreen.toggle());
+    const reactivated = await p.evaluate(() => window.__crashScreen.toggle());
+    const perf1 = await poll(async () => { const s = await api.stats(p); return s.perf && s.perf.mode === 'performance' ? s.perf : null; }, 1500, 40);
+    const debugPerf1 = await api.dbgCall(p, 'perf');   // cross-check only — debug.perf() is implementation-visible even before stats() exposes .perf
+    check('A.perf 1 (§2.4): activating over a > 8000-element page selects perfMode auto → \'performance\' (measured at activation, not after waiting out the 10 s recheck)',
+      toggledOff === 'off' && reactivated === 'on' && !!perf1 && perf1.mode === 'performance', { toggledOff, reactivated, perf1, debugPerf1 });
+
+    // ---- perfMode: 'quality' forced — the caps must NOT come down despite the element count -------
+    const setQuality = await api.call(p, 'setSetting', 'perfMode', 'quality');
+    const perfQuality = await poll(async () => { const s = await api.stats(p); return s.perf && s.perf.mode === 'quality' ? s.perf : null; }, 1000, 30);
+    const debugPerfQuality = await api.dbgCall(p, 'perf');
+    check('A.perf 2 (§2.2/§2.4): perfMode: \'quality\' forced over the SAME > 8000-element page keeps the FULL debris cap (not min(cap, 80)) — forced beats measured',
+      setQuality !== undefined && !!perfQuality && perfQuality.mode === 'quality' && perfQuality.cap === debrisCapFull,
+      { setQuality, perfQuality, debrisCapFull, debugPerfQuality });
+    await api.call(p, 'setSetting', 'perfMode', 'auto');
+
+    // ---- §2.3 candidate-search cache: the collapse weapon is the one public path that reaches
+    // walkCandidates() directly (collapseCandidates → walkCandidates); debug.perf().walkCalls/walkRuns
+    // and debug.walkReset() are the implementation's own test-only counters for exactly this. --------
+    await api.setWeapon(p, 'collapse');
+    /* noCooldown alone is NOT enough to fire 붕괴 ten times in one tick. 붕괴 carries mag: 1 / reloadMs: 5000
+       (src/00-prelude.js), so the FIRST smashAt() spends the only charge, flushPendingReload() immediately
+       starts the 5 s reload, and action() then rejects calls 2–10 at the spend() gate — before W.fire(), so
+       collapseCandidates()/walkCandidates() is never reached at all and the counters read {calls: 1, runs: 1}.
+       That is correct product behaviour (the one-charge super weapon), not a cache failure: the magazine, not
+       the memo, is what the old assertion was measuring. infiniteAmmo keeps the charge from being consumed so
+       all ten hits really fire — ten genuine collapses at the same point inside one 300 ms window, which is
+       exactly the scenario §2.3 memoises. Both flags are restored below. */
+    await api.debug(p, { noCooldown: true, infiniteAmmo: true });
+    await api.dbgCall(p, 'walkReset');
+    /* The ten calls run inside ONE page evaluate. Driven from here they would be ten CDP round trips —
+       ~35 ms each on this machine — so the 300 ms memo window expires mid-loop and the cache is blamed
+       for the harness's own latency. In one evaluate they share a tick, which is what §2.3 is about.
+       smashAt() returns false for an attack that was REJECTED, so the accepted count proves the ten hits
+       actually happened rather than being silently gated away again. */
+    const fired10 = await p.evaluate(() => { let n = 0; for (let i = 0; i < 10; i++) if (window.__crashScreen.smashAt(100, 100)) n++; return n; });
+    const walk10 = await api.dbgCall(p, 'perf');
+    check('A.perf 3 (§2.3): 10 collapse hits at the SAME point inside one 300 ms window → 10 CALLS but walkCandidates really traverses ONCE (walkRuns)',
+      fired10 === 10 && walk10 && walk10.walkCalls === 10 && walk10.walkRuns === 1, { fired10, walk10 });
+    await sleep(350);   // past WALK_MEMO_MS, so the next search must traverse for real
+    const fired11 = await p.evaluate(() => window.__crashScreen.smashAt(100, 100));
+    const walk11 = await api.dbgCall(p, 'perf');
+    check('A.perf 3 (§2.3): once the 300 ms memo window elapses, the next candidate search re-walks (walkRuns increments again, to 2)',
+      fired11 === true && walk11 && walk11.walkCalls === 11 && walk11.walkRuns === 2, { fired11, walk11 });
+    await api.debug(p, { noCooldown: false, infiniteAmmo: false });
+
+    // ---- 30 hits over the heavy fixture, then teardown: no errors, no leftovers -------------------
+    await api.setWeapon(p, 'hammer');
+    const hitErrBefore = h.log.pageErrors.length;
+    for (let i = 0; i < 30; i++) await api.smashAt(p, 80 + (i % 20) * 4, 80 + (i % 15) * 4);
+    const perfAfterHits = (await api.stats(p)).perf;
+    await p.evaluate(() => window.__crashScreen.deactivate());
+    await p.evaluate(() => { const el = document.getElementById('crs-perf-fixture'); if (el) el.remove(); });
+    const leftoverPerf = await api.count(p, '[data-crs]');
+    check('A.perf 1 (§2.4): 30 hits over the heavy fixture + deactivate → zero NEW page errors and zero leftover [data-crs] nodes',
+      h.log.pageErrors.length === hitErrBefore && leftoverPerf === 0,
+      { newErrors: h.log.pageErrors.slice(hitErrBefore), leftoverPerf, perfAfterHits });
+
+    await closeSettingsPage(h);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // §3.5 — reduceMotion and highContrastMarkers, each checked against a MEASURED BASELINE (the
+  // same scenario with the setting left at its default) so the assertion fails if the feature is
+  // simply absent, not merely if a property happens to be missing. Default mode (rampage) is
+  // enough for both — neither needs survival/KO.
+  // ---------------------------------------------------------------------------------------------
+  {
+    const h = await openSettingsPage();
+    const { page: p } = h;
+    await api.setCombat(p, true);
+
+    // ---- reduceMotion: baseline (default 'auto', OS left at no-preference) vs forced 'on' ---------
+    await api.setWeapon(p, 'pistol');
+    const idleBase = await poll(async () => { const s = await api.stats(p); return s.viewmodel === 'idle' ? s : null; }, 1000, 25);
+    const vmAnimsBase = await p.evaluate(() => { const el = document.querySelector('.crs-viewmodel'); return el && el.getAnimations ? el.getAnimations({ subtree: true }).length : -1; });
+    check('A.a11y 1 (§3.1 baseline): with reduceMotion at its default, the idle viewmodel wobble is a LIVE running animation',
+      !!idleBase && vmAnimsBase >= 1, { idleBase: !!idleBase, vmAnimsBase });
+
+    const setRM = await api.call(p, 'setSetting', 'reduceMotion', 'on');
+    const settingsRM = await api.call(p, 'settings');
+    await api.restore(p);
+    await api.setWeapon(p, 'pistol');
+    const idleRM = await poll(async () => { const s = await api.stats(p); return s.viewmodel === 'idle' ? s : null; }, 1000, 25);
+    const vmAnimsRM = await p.evaluate(() => { const el = document.querySelector('.crs-viewmodel'); return el && el.getAnimations ? el.getAnimations({ subtree: true }).length : -1; });
+    check('A.a11y 1 (§3.1/§3.5): reduceMotion: \'on\' → the idle viewmodel wobble has ZERO running animations (vs ≥ 1 at the default, measured just above)',
+      setRM !== undefined && !!settingsRM && settingsRM.reduceMotion === 'on' && !!idleRM && vmAnimsRM === 0,
+      { setRM, reduceMotion: settingsRM && settingsRM.reduceMotion, vmAnimsBase, vmAnimsRM });
+
+    const fgA = await api.rect(p, '#figure');
+    await api.setPlayerPos(p, fgA.cx, fgA.cy);
+    await api.setWeapon(p, 'hammer');
+    const tierA = await api.forceAttack(p, '#figure');
+    await sleep(40);
+    const statsA = await api.stats(p);
+    const rootTransformA = await p.evaluate(() => getComputedStyle(document.querySelector('.crs-root')).transform);
+    check('A.a11y 1 (§3.1/§3.5): reduceMotion: \'on\' → a hit produces no hitstop and no screen-shake transform (amplitude 0)',
+      tierA === 'shooter' && statsA.hitstop === false && rootTransformA === 'none', { tier: tierA, hitstop: statsA.hitstop, rootTransform: rootTransformA });
+    await api.call(p, 'setSetting', 'reduceMotion', 'auto');
+    await api.restore(p);
+
+    // ---- highContrastMarkers: baseline vs forced on the SAME kind of hostile marker ----------------
+    const fgB = await api.rect(p, '#figure');
+    await api.setPlayerPos(p, fgB.cx, fgB.cy);
+    const tierB0 = await api.forceAttack(p, '#figure');
+    await sleep(40);
+    const auraBase = await p.evaluate(() => {
+      const el = document.querySelector('.crs-hostile');
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return { text: el.textContent || '', bgImage: cs.backgroundImage || '' };
+    });
+    check('A.a11y 2 (§3.2 baseline): with highContrastMarkers at its default (false), the hostile marker carries no ⚠ glyph and no striped background',
+      tierB0 === 'shooter' && !!auraBase && !auraBase.text.includes('⚠') && !/repeating-linear-gradient/.test(auraBase.bgImage),
+      { tier: tierB0, aura: auraBase });
+    await api.restore(p);
+
+    const setHC = await api.call(p, 'setSetting', 'highContrastMarkers', true);
+    const fgB2 = await api.rect(p, '#figure');
+    await api.setPlayerPos(p, fgB2.cx, fgB2.cy);
+    const tierB1 = await api.forceAttack(p, '#figure');
+    await sleep(40);
+    const auraHC = await p.evaluate(() => {
+      const el = document.querySelector('.crs-hostile');
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return { text: el.textContent || '', bgImage: cs.backgroundImage || '', hpNumber: /\d+\s*\/\s*\d+/.test(el.textContent || '') };
+    });
+    check('A.a11y 2 (§3.2): highContrastMarkers: true → the SAME kind of hostile marker now carries the ⚠ glyph and a striped (repeating-linear-gradient) background — vs neither at the baseline above',
+      setHC !== undefined && tierB1 === 'shooter' && !!auraHC && auraHC.text.includes('⚠') && /repeating-linear-gradient/.test(auraHC.bgImage),
+      { setHC, tier: tierB1, auraBase, auraHC });
+    check('A.a11y 2 (§3.2): highContrastMarkers: true → the marker also shows a numeric HP readout, not colour alone',
+      !!auraHC && auraHC.hpNumber === true, auraHC);
+    await api.call(p, 'setSetting', 'highContrastMarkers', false);
+    await api.restore(p);
+
+    // ---- live region: announces a weapon change, then a reload START and a DIFFERENT COMPLETION ---
+    const liveBase = await api.hudQ(p, '[aria-live="polite"]');
+    await api.setWeapon(p, 'sniper');
+    const liveAfterWeapon = await poll(async () => {
+      const q = await api.hudQ(p, '[aria-live="polite"]');
+      return q && q.text && q.text !== (liveBase && liveBase.text) ? q : null;
+    }, 800, 25);
+    check('A.a11y 3 (§3.4/§3.5): an aria-live="polite" region exists in the HUD shadow root and its text CHANGES on a weapon switch (measured change, not merely "present")',
+      !!liveBase && !!liveAfterWeapon, { liveBase, liveAfterWeapon });
+
+    await api.setWeapon(p, 'pistol');
+    /* This page runs with the SHIPPING debug flags (openSettingsPage() never sets noCooldown), so the
+       per-weapon draw time is live: setWeapon('pistol') arms a 150 ms swap (SPEC-weapons §3.1) and
+       action() rejects anything fired inside it at the swap gate — BEFORE spend(), so the shot below
+       would cost no round at all. A fixed sleep(60) is shorter than that window, which is exactly how the
+       "one shot first" line used to become a no-op and leave reload() facing a full magazine. Wait for
+       ammo().swapping to clear instead of guessing. */
+    const swapCleared = await poll(async () => { const a = await api.ammo(p); return (a && typeof a === 'object' && a.swapping === false) ? a : null; }, 1500, 25);
+    /* fastReload collapses a 2 s reload to 30 ms, so START and DONE land inside one poll interval and the
+       START announcement is never observable. This assertion is about TWO distinct messages, not about
+       speed, so it runs at the real reload duration and restores the flag afterwards. */
+    await api.debug(p, { fastReload: false });
+    const ammoBeforeShot = await api.ammo(p);
+    const shotLanded = await api.smashAt(p, 10, 10);   // one shot first — reload() on an already-full magazine is a no-op (see A.ammo 1)
+    const ammoAfterShot = await api.ammo(p);
+    /* The precondition is asserted, not assumed: if this shot does not actually empty a round the reload
+       below is a no-op and the two-announcement assertion would be vacuously "about" a reload that never
+       ran. (10, 10) sits over our own .crs-shield so nothing breaks there — irrelevant on purpose: spend()
+       runs before W.fire(), so a MISS still costs a round. Only a REJECTED attack costs nothing. */
+    check('A.a11y 3 (§3.4 precondition): the single shot before reload() really spends a round (12 → 11) — otherwise reload() is a no-op and the two-message assertion below proves nothing',
+      shotLanded === true && !!ammoBeforeShot && !!ammoAfterShot &&
+      ammoBeforeShot.mag === ammoBeforeShot.size && ammoAfterShot.mag === ammoBeforeShot.mag - 1,
+      { swapCleared, shotLanded, before: ammoBeforeShot, after: ammoAfterShot });
+    const liveBeforeReload = await api.hudQ(p, '[aria-live="polite"]');
+    const reloadStarted = await api.reload(p);
+    const liveReloadStart = await poll(async () => {
+      const q = await api.hudQ(p, '[aria-live="polite"]');
+      return q && q.text && q.text !== (liveBeforeReload && liveBeforeReload.text) ? q : null;
+    }, 400, 20);
+    const liveReloadDone = await poll(async () => {
+      const q = await api.hudQ(p, '[aria-live="polite"]');
+      return q && liveReloadStart && q.text && q.text !== liveReloadStart.text ? q : null;
+    }, 1600, 25);
+    check('A.a11y 3 (§3.4): a reload announces a START message and then a DIFFERENT COMPLETION message — two distinct live-region updates, not one static string',
+      reloadStarted === true && !!liveReloadStart && !!liveReloadDone && liveReloadStart.text !== liveReloadDone.text,
+      { reloadStarted, before: liveBeforeReload, start: liveReloadStart, done: liveReloadDone });
+    await api.debug(p, { fastReload: true });   // back to the fast path for the remaining blocks
+
+    await closeSettingsPage(h);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // §3.3 / §3.4 — the virtual keyboard cursor (and its survival-mode split from WASD) and the KO
+  // overlay's focus trap. setCombat(true) lands on survival (state.lastCombatMode defaults to it),
+  // same as every other combat test in this suite — survival is required for both health/KO and
+  // the WASD-vs-arrow split.
+  // ---------------------------------------------------------------------------------------------
+  {
+    const h = await openSettingsPage();
+    const { page: p } = h;
+
+    // NOTE: the Space-fires sub-test below runs BEFORE switching to survival — survival keeps Space
+    // bound to the drone's existing dash (debug.a11y confirms keyboardAim's own 'fire' action is
+    // suppressed there), so "Space breaks the element under the cursor" is only true in the default
+    // (rampage) mode. setCombat(true) → survival is deferred to the WASD-split sub-test that needs it.
+    const setKA = await api.call(p, 'setSetting', 'keyboardAim', true);
+    const cursor0 = await api.rectNoScroll(p, '.crs-kbcursor');
+    check('A.a11y 4 (§3.3): keyboardAim: true → a .crs-kbcursor[data-crs] virtual cursor exists',
+      setKA !== undefined && !!cursor0 && cursor0.width > 0, { setKA, cursor0 });
+
+    // ---- step sizes, MEASURED: plain 20 px, Shift 5 px, Alt 60 px ----------------------------------
+    await p.keyboard.press('ArrowRight');
+    const cursor1 = await api.rectNoScroll(p, '.crs-kbcursor');
+    await p.keyboard.down('Shift'); await p.keyboard.press('ArrowRight'); await p.keyboard.up('Shift');
+    const cursor2 = await api.rectNoScroll(p, '.crs-kbcursor');
+    await p.keyboard.down('Alt'); await p.keyboard.press('ArrowRight'); await p.keyboard.up('Alt');
+    const cursor3 = await api.rectNoScroll(p, '.crs-kbcursor');
+    const d1 = cursor1.cx - cursor0.cx, d2 = cursor2.cx - cursor1.cx, d3 = cursor3.cx - cursor2.cx;
+    check('A.a11y 4 (§3.3): ArrowRight moves the cursor 20 px, Shift+ArrowRight 5 px, Alt+ArrowRight 60 px',
+      Math.abs(d1 - 20) <= 1 && Math.abs(d2 - 5) <= 1 && Math.abs(d3 - 60) <= 1, { d1, d2, d3 });
+
+    // ---- Space fires the current weapon at the cursor — whatever is under it breaks ---------------
+    const figRect = await api.rect(p, '#figure');
+    const cur4 = await api.rectNoScroll(p, '.crs-kbcursor');
+    const stepsX = Math.round((figRect.cx - cur4.cx) / 20), stepsY = Math.round((figRect.cy - cur4.cy) / 20);
+    for (let i = 0; i < Math.abs(stepsX); i++) await p.keyboard.press(stepsX >= 0 ? 'ArrowRight' : 'ArrowLeft');
+    for (let i = 0; i < Math.abs(stepsY); i++) await p.keyboard.press(stepsY >= 0 ? 'ArrowDown' : 'ArrowUp');
+    const brokenBefore = await api.broken(p, '#figure');
+    for (let i = 0; i < 8 && !(await api.broken(p, '#figure')); i++) { await p.keyboard.press('Space'); await sleep(30); }
+    const brokenAfter = await api.broken(p, '#figure');
+    check('A.a11y 4 (§3.3): Space breaks the element the virtual cursor is sitting over',
+      brokenBefore === false && brokenAfter === true, { brokenBefore, brokenAfter });
+
+    // ---- survival: arrow keys aim the cursor, WASD moves the player — the two never cross ---------
+    await api.restore(p);
+    await api.setCombat(p, true);   // → survival (state.lastCombatMode defaults to it): WASD only moves anything here
+    await api.call(p, 'setSetting', 'keyboardAim', true);
+    const pBefore = await api.player(p);
+    const curBefore = await api.rectNoScroll(p, '.crs-kbcursor');
+    await p.keyboard.down('d'); await sleep(150); await p.keyboard.up('d');
+    const pAfterWasd = await api.player(p);
+    const curAfterWasd = await api.rectNoScroll(p, '.crs-kbcursor');
+    await p.keyboard.press('ArrowUp');
+    const pAfterArrow = await api.player(p);
+    const curAfterArrow = await api.rectNoScroll(p, '.crs-kbcursor');
+    check('A.a11y 4 (§3.3): in survival, holding \'d\' (WASD) moves the PLAYER but leaves the virtual cursor exactly where it was',
+      pAfterWasd.x > pBefore.x + 1 && Math.abs(curAfterWasd.cx - curBefore.cx) <= 1 && Math.abs(curAfterWasd.cy - curBefore.cy) <= 1,
+      { pBefore, pAfterWasd, curBefore, curAfterWasd });
+    check('A.a11y 4 (§3.3): ...while ArrowUp moves the virtual CURSOR but leaves the player\'s own position exactly where it was (the split holds both ways)',
+      Math.abs(curAfterArrow.cy - curAfterWasd.cy) >= 15 && Math.abs(pAfterArrow.x - pAfterWasd.x) <= 1 && Math.abs(pAfterArrow.y - pAfterWasd.y) <= 1,
+      { curAfterWasd, curAfterArrow, pAfterWasd, pAfterArrow });
+
+    // ---- KO overlay: role="dialog", focus starts trapped on button 1, Tab cycles 0→1→0 ------------
+    await api.restore(p);
+    await sleep(60);
+    const figKo = await api.rect(p, '#figure');
+    await api.setPlayerPos(p, figKo.cx, figKo.cy);
+    await api.setPlayerHp(p, 5);
+    await api.setWeapon(p, 'sniper');
+    await api.forceAttack(p, '#figure');
+    await api.smashAt(p, figKo.cx, figKo.cy);
+    const koShown = await poll(async () => { const k = await api.hudQ(p, '.crs-ko'); return k && k.visible ? k : null; }, 1500, 25);
+    const focusInfo = () => p.evaluate(() => {
+      const host = document.querySelector('crs-hud, .crs-hud-host');
+      const sh = host && host.shadowRoot;
+      const ko = sh && sh.querySelector('.crs-ko');
+      const btns = ko ? [...ko.querySelectorAll('button')] : [];
+      const active = sh ? sh.activeElement : null;
+      return { nBtns: btns.length, activeIdx: active ? btns.indexOf(active) : -1 };
+    });
+    const f0 = await focusInfo();
+    await p.keyboard.press('Tab');
+    const f1 = await focusInfo();
+    await p.keyboard.press('Tab');
+    const f2 = await focusInfo();
+    await p.keyboard.down('Shift'); await p.keyboard.press('Tab'); await p.keyboard.up('Shift');
+    const f3 = await focusInfo();
+    check('A.a11y 5 (§3.4): the KO overlay shows exactly two buttons, starts with focus trapped on the FIRST, and Tab cycles 0 → 1 → 0 (wrapping inside the dialog, never escaping to the page)',
+      !!koShown && f0.nBtns === 2 && f0.activeIdx === 0 && f1.activeIdx === 1 && f2.activeIdx === 0,
+      { koShown: !!koShown, f0, f1, f2 });
+    check('A.a11y 5 (§3.4): Shift+Tab from the first button wraps to the LAST one (the trap holds in both directions)',
+      f3.activeIdx === 1, f3);
+    const koRole = await p.evaluate(() => {
+      const host = document.querySelector('crs-hud, .crs-hud-host');
+      const sh = host && host.shadowRoot;
+      const ko = sh && sh.querySelector('.crs-ko');
+      return ko ? { role: ko.getAttribute('role'), modal: ko.getAttribute('aria-modal') } : null;
+    });
+    check('A.a11y 5 (§3.4): the KO overlay itself is role="dialog" aria-modal="true"',
+      !!koRole && koRole.role === 'dialog' && koRole.modal === 'true', koRole);
+    await p.keyboard.press('Enter');
+
+    await closeSettingsPage(h);
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -2787,8 +3350,12 @@ async function installWatcher(page) {
   });
 }
 
-async function suiteA12(page, log, contentJs) {
-  console.log('--- v1.2: ammo / sniper + scope / loadouts / combat ---');
+async function suiteA12(browser, origin, contentCss, contentJs) {
+  console.log('--- ammo: ammo / sniper + scope / loadouts / combat ---');
+  // SPEC-test-speed §5: its own page, its own preconditions. It used to be handed suite A's page in the
+  // middle of that suite; nothing it does depends on what ran before it, so it now opens a fresh one.
+  const h = await freshPage(browser, origin, contentCss, contentJs);
+  const { page, log } = h;
   const W = await weaponTable(page);
   const DMG = W.dmg;
   const errBefore = log.pageErrors.length;
@@ -3224,11 +3791,13 @@ async function suiteA12(page, log, contentJs) {
     return { tier, orbNode: !!document.querySelector('.crs-orb'), orbs: a.stats().orbs };
   }, '#figure');
   await api.setPlayerPos(page, far5.x, far5.y + 300);
-  await sleep(3500);
+  // SPEC-test-speed §2: once the orb is gone it can no longer reach the player, so polling for its
+  // disappearance proves exactly what sitting out the whole 3.5 s proved. Ceiling unchanged.
+  await poll(async () => ((((await api.count(page, '.crs-orb')) === 0) && (await api.stats(page)).orbs === 0) ? true : null), 3500, 80);
   const p5b = await api.player(page);
   const seen5b = await api.seen(page);
   const tier5b = launch5b.tier;
-  check('A.combat 5b: dodge — an orb IS launched (node + stats().orbs ≥ 1), then player 500 px away and 300 px perpendicular: hp unchanged (100) after 3.5 s and the orb is gone', tier5b === 'shooter' && launch5b.orbNode === true && launch5b.orbs >= 1 && !!seen5b['.crs-orb'] && p5b.hp === 100 && (await api.count(page, '.crs-orb')) === 0 && (await api.stats(page)).orbs === 0, { launch: launch5b, player: p5b, seen: !!seen5b['.crs-orb'], orbs: await api.count(page, '.crs-orb') });
+  check('A.combat 5b: dodge — an orb IS launched (node + stats().orbs ≥ 1), then player 500 px away and 300 px perpendicular: hp unchanged (100) within 3.5 s and the orb is gone', tier5b === 'shooter' && launch5b.orbNode === true && launch5b.orbs >= 1 && !!seen5b['.crs-orb'] && p5b.hp === 100 && (await api.count(page, '.crs-orb')) === 0 && (await api.stats(page)).orbs === 0, { launch: launch5b, player: p5b, seen: !!seen5b['.crs-orb'], orbs: await api.count(page, '.crs-orb') });
   // 5c interception: a hammer at the orb centre destroys it and never touches the page under it
   await api.restore(page);
   await sleep(60);
@@ -3825,6 +4394,7 @@ async function suiteA12(page, log, contentJs) {
   await api.setWeapon(page, 'hammer');
   await api.restore(page);
   await sleep(100);
+  await closeBlockPage('A.ammo', h);
 }
 
 // ---------------------------------------------------------------------------
@@ -3851,17 +4421,25 @@ async function suiteA12(page, log, contentJs) {
 //     .crs-avatar node count stays exactly 1 through a dash (no extra same-class ghost copies),
 //     since no afterimage class name is in the contract either.
 // ---------------------------------------------------------------------------
-async function suiteA14(page, log, contentJs) {
-  console.log('--- v1.4: combat v2 — drone avatar / aim lock-on / repairing enemies (SPEC-combat-v2 §7), debris lifetime (§9.4), depth-of-stack (§10.6) ---');
+async function suiteA14(browser, origin, contentCss, contentJs) {
+  console.log('--- combat: combat v2 — drone avatar / aim lock-on / repairing enemies (SPEC-combat-v2 §7), debris lifetime (§9.4), depth-of-stack (§10.6) ---');
+  // SPEC-test-speed §5: its own page. This block always rebuilt its own state on entry (it re-evaluates
+  // content.js below), so the only thing it inherited from suite A was the tab itself.
+  const h = await freshPage(browser, origin, contentCss, contentJs, { activate: false });
+  const { page, log } = h;
   const near = (a, b, tol) => Math.abs(a - b) <= tol;
   const norm360 = (a) => ((a % 360) + 360) % 360;
   const angDist = (a, b) => { const d = Math.abs(norm360(a) - norm360(b)) % 360; return d > 180 ? 360 - d : d; };
-  const W14 = await weaponTable(page);
-  const DMG14 = W14.dmg;
-
+  // Activation first: window.__crashScreen only exists once content.js has run, and weaponTable() reads it.
+  // (It used to be read before this line because suite A had already evaluated content.js on this tab.)
   const onV14 = await page.evaluate(contentJs);
   check('A.v2: content.js reactivated for the combat-v2 / debris / depth block', onV14 === 'on', onV14);
-  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true });
+  const W14 = await weaponTable(page);
+  const DMG14 = W14.dmg;
+  // noFalloff was inherited from suite A's injection while this block shared that page; every exact-damage
+  // assertion below is written against the flat, unreduced numbers, so the block now sets it for itself.
+  // (§10.6's pierce section still turns falloff back ON locally to measure the real formula.)
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true });
   await page.evaluate(() => window.scrollTo(0, 0));
   await api.restore(page);
   await sleep(80);
@@ -4021,24 +4599,32 @@ async function suiteA14(page, log, contentJs) {
   await sleep(1100);
 
   // ---- (6) lock-on hit vs. evade (§7.6) ----
+  // SPEC-test-speed §3/§4: outcome-only, so the lock runs at quarter speed. Set BEFORE forceLock —
+  // startLock() freezes scaleMs(LOCK_MS) into lk.dur at creation, and a scale change afterwards would
+  // not reach a lock already in flight.
+  await setTimeScale(page, 0.25);
   await resetScene(400, 400);
   await force('#figure', 'forceLock');
   const hpBefore76 = (await api.player(page)).hp;
-  await sleep(3300);
+  await sleep(tms(page, 3000) + 300);
   const hpAfter76 = (await api.player(page)).hp;
   const lockGone76 = (await api.count(page, '.crs-lock')) === 0;
-  check('A.v2 7.6: standing still through the full 3.0 s lock → health decreases and the .crs-lock node disappears', hpAfter76 < hpBefore76 && lockGone76, { hpBefore76, hpAfter76, lockGone76 });
+  check('A.v2 7.6: standing still through the full lock → health decreases and the .crs-lock node disappears (outcome only, so run at debug.timeScale 0.25; the 3.0 s itself is asserted by §7.5 at scale 1)', hpAfter76 < hpBefore76 && lockGone76, { hpBefore76, hpAfter76, lockGone76, scale: scaleOf(page) });
   await resetScene(400, 400);
   const nearBefore76 = (await api.stats(page)).nearMisses;
   await force('#figure', 'forceLock');
-  await sleep(1600);   // past the 1.5 s fixed-phase threshold
+  await sleep(tms(page, 1500) + 180);   // past the half-way fixed-phase threshold (LOCK_FOLLOW × lk.dur)
   await debugCall('setAvatarPos', 650, 400);   // ≥ 100 px away
-  await sleep(1700);
+  await sleep(tms(page, 1500) + 300);
   const hpAfterDodge76 = (await api.player(page)).hp;
   const nearAfter76 = (await api.stats(page)).nearMisses;
-  check('A.v2 7.6: stepping ≥ 100 px away after the 1.5 s fixed phase avoids the hit (hp unchanged) and bumps stats().nearMisses', hpAfterDodge76 === 100 && nearAfter76 === nearBefore76 + 1, { hpAfterDodge76, nearBefore76, nearAfter76 });
+  check('A.v2 7.6: stepping ≥ 100 px away after the fixed phase avoids the hit (hp unchanged) and bumps stats().nearMisses', hpAfterDodge76 === 100 && nearAfter76 === nearBefore76 + 1, { hpAfterDodge76, nearBefore76, nearAfter76, scale: scaleOf(page) });
+  await setTimeScale(page, 1);
 
   // ---- (7) repair restores a nearby broken original (§7.7) ----
+  // SPEC-test-speed §3/§4: §7.7–§7.9 are outcome assertions ("the beam finishes and the element is back",
+  // "the meter comes back down"). Quarter speed from here to the end of §7.9; §7.10/§7.11 set their own.
+  await setTimeScale(page, 0.25);
   await resetScene(400, 400);
   await api.setWeapon(page, 'hammer');
   const sc7 = await api.rect(page, '#small-card');
@@ -4056,7 +4642,7 @@ async function suiteA14(page, log, contentJs) {
   check('A.v2 7.7: debug.forceRepair(#figure) picks the broken #small-card within 600 px and starts a .crs-repair beam', repairTarget7 === 'small-card' && beamSeen7 === true, { repairTarget7, beamSeen7 });
   // §3.1 step 3: the 1.5 s beam is followed by a further 600 ms piece-return animation before the original is
   // actually un-hidden, so this polls out to ~2.3 s rather than stopping right at the beam's own 1.5 s.
-  const broken7after = await poll(async () => (await api.broken(page, '#small-card')) === false ? false : null, 2300, 80);
+  const broken7after = await poll(async () => (await api.broken(page, '#small-card')) === false ? false : null, tms(page, 2300) + 400, 60);
   const vis7after = await api.visibility(page, '#small-card');
   const repaired7 = (await api.stats(page)).repaired;
   const scoreAfter7 = (await api.player(page)).score;
@@ -4073,9 +4659,9 @@ async function suiteA14(page, log, contentJs) {
   await api.setWeapon(page, 'rocket');
   const fg8 = await api.rect(page, '#figure');
   await smashUntil(page, () => api.broken(page, '#figure'), fg8.left + 6, fg8.top + 6, 6);
-  await sleep(1700);
+  await sleep(tms(page, 1500) + 300);
   const scStillBroken8 = await api.broken(page, '#small-card');
-  check('A.v2 7.8: killing the repairing hostile mid-beam cancels the repair — #small-card is still broken 1.5+ s later', beamSeen8 === true && scStillBroken8 === true, { beamSeen8, scStillBroken8 });
+  check('A.v2 7.8: killing the repairing hostile mid-beam cancels the repair — #small-card is still broken a full beam-length later', beamSeen8 === true && scStillBroken8 === true, { beamSeen8, scStillBroken8, scale: scaleOf(page) });
   await api.setWeapon(page, 'hammer');
 
   // ---- (9) destroy ratio tracks broken vs. repaired area (§7.9) ----
@@ -4086,22 +4672,24 @@ async function suiteA14(page, log, contentJs) {
   check('A.v2 7.9: stats().destroyRatio === 0 with nothing broken', ratio0_9 === 0, ratio0_9);
   const bc9 = await api.rect(page, '#big-card');
   await smashUntil(page, () => api.broken(page, '#big-card'), bc9.cx, bc9.cy, 6);
-  const ratio1_9 = await poll(async () => { const r = (await api.stats(page)).destroyRatio; return r > 0 ? r : null; }, 2600, 100);
+  const ratio1_9 = await poll(async () => { const r = (await api.stats(page)).destroyRatio; return r > 0 ? r : null; }, tms(page, 2600) + 400, 80);
   check('A.v2 7.9: breaking a large element raises stats().destroyRatio above 0 (within the 2 s refresh)', ratio1_9 > 0, ratio1_9);
   await force('#figure', 'forceAttack');
   await force('#figure', 'forceRepair');
-  await sleep(1700);   // the 1.5 s repair beam completing
-  const ratio2_9 = await poll(async () => { const r = (await api.stats(page)).destroyRatio; return r < ratio1_9 ? r : null; }, 2600, 100);
+  await sleep(tms(page, 1500) + 300);   // the repair beam completing
+  const ratio2_9 = await poll(async () => { const r = (await api.stats(page)).destroyRatio; return r < ratio1_9 ? r : null; }, tms(page, 2600) + 400, 80);
   check('A.v2 7.9: a completed repair brings stats().destroyRatio back down (within the next 2 s refresh)', ratio2_9 != null && ratio2_9 < ratio1_9, { ratio1_9, ratio2_9: ratio2_9 != null ? ratio2_9 : (await api.stats(page)).destroyRatio });
 
   // ---- (10) T3 uses the lock-on instead of the laser (§7.10) ----
+  await setTimeScale(page, 0.25);   // SPEC-test-speed §3: outcome only — set before the lock is created
   await resetScene(400, 400);
   await api.rect(page, '#boss');   // hostileAttack() requires the element on-screen — scroll it into view first
   const tier10 = await force('#boss', 'forceAttack');
   await sleep(150);
   check('A.v2 7.10: debug.forceAttack(#boss) now returns "lock", not "laser"', tier10 === 'lock', tier10);
   check('A.v2 7.10: no .crs-beam appears for a T3 attack any more (replaced by .crs-lock)', (await api.count(page, '.crs-beam')) === 0 && (await api.count(page, '.crs-lock')) >= 1, { beams: await api.count(page, '.crs-beam'), locks: await api.count(page, '.crs-lock') });
-  await sleep(3200);
+  await sleep(tms(page, 3000) + 250);   // drain: let that lock resolve before §7.11 fires another attack
+  await setTimeScale(page, 1);
 
   // ---- (11) boss stage 3 regains the laser sweep (§7.11) ----
   await resetScene(400, 400);
@@ -4112,22 +4700,24 @@ async function suiteA14(page, log, contentJs) {
   // unrelated reason — "already broken" — not the 3rd-phase laser logic this test means to exercise). Pistol's
   // damage is known, small and precise, so the exact hit count needed is computed instead of polled for.
   await api.setWeapon(page, 'pistol');
-  const W11 = await weaponTable(page);
-  const bossMax11 = (await api.hpOf(page, '#boss')).max;
-  const hp0_11 = (await api.hpOf(page, '#boss')).hp;
-  const target11 = 0.275 * bossMax11;   // the middle of (20%, 35%]
-  const need11 = hp0_11 > target11 ? Math.round((hp0_11 - target11) / W11.dmg('pistol')) : 0;
-  for (let i = 0; i < need11; i++) {
+  // A parent's hp AND max include its children's, and a pistol hit can break a child — so both numbers
+  // move as the boss is worn down. A shot count computed once from the starting hp therefore stops in the
+  // wrong place; step to the window re-reading hp/max each time instead. Pistol damage is small enough
+  // that stepping can't jump past the window into an outright kill (which is what the count guarded).
+  let bossHp11 = await api.hpOf(page, '#boss');
+  for (let i = 0; i < 40 && bossHp11.hp > 0.275 * bossHp11.max; i++) {
     const bo11 = await api.rect(page, '#boss');
+    const beforeHp11 = bossHp11.hp;
     await api.smashAt(page, bo11.left + 6, bo11.top + 6);
-    await poll(async () => (await api.hpOf(page, '#boss')).hp < hp0_11 - i * W11.dmg('pistol'), 400, 20);
+    await poll(async () => (await api.hpOf(page, '#boss')).hp < beforeHp11, 400, 20);
+    bossHp11 = await api.hpOf(page, '#boss');
   }
-  const bossHp11 = await api.hpOf(page, '#boss');
   await api.setWeapon(page, 'hammer');
   const tier11 = await force('#boss', 'forceAttack');
   const beamSeen11 = await poll(() => api.has(page, '.crs-beam'), 800);
   check('A.v2 7.11: boss weakened to ~20–35% hp (3rd stage), still alive, regains the laser sweep — debug.forceAttack(#boss) → "laser" or a .crs-beam appears (debug.forceBoss result recorded, see notes)', bossHp11.hp > 0 && bossHp11.hp <= 0.351 * bossHp11.max && (tier11 === 'laser' || beamSeen11 === true), { forceBoss11, bossHp11, tier11, beamSeen11 });
-  await sleep(1700);
+  // drain only — nothing is asserted about its length, so it runs on the product clock at quarter speed.
+  await withScale(page, 0.25, () => tsleep(page, 1700));
 
   // ---- (12) Escape with avatar + lock + repair all live → fully traceless (§7.12) ----
   await resetScene(400, 400);
@@ -4245,9 +4835,16 @@ async function suiteA14(page, log, contentJs) {
   await smashUntil(page, () => api.broken(page, '#big-card'), bc943.cx, bc943.cy, 6);
   await poll(async () => { const s = await api.stats(page); return (s.pieceCount > 0 && s.pieces.every((p) => p.resting)) ? s : null; }, 4000, 60);
   const countAt0_943 = await api.count(page, '.crs-piece');
-  await sleep(10000);
+  // SPEC-test-speed §2/§3: the longest single wait in the suite, and a pure negative — "nothing despawns".
+  // Polling cannot shorten a negative, but the product clock can: at debug.timeScale 0.1 the twelve seconds
+  // of PRODUCT time below cost 1.2 s of wall clock, and they still cover twice the 6 s lifetime that the 0
+  // setting is overriding. debrisLife() runs the lifetime through scaleMs(), and scaleMs(0) is 0, so
+  // "unlimited" keeps meaning unlimited at any scale — the thing this assertion exists to prove.
+  await setTimeScale(page, 0.1);
+  await tsleep(page, 12000);
   const countAfter10s_943 = await api.count(page, '.crs-piece');
-  check('A.v2 9.4.3: debrisLifeMs = 0 → the piece count does not shrink over the next 10 s (unlimited lifetime)', countAt0_943 > 0 && countAfter10s_943 >= countAt0_943, { countAt0_943, countAfter10s_943 });
+  check('A.v2 9.4.3: debrisLifeMs = 0 → the piece count does not shrink over the next 12 s of product time (unlimited lifetime; debug.timeScale 0.1 → 1.2 s wall)', countAt0_943 > 0 && countAfter10s_943 >= countAt0_943, { countAt0_943, countAfter10s_943, scale: scaleOf(page) });
+  await setTimeScale(page, 1);
   await page.evaluate(() => { window.__crsStore.crsDebrisLifeMs = 6000; });
   await page.evaluate(contentJs);
   await page.evaluate(contentJs);
@@ -4643,12 +5240,13 @@ async function suiteA14(page, log, contentJs) {
   await api.restore(page);
   await sleep(80);
 
-  // ---- tidy up: back to the suite's baseline mode/weapon/debug flags ----
+  // ---- tidy up: back to the block's baseline mode/weapon/debug flags before the evidence tally ----
   await setCombatMode('rampage');
   await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: false });
   await api.setWeapon(page, 'hammer');
   await api.restore(page);
   await sleep(100);
+  await closeBlockPage('A.combat', h);
 }
 
 // ---------------------------------------------------------------------------
@@ -4952,21 +5550,64 @@ async function suiteC(puppeteer, origin) {
 
   const { server, origin } = await startServer();
   console.log(`server: ${origin}`);
-  let browser = null;
+  // SPEC-test-speed §4: A, B and C share nothing — three browsers, three fixtures served by the same static
+  // server, three independent result streams — so they run CONCURRENTLY and the wall clock is the slowest of
+  // them (A) rather than their sum. They used to share one browser; each now launches its own so a crash or a
+  // slow teardown in one cannot stall another. Output stays readable because each lane buffers its own lines
+  // (CHANNEL above) and the buffers are flushed in A, B, C order — the same text a serial run produced.
+  const lanes = [];
+  const runLane = (id, fn) => {
+    const ch = { id, lines: [], t0: Date.now(), ms: 0 };
+    const p = CHANNEL.run(ch, async () => {
+      try { await fn(); } catch (e) { check(`${id} completed without exceptions`, false, String(e && e.stack || e)); }
+      ch.ms = Date.now() - ch.t0;
+    });
+    lanes.push({ ch, p });
+  };
+  const ownBrowser = async (fn) => {
+    const b = await puppeteer.launch({ headless: true, args: BASE_ARGS });
+    try { await fn(b); } finally { try { await b.close(); } catch (_) { /* ignore */ } }
+  };
+  // SPEC-test-speed §5: suite A is four independent blocks, each on its own browser, and they run
+  // alongside B and C. The wall clock is now the slowest single lane, not their sum. LANE_CAP keeps a
+  // loaded machine from thrashing — a saturated box drops CDP targets and the failure looks like a
+  // product bug ("Attempted to use detached Frame") when it is only contention.
+  let live = 0;
+  const waiting = [];
+  const slot = async (fn) => {
+    if (live >= LANE_CAP) await new Promise((r) => waiting.push(r));
+    live++;
+    try { return await fn(); } finally { live--; const next = waiting.shift(); if (next) next(); }
+  };
+  const ownBrowserQueued = (fn) => slot(() => ownBrowser(fn));
+  const A_BLOCKS = [
+    ['core', (b) => suiteA(b, origin, contentCss, contentJs)],
+    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],
+    ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],
+    ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],
+  ];
+  if (WANT('A')) for (const [name, fn] of A_BLOCKS) {
+    if (WANT_BLOCK(name)) runLane(name, () => ownBrowserQueued(fn));
+  }
+  if (WANT('B')) runLane('B', () => ownBrowserQueued((b) => suiteB(b, origin, contentCss, contentJs)));
+  if (WANT('C')) runLane('C', () => slot(() => suiteC(puppeteer, origin)));
   try {
-    browser = await puppeteer.launch({ headless: true, args: BASE_ARGS });
-    if (WANT('A')) { try { await suiteA(browser, origin, contentCss, contentJs); } catch (e) { check('Suite A completed without exceptions', false, String(e && e.stack || e)); } }
-    if (WANT('B')) { try { await suiteB(browser, origin, contentCss, contentJs); } catch (e) { check('Suite B completed without exceptions', false, String(e && e.stack || e)); } }
-    await browser.close(); browser = null;
-    if (WANT('C')) { try { await suiteC(puppeteer, origin); } catch (e) { check('Suite C completed without exceptions', false, String(e && e.stack || e)); } }
+    for (const lane of lanes) {
+      await lane.p;
+      for (const line of lane.ch.lines) rawLog(line);
+      rawLog(`--- ${lane.ch.id} finished in ${(lane.ch.ms / 1000).toFixed(1)} s ---`);
+    }
   } finally {
-    if (browser) { try { await browser.close(); } catch (_) { /* ignore */ } }
     server.close();
   }
 
   const secs = elapsed();
-  if (PARTIAL) console.log(`\n*** PARTIAL RUN: suites ${SUITES.split('').join(', ')} only — NOT a full verification ***`);
-  else check(`total runtime < ${Math.round(TIME_BUDGET_MS / 1000)} s`, Number(secs) < TIME_BUDGET_MS / 1000, secs);
+  // A partial run — picked suites OR picked blocks — can never be mistaken for a full verification:
+  // it says so and it declines to report the runtime check (SPEC-test-speed §5).
+  if (PARTIAL || PARTIAL_BLOCKS) {
+    const what = [PARTIAL ? `suites ${SUITES.split('').join(', ')}` : null, PARTIAL_BLOCKS ? `blocks ${BLOCKS_PICKED.join(', ')}` : null].filter(Boolean).join(' / ');
+    console.log(`\n*** PARTIAL RUN: ${what} only — NOT a full verification ***`);
+  } else check(`total runtime < ${Math.round(TIME_BUDGET_MS / 1000)} s`, Number(secs) < TIME_BUDGET_MS / 1000, secs);
   const passed = results.filter((r) => r.ok).length;
   const failed = results.length - passed;
   console.log(`\nSUMMARY: ${passed} passed, ${failed} failed, ${results.length} total in ${secs} s`);

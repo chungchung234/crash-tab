@@ -290,5 +290,101 @@
   "setDebrisLife": {
     "message": "Debris lifetime",
     "description": "Setting label: how long debris stays before it fades"
+  },
+  "setMode": {
+    "message": "Play mode",
+    "description": "Setting label: default play mode"
+  },
+  "setDefaultWeapon": {
+    "message": "Default weapon",
+    "description": "Setting label: weapon selected on activation"
+  },
+  "setLoadoutPreset": {
+    "message": "Loadout preset",
+    "description": "Setting label: loadout preset"
+  },
+  "setDebrisAnchor": {
+    "message": "Debris anchor",
+    "description": "Setting label: debris anchor frame"
+  },
+  "setDebrisCap": {
+    "message": "Debris limit",
+    "description": "Setting label: maximum live debris pieces"
+  },
+  "setSoundVolume": {
+    "message": "Sound volume",
+    "description": "Setting label: master sound volume"
+  },
+  "setMuted": {
+    "message": "Start muted",
+    "description": "Setting label: start muted"
+  },
+  "setWeaponArt": {
+    "message": "Weapon art",
+    "description": "Setting label: weapon artwork mode"
+  },
+  "setViewmodel": {
+    "message": "Viewmodel",
+    "description": "Setting label: show the first-person weapon"
+  },
+  "setCombatDifficulty": {
+    "message": "Combat difficulty",
+    "description": "Setting label: combat difficulty"
+  },
+  "setReduceMotion": {
+    "message": "Reduce motion",
+    "description": "Setting label: reduce motion"
+  },
+  "setHighContrastMarkers": {
+    "message": "High-contrast markers",
+    "description": "Setting label: high-contrast markers"
+  },
+  "setKeyboardAim": {
+    "message": "Keyboard aim",
+    "description": "Setting label: keyboard aiming"
+  },
+  "setPerfMode": {
+    "message": "Performance mode",
+    "description": "Setting label: performance mode"
+  },
+  "perfBadge": {
+    "message": "Performance",
+    "description": "HUD badge shown while the performance guard has downgraded"
+  },
+  "toastKeyboardAim": {
+    "message": "Keyboard aim: arrow keys move · Space fires · Enter scopes · Tab next target",
+    "description": "Toast listing the keyboard-aim controls"
+  },
+  "a11yWeapon": {
+    "message": "Weapon",
+    "description": "Screen reader: weapon changed"
+  },
+  "a11yReloadStart": {
+    "message": "Reloading",
+    "description": "Screen reader: reload started"
+  },
+  "a11yReloadDone": {
+    "message": "Reloaded",
+    "description": "Screen reader: reload finished"
+  },
+  "a11yMode": {
+    "message": "Mode",
+    "description": "Screen reader: play mode changed"
+  },
+  "a11yKo": {
+    "message": "Defeated",
+    "description": "Screen reader: the player was knocked out"
+  },
+  "a11yRepair": {
+    "message": "Repaired",
+    "description": "Screen reader: an element was repaired"
+  },
+  "a11yChallengeStart": {
+    "message": "Challenge started",
+    "description": "Screen reader: a challenge started"
+  },
+  "a11yChallengeEnd": {
+    "message": "Challenge ended",
+    "description": "Screen reader: a challenge ended"
   }
 }

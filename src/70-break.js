@@ -35,7 +35,7 @@
     if (txt.length < 2) return false;
     try { if (el.querySelector('img,video,canvas,svg,iframe,table,input,textarea,select,object,embed,picture')) return false; } catch (e) { return false; }
     if (countDescendants(el, 41) > 40) return false;
-    if (txt.split(/\s+/).length > 80) return false;
+    if (txt.split(/\s+/).length > textTokenCap()) return false;   // SPEC-settings §2.2: 80 tokens, 40 in performance mode
     return true;
   }
   function boxVisible(el) {
@@ -68,7 +68,7 @@
     const sx = rect.width / ow || 1, sy = rect.height / oh || 1;
     const sl = opts.splitLine ? { angle: opts.splitLine.angle, cx: (opts.splitLine.cx - rect.left) / sx, cy: (opts.splitLine.cy - rect.top) / sy } : null;
     const polys = splitRect(ow, oh, n, (ix - rect.left) / sx, (iy - rect.top) / sy, sl);
-    const cap = opts.cloneCap || (n >= 4 ? 150 : 400);
+    const cap = cloneCapFor(opts.cloneCap || (n >= 4 ? 150 : 400));   // SPEC-settings §2.2: 400 descendants, 150 in performance mode
     // Every piece gets its own cloneTree (a deep DOM copy would carry style attributes,
     // which a strict style-src CSP rejects on insertion); the computed-style diff of the
     // first piece is replayed on its siblings.
@@ -295,7 +295,7 @@
     if (!rect || rect.width < 1 || rect.height < 1) return false;
     const t0 = now();
     const tag = tagOf(el);
-    const descendants = countDescendants(el, 201);
+    const descendants = countDescendants(el, textDescendantCap() + 1);   // SPEC-settings §2.2: 200, 120 in performance mode
     const wantText = opts.textSplit !== false && textDominant(el);
     let made = 0;
     if (tag === 'video') { try { opts.wasPlaying = !el.paused; el.pause(); } catch (e) { /* ignore */ } }

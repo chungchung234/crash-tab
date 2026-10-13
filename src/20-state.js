@@ -75,10 +75,15 @@
   let canvasCssW = 0, canvasCssH = 0, canvasSX = 1, canvasSY = 1;
 
   function track(timerId) { state.timers.add(timerId); return timerId; }
-  function later(fn, ms) {
+  /* laterRaw() takes a delay that is ALREADY in real milliseconds — a remaining time computed against a
+   * deadline that scaleMs() has already shortened (reload progress, repair beams, the combat grace). Passing
+   * one of those through later() would scale it a second time. Everything else uses later(). */
+  function laterRaw(fn, ms) {
     const id = setT(() => { state.timers.delete(id); try { fn(); } catch (e) { state.lastError = String((e && e.stack) || e); } }, ms);   // deferred paths surface in stats().lastError too
     return track(id);
   }
+  /* SPEC-test-speed §3: the single choke point for the product's 76 timers. */
+  function later(fn, ms) { return laterRaw(fn, scaleMs(ms)); }
   /* Cancel a timer created by later() and forget its id (plain clearT() would leave the id in the Set). */
   function untrack(id) {
     if (!id) return;

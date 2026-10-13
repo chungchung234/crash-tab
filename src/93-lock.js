@@ -84,7 +84,9 @@
     if (!forced && now() < (rec.lockReadyAt || 0)) return null;
     if (state.locks.length >= LOCK_MAX) return null;   // §2.2: three at a time, the oldest ones finish first
     const parts = buildLock();
-    const lk = Object.assign({ id: ++state.lockSeq, rec, startedAt: now(), dur: forced ? LOCK_MS : lockDuration(rec), phase: 'warn',
+    // SPEC-test-speed §3: "락온 3단계" — the three phases are fractions of lk.dur, so scaling the duration once
+    // here scales warn/close/imminent together and keeps their RATIOS exactly as §7.5 asserts them.
+    const lk = Object.assign({ id: ++state.lockSeq, rec, startedAt: now(), dur: scaleMs(forced ? LOCK_MS : lockDuration(rec)), phase: 'warn',
       onEnemy: modeLockOnEnemy(), frozen: false, cx: 0, cy: 0, w: 0, h: 0, beeped: '', done: false, forced: !!forced, coverAt: 0, tagWeapon: null,
       hp0: hpOf(rec.el).hp, tagText: null, coveredNow: null }, parts);
     const a = lockAnchor(lk);
@@ -110,7 +112,7 @@
       if (rec.phase === 'lock') rec.phase = 'idle';
       dropAimLine(rec);
       try { rec.aura.classList.remove('crs-lock-imminent'); } catch (e) { /* ignore */ }
-      if (keepRecover) rec.lockReadyAt = now() + LOCK_RECOVER_MS;
+      if (keepRecover) rec.lockReadyAt = now() + scaleMs(LOCK_RECOVER_MS);
     }
     try { cancelAnimsOf(lk.node); lk.node.remove(); } catch (e) { /* ignore */ }
   }
@@ -170,7 +172,7 @@
     }
     const r = rec;
     removeLock(lk, false);
-    if (r) { r.lockReadyAt = now() + LOCK_RECOVER_MS; if (state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }
+    if (r) { r.lockReadyAt = now() + scaleMs(LOCK_RECOVER_MS); if (state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }
   }
   /* A 150 ms red rim at the edge of the screen: quickdraw has no health bar to flash, so the failure still has
    * to land somewhere the player is looking. */

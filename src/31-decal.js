@@ -17,7 +17,8 @@
   let decalRaf = 0;
   let decalHold = 0;               // the hit element wobbles (reactDamage, 260 ms) — ride it out, see decalBusy()
 
-  function decalDpr() { return Math.min(win.devicePixelRatio || 1, 2); }
+  /* SPEC-settings §2.2: device pixels per CSS pixel, capped at 2 — 1.5 in performance mode. */
+  function decalDpr() { return Math.min(win.devicePixelRatio || 1, perfDprMax()); }
 
   /* The element a mark at (x, y) belongs to. pickTarget() is the SAME walk-up the weapons use to decide what
    * they damaged, so a mark always lands on exactly the element that took the hit. It returns null over the

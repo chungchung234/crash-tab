@@ -57,7 +57,11 @@
   const AIMLINE_MIN_MS = 220;        // an aim line stays visible at least this long (forced / zero wind-up)
   /* api.debug (A12): one plain object, survives toggles. v1.2 adds noSpread / noAttacks / fastReload /
    * infiniteAmmo and the hooks setPlayerHp / setPlayerPos / forceAttack (attached in section 12b). */
-  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false, hitstop: true };
+  /* SPEC-test-speed §3: `timeScale` is the one knob that shortens the product's own time constants so a test
+   * can prove an OUTCOME without paying its wall clock. Clamped to [0.05, 1] at every read (scaleMs()), so a
+   * test can only ever speed the product UP — never slow it down to hide a timing regression. Default 1, and
+   * `ms * 1 === ms` exactly, so a default run is numerically identical to one with no scaling at all. */
+  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false, hitstop: true, timeScale: 1 };
   const CAP = 160;                 // live debris pieces (A1)
   const MIN_EVICT_AGE = 800;       // ms (A1)
   const GPU_BUDGET = 64e6;         // sum of w*h*dpr^2 over live pieces (A1)

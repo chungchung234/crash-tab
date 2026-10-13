@@ -71,7 +71,9 @@
     node.style.transformOrigin = '0 50%';
     const ghost = mk('div', 'crs-repair-ghost');
     root.append(node, ghost);
-    const rp = { rec, el, node, ghost, startedAt: now(), dur: REPAIR_BEAM_MS, delays: 0, timer: 0, done: false, x1: 0, y1: 0, x2: 0, y2: 0 };
+    // SPEC-test-speed §3: "복구 빔 1.5초" — rp.dur is compared against now() in armRepairTimer(), so it carries
+    // the scale itself and the timer below is armed with laterRaw() to avoid scaling the remainder twice.
+    const rp = { rec, el, node, ghost, startedAt: now(), dur: scaleMs(REPAIR_BEAM_MS), delays: 0, timer: 0, done: false, x1: 0, y1: 0, x2: 0, y2: 0 };
     state.repairs.push(rp);
     placeRepairBeam(rp);
     // §10.4: a back-rank enemy drops its blur while it works, so you can see who is undoing your kills
@@ -84,7 +86,7 @@
   }
   function armRepairTimer(rp) {
     untrack(rp.timer);
-    rp.timer = later(() => { rp.timer = 0; completeRepair(rp); }, Math.max(0, rp.startedAt + rp.dur - now()));
+    rp.timer = laterRaw(() => { rp.timer = 0; completeRepair(rp); }, Math.max(0, rp.startedAt + rp.dur - now()));   // remainder is already scaled
   }
   function removeRepair(rp) {
     const i = state.repairs.indexOf(rp);
@@ -100,7 +102,7 @@
   function delayRepair(rp) {
     if (rp.done || rp.delays >= REPAIR_DELAY_MAX) return false;
     rp.delays++;
-    rp.dur += REPAIR_DELAY_MS;
+    rp.dur += scaleMs(REPAIR_DELAY_MS);   // same clock as rp.dur above
     armRepairTimer(rp);
     try { trackAnim(rp.node.animate([{ filter: 'brightness(2.4)' }, { filter: 'brightness(1)' }], { duration: 180, easing: 'ease-out' })); } catch (e) { /* ignore */ }
     sfx('clack');
