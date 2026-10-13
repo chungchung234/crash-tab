@@ -90,14 +90,20 @@ jobs:
           exit $rc
 
       - name: End-to-end tests
-        timeout-minutes: 15
+        timeout-minutes: 10
         # PUPPETEER_EXECUTABLE_PATH is deliberately left unset so puppeteer uses its
         # own Chrome for Testing download; suite C needs puppeteer >= 25 extensions.
         # CI=true makes test/e2e.js add --no-sandbox --disable-dev-shm-usage, which
         # GitHub-hosted Ubuntu runners require (unprivileged user namespaces are
         # restricted by AppArmor). Local runs keep the sandbox.
+        #
+        # The suite is four concurrent block lanes plus suites B and C (SPEC-test-speed §5):
+        # 86 s locally, and the whole CI job measured 1 m 47 s. The budget was 420 s back when
+        # the suite ran serially; 240 s is now generous and small enough that the runtime
+        # assertion means something again. CRS_LANES is left at its default (min(4, cores-1)),
+        # which a 4-core GitHub runner resolves to 3.
         env:
-          CRS_TIME_BUDGET_MS: '420000'
+          CRS_TIME_BUDGET_MS: '240000'
         run: node test/e2e.js
 
       - name: Upload test output on failure
