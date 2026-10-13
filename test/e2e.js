@@ -4879,7 +4879,14 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
     return (d && typeof d.pieceBoxes === 'function') ? d.pieceBoxes() : null;
   });
   // the same relation evictPieces() uses to decide what an eviction knocks loose: ≥ 40 % horizontal overlap
-  // with the supporting piece, and a bottom edge at or above that piece's top.
+  // with the supporting piece, and a bottom edge sitting ON that piece's top.
+  //
+  // "at or above the lower piece's top" is not enough to pick a pair: it also matches an upper piece
+  // floating 200 px higher that happens to share a column, and THAT piece is held up by something else,
+  // so retiring the lower one leaves it exactly where it was and the re-fall assertion fails for a reason
+  // that has nothing to do with eviction. Demand actual contact — the gap decides whether the lower piece
+  // is really the support — and the pair that gets picked is then the pair the assertion is about.
+  const CONTACT944 = 4;
   const findPair944 = (boxes) => {
     if (!Array.isArray(boxes)) return null;
     for (const lower of boxes) {
@@ -4888,7 +4895,8 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
         if (upper === lower || !upper.resting) continue;
         const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
         if (ov < 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l)) continue;
-        if (upper.bottom <= lower.top + 1) return { lower: lower.pid, upper: upper.pid, upperTop: upper.top };
+        const gap = lower.top - upper.bottom;
+        if (gap >= -1 && gap <= CONTACT944) return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
       }
     }
     return null;
