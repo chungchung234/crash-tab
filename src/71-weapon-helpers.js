@@ -55,7 +55,9 @@
   function rollSniperCrit(scoped) { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < critChanceOf('sniper', scoped)); }   // 헤드샷 (v1.2 §2, v1.5 §3)
   /* v1.3 §1: the power multiplier is gone. v1.5 §3: `mul` carries distance falloff and pierce attenuation. */
   function rollDamage(base, crit, mul) { return Math.max(1, Math.round(base * (crit ? 2 : 1) * (mul == null ? 1 : mul))); }
-  function reducedMotion() { try { return win.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+  /* SPEC-settings §3.1: the ONE motion question. `reduceMotion` is auto | on | off and `auto` is the OS
+   * preference — motionReduced() (src/96-a11y.js) resolves it; every call site here is unchanged. */
+  function reducedMotion() { return motionReduced(); }
   function weaponBtn(id) { return (hudEls.weaponBtns && hudEls.weaponBtns[id]) || null; }
   function willBreak(el, dmg) { if (!el) return false; const r = state.hp.get(el); return (r ? r.hp : hpMax(el)) - dmg <= 0; }
 

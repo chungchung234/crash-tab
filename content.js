@@ -72,7 +72,11 @@
   const AIMLINE_MIN_MS = 220;        // an aim line stays visible at least this long (forced / zero wind-up)
   /* api.debug (A12): one plain object, survives toggles. v1.2 adds noSpread / noAttacks / fastReload /
    * infiniteAmmo and the hooks setPlayerHp / setPlayerPos / forceAttack (attached in section 12b). */
-  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false, hitstop: true };
+  /* SPEC-test-speed §3: `timeScale` is the one knob that shortens the product's own time constants so a test
+   * can prove an OUTCOME without paying its wall clock. Clamped to [0.05, 1] at every read (scaleMs()), so a
+   * test can only ever speed the product UP — never slow it down to hide a timing regression. Default 1, and
+   * `ms * 1 === ms` exactly, so a default run is numerically identical to one with no scaling at all. */
+  const debug = { noCrit: false, forceCrit: false, noCooldown: false, noSpread: false, noAttacks: false, fastReload: false, infiniteAmmo: false, hitstop: true, timeScale: 1 };
   const CAP = 160;                 // live debris pieces (A1)
   const MIN_EVICT_AGE = 800;       // ms (A1)
   const GPU_BUDGET = 64e6;         // sum of w*h*dpr^2 over live pieces (A1)
@@ -115,6 +119,21 @@
   const randInt = (a, b) => Math.floor(rand(a, b + 1));
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const px = (v) => (Math.round(v * 100) / 100) + 'px';
+
+  /* ── SPEC-test-speed §3: the debug time scale ──────────────────────────────
+   * Spec names this pair `dur()`; it is `scaleMs()` here because `dur` is already a local variable in five
+   * product functions (32-material, 35-effects, 40-audio, 46-viewmodel, 65-pieces) and every fragment shares
+   * ONE closure — a top-level `dur` would be shadowed inside exactly the functions that schedule timers.
+   * Clamped to [0.05, 1]: a test may speed the product up, never slow it down. Non-numeric / NaN reads as 1. */
+  function timeScale() {
+    const s = Number(debug.timeScale);
+    return isFinite(s) ? clamp(s, 0.05, 1) : 1;
+  }
+  function scaleMs(ms) { return (typeof ms === 'number' && isFinite(ms)) ? ms * timeScale() : ms; }
+  /* Read-back for SPEC-test-speed §8 test 2: debug.scaledMs(3000) reports what the clamp actually applied,
+   * so a test can prove `timeScale = 2` behaves as 1 without timing a three-second lock to find out. */
+  debug.scaledMs = (ms) => scaleMs(ms);
+  debug.timeScaleNow = () => timeScale();
 
   /* safe(): run fn in try/catch; swallow promise rejections too (A3). */
   function safe(fn) {
@@ -186,7 +205,14 @@
     lockBlocked: '차단!', labelRatio: '파괴율', labelDominating: '제압!',
     hintCovered: '가려짐', hintPierce: '관통 가능', hintEnemyBehind: '뒤에 적',
     helpMove: '이동', helpDash: '대시', helpAim: '마우스로 조준',
-    setDebrisLife: '파편이 사라지는 시간'
+    setDebrisLife: '파편이 사라지는 시간',
+    // ── SPEC-settings §2.3 / §3.3 / §3.4: the only new strings content.js itself renders ──
+    // (the other setting labels are read from settings-schema.json by the options page, step 10)
+    setPerfMode: '성능 모드', perfBadge: '성능 모드',
+    toastKeyboardAim: '키보드 조준: 방향키로 이동 · Space 발사 · Enter 조준경 · Tab 다음 대상',
+    a11yWeapon: '무기', a11yReloadStart: '재장전 시작', a11yReloadDone: '재장전 완료',
+    a11yMode: '모드', a11yKo: '패배', a11yRepair: '복구',
+    a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));
@@ -271,10 +297,15 @@
   let canvasCssW = 0, canvasCssH = 0, canvasSX = 1, canvasSY = 1;
 
   function track(timerId) { state.timers.add(timerId); return timerId; }
-  function later(fn, ms) {
+  /* laterRaw() takes a delay that is ALREADY in real milliseconds — a remaining time computed against a
+   * deadline that scaleMs() has already shortened (reload progress, repair beams, the combat grace). Passing
+   * one of those through later() would scale it a second time. Everything else uses later(). */
+  function laterRaw(fn, ms) {
     const id = setT(() => { state.timers.delete(id); try { fn(); } catch (e) { state.lastError = String((e && e.stack) || e); } }, ms);   // deferred paths surface in stats().lastError too
     return track(id);
   }
+  /* SPEC-test-speed §3: the single choke point for the product's 76 timers. */
+  function later(fn, ms) { return laterRaw(fn, scaleMs(ms)); }
   /* Cancel a timer created by later() and forget its id (plain clearT() would leave the id in the Set). */
   function untrack(id) {
     if (!id) return;
@@ -294,6 +325,585 @@
     }
   }
   function sendState(active) { safe(() => chrome.runtime.sendMessage({ type: 'crash:state', active: !!active })); }
+
+// ── 21-settings.js ──
+  /* ===================================================================== */
+  /* 1b. Settings (SPEC-settings §1)                                        */
+  /*                                                                        */
+  /* ONE schema file, read by TWO consumers: tools/build.js inlines          */
+  /* settings-schema.json at the /*@SETTINGS_SCHEMA@*\/ marker below as a    */
+  /* frozen literal, and the options page (roadmap step 10) fetches the      */
+  /* very same file through chrome.runtime.getURL(). Neither one owns a      */
+  /* second copy of the defaults.                                           */
+  /*                                                                        */
+  /* The marker is replaced by `Object.freeze([ …entries… ])`. It is wrapped */
+  /* in [].concat(…) so this source file still PARSES on its own when the    */
+  /* schema file is absent (build.js then only warns): the unresolved form   */
+  /* is Object.freeze([].concat()) — a frozen empty schema.                  */
+  /* ===================================================================== */
+  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","quickdraw","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
+  const SETTING_GROUPS = ['general', 'combat', 'accessibility', 'advanced'];
+  /* chrome.storage.sync keys are namespaced `crs.<key>` so they can never collide with the v1 flat keys
+   * (crsWeapon, crsMuted, …) that §1.2 migrates away from. Only big things go to `local` — the one that
+   * exists today is crsSeenCombatHelp (v1.4 §5), which is deliberately per-machine and is NOT a setting. */
+  const SETTING_PREFIX = 'crs.';
+  const SETTING_MIGRATED = 'crs.migrated';   // schema version the stored data was migrated to
+  const SETTINGS_VERSION = 1;
+
+  const SETTING_BY_KEY = Object.create(null);
+  const settings = Object.create(null);          // key -> resolved value (schema default until something says otherwise)
+  const settingsExplicit = new Set();            // keys that storage (or a runtime write) actually carries
+  const settingsMeta = { loaded: false, subscribed: false, migrated: false, legacyPresent: new Set() };
+
+  for (const e of SETTINGS_SCHEMA) {
+    if (!e || typeof e.key !== 'string') continue;
+    SETTING_BY_KEY[e.key] = e;
+    settings[e.key] = e.default;
+  }
+
+  /* ---- validation (the same rules tools/validate.js R10 enforces on the file) ---- */
+  function settingValid(entry, v) {
+    if (!entry) return false;
+    if (entry.type === 'bool') return typeof v === 'boolean';
+    if (entry.type === 'enum') return Array.isArray(entry.options) && entry.options.indexOf(v) !== -1;
+    if (entry.type === 'string') return typeof v === 'string';
+    if (entry.type === 'int') {
+      if (typeof v !== 'number' || !isFinite(v) || Math.floor(v) !== v) return false;
+      if (Number.isInteger(entry.min) && v < entry.min) return false;
+      if (Number.isInteger(entry.max) && v > entry.max) return false;
+      return true;
+    }
+    if (entry.type === 'number') {
+      if (typeof v !== 'number' || !isFinite(v)) return false;
+      if (typeof entry.min === 'number' && v < entry.min) return false;
+      if (typeof entry.max === 'number' && v > entry.max) return false;
+      return true;
+    }
+    return false;
+  }
+  function settingShow(v) {
+    try { return typeof v === 'string' ? JSON.stringify(v) : String(v); } catch (e) { return '?'; }
+  }
+  /* §1.3: "잘못된 값은 무시하고 stats().lastError 에 남긴다" — never thrown, never stored, always reported. */
+  function settingFail(text) {
+    state.lastError = 'settings: ' + text;
+    return false;
+  }
+  function settingsGet(key) {
+    const e = SETTING_BY_KEY[key];
+    if (!e) return undefined;
+    const v = settings[key];
+    return settingValid(e, v) ? v : e.default;
+  }
+  function settingBool(key) { return settingsGet(key) === true; }
+  function settingsNow() {
+    const out = {};
+    for (const k of Object.keys(SETTING_BY_KEY)) out[k] = settingsGet(k);
+    return out;
+  }
+  /* The schema itself, for the options page and for tests. A copy: nothing outside may mutate it. */
+  function settingsSchema() {
+    return SETTINGS_SCHEMA.map((e) => Object.assign({}, e, Array.isArray(e.options) ? { options: e.options.slice() } : null));
+  }
+
+  /* ---- §1.2: the v1 flat keys this schema absorbs ----------------------------
+   * Every one of these is still READ and WRITTEN by the v1 code paths (loadPrefs, setWeapon, setMuted,
+   * persistMode, setDebrisAnchor, setWeaponOption, setLoadout). They are kept as a compatibility MIRROR
+   * for one release: the wrappers in src/99-api.js push each legacy write into the matching setting too,
+   * so the two never disagree, and `settingsApply()` defers to the legacy key for as long as one is
+   * present in storage — which makes the two async reads (loadPrefs' and this module's) order-independent.
+   * `crsLoadout` (an array) and `crsSeenCombatHelp` (local, per machine) have no schema type and stay put. */
+  const LEGACY_READ = {
+    mode: (res) => {
+      if (MODES.indexOf(res.crsMode) !== -1) return res.crsMode;
+      if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'quickdraw' : 'rampage';
+      return undefined;
+    },
+    defaultWeapon: (res) => {
+      const w = migrateWeaponId(res.crsWeapon);
+      return WEAPON_IDS.indexOf(w) !== -1 ? w : undefined;
+    },
+    loadoutPreset: (res) => (typeof res.crsLoadoutPreset === 'string' ? res.crsLoadoutPreset : undefined),
+    debrisAnchor: (res) => (res.crsDebrisAnchor === 'viewport' || res.crsDebrisAnchor === 'document' ? res.crsDebrisAnchor : undefined),
+    debrisLifeMs: (res) => (typeof res.crsDebrisLifeMs === 'number' ? res.crsDebrisLifeMs : (typeof res.crsDebrisLife === 'number' ? res.crsDebrisLife : undefined)),
+    muted: (res) => (typeof res.crsMuted === 'boolean' ? res.crsMuted : undefined),
+    weaponArt: (res) => (WEAPON_ART_MODES.indexOf(res.crsWeaponArt) !== -1 ? res.crsWeaponArt : undefined),
+    viewmodel: (res) => (typeof res.crsViewmodel === 'boolean' ? res.crsViewmodel : undefined)
+  };
+  const LEGACY_KEYS_OF = {
+    mode: ['crsMode', 'crsCombat'],
+    defaultWeapon: ['crsWeapon'],
+    loadoutPreset: ['crsLoadoutPreset'],
+    debrisAnchor: ['crsDebrisAnchor'],
+    debrisLifeMs: ['crsDebrisLifeMs', 'crsDebrisLife'],
+    muted: ['crsMuted'],
+    weaponArt: ['crsWeaponArt'],
+    viewmodel: ['crsViewmodel']
+  };
+  /* Removed outright (v1.3 §1): never read again, dropped on sight. */
+  const LEGACY_DEAD = ['crsPower'];
+  /* crsLoadoutPreset is the ONE v1 key the migration does not delete: it names the preset for `crsLoadout`,
+   * an ARRAY that no schema type can hold and that therefore has to stay where it is. Dropping its name
+   * while keeping the order would make every stored loadout read back as 'custom'. */
+  const LEGACY_KEEP = ['crsLoadoutPreset'];
+  function legacyKeyList() {
+    const out = LEGACY_DEAD.slice();
+    for (const k of Object.keys(LEGACY_KEYS_OF)) for (const n of LEGACY_KEYS_OF[k]) out.push(n);
+    return out;
+  }
+  function legacyRemovableKeys() { return legacyKeyList().filter((n) => LEGACY_KEEP.indexOf(n) === -1); }
+  function legacyWritePatch(key, value) {
+    if (key === 'mode') return { crsMode: value, crsCombat: value !== 'rampage' };
+    if (key === 'defaultWeapon') return { crsWeapon: value };
+    if (key === 'loadoutPreset') return { crsLoadoutPreset: value };
+    if (key === 'debrisAnchor') return { crsDebrisAnchor: value };
+    if (key === 'debrisLifeMs') return { crsDebrisLifeMs: value, crsDebrisLife: value };
+    if (key === 'muted') return { crsMuted: value };
+    if (key === 'weaponArt') return { crsWeaponArt: value };
+    if (key === 'viewmodel') return { crsViewmodel: value };
+    return null;
+  }
+
+  /* ---- applying one setting to the live page ---------------------------------
+   * Every branch is idempotent and silent: it never writes storage and never toasts, so it is safe to run
+   * from a storage event raised by another tab. The ones with no branch here (mode / defaultWeapon /
+   * loadoutPreset / debrisAnchor on a legacy-owned load) are applied by the v1 paths instead. */
+  function settingApply(key, value) {
+    try {
+      if (key === 'mode') { if (value !== state.mode) setPlayMode(value, { silent: true }); }
+      else if (key === 'defaultWeapon') { if (!state.weaponTouched && value !== state.weapon) setWeapon(value, { silent: true }); }
+      else if (key === 'loadoutPreset') { if (!state.loadoutTouched && PRESETS[value]) setLoadout(PRESETS[value], { preset: value, silent: true }); }
+      else if (key === 'debrisAnchor') setDebrisAnchor(value, true);
+      else if (key === 'debrisLifeMs') applyDebrisLife(value);
+      else if (key === 'debrisCap') enforceCap(0, 0);
+      else if (key === 'soundVolume') applySoundVolume();
+      else if (key === 'muted') {
+        if (!!value !== !!state.muted) {
+          state.muted = !!value;
+          if (state.muted) stopLoop(); else if (state.hold && state.hold.id === 'flame') { ensureAudio(); startLoop(); }
+          updateHud();
+        }
+      }
+      else if (key === 'weaponArt') { if (WEAPON_ART_MODES.indexOf(value) !== -1) { wpnOpts.weaponArt = value; applyWeaponOpts(); } }
+      else if (key === 'viewmodel') { wpnOpts.viewmodel = !!value; applyWeaponOpts(); }
+      else if (key === 'combatDifficulty') debug.difficulty = value;
+      else if (key === 'perfMode') perfResolve(true);
+      else if (key === 'reduceMotion') a11yMotionChanged();
+      else if (key === 'highContrastMarkers') a11yContrastChanged();
+      else if (key === 'keyboardAim') a11yAimChanged();
+    } catch (e) { /* a page that fights back must never break a settings write */ }
+  }
+  /* The runtime half of api.setDebrisLife(), with no storage write of its own. */
+  function applyDebrisLife(ms) {
+    ms = +ms;
+    if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;
+    state.debrisLifeMs = ms;
+    for (const p of state.pieces) if (p.resting) p.expireAt = ms > 0 ? now() + ms + rand(-DEBRIS_JITTER, DEBRIS_JITTER) : 0;
+    scheduleDebrisSweep();
+    return state.debrisLifeMs;
+  }
+  function soundGain() { return clamp(settingsGet('soundVolume') / 100, 0, 1); }
+  function applySoundVolume() {
+    if (!audio.master) return;
+    try { audio.master.gain.value = soundGain(); } catch (e) { /* ignore */ }
+  }
+  /* Push every setting onto the live page. `opts.all` ignores the legacy-defers rule (used after a write,
+   * where the caller already knows the setting is the authority). */
+  function settingsApply(opts) {
+    const all = !!(opts && opts.all);
+    for (const key of Object.keys(SETTING_BY_KEY)) {
+      if (!all) {
+        if (!settingsExplicit.has(key)) continue;                 // never fight a default with a default
+        if (settingsMeta.legacyPresent.has(key)) continue;         // the v1 path still owns this one this load
+      }
+      settingApply(key, settingsGet(key));
+    }
+  }
+
+  /* ---- storage ---------------------------------------------------------------
+   * One read per page (not per activation): the IIFE body runs once, `window.__crashScreen.toggle()`
+   * short-circuits every later injection, and chrome.storage.onChanged keeps the cache fresh from then on.
+   * That is what stops the read from racing the first frame — by the second activation the values are
+   * already in memory and apply synchronously. */
+  function settingsRead(cb) {
+    const want = Object.keys(SETTING_BY_KEY).map((k) => SETTING_PREFIX + k);
+    want.push(SETTING_MIGRATED);
+    safeThen(() => chrome.storage.sync.get(want.concat(legacyKeyList())), (res) => {
+      res = res || {};
+      settingsMeta.migrated = res[SETTING_MIGRATED] >= SETTINGS_VERSION;
+      settingsMeta.legacyPresent.clear();
+      /* 1. adopt whatever the v1 flat keys still hold (this is the migration READ half) */
+      for (const key of Object.keys(LEGACY_READ)) {
+        if (!LEGACY_KEYS_OF[key].some((n) => res[n] !== undefined)) continue;
+        let v = LEGACY_READ[key](res);
+        if (key === 'debrisLifeMs' && typeof v === 'number' && !settingValid(SETTING_BY_KEY[key], v)) v = nearestDebrisLife(v);
+        if (v === undefined || !settingValid(SETTING_BY_KEY[key], v)) continue;   // a junk v1 value is simply not adopted
+        settings[key] = v; settingsExplicit.add(key);
+        settingsMeta.legacyPresent.add(key);   // the v1 path owns this key for as long as its key is on disk
+      }
+      /* 2. the namespaced keys win over the legacy ones they replaced */
+      for (const key of Object.keys(SETTING_BY_KEY)) {
+        const v = res[SETTING_PREFIX + key];
+        if (v === undefined) continue;
+        if (!settingValid(SETTING_BY_KEY[key], v)) continue;       // a stored value that no longer validates is ignored
+        if (settingsMeta.legacyPresent.has(key)) { settingsExplicit.add(key); continue; }   // the v1 key still on disk wins this load
+        settings[key] = v; settingsExplicit.add(key);
+      }
+      settingsMeta.loaded = true;
+      settingsMigrate(res);
+      settingsApply();
+      try { if (cb) cb(); } catch (e) { /* ignore */ }
+    });
+  }
+  function nearestDebrisLife(ms) {
+    const opts = SETTING_BY_KEY.debrisLifeMs ? SETTING_BY_KEY.debrisLifeMs.options : null;
+    if (!Array.isArray(opts) || !opts.length) return ms;
+    let best = opts[0];
+    for (const o of opts) if (Math.abs(o - ms) < Math.abs(best - ms)) best = o;
+    return best;
+  }
+  /* §1.3: "구 키 마이그레이션은 한 번만 돌고 구 키를 지운다." The adopted values are written under their
+   * new names, the marker is stamped, and the flat keys are dropped. chrome.storage.sync.remove() is wrapped
+   * in safe() because a storage shim without it (the e2e harness) must leave the keys exactly where they are
+   * rather than taking the whole load down. */
+  function settingsMigrate(res) {
+    if (settingsMeta.migrated) return;
+    const patch = {};
+    for (const key of settingsMeta.legacyPresent) {
+      if (res[SETTING_PREFIX + key] !== undefined) continue;        // already carried over on an earlier run
+      if (!settingsExplicit.has(key)) continue;
+      patch[SETTING_PREFIX + key] = settings[key];
+    }
+    patch[SETTING_MIGRATED] = SETTINGS_VERSION;
+    settingsMeta.migrated = true;
+    safe(() => chrome.storage.sync.set(patch));
+    const removing = safe(() => chrome.storage.sync.remove(legacyRemovableKeys()));
+    /* The v1 keys are going away in this same tick, so the settings layer has to take ownership NOW — the
+     * other async read in flight (loadPrefs') may land on either side of the delete, and leaving the keys
+     * marked "legacy-owned" would make THIS one load fall back to the hard defaults. Anything whose only v1
+     * key is kept on purpose (loadoutPreset, paired with the crsLoadout array) stays with the v1 path.
+     * When remove() is unavailable the keys survive, which is exactly when deferring to them is still right. */
+    if (removing !== undefined) {
+      for (const key of Object.keys(LEGACY_KEYS_OF)) {
+        if (LEGACY_KEYS_OF[key].every((n) => LEGACY_KEEP.indexOf(n) !== -1)) continue;
+        settingsMeta.legacyPresent.delete(key);
+      }
+    }
+  }
+  /* §1.3: an options tab writing a value must land on every open page WITHOUT re-activation. */
+  function settingsSubscribe() {
+    if (settingsMeta.subscribed) return;
+    const ok = safe(() => {
+      chrome.storage.onChanged.addListener(settingsChanged);
+      return true;
+    });
+    settingsMeta.subscribed = !!ok;
+  }
+  function settingsChanged(changes, area) {
+    if (area && area !== 'sync') return;
+    if (!changes || typeof changes !== 'object') return;
+    for (const name of Object.keys(changes)) {
+      if (name.slice(0, SETTING_PREFIX.length) !== SETTING_PREFIX) continue;
+      const key = name.slice(SETTING_PREFIX.length);
+      const entry = SETTING_BY_KEY[key];
+      if (!entry) continue;
+      const nv = changes[name] ? changes[name].newValue : undefined;
+      if (nv === undefined) {                                      // the key was deleted: fall back to the default
+        settings[key] = entry.default;
+        settingsExplicit.delete(key);
+        settingsMeta.legacyPresent.delete(key);
+        settingApply(key, entry.default);
+        continue;
+      }
+      if (!settingValid(entry, nv)) { settingFail('ignored an invalid stored value for "' + key + '": ' + settingShow(nv)); continue; }
+      if (settings[key] === nv && settingsExplicit.has(key)) continue;
+      settings[key] = nv;
+      settingsExplicit.add(key);
+      settingsMeta.legacyPresent.delete(key);                      // an explicit write retires the v1 key for good
+      settingApply(key, nv);
+    }
+  }
+
+  /* ---- the two public entry points (§1.3) ---- */
+  function setSettingValue(key, value) {
+    const entry = SETTING_BY_KEY[key];
+    if (!entry) return settingFail('unknown key ' + settingShow(key));
+    if (!settingValid(entry, value)) return settingFail('invalid value for "' + key + '": ' + settingShow(value));
+    settings[key] = value;
+    settingsExplicit.add(key);
+    settingsMeta.legacyPresent.delete(key);
+    const patch = {};
+    patch[SETTING_PREFIX + key] = value;
+    const mirror = legacyWritePatch(key, value);                   // one release of compatibility; see LEGACY_READ
+    if (mirror) Object.assign(patch, mirror);
+    safe(() => chrome.storage.sync.set(patch));
+    settingApply(key, value);
+    return true;
+  }
+  /* Used by the v1 setters (wrapped in src/99-api.js): the user changed something through the HUD or a
+   * hotkey, so the namespaced key has to follow or the next load would resurrect the old value. */
+  function settingsMirror(key, value) {
+    const entry = SETTING_BY_KEY[key];
+    if (!entry || !settingValid(entry, value)) return false;
+    if (settings[key] === value && settingsExplicit.has(key)) return true;
+    settings[key] = value;
+    settingsExplicit.add(key);
+    settingsMeta.legacyPresent.delete(key);
+    const patch = {};
+    patch[SETTING_PREFIX + key] = value;
+    safe(() => chrome.storage.sync.set(patch));
+    return true;
+  }
+
+  /* settingsBoot() is called ONCE from src/99-api.js, after every module has been evaluated and before the
+   * first activate(). Reading at injection time rather than at activate() is what keeps the storage round
+   * trip from racing the first frame: by the second activation the values are already in memory and apply
+   * synchronously, and chrome.storage.onChanged keeps them fresh in between. */
+  function settingsBoot() {
+    settingsSubscribe();
+    settingsRead();
+  }
+
+// ── 22-perf.js ──
+  /* ===================================================================== */
+  /* 1c. Performance guard (SPEC-settings §2)                               */
+  /*                                                                        */
+  /* Three parts: a cheap measurement (§2.1), one table of things that come  */
+  /* down in `performance` mode (§2.2), and a memoised candidate walk with   */
+  /* a MutationObserver behind it (§2.3). Every consumer asks a function     */
+  /* here instead of reading a constant, so the guard never has to reach     */
+  /* into another module's state.                                           */
+  /* ===================================================================== */
+  const PERF_SAMPLE_MS = 10000;      // §2.1: re-measure every 10 s while active
+  const PERF_FRAMES = 30;            // §2.1: average tick() cost over the last 30 frames
+  const PERF_ELEMENTS = 8000;        // §2.1: element count above which `auto` picks performance
+  const PERF_TICK_MS = 8;            // §2.1: average tick cost above which `auto` picks performance
+  /* §2.2 — the downgrade table. Where the current default already differs from the figure the spec quotes
+   * in its "기본" column, the DEFAULT is left exactly as it ships (changing it would be a behaviour change,
+   * not a performance guard) and only the `performance` figure is applied:
+   *   piece cap        the debrisCap setting (160)      → min(setting, 80)
+   *   decal cap        40                               → 12      (src/31-decal.js)
+   *   text split       descendants 200 / tokens 80      → 120 / 40
+   *   clone compare    400 descendants                  → 150
+   *   enemy selection  1500 ms (ships as 1500, not 900) → 2500 ms
+   *   concurrent enemies  up to 5                       → 2
+   *   particles        40 live (ships as 40, not 60)    → 30
+   *   crack strands    ×1.0                             → ×0.7
+   *   canvas DPR       max 2                            → max 1.5                                        */
+  const PERF_PIECE_CAP = 80;
+  const PERF_TEXT_DESCENDANTS = 120, TEXT_DESCENDANTS = 200;
+  const PERF_TEXT_TOKENS = 40, TEXT_TOKENS = 80;
+  const PERF_CLONE_CAP = 150;
+  const PERF_SELECT_MS = 2500, SELECT_MS = 1500;
+  const PERF_MAX_HOSTILES = 2;
+  const PERF_PARTICLE_CAP = 30, PARTICLE_CAP = 40;
+  const PERF_CRACK_MUL = 0.7;
+  const PERF_DPR = 1.5, QUALITY_DPR = 2;
+
+  /* `state.perf` is the published reading (src/31-decal.js already consults it). `mode` is the EFFECTIVE
+   * mode — what everything downgrades against — while the setting stays auto | quality | performance. */
+  state.perf = { mode: 'quality', elements: 0, avgTickMs: 0, auto: 'quality' };
+  state.perfTimer = 0;
+  const perfFrames = new Float64Array(PERF_FRAMES);
+  let perfFrameN = 0, perfFrameI = 0;
+
+  function perfMode() { return state.perf.mode; }
+  function perfOn() { return state.perf.mode === 'performance'; }
+  function perfAvgTick() {
+    if (!perfFrameN) return 0;
+    let s = 0;
+    const n = Math.min(perfFrameN, PERF_FRAMES);
+    for (let i = 0; i < n; i++) s += perfFrames[i];
+    return s / n;
+  }
+  /* Every frame feeds the average. tickFrame() is wrapped rather than edited so src/92-tick.js stays the
+   * physics loop and nothing else; a frame that throws still records its cost (try/finally) and still throws. */
+  const tickFrameBase = tickFrame;
+  tickFrame = function (t) {
+    const t0 = now();
+    try { return tickFrameBase(t); }
+    finally {
+      perfFrames[perfFrameI] = now() - t0;
+      perfFrameI = (perfFrameI + 1) % PERF_FRAMES;
+      perfFrameN++;
+    }
+  };
+
+  function perfElements() {
+    try { return doc.getElementsByTagName('*').length; } catch (e) { return 0; }
+  }
+  /* §2.1: auto picks performance above 8000 elements OR above an 8 ms average tick; quality / performance
+   * are forced values. Returns true when the effective mode changed. */
+  function perfResolve(remeasure) {
+    const p = state.perf;
+    if (remeasure) { p.elements = perfElements(); p.avgTickMs = perfAvgTick(); }
+    /* the 8 ms rule is an average over 30 frames (§2.1) — judging it on three noisy ones would flip the
+     * whole page into performance mode because one frame happened to be descheduled */
+    const tickSays = perfFrameN >= PERF_FRAMES && p.avgTickMs > PERF_TICK_MS;
+    p.auto = (p.elements > PERF_ELEMENTS || tickSays) ? 'performance' : 'quality';
+    const want = settingsGet('perfMode');
+    const next = (want === 'quality' || want === 'performance') ? want : p.auto;
+    if (next === p.mode) { perfBadgeSync(); return false; }
+    p.mode = next;
+    perfBadgeSync();
+    /* the piece cap may have just come down; evict down to it rather than waiting for the next break */
+    try { enforceCap(0, 0); } catch (e) { /* ignore */ }
+    try { updateHud(); } catch (e) { /* ignore */ }
+    return true;
+  }
+  function perfTick() {
+    state.perfTimer = 0;
+    if (!state.active) return;
+    perfResolve(true);
+    state.perfTimer = later(perfTick, PERF_SAMPLE_MS);
+  }
+  function perfArm() {
+    untrack(state.perfTimer); state.perfTimer = 0;
+    if (!state.active) return;
+    state.perfTimer = later(perfTick, PERF_SAMPLE_MS);
+  }
+  function perfStart() {
+    perfFrameN = 0; perfFrameI = 0;
+    perfResolve(true);          // §2.1: measured once at activation, then every 10 s
+    walkObserve();
+    perfArm();
+  }
+  function perfStop() {
+    untrack(state.perfTimer); state.perfTimer = 0;
+    walkUnobserve();
+    perfBadgeDrop();
+  }
+  function perfInfo() {
+    return { mode: state.perf.mode, elements: state.perf.elements, avgTickMs: Math.round(state.perf.avgTickMs * 100) / 100, cap: pieceCap() };
+  }
+
+  /* ---- §2.2 the downgrade table, one accessor per row ---- */
+  function pieceCap() {
+    const want = settingsGet('debrisCap');
+    const base = (typeof want === 'number' && want > 0) ? want : CAP;
+    return perfOn() ? Math.min(base, PERF_PIECE_CAP) : base;
+  }
+  function textDescendantCap() { return perfOn() ? PERF_TEXT_DESCENDANTS : TEXT_DESCENDANTS; }
+  function textTokenCap() { return perfOn() ? PERF_TEXT_TOKENS : TEXT_TOKENS; }
+  function cloneCapFor(base) { return perfOn() ? Math.min(base, PERF_CLONE_CAP) : base; }
+  function selectIntervalMs() { return perfOn() ? PERF_SELECT_MS : SELECT_MS; }
+  function particleCap() { return perfOn() ? PERF_PARTICLE_CAP : PARTICLE_CAP; }
+  function crackRayMul() { return perfOn() ? PERF_CRACK_MUL : 1; }
+  function perfDprMax() { return perfOn() ? PERF_DPR : QUALITY_DPR; }
+
+  /* ---- §2.3 the memoised candidate walk --------------------------------------
+   * walkCandidates() is the single most expensive thing the extension does on a big page: one BFS over the
+   * document per collapse, per enemy-selection tick and per repair pick. The TRAVERSAL is memoised for
+   * 300 ms, keyed by viewport size + round(scrollY / 100) (plus the option signature, because the three
+   * callers ask for different areas and a shared cache would hand one of them the other's answer). The
+   * distance to the impact point is NOT cached — it is recomputed per call from the cached rect, so a
+   * second call at a different point still sorts correctly while the walk itself runs once.
+   *
+   * A MutationObserver on document.body (childList + subtree, counter only) invalidates the cache the
+   * moment the page's structure changes, and deactivate() disconnects it. Our own nodes live under
+   * documentElement, not body, so debris never invalidates the cache it is not part of. */
+  const WALK_MEMO_MS = 300;
+  const WALK_MEMO_MAX = 4;
+  const walkMemo = new Map();          // sig -> { key, at, out }
+  const walkSkipIds = new WeakMap();
+  let walkSkipSeq = 0, walkEpoch = 0, walkMo = null;
+  /* Counters for the §2.4 cache assertion: calls vs. real traversals. `debug.scanCount` is the same
+   * number on the public debug object — a plain integer, so api.debug()'s flag copy picks it up — and it
+   * increments once per REAL traversal and never on a cache hit. */
+  const walkCount = { calls: 0, runs: 0 };
+  debug.scanCount = 0;
+
+  function walkSig(opts) {
+    let sid = 0;
+    const skip = opts && opts.skip;
+    if (skip) {
+      sid = walkSkipIds.get(skip) || 0;
+      if (!sid) { sid = ++walkSkipSeq; walkSkipIds.set(skip, sid); }
+    }
+    return Math.round((opts && opts.limit) || 0) + ':' + ((opts && opts.minArea) || 0) + ':' + (opts && opts.descendCollected ? 1 : 0) + ':' + sid;
+  }
+  function walkKey() {
+    let sy = 0;
+    try { sy = win.scrollY || win.pageYOffset || 0; } catch (e) { sy = 0; }
+    /* a skip() predicate reads live state (hostileSkip reads state.hostiles), so its answer changes when
+     * that set does — fold the size in so a stale list can never be handed back */
+    return viewW() + 'x' + viewH() + '@' + Math.round(sy / 100) + '#' + walkEpoch + '/' + state.hostiles.size;
+  }
+  function walkObserve() {
+    if (walkMo) return;
+    const body = doc.body;
+    if (!body) return;
+    try {
+      /* A COUNTER, as §2.3 asks — the records are never inspected. Our own nodes cannot reach it: the
+       * shield, the fx root and the HUD are all mounted on documentElement, not on body, so debris,
+       * decals and HUD churn never invalidate a cache they are not part of. */
+      walkMo = new MutationObserver(() => { walkEpoch++; });
+      walkMo.observe(body, { childList: true, subtree: true });
+    } catch (e) { walkMo = null; }
+  }
+  function walkUnobserve() {
+    if (walkMo) { try { walkMo.disconnect(); } catch (e) { /* ignore */ } walkMo = null; }
+    walkMemo.clear();
+  }
+  function walkCandidates(x, y, opts) {
+    opts = opts || {};
+    walkCount.calls++;
+    const sig = walkSig(opts), key = walkKey(), t = now();
+    let rec = walkMemo.get(sig);
+    if (!rec || rec.key !== key || t - rec.at > WALK_MEMO_MS) {
+      walkCount.runs++; debug.scanCount = (debug.scanCount || 0) + 1;
+      rec = { key, at: t, out: walkCandidatesRaw(x, y, opts) };
+      walkMemo.set(sig, rec);
+      while (walkMemo.size > WALK_MEMO_MAX) { const first = walkMemo.keys().next(); if (first.done) break; walkMemo.delete(first.value); }
+      /* the fresh walk already measured distance from (x, y) — hand the caller its own copy */
+      return rec.out.map(walkCopy);
+    }
+    const out = rec.out.map((c) => {
+      const o = walkCopy(c);
+      if (c.r) o.d = edgeDist(c.r, x, y);
+      return o;
+    });
+    out.sort((a, b) => a.d - b.d);
+    return out;
+  }
+  /* A fresh object per call: src/90-combat.js writes `c.w` onto the entries it is given. */
+  function walkCopy(c) { return { el: c.el, d: c.d, cx: c.cx, cy: c.cy, area: c.area, r: c.r }; }
+
+  /* ---- §2.3 the HUD badge shown while the guard has us in performance mode ---- */
+  function perfBadgeSync() {
+    const title = hudEls.title;
+    if (!title) return;
+    if (!perfOn()) { perfBadgeDrop(); return; }
+    let b = hudEls.perfBadge;
+    if (!b || !b.isConnected) {
+      try {
+        b = doc.createElement('span');
+        b.className = 'crs-perfbadge';
+        const s = b.style;
+        s.marginLeft = 'auto'; s.padding = '1px 6px'; s.borderRadius = '7px';
+        s.fontSize = '10px'; s.fontWeight = '700'; s.letterSpacing = '.2px';
+        s.background = 'rgba(255,178,36,.22)'; s.color = '#ffb224';
+        s.border = '1px solid rgba(255,178,36,.5)'; s.whiteSpace = 'nowrap';
+        title.append(b);
+        hudEls.perfBadge = b;
+      } catch (e) { return; }
+    }
+    try { b.textContent = '⚡ ' + msg('perfBadge'); b.title = msg('setPerfMode'); } catch (e) { /* ignore */ }
+  }
+  function perfBadgeDrop() {
+    const b = hudEls.perfBadge;
+    if (b) { try { b.remove(); } catch (e) { /* ignore */ } }
+    hudEls.perfBadge = null;
+  }
+
+  /* debug.perf(): the measurement and the cache counters in one place, for diagnosing a page that sits in
+   * the wrong mode. A function, so api.debug's flag-copying helpers skip it. */
+  debug.perf = () => Object.assign(perfInfo(), {
+    setting: settingsGet('perfMode'), auto: state.perf.auto,
+    walkCalls: walkCount.calls, walkRuns: walkCount.runs, walkCached: walkMemo.size, observing: !!walkMo
+  });
+  debug.perfResolve = () => perfResolve(true);
+  debug.walkReset = () => { walkCount.calls = 0; walkCount.runs = 0; debug.scanCount = 0; walkMemo.clear(); };
 
 // ── 25-layers.js ──
   /* ===================================================================== */
@@ -422,7 +1032,7 @@
     const ink = matOf(mat);
     const raysR = opts.rays || P.rays, lenScale = opts.lenScale || 1, lenR = opts.len || P.len;
     const gunlike = kind === 'gun' || kind === 'smg';
-    const nRays = Math.max(2, Math.round(randInt(raysR[0], raysR[1]) * M.rayMul));
+    const nRays = Math.max(2, Math.round(randInt(raysR[0], raysR[1]) * M.rayMul * crackRayMul()));   // SPEC-settings §2.2: ×0.7 in performance mode
     const rays = [], branches = [];
     let maxLen = 0;
     for (let i = 0; i < nRays; i++) {
@@ -730,7 +1340,8 @@
   let decalRaf = 0;
   let decalHold = 0;               // the hit element wobbles (reactDamage, 260 ms) — ride it out, see decalBusy()
 
-  function decalDpr() { return Math.min(win.devicePixelRatio || 1, 2); }
+  /* SPEC-settings §2.2: device pixels per CSS pixel, capped at 2 — 1.5 in performance mode. */
+  function decalDpr() { return Math.min(win.devicePixelRatio || 1, perfDprMax()); }
 
   /* The element a mark at (x, y) belongs to. pickTarget() is the SAME walk-up the weapons use to decide what
    * they damaged, so a mark always lands on exactly the element that took the hit. It returns null over the
@@ -1070,7 +1681,7 @@
   }
   function shake(mode, opts) {
     let a = (opts && opts.amp != null) ? opts.amp : (mode === 'bomb' || mode === 'collapse' ? 12 : (mode === 'gun' ? 2 : 6));
-    try { if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) a = 0; } catch (e) { /* ignore */ }
+    if (reducedMotion()) a = 0;   // SPEC-settings §3.1: reduced motion means amplitude 0, OS- or setting-driven
     if (!a || !root) return;
     try { if (state.shake) state.shake.cancel(); } catch (e) { /* ignore */ }
     const ang = rand(0, Math.PI * 2), ux = Math.cos(ang), uy = Math.sin(ang), vx = -uy, vy = ux;
@@ -1102,7 +1713,7 @@
       const AC = win.AudioContext || win.webkitAudioContext;
       if (!AC) return;
       const c = new AC();
-      const master = c.createGain(); master.gain.value = 0.28;
+      const master = c.createGain(); master.gain.value = soundGain();   // SPEC-settings §1.2: soundVolume (0–100, default 28)
       const comp = c.createDynamicsCompressor();
       comp.threshold.value = -12; comp.ratio.value = 6;
       master.connect(comp); comp.connect(c.destination);
@@ -3395,10 +4006,12 @@
    * — the page is NOT put back, only the litter is taken away. Under memory pressure a lifetime of "forever" is
    * still capped, because that is exactly when the floor is fullest. */
   function debrisLife() {
-    const pressure = state.pieces.length > CAP * 0.75 || state.gpuSum > GPU_BUDGET * 0.75;
+    const pressure = state.pieces.length > pieceCap() * 0.75 || state.gpuSum > GPU_BUDGET * 0.75;
     const want = state.debrisLifeMs;
-    if (pressure) return want > 0 ? Math.min(want, DEBRIS_PERF_MS) : DEBRIS_PERF_MS;
-    return want;
+    // SPEC-test-speed §3: "파편 수명" — expireAt is a timestamp comparison, not a later(), so it needs the scale
+    // of its own. 0 means "unlimited" and scaleMs(0) is 0, so that branch keeps its meaning.
+    if (pressure) return scaleMs(want > 0 ? Math.min(want, DEBRIS_PERF_MS) : DEBRIS_PERF_MS);
+    return scaleMs(want);
   }
   function scheduleDebrisSweep() {
     if (state.debrisTimer || !state.active) return;
@@ -3473,7 +4086,7 @@
     return s;
   }
   function enforceCap(incoming, incomingGpu) {
-    let need = state.pieces.length + incoming - CAP;
+    let need = state.pieces.length + incoming - pieceCap();   // SPEC-settings §1.2 debrisCap / §2.2 min(setting, 80)
     let gpu = state.gpuSum + (incomingGpu || 0);   // include the batch being added, not only what is live
     const overGpu = gpu > GPU_BUDGET;
     if (need <= 0 && !overGpu) return;
@@ -3537,7 +4150,7 @@
     if (txt.length < 2) return false;
     try { if (el.querySelector('img,video,canvas,svg,iframe,table,input,textarea,select,object,embed,picture')) return false; } catch (e) { return false; }
     if (countDescendants(el, 41) > 40) return false;
-    if (txt.split(/\s+/).length > 80) return false;
+    if (txt.split(/\s+/).length > textTokenCap()) return false;   // SPEC-settings §2.2: 80 tokens, 40 in performance mode
     return true;
   }
   function boxVisible(el) {
@@ -3570,7 +4183,7 @@
     const sx = rect.width / ow || 1, sy = rect.height / oh || 1;
     const sl = opts.splitLine ? { angle: opts.splitLine.angle, cx: (opts.splitLine.cx - rect.left) / sx, cy: (opts.splitLine.cy - rect.top) / sy } : null;
     const polys = splitRect(ow, oh, n, (ix - rect.left) / sx, (iy - rect.top) / sy, sl);
-    const cap = opts.cloneCap || (n >= 4 ? 150 : 400);
+    const cap = cloneCapFor(opts.cloneCap || (n >= 4 ? 150 : 400));   // SPEC-settings §2.2: 400 descendants, 150 in performance mode
     // Every piece gets its own cloneTree (a deep DOM copy would carry style attributes,
     // which a strict style-src CSP rejects on insertion); the computed-style diff of the
     // first piece is replayed on its siblings.
@@ -3797,7 +4410,7 @@
     if (!rect || rect.width < 1 || rect.height < 1) return false;
     const t0 = now();
     const tag = tagOf(el);
-    const descendants = countDescendants(el, 201);
+    const descendants = countDescendants(el, textDescendantCap() + 1);   // SPEC-settings §2.2: 200, 120 in performance mode
     const wantText = opts.textSplit !== false && textDominant(el);
     let made = 0;
     if (tag === 'video') { try { opts.wasPlaying = !el.paused; el.pause(); } catch (e) { /* ignore */ } }
@@ -3920,7 +4533,9 @@
   function rollSniperCrit(scoped) { return debug.forceCrit ? true : (debug.noCrit ? false : Math.random() < critChanceOf('sniper', scoped)); }   // 헤드샷 (v1.2 §2, v1.5 §3)
   /* v1.3 §1: the power multiplier is gone. v1.5 §3: `mul` carries distance falloff and pierce attenuation. */
   function rollDamage(base, crit, mul) { return Math.max(1, Math.round(base * (crit ? 2 : 1) * (mul == null ? 1 : mul))); }
-  function reducedMotion() { try { return win.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+  /* SPEC-settings §3.1: the ONE motion question. `reduceMotion` is auto | on | off and `auto` is the OS
+   * preference — motionReduced() (src/96-a11y.js) resolves it; every call site here is unchanged. */
+  function reducedMotion() { return motionReduced(); }
   function weaponBtn(id) { return (hudEls.weaponBtns && hudEls.weaponBtns[id]) || null; }
   function willBreak(el, dmg) { if (!el) return false; const r = state.hp.get(el); return (r ? r.hp : hpMax(el)) - dmg <= 0; }
 
@@ -4011,7 +4626,7 @@
   function onCooldown() { return !debug.noCooldown && now() < state.cooldownUntil; }
   function startCooldown(id, ms) {
     if (!(ms > 0) || debug.noCooldown) return;   // nothing recorded while cooldowns are disabled (a later flip starts clean)
-    state.cooldownUntil = now() + ms;
+    state.cooldownUntil = now() + scaleMs(ms);   // SPEC-test-speed §3: deadline comparison in onCooldown()
     if (ms < 500) return;   // the dim reads as a real timer only on axe / bomb / rocket / collapse
     try { const b = weaponBtn(id); if (b) trackAnim(b.animate([{ opacity: 0.55 }, { opacity: 1 }], { duration: ms, easing: 'linear' })); } catch (e) { /* ignore */ }
   }
@@ -4041,9 +4656,14 @@
     const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const i = state.dmgNodes.indexOf(n); if (i >= 0) state.dmgNodes.splice(i, 1); };
     try {
       const base = 'translate(-50%, -50%) ';
-      const kf = crit
-        ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: 1, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
-        : [{ transform: base + 'translateY(0px)', opacity: 1 }, { transform: base + 'translateY(-44px)', opacity: 0 }];
+      /* SPEC-settings §3.1: "피해 숫자가 이동 없이 페이드만" — reduced motion keeps the number (the
+       * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
+       * centring transform the node already carries is left exactly where it is. */
+      const kf = reducedMotion()
+        ? [{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0 }]
+        : (crit
+          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: 1, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
+          : [{ transform: base + 'translateY(0px)', opacity: 1 }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
       const a = trackAnim(n.animate(kf, { duration: 650, easing: 'ease-out', fill: 'forwards' }));
       a.addEventListener('finish', kill);
     } catch (e) { /* ignore */ }
@@ -4543,6 +5163,7 @@
     sfx('whoosh');
     if (!root) { rocketImpact(x, y); return null; }
     const sx = viewW() / 2, sy = viewH() + 20;
+    const flightMs = reducedMotion() ? 40 : 150;   // SPEC-settings §3.1: the flight is shortened, never skipped
     const ang = Math.atan2(y - sy, x - sx);
     const n = mk('div', 'crs-rocket');
     n.style.left = px(sx); n.style.top = px(sy); n.style.width = '28px'; n.style.height = '8px';
@@ -4552,11 +5173,12 @@
     const rot = ' translate(-50%, -50%) rotate(' + ang.toFixed(4) + 'rad)';
     n.style.transform = 'translate(0px, 0px)' + rot;
     root.append(n);
-    try { trackAnim(n.animate([{ transform: 'translate(0px, 0px)' + rot }, { transform: 'translate(' + px(x - sx) + ', ' + px(y - sy) + ')' + rot }], { duration: 150, easing: 'ease-in', fill: 'forwards' })); } catch (e) { /* ignore */ }
-    later(() => { try { n.remove(); } catch (e) { /* ignore */ } rocketImpact(x, y); }, 150);
+    try { trackAnim(n.animate([{ transform: 'translate(0px, 0px)' + rot }, { transform: 'translate(' + px(x - sx) + ', ' + px(y - sy) + ')' + rot }], { duration: flightMs, easing: 'ease-in', fill: 'forwards' })); } catch (e) { /* ignore */ }
+    later(() => { try { n.remove(); } catch (e) { /* ignore */ } rocketImpact(x, y); }, flightMs);
     return null;
   }
-  /* Fire particles (A9): 12–26 px radial gradients rising 30–60 px over 350–500 ms, cap 40 live. */
+  /* Fire particles (A9): 12–26 px radial gradients rising 30–60 px over 350–500 ms, cap 40 live
+   * (30 in performance mode, SPEC-settings §2.2; the COUNT is halved under reduced motion, §3.1). */
   function spawnFire(x, y, count) {
     if (!root) return;
     for (let i = 0; i < count; i++) {
@@ -4567,7 +5189,7 @@
       n.style.background = 'radial-gradient(circle, #ffd166 0%, #ff6b35 45%, rgba(255,107,53,0) 72%)';
       root.append(n);
       state.fire.push(n);
-      while (state.fire.length > 40) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
       const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(n); if (k >= 0) state.fire.splice(k, 1); };
       try {
         const an = trackAnim(n.animate([{ transform: 'translateY(0px) scale(1)', opacity: 0.95 }, { transform: 'translateY(' + px(-rand(30, 60)) + ') scale(.4)', opacity: 0 }], { duration: rand(350, 500), easing: 'ease-out', fill: 'forwards' }));
@@ -4599,7 +5221,9 @@
   /* One BFS for collapse AND the hostile picker (v1.2 A7). opts: { limit: max area to COLLECT, minArea,
    * descendCollected: keep walking into collected elements (hostile: nested cards), skip(el) }. Same visited
    * cap 2000 / out cap 60 / viewport-intersection and visibility rules as the v1 collapseCandidates. */
-  function walkCandidates(x, y, opts) {
+  /* The RAW traversal. src/22-perf.js wraps it as walkCandidates() with the §2.3 300 ms memo — every
+   * caller keeps calling walkCandidates() and gets the cache for free. */
+  function walkCandidatesRaw(x, y, opts) {
     const vw = viewW(), vh = viewH();
     const limit = opts.limit, minArea = opts.minArea || 0, deep = !!opts.descendCollected, skip = opts.skip || null;
     const out = [], queue = [];
@@ -4622,7 +5246,8 @@
       if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
       const area = r.width * r.height;
       if (area <= limit) {
-        if (area >= minArea && !(skip && skip(el))) out.push({ el, d: edgeDist(r, x, y), cx: r.left + r.width / 2, cy: r.top + r.height / 2, area });
+        // `r` rides along so the §2.3 memo can re-measure the distance from a new point without re-walking
+        if (area >= minArea && !(skip && skip(el))) out.push({ el, d: edgeDist(r, x, y), cx: r.left + r.width / 2, cy: r.top + r.height / 2, area, r: { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } });
         if (deep) descend(el);
         continue;
       }
@@ -4879,13 +5504,15 @@
     if (!state.active || !W || W.mag == null || state.reload) return false;
     if (state.ammo[id] >= W.mag) return false;
     scopeOff();
-    const ms = debug.fastReload ? 30 : W.reloadMs;
+    // SPEC-test-speed §3: scaled ONCE here, so reloadProgress (now() - startedAt) / r.ms, the button fade and
+    // both timers below all read the same clock. The timers therefore use laterRaw().
+    const ms = scaleMs(debug.fastReload ? 30 : W.reloadMs);
     const rec = { id, startedAt: now(), ms, timer: 0, magTimer: 0 };
     state.reload = rec;
     vmReload(ms);   // ── v1.5 §2.1: tilt down, drop the magazine, bring a fresh one up, across the whole reloadMs ──
     sfx('magout');
-    rec.magTimer = later(() => { rec.magTimer = 0; if (state.reload === rec) sfx('magin'); }, Math.round(ms * 0.8));
-    rec.timer = later(() => {
+    rec.magTimer = laterRaw(() => { rec.magTimer = 0; if (state.reload === rec) sfx('magin'); }, Math.round(ms * 0.8));
+    rec.timer = laterRaw(() => {
       rec.timer = 0;
       if (state.reload !== rec) return;
       state.reload = null;
@@ -5731,7 +6358,8 @@
     if (!p.startedAt) return 0;
     return Math.max(0, (state.paused ? p.pausedAt : now()) - p.startedAt - p.pausedTotal);
   }
-  function maxHostiles() { return combatElapsed() >= 60000 ? 5 : 3; }
+  /* SPEC-settings §2.2: performance mode holds the page to two live enemies whatever the clock says. */
+  function maxHostiles() { const n = combatElapsed() >= 60000 ? 5 : 3; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
   /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0). */
   function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1); }
@@ -5773,7 +6401,7 @@
     untrack(state.combatTimer); state.combatTimer = 0;
     untrack(state.clockTimer); state.clockTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
-    state.graceUntil = now() + GRACE_MS;
+    state.graceUntil = now() + scaleMs(GRACE_MS);   // SPEC-test-speed §3: "전투 유예" is a deadline, not a later()
     state.combatTimer = later(selectTick, GRACE_MS);
     state.clockTimer = later(clockTick, 1000);
     armDepthTick();          // v1.4 §10.1
@@ -5791,7 +6419,7 @@
   function selectTick() {
     state.combatTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
-    state.combatTimer = later(selectTick, 1500);
+    state.combatTimer = later(selectTick, selectIntervalMs());   // SPEC-settings §2.2: 1500 ms, 2500 ms in performance mode
     updatePlayerHud();
     const p = state.player;
     if (state.ko || !p.alive || debug.noAttacks || state.scoped || !p.inWindow) return;
@@ -6158,7 +6786,7 @@
     state.paused = false;
     state.player.pausedTotal += now() - state.player.pausedAt;
     if (!state.active || !state.combat) return;
-    state.combatTimer = later(selectTick, Math.max(1000, state.graceUntil - now()));
+    state.combatTimer = laterRaw(selectTick, Math.max(scaleMs(1000), state.graceUntil - now()));   // remainder already scaled
     untrack(state.clockTimer); state.clockTimer = later(clockTick, 1000);
     for (const rec of state.hostiles.values()) { scheduleAttack(rec, Math.max(1000, attackInterval(rec))); scheduleRepair(rec); }
     armDepthTick(); armRatioTick();   // v1.4 §10.1 / §3.2
@@ -7063,7 +7691,9 @@
     if (!forced && now() < (rec.lockReadyAt || 0)) return null;
     if (state.locks.length >= LOCK_MAX) return null;   // §2.2: three at a time, the oldest ones finish first
     const parts = buildLock();
-    const lk = Object.assign({ id: ++state.lockSeq, rec, startedAt: now(), dur: forced ? LOCK_MS : lockDuration(rec), phase: 'warn',
+    // SPEC-test-speed §3: "락온 3단계" — the three phases are fractions of lk.dur, so scaling the duration once
+    // here scales warn/close/imminent together and keeps their RATIOS exactly as §7.5 asserts them.
+    const lk = Object.assign({ id: ++state.lockSeq, rec, startedAt: now(), dur: scaleMs(forced ? LOCK_MS : lockDuration(rec)), phase: 'warn',
       onEnemy: modeLockOnEnemy(), frozen: false, cx: 0, cy: 0, w: 0, h: 0, beeped: '', done: false, forced: !!forced, coverAt: 0, tagWeapon: null,
       hp0: hpOf(rec.el).hp, tagText: null, coveredNow: null }, parts);
     const a = lockAnchor(lk);
@@ -7089,7 +7719,7 @@
       if (rec.phase === 'lock') rec.phase = 'idle';
       dropAimLine(rec);
       try { rec.aura.classList.remove('crs-lock-imminent'); } catch (e) { /* ignore */ }
-      if (keepRecover) rec.lockReadyAt = now() + LOCK_RECOVER_MS;
+      if (keepRecover) rec.lockReadyAt = now() + scaleMs(LOCK_RECOVER_MS);
     }
     try { cancelAnimsOf(lk.node); lk.node.remove(); } catch (e) { /* ignore */ }
   }
@@ -7149,7 +7779,7 @@
     }
     const r = rec;
     removeLock(lk, false);
-    if (r) { r.lockReadyAt = now() + LOCK_RECOVER_MS; if (state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }
+    if (r) { r.lockReadyAt = now() + scaleMs(LOCK_RECOVER_MS); if (state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }
   }
   /* A 150 ms red rim at the edge of the screen: quickdraw has no health bar to flash, so the failure still has
    * to land somewhere the player is looking. */
@@ -7291,7 +7921,9 @@
     node.style.transformOrigin = '0 50%';
     const ghost = mk('div', 'crs-repair-ghost');
     root.append(node, ghost);
-    const rp = { rec, el, node, ghost, startedAt: now(), dur: REPAIR_BEAM_MS, delays: 0, timer: 0, done: false, x1: 0, y1: 0, x2: 0, y2: 0 };
+    // SPEC-test-speed §3: "복구 빔 1.5초" — rp.dur is compared against now() in armRepairTimer(), so it carries
+    // the scale itself and the timer below is armed with laterRaw() to avoid scaling the remainder twice.
+    const rp = { rec, el, node, ghost, startedAt: now(), dur: scaleMs(REPAIR_BEAM_MS), delays: 0, timer: 0, done: false, x1: 0, y1: 0, x2: 0, y2: 0 };
     state.repairs.push(rp);
     placeRepairBeam(rp);
     // §10.4: a back-rank enemy drops its blur while it works, so you can see who is undoing your kills
@@ -7304,7 +7936,7 @@
   }
   function armRepairTimer(rp) {
     untrack(rp.timer);
-    rp.timer = later(() => { rp.timer = 0; completeRepair(rp); }, Math.max(0, rp.startedAt + rp.dur - now()));
+    rp.timer = laterRaw(() => { rp.timer = 0; completeRepair(rp); }, Math.max(0, rp.startedAt + rp.dur - now()));   // remainder is already scaled
   }
   function removeRepair(rp) {
     const i = state.repairs.indexOf(rp);
@@ -7320,7 +7952,7 @@
   function delayRepair(rp) {
     if (rp.done || rp.delays >= REPAIR_DELAY_MAX) return false;
     rp.delays++;
-    rp.dur += REPAIR_DELAY_MS;
+    rp.dur += scaleMs(REPAIR_DELAY_MS);   // same clock as rp.dur above
     armRepairTimer(rp);
     try { trackAnim(rp.node.animate([{ filter: 'brightness(2.4)' }, { filter: 'brightness(1)' }], { duration: 180, easing: 'ease-out' })); } catch (e) { /* ignore */ }
     sfx('clack');
@@ -7761,6 +8393,385 @@
     state.listeners.length = 0;
   }
 
+// ── 96-a11y.js ──
+  /* ===================================================================== */
+  /* 14b. Accessibility (SPEC-settings §3)                                  */
+  /*                                                                        */
+  /* §3.1 reduced motion, §3.2 markers that do not depend on colour,        */
+  /* §3.3 the keyboard aim cursor, §3.4 the screen-reader live region and   */
+  /* the KO dialog. Everything here is driven by three settings and is      */
+  /* fully reversible: deactivate() takes the cursor, the live region and   */
+  /* the document classes away with the rest of the HUD.                    */
+  /* ===================================================================== */
+
+  /* ---- §3.1 reduced motion ---------------------------------------------------
+   * `reducedMotion()` (src/71-weapon-helpers.js) is the ONE question thirty call sites ask, and it now asks
+   * this: the setting is auto | on | off, and `auto` is what the OS says. Nothing else had to change — the
+   * whole §3.1 list is already routed through that single predicate. */
+  function motionReduced() {
+    const want = settingsGet('reduceMotion');
+    if (want === 'on') return true;
+    if (want === 'off') return false;
+    try { return win.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
+  }
+  /* Anything that CACHED the answer has to be told. The frame-driven effects (shake, hitstop, damage numbers,
+   * rocket flight, fire particles, scope sway, lock brackets) re-ask on their next run and need nothing. */
+  function a11yMotionChanged() {
+    if (!state.active) return;
+    try { if (state.avatar) avatarWobble(state.avatar); } catch (e) { /* ignore */ }
+    try { ensureViewmodel(); } catch (e) { /* ignore */ }
+    try { for (const rec of state.hostiles.values()) if (rec.aura && rec.pulse !== undefined) setAuraPulse(rec, 900); } catch (e) { /* ignore */ }
+    try { if (reducedMotion()) { state.hitstopUntil = 0; if (state.shake) { state.shake.cancel(); state.shake = null; } } } catch (e) { /* ignore */ }
+  }
+  /* §3.1 "적대 오라 맥동이 정적 표시로": under reduced motion the aura stops breathing and simply stands at
+   * full strength — the information (this element is hostile) survives, the animation does not. */
+  const setAuraPulseBase = setAuraPulse;
+  setAuraPulse = function (rec, ms) {
+    if (!reducedMotion()) return setAuraPulseBase(rec, ms);
+    try {
+      if (rec.pulse) { rec.pulse.cancel(); state.anims.delete(rec.pulse); }
+      rec.pulse = null;
+      if (rec.aura) rec.aura.style.opacity = '1';
+    } catch (e) { rec.pulse = null; }
+  };
+  /* §3.1 "불꽃 입자 절반" — halved at the source, so every caller (flame tick, rocket impact) is covered. */
+  const spawnFireBase = spawnFire;
+  spawnFire = function (x, y, count) {
+    const n = reducedMotion() ? Math.max(1, Math.round(count / 2)) : count;
+    return spawnFireBase(x, y, n);
+  };
+
+  /* ---- §3.2 markers that do not depend on colour -----------------------------
+   * One class on <html> drives the stripe pattern and the solid hover / hostile outlines (content.css,
+   * `/* settings *\/` block); the ⚠ glyph and the always-visible health numbers are composed here. */
+  const HC_CLASS = 'crs-hcm';
+  function highContrast() { return settingBool('highContrastMarkers'); }
+  function a11yContrastSync() {
+    try { docEl.classList.toggle(HC_CLASS, !!(state.active && highContrast())); } catch (e) { /* ignore */ }
+  }
+  function a11yContrastChanged() {
+    a11yContrastSync();
+    try { for (const rec of state.hostiles.values()) setHostileLabel(rec); } catch (e) { /* ignore */ }
+    try { refreshHover(); } catch (e) { /* ignore */ }
+  }
+  /* The aura label is composed in ONE place (src/87-depth.js), so the ⚠ and the hp readout go on there. */
+  const setHostileLabelBase = setHostileLabel;
+  setHostileLabel = function (rec) {
+    setHostileLabelBase(rec);
+    if (!rec || !rec.label) return;
+    try {
+      if (!highContrast()) { if (rec.aura) rec.aura.classList.remove('crs-hc'); return; }
+      if (rec.aura) rec.aura.classList.add('crs-hc');
+      const h = hpOf(rec.el);
+      rec.label.textContent = '⚠ ' + rec.label.textContent + ' ' + Math.max(0, Math.round(h.hp)) + '/' + h.max;
+    } catch (e) { /* ignore */ }
+  };
+
+  /* ---- §3.3 the keyboard aim cursor ------------------------------------------
+   * A virtual cursor the arrow keys drive. It is the POINTER: everything downstream (hover highlight, the
+   * weapons, and in a mode where the cursor is the player, dodging) already reads state.hoverX/Y and
+   * state.player.x/y, so moving those two pairs is the whole feature.
+   *
+   * Survival is the collision §3.3 calls out: WASD already flies the drone there. When both are live the
+   * arrows aim and WASD moves — so the arrows are claimed here BEFORE src/95-events.js can read them as
+   * movement, and WASD is left alone. */
+  const KB_STEP = 20, KB_STEP_FINE = 5, KB_STEP_COARSE = 60;
+  const kbAim = { node: null, x: 0, y: 0, order: [], at: -1 };
+
+  function keyboardAim() { return settingBool('keyboardAim'); }
+  function kbArrowOf(c, k) {
+    if (c === 'ArrowUp' || k === 'ArrowUp') return 'up';
+    if (c === 'ArrowDown' || k === 'ArrowDown') return 'down';
+    if (c === 'ArrowLeft' || k === 'ArrowLeft') return 'left';
+    if (c === 'ArrowRight' || k === 'ArrowRight') return 'right';
+    return null;
+  }
+  function kbBuild() {
+    if (kbAim.node && kbAim.node.isConnected) return kbAim.node;
+    if (!root) return null;
+    const n = mk('div', 'crs-kbcursor');
+    root.append(n);
+    kbAim.node = n;
+    if (!(kbAim.x > 0) && !(kbAim.y > 0)) { kbAim.x = viewW() / 2; kbAim.y = viewH() / 2; }
+    kbPlace();
+    return n;
+  }
+  function kbClear() {
+    if (kbAim.node) { try { kbAim.node.remove(); } catch (e) { /* ignore */ } }
+    kbAim.node = null; kbAim.order.length = 0; kbAim.at = -1;
+  }
+  function kbPlace() {
+    const n = kbAim.node;
+    if (!n) return;
+    kbAim.x = clamp(kbAim.x, 0, Math.max(0, viewW() - 1));
+    kbAim.y = clamp(kbAim.y, 0, Math.max(0, viewH() - 1));
+    try { n.style.left = px(kbAim.x); n.style.top = px(kbAim.y); } catch (e) { /* ignore */ }
+    state.hoverX = kbAim.x; state.hoverY = kbAim.y;
+    state.overHud = false;
+    /* §3.3: "전투 모드에서는 이 가상 커서가 플레이어 위치가 되어 회피가 성립한다" — but only where the
+     * cursor IS the player. In survival the drone is, and trackPlayer() makes the same exception. */
+    if (!state.avatar) { state.player.x = kbAim.x; state.player.y = kbAim.y; state.player.inWindow = true; }
+    scheduleHover();
+  }
+  function kbMove(dir, e) {
+    const step = e && e.shiftKey ? KB_STEP_FINE : (e && e.altKey ? KB_STEP_COARSE : KB_STEP);
+    if (dir === 'up') kbAim.y -= step;
+    else if (dir === 'down') kbAim.y += step;
+    else if (dir === 'left') kbAim.x -= step;
+    else if (dir === 'right') kbAim.x += step;
+    kbAim.at = -1;
+    kbPlace();
+  }
+  /* Tab / Shift+Tab walk the aimable candidates in DOCUMENT order and snap the cursor to the middle of each. */
+  function kbTargets() {
+    const out = [];
+    const vw = viewW(), vh = viewH();
+    let list = [];
+    try { list = doc.body ? doc.body.querySelectorAll('*') : []; } catch (e) { list = []; }
+    for (const el of list) {
+      if (out.length >= 200) break;
+      if (isOurs(el) || SKIP_WALK_TAGS.has(tagOf(el))) continue;
+      try { if (el.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+      const r = rectOf(el);
+      if (!r || r.width < 24 || r.height < 14) continue;
+      if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
+      if (r.width * r.height > 0.8 * vw * vh) continue;
+      const s = gcs(el);
+      if (!s || s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) < 0.05) continue;
+      out.push(el);
+    }
+    return out;
+  }
+  function kbCycle(back) {
+    if (!kbAim.order.length || kbAim.at < 0) { kbAim.order = kbTargets(); kbAim.at = back ? kbAim.order.length : -1; }
+    if (!kbAim.order.length) return;
+    kbAim.at = ((kbAim.at + (back ? -1 : 1)) % kbAim.order.length + kbAim.order.length) % kbAim.order.length;
+    const el = kbAim.order[kbAim.at];
+    const r = rectOf(el);
+    if (!r) { kbAim.at = -1; return; }
+    kbAim.x = r.left + r.width / 2;
+    kbAim.y = r.top + r.height / 2;
+    kbPlace();
+  }
+  function kbFire() {
+    if (state.ko) return;
+    const W = WEAPONS[state.weapon];
+    ensureAudio();
+    if (W.input === 'drag') { startSlash(kbAim.x - 24, kbAim.y, null); resolveSlash(kbAim.x + 24, kbAim.y); return; }
+    smashAt(kbAim.x, kbAim.y);
+  }
+  function a11yAimChanged() {
+    if (!state.active) { kbClear(); return; }
+    if (keyboardAim()) { kbBuild(); toast('⌨️ ' + msg('toastKeyboardAim')); announce(msg('toastKeyboardAim')); }
+    else kbClear();
+  }
+  /* Claimed ahead of src/95-events.js' own handler, which is why this wraps onKey() rather than adding a
+   * second listener: one handler, one preventDefault, no chance of both reading the same arrow key. */
+  const onKeyBase = onKey;
+  onKey = function (e) {
+    /* never while the KO dialog is up: Tab belongs to its focus trap then, and nothing may fire */
+    if (state.active && !state.ko && keyboardAim() && !handledKeys.has(e)) {
+      let claimed = false;
+      try { claimed = kbHandle(e); } catch (err) { state.lastError = String((err && err.stack) || err); }
+      if (claimed) return;
+    }
+    return onKeyBase(e);
+  };
+  /* Returns true when the keystroke belonged to the virtual cursor. A hostile page can make any DOM read
+   * throw, so the caller runs this inside a try — an exception here must never reach window.onerror. */
+  function kbHandle(e) {
+    let path = null;
+    try { path = e.composedPath ? e.composedPath()[0] : e.target; } catch (err) { path = e.target; }
+    if (isEditable(path) || e.ctrlKey || e.metaKey) return false;
+    const dir = kbArrowOf(e.code, e.key);
+    let action = null;
+    if (dir) action = 'aim';
+    else if (isSpaceKey(e.code, e.key) && !modeHasAvatar()) action = 'fire';   // survival keeps Space for the dash
+    else if (e.code === 'Enter' || e.key === 'Enter') action = 'scope';
+    else if (e.code === 'Tab' || e.key === 'Tab') action = 'cycle';
+    if (!action) return false;
+    handledKeys.add(e);
+    try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
+    kbBuild();
+    if (action === 'aim') kbMove(dir, e);
+    else if (action === 'fire') { if (!e.repeat) kbFire(); }
+    else if (action === 'scope') { if (!e.repeat) { if (state.scoped) scopeOff(); else scopeOn(); } }
+    else if (action === 'cycle') kbCycle(!!e.shiftKey);
+    return true;
+  }
+
+  /* ---- §3.4 the screen-reader live region ------------------------------------
+   * Visually hidden, inside the HUD shadow root, polite. Everything the player would otherwise only learn
+   * from a colour, an icon or a sound is written here as text. */
+  const A11Y_CSS = [
+    '.crs-live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}',
+    /* §3.4: a focus ring every HUD button shows, at ≥ 3:1 against both HUD plates and the KO curtain */
+    'button:focus-visible{outline:3px solid #fff;outline-offset:2px;box-shadow:0 0 0 6px rgba(229,72,77,.65)}',
+    '.crs-ko{outline:none}'
+  ].join('\n');
+  let a11yLive = null, a11yLast = '';
+
+  function a11yAugmentHud() {
+    const mount = hudEls.mount;
+    if (!mount) return;
+    let styled = false;
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(A11Y_CSS);
+      mount.adoptedStyleSheets = (mount.adoptedStyleSheets || []).concat([sheet]);
+      styled = true;
+    } catch (e) { styled = false; }
+    if (!styled) { try { const st = doc.createElement('style'); st.textContent = A11Y_CSS; mount.append(st); } catch (e) { /* ignore */ } }
+    try {
+      const live = doc.createElement('div');
+      live.className = 'crs-live';
+      live.setAttribute('aria-live', 'polite');
+      live.setAttribute('aria-atomic', 'true');
+      live.setAttribute('role', 'status');
+      mount.append(live);
+      a11yLive = live;
+      hudEls.live = live;
+    } catch (e) { a11yLive = null; }
+  }
+  const buildHudBase = buildHud;
+  buildHud = function () {
+    const host = buildHudBase();
+    try { a11yAugmentHud(); } catch (e) { /* ignore */ }
+    return host;
+  };
+  /* The same text twice in a row is not an announcement, so a repeat is nudged with a trailing space —
+   * that is the standard trick for making a live region re-read an identical string. */
+  function announce(text) {
+    if (!a11yLive || !text) return;
+    try {
+      const s = String(text);
+      a11yLive.textContent = (s === a11yLast) ? s + ' ' : s;
+      a11yLast = a11yLive.textContent;
+    } catch (e) { /* ignore */ }
+  }
+  function announceWeapon(id) {
+    const W = WEAPONS[id];
+    if (W) announce(msg('a11yWeapon') + ': ' + msg(W.name));
+  }
+  function announceMode(id) { announce(msg('a11yMode') + ': ' + modeLabel(id)); }
+  /* Roadmap step 11 adds challenges; the two strings and the call shape are settled here so that step only
+   * has to call it. Reachable now through debug so it is exercised rather than dead. */
+  function announceChallenge(started) { announce(started ? msg('a11yChallengeStart') : msg('a11yChallengeEnd')); }
+  debug.announceChallenge = (started) => announceChallenge(!!started);
+
+  const startReloadBase = startReload;
+  startReload = function (id, manual) {
+    const r = startReloadBase(id, manual);
+    if (r) announce(msg('a11yReloadStart') + ': ' + msg((WEAPONS[id] || WEAPONS[state.weapon]).name));
+    return r;
+  };
+  /* Completion happens inside startReload()'s own timer, so it is read off the ammo HUD refresh that the
+   * timer makes anyway: the reload record went away AND the magazine came back full. stopReload() (a weapon
+   * swap, a scope-out) also clears the record but leaves the magazine short, so it says nothing. */
+  let a11yReload = null;
+  const updateAmmoHudBase = updateAmmoHud;
+  updateAmmoHud = function () {
+    const r = state.reload;
+    if (a11yReload && a11yReload !== r) {
+      const W = WEAPONS[a11yReload.id];
+      if (W && W.mag != null && state.ammo[a11yReload.id] >= W.mag) announce(msg('a11yReloadDone') + ': ' + msg(W.name));
+    }
+    a11yReload = r;
+    return updateAmmoHudBase();
+  };
+  const completeRepairBase = completeRepair;
+  completeRepair = function (rp) {
+    const before = state.repaired;
+    const out = completeRepairBase(rp);
+    if (state.repaired > before) announce(msg('a11yRepair'));
+    return out;
+  };
+
+  /* ---- §3.4 the KO overlay as a modal dialog ---------------------------------
+   * role=dialog + aria-modal, focus moved in and TRAPPED between the two buttons, and the focus that was
+   * there before handed back when it closes. */
+  let koReturnFocus = null, koTrapBound = false;
+  function koButtons() {
+    const ko = hudEls.ko;
+    if (!ko) return [];
+    try { return Array.prototype.slice.call(ko.querySelectorAll('button')); } catch (e) { return []; }
+  }
+  function koTrap(e) {
+    const ko = hudEls.ko;
+    if (!ko || !state.ko) return;
+    if (!(e.code === 'Tab' || e.key === 'Tab')) return;
+    const btns = koButtons();
+    if (!btns.length) return;
+    try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
+    handledKeys.add(e);
+    let i = 0;
+    try {
+      const active = (hudShadow && hudShadow.activeElement) || doc.activeElement;
+      i = Math.max(0, btns.indexOf(active));
+    } catch (err) { i = 0; }
+    const next = btns[((i + (e.shiftKey ? -1 : 1)) % btns.length + btns.length) % btns.length];
+    try { next.focus(); } catch (err) { /* ignore */ }
+  }
+  const showKoBase = showKo;
+  showKo = function () {
+    const had = !!hudEls.ko;
+    showKoBase();
+    const ko = hudEls.ko;
+    if (!ko || had) return;
+    try {
+      ko.setAttribute('role', 'dialog');
+      ko.setAttribute('aria-modal', 'true');
+      ko.setAttribute('tabindex', '-1');
+      const kt = ko.querySelector('.kt');
+      ko.setAttribute('aria-label', (kt && kt.textContent) || msg('koTitle'));
+    } catch (e) { /* ignore */ }
+    /* §3.1: "KO 오버레이가 확대 없이 페이드" — the curtain still arrives, it just stops zooming. No
+     * fill, so the overlay settles back onto its own stylesheet rule instead of holding a transform. */
+    try {
+      const rm = reducedMotion();
+      trackAnim(ko.animate(
+        rm ? [{ opacity: 0 }, { opacity: 1 }]
+           : [{ opacity: 0, transform: 'scale(.92)' }, { opacity: 1, transform: 'scale(1)' }],
+        { duration: rm ? 140 : 180, easing: 'ease-out' }
+      ));
+    } catch (e) { /* ignore */ }
+    try { koReturnFocus = doc.activeElement; } catch (e) { koReturnFocus = null; }
+    /* bound once per activation — unbindEvents() takes it away with every other listener */
+    if (!koTrapBound) { koTrapBound = true; listen(win, 'keydown', koTrap, { capture: true }); }
+    const btns = koButtons();
+    if (btns.length) { try { btns[0].focus(); } catch (e) { /* ignore */ } }
+    announce(msg('a11yKo'));
+  };
+  const hideKoBase = hideKo;
+  hideKo = function () {
+    const had = !!hudEls.ko;
+    hideKoBase();
+    if (!had) return;
+    const back = koReturnFocus;
+    koReturnFocus = null;
+    if (back && back.isConnected && typeof back.focus === 'function') { try { back.focus(); } catch (e) { /* ignore */ } }
+  };
+
+  /* ---- lifecycle ---- */
+  function a11yStart() {
+    a11yLast = '';
+    a11yContrastSync();
+    if (keyboardAim()) kbBuild();
+  }
+  function a11yStop() {
+    kbClear();
+    koReturnFocus = null; koTrapBound = false; a11yReload = null;
+    a11yLive = null; a11yLast = '';
+    try { docEl.classList.remove(HC_CLASS); } catch (e) { /* ignore */ }
+  }
+  debug.a11y = () => ({
+    reduced: reducedMotion(), setting: settingsGet('reduceMotion'),
+    highContrast: highContrast(), keyboardAim: keyboardAim(),
+    cursor: kbAim.node && kbAim.node.isConnected ? { x: Math.round(kbAim.x), y: Math.round(kbAim.y) } : null,
+    live: a11yLive ? a11yLive.textContent : null,
+    koDialog: hudEls.ko ? hudEls.ko.getAttribute('role') : null
+  });
+
 // ── 99-api.js ──
   /* ===================================================================== */
   /* 15. Public API: restore / activate / deactivate / toggle / prefs         */
@@ -7859,7 +8870,7 @@
       stopReload();
       scopeOff();
       const swapMs = swapMsOf(id);   // v1.5 §3: per-weapon draw time replaces the flat SWAP_MS
-      state.swapUntil = now() + swapMs;
+      state.swapUntil = now() + scaleMs(swapMs);   // SPEC-test-speed §3: deadline comparison in swapActive()
       untrack(state.swapTimer); state.swapTimer = 0;
       if (!debug.noCooldown) state.swapTimer = later(() => { state.swapTimer = 0; updateAmmoHud(); }, swapMs + 5);   // clears the 교체 중 readout
     }
@@ -8083,6 +9094,127 @@
     }
   };
   window.__crashScreen = api;
+
+  /* ═════════════════════════════════════════════════════════════════════ */
+  /* ── settings: public surface, legacy mirroring and lifecycle ──        */
+  /*                                                                       */
+  /* SPEC-settings §1–§3. Everything above this line is untouched: the new  */
+  /* behaviour is attached by wrapping the function bindings the generated  */
+  /* bundle already shares (the whole file is one closure, and a function   */
+  /* declaration's binding is writable — the same device src/46-viewmodel.js*/
+  /* uses for updateHud). The originals are kept in ONE object so this      */
+  /* block adds exactly one new top-level name.                             */
+  /* ═════════════════════════════════════════════════════════════════════ */
+  const SETTINGS_BASE = {
+    stats, activate, deactivate, restore,
+    setWeapon, setMuted, setPlayMode, setDebrisAnchor, setWeaponOption, setLoadout
+  };
+
+  /* ---- §1.3 the two entry points, plus the schema for the options page (step 10) ---- */
+  api.settings = () => settingsNow();
+  api.setSetting = (key, value) => setSettingValue(key, value);
+  api.settingsSchema = () => settingsSchema();
+  api.settingGroups = () => SETTING_GROUPS.slice();
+
+  /* stats() gains §2.3's perf block and the resolved settings; `cap` becomes the LIVE piece cap, which is
+   * the debrisCap setting and comes down to min(cap, 80) while the guard has us in performance mode. */
+  stats = function () {
+    const s = SETTINGS_BASE.stats();
+    s.cap = pieceCap();
+    s.perf = perfInfo();
+    s.settings = settingsNow();
+    return s;
+  };
+  api.stats = stats;
+
+  /* ---- the v1 setters keep their storage keys AND now feed the schema ----------
+   * §1.2 absorbs these keys, but the v1 write paths are what the HUD, the hotkeys and the public API still
+   * call. Each one mirrors into the matching setting so the two storage forms can never disagree while the
+   * migration window is open; settingsApply() in turn defers to the v1 key for as long as one is on disk,
+   * which is what makes loadPrefs() and the settings read order-independent. */
+  setWeapon = function (rawId, opts) {
+    const prev = state.weapon;
+    const r = SETTINGS_BASE.setWeapon(rawId, opts);
+    if (!r) return r;
+    const silent = !!(opts && opts.silent);
+    if (!silent) settingsMirror('defaultWeapon', r);
+    if (r !== prev && !silent) announceWeapon(r);   // §3.4: the weapon is announced, not just drawn
+    return r;
+  };
+  setMuted = function (v) {
+    SETTINGS_BASE.setMuted(v);
+    settingsMirror('muted', state.muted);
+  };
+  setPlayMode = function (id, opts) {
+    const prev = state.mode;
+    const r = SETTINGS_BASE.setPlayMode(id, opts);
+    if (r !== prev) {
+      if (!(opts && opts.silent)) settingsMirror('mode', r);
+      announceMode(r);                              // §3.4: mode changes are announced
+    }
+    return r;
+  };
+  setDebrisAnchor = function (v, silent) {
+    const r = SETTINGS_BASE.setDebrisAnchor(v, silent);
+    if (!silent) settingsMirror('debrisAnchor', r);
+    return r;
+  };
+  setWeaponOption = function (name, value) {
+    const r = SETTINGS_BASE.setWeaponOption(name, value);
+    if (r) settingsMirror(name === 'viewmodel' ? 'viewmodel' : name, name === 'viewmodel' ? !!value : value);
+    return r;
+  };
+  setLoadout = function (ids, opts) {
+    const r = SETTINGS_BASE.setLoadout(ids, opts);
+    if (r && !(opts && opts.silent)) settingsMirror('loadoutPreset', state.preset);
+    return r;
+  };
+  /* api.setDebrisLife() stays the RUNTIME escape hatch it has always been: any non-negative number of ms is
+   * accepted and persisted under the v1 key. The SETTING is an enum (3000 / 6000 / 12000 / 0), so a value
+   * outside it applies and persists but is not mirrored — settingsMirror() validates before it writes. */
+  api.setDebrisLife = (ms) => {
+    ms = +ms;
+    if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;
+    applyDebrisLife(ms);
+    safe(() => chrome.storage.sync.set({ crsDebrisLifeMs: ms, crsDebrisLife: ms }));
+    settingsMirror('debrisLifeMs', ms);
+    return state.debrisLifeMs;
+  };
+
+  /* ---- lifecycle: the perf guard and the accessibility layer come up and go down with the page ---- */
+  activate = function () {
+    SETTINGS_BASE.activate();
+    /* synchronous, so it lands before the first frame; loadPrefs()' own async read resolves afterwards and
+     * still owns every key whose v1 storage key is still on disk (settingsApply skips those) */
+    try { settingsApply(); } catch (e) { /* ignore */ }
+    try { perfStart(); } catch (e) { /* ignore */ }
+    try { a11yStart(); } catch (e) { /* ignore */ }
+  };
+  deactivate = function (silent) {
+    try { a11yStop(); } catch (e) { /* ignore */ }
+    try { perfStop(); } catch (e) { /* ignore */ }
+    const r = SETTINGS_BASE.deactivate(silent);
+    /* belt and braces: restore() re-armed nothing we own, but clearTimers() only empties the SET */
+    untrack(state.perfTimer); state.perfTimer = 0;
+    return r;
+  };
+  /* restore() runs clearTimers(), which takes the 10 s perf sample with it; re-arm while still active. */
+  restore = function () {
+    SETTINGS_BASE.restore();
+    if (!state.active) return;
+    try { perfArm(); } catch (e) { /* ignore */ }
+    try { a11yStart(); } catch (e) { /* ignore */ }
+  };
+
+  /* `api` captured activate / restore / stats BY VALUE in its object literal, so the wrappers above have to
+   * be published too. (deactivate and toggle are reached through arrows / a binding lookup and follow on
+   * their own; weapons / smashAt / … were never wrapped.) */
+  api.activate = activate;
+  api.restore = restore;
+
+  /* One storage read and one chrome.storage.onChanged subscription per page, before the first activate(). */
+  settingsBoot();
+
   try {
     activate();
     return 'on';

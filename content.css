@@ -999,3 +999,85 @@ crs-hud:popover-open {
 .crs-viewmodel-art {
   overflow: visible !important;
 }
+
+/* ===================================================================== */
+/* settings — SPEC-settings §3.2 / §3.3                                   */
+/*                                                                        */
+/* Injected at USER origin like everything above it, so `!important` here  */
+/* outranks a page's own `!important`. Anything JS writes or ANIMATES is   */
+/* declared WITHOUT `!important` (the keyboard cursor's left / top), or a  */
+/* Web Animation and a CSSOM write would both be silently outranked.      */
+/* ===================================================================== */
+
+/* §3.3 the keyboard aim cursor: a crosshair the arrow keys drive. `left` and `top`
+   are written per keystroke by kbPlace(), so they are deliberately NOT !important. */
+.crs-kbcursor {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  width: 26px !important;
+  height: 26px !important;
+  z-index: 3 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  border-radius: 50% !important;
+  outline: 2px solid rgba(255, 255, 255, .95) !important;
+  outline-offset: -1px !important;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(0, 0, 0, .55) !important;
+  background:
+    linear-gradient(90deg, transparent calc(50% - 1px), rgba(255, 255, 255, .95) calc(50% - 1px), rgba(255, 255, 255, .95) calc(50% + 1px), transparent calc(50% + 1px)),
+    linear-gradient(0deg, transparent calc(50% - 1px), rgba(255, 255, 255, .95) calc(50% - 1px), rgba(255, 255, 255, .95) calc(50% + 1px), transparent calc(50% + 1px)) !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+/* §3.4 the live region, for the branch where the HUD has no shadow root and the
+   constructed stylesheet never took: it must stay readable and invisible. */
+.crs-live {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+/* §3.2 highContrastMarkers: <html> carries .crs-hcm while the setting is on.
+   The hostile aura gets a 45° stripe pattern on top of the red (so the marker is
+   not colour alone) and both markers go to a thicker, fully opaque solid line. */
+.crs-hcm .crs-hostile {
+  outline-width: 3px !important;
+  outline-color: rgba(255, 255, 255, 1) !important;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, .30) 0 7px,
+    rgba(0, 0, 0, .30) 7px 14px
+  ) !important;
+  background-color: transparent !important;
+  background-repeat: repeat !important;
+}
+.crs-hcm .crs-hostile-label {
+  background: rgba(0, 0, 0, .95) !important;
+  outline: 2px solid rgba(255, 255, 255, 1) !important;
+  outline-offset: -2px !important;
+}
+.crs-hcm .crs-target {
+  outline-width: 3px !important;
+  outline-color: rgba(255, 255, 255, 1) !important;
+  outline-style: solid !important;
+}
+.crs-hcm .crs-target-label {
+  background: rgba(0, 0, 0, .95) !important;
+  outline: 2px solid rgba(255, 255, 255, 1) !important;
+  outline-offset: -2px !important;
+}
+/* §10.4 draws a `back` enemy dashed to read as further away; a high-contrast run
+   needs every hostile frame to be the same unmistakable solid line. */
+.crs-hcm .crs-depth-back,
+.crs-hcm .crs-lock {
+  outline-style: solid !important;
+}

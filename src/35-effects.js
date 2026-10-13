@@ -23,7 +23,7 @@
   }
   function shake(mode, opts) {
     let a = (opts && opts.amp != null) ? opts.amp : (mode === 'bomb' || mode === 'collapse' ? 12 : (mode === 'gun' ? 2 : 6));
-    try { if (win.matchMedia('(prefers-reduced-motion: reduce)').matches) a = 0; } catch (e) { /* ignore */ }
+    if (reducedMotion()) a = 0;   // SPEC-settings §3.1: reduced motion means amplitude 0, OS- or setting-driven
     if (!a || !root) return;
     try { if (state.shake) state.shake.cancel(); } catch (e) { /* ignore */ }
     const ang = rand(0, Math.PI * 2), ux = Math.cos(ang), uy = Math.sin(ang), vx = -uy, vy = ux;

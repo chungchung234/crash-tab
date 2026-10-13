@@ -290,5 +290,101 @@
   "setDebrisLife": {
     "message": "파편이 사라지는 시간",
     "description": "Setting label: how long debris stays before it fades"
+  },
+  "setMode": {
+    "message": "모드",
+    "description": "Setting label: default play mode"
+  },
+  "setDefaultWeapon": {
+    "message": "기본 무기",
+    "description": "Setting label: weapon selected on activation"
+  },
+  "setLoadoutPreset": {
+    "message": "로드아웃 프리셋",
+    "description": "Setting label: loadout preset"
+  },
+  "setDebrisAnchor": {
+    "message": "파편 기준",
+    "description": "Setting label: debris anchor frame"
+  },
+  "setDebrisCap": {
+    "message": "파편 상한",
+    "description": "Setting label: maximum live debris pieces"
+  },
+  "setSoundVolume": {
+    "message": "소리 크기",
+    "description": "Setting label: master sound volume"
+  },
+  "setMuted": {
+    "message": "음소거",
+    "description": "Setting label: start muted"
+  },
+  "setWeaponArt": {
+    "message": "무기 그림",
+    "description": "Setting label: weapon artwork mode"
+  },
+  "setViewmodel": {
+    "message": "뷰모델",
+    "description": "Setting label: show the first-person weapon"
+  },
+  "setCombatDifficulty": {
+    "message": "전투 난이도",
+    "description": "Setting label: combat difficulty"
+  },
+  "setReduceMotion": {
+    "message": "모션 줄이기",
+    "description": "Setting label: reduce motion"
+  },
+  "setHighContrastMarkers": {
+    "message": "고대비 표식",
+    "description": "Setting label: high-contrast markers"
+  },
+  "setKeyboardAim": {
+    "message": "키보드 조준",
+    "description": "Setting label: keyboard aiming"
+  },
+  "setPerfMode": {
+    "message": "성능 모드",
+    "description": "Setting label: performance mode"
+  },
+  "perfBadge": {
+    "message": "성능 모드",
+    "description": "HUD badge shown while the performance guard has downgraded"
+  },
+  "toastKeyboardAim": {
+    "message": "키보드 조준: 방향키로 이동 · Space 발사 · Enter 조준경 · Tab 다음 대상",
+    "description": "Toast listing the keyboard-aim controls"
+  },
+  "a11yWeapon": {
+    "message": "무기",
+    "description": "Screen reader: weapon changed"
+  },
+  "a11yReloadStart": {
+    "message": "재장전 시작",
+    "description": "Screen reader: reload started"
+  },
+  "a11yReloadDone": {
+    "message": "재장전 완료",
+    "description": "Screen reader: reload finished"
+  },
+  "a11yMode": {
+    "message": "모드",
+    "description": "Screen reader: play mode changed"
+  },
+  "a11yKo": {
+    "message": "패배",
+    "description": "Screen reader: the player was knocked out"
+  },
+  "a11yRepair": {
+    "message": "복구",
+    "description": "Screen reader: an element was repaired"
+  },
+  "a11yChallengeStart": {
+    "message": "챌린지 시작",
+    "description": "Screen reader: a challenge started"
+  },
+  "a11yChallengeEnd": {
+    "message": "챌린지 종료",
+    "description": "Screen reader: a challenge ended"
   }
 }

@@ -71,7 +71,7 @@
     const ink = matOf(mat);
     const raysR = opts.rays || P.rays, lenScale = opts.lenScale || 1, lenR = opts.len || P.len;
     const gunlike = kind === 'gun' || kind === 'smg';
-    const nRays = Math.max(2, Math.round(randInt(raysR[0], raysR[1]) * M.rayMul));
+    const nRays = Math.max(2, Math.round(randInt(raysR[0], raysR[1]) * M.rayMul * crackRayMul()));   // SPEC-settings §2.2: ×0.7 in performance mode
     const rays = [], branches = [];
     let maxLen = 0;
     for (let i = 0; i < nRays; i++) {

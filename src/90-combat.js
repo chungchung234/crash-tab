@@ -7,7 +7,8 @@
     if (!p.startedAt) return 0;
     return Math.max(0, (state.paused ? p.pausedAt : now()) - p.startedAt - p.pausedTotal);
   }
-  function maxHostiles() { return combatElapsed() >= 60000 ? 5 : 3; }
+  /* SPEC-settings §2.2: performance mode holds the page to two live enemies whatever the clock says. */
+  function maxHostiles() { const n = combatElapsed() >= 60000 ? 5 : 3; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
   /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0). */
   function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1); }
@@ -49,7 +50,7 @@
     untrack(state.combatTimer); state.combatTimer = 0;
     untrack(state.clockTimer); state.clockTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
-    state.graceUntil = now() + GRACE_MS;
+    state.graceUntil = now() + scaleMs(GRACE_MS);   // SPEC-test-speed §3: "전투 유예" is a deadline, not a later()
     state.combatTimer = later(selectTick, GRACE_MS);
     state.clockTimer = later(clockTick, 1000);
     armDepthTick();          // v1.4 §10.1
@@ -67,7 +68,7 @@
   function selectTick() {
     state.combatTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
-    state.combatTimer = later(selectTick, 1500);
+    state.combatTimer = later(selectTick, selectIntervalMs());   // SPEC-settings §2.2: 1500 ms, 2500 ms in performance mode
     updatePlayerHud();
     const p = state.player;
     if (state.ko || !p.alive || debug.noAttacks || state.scoped || !p.inWindow) return;
@@ -434,7 +435,7 @@
     state.paused = false;
     state.player.pausedTotal += now() - state.player.pausedAt;
     if (!state.active || !state.combat) return;
-    state.combatTimer = later(selectTick, Math.max(1000, state.graceUntil - now()));
+    state.combatTimer = laterRaw(selectTick, Math.max(scaleMs(1000), state.graceUntil - now()));   // remainder already scaled
     untrack(state.clockTimer); state.clockTimer = later(clockTick, 1000);
     for (const rec of state.hostiles.values()) { scheduleAttack(rec, Math.max(1000, attackInterval(rec))); scheduleRepair(rec); }
     armDepthTick(); armRatioTick();   // v1.4 §10.1 / §3.2

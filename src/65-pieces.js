@@ -187,10 +187,12 @@
    * — the page is NOT put back, only the litter is taken away. Under memory pressure a lifetime of "forever" is
    * still capped, because that is exactly when the floor is fullest. */
   function debrisLife() {
-    const pressure = state.pieces.length > CAP * 0.75 || state.gpuSum > GPU_BUDGET * 0.75;
+    const pressure = state.pieces.length > pieceCap() * 0.75 || state.gpuSum > GPU_BUDGET * 0.75;
     const want = state.debrisLifeMs;
-    if (pressure) return want > 0 ? Math.min(want, DEBRIS_PERF_MS) : DEBRIS_PERF_MS;
-    return want;
+    // SPEC-test-speed §3: "파편 수명" — expireAt is a timestamp comparison, not a later(), so it needs the scale
+    // of its own. 0 means "unlimited" and scaleMs(0) is 0, so that branch keeps its meaning.
+    if (pressure) return scaleMs(want > 0 ? Math.min(want, DEBRIS_PERF_MS) : DEBRIS_PERF_MS);
+    return scaleMs(want);
   }
   function scheduleDebrisSweep() {
     if (state.debrisTimer || !state.active) return;
@@ -265,7 +267,7 @@
     return s;
   }
   function enforceCap(incoming, incomingGpu) {
-    let need = state.pieces.length + incoming - CAP;
+    let need = state.pieces.length + incoming - pieceCap();   // SPEC-settings §1.2 debrisCap / §2.2 min(setting, 80)
     let gpu = state.gpuSum + (incomingGpu || 0);   // include the batch being added, not only what is live
     const overGpu = gpu > GPU_BUDGET;
     if (need <= 0 && !overGpu) return;

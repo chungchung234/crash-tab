@@ -36,13 +36,15 @@
     if (!state.active || !W || W.mag == null || state.reload) return false;
     if (state.ammo[id] >= W.mag) return false;
     scopeOff();
-    const ms = debug.fastReload ? 30 : W.reloadMs;
+    // SPEC-test-speed §3: scaled ONCE here, so reloadProgress (now() - startedAt) / r.ms, the button fade and
+    // both timers below all read the same clock. The timers therefore use laterRaw().
+    const ms = scaleMs(debug.fastReload ? 30 : W.reloadMs);
     const rec = { id, startedAt: now(), ms, timer: 0, magTimer: 0 };
     state.reload = rec;
     vmReload(ms);   // ── v1.5 §2.1: tilt down, drop the magazine, bring a fresh one up, across the whole reloadMs ──
     sfx('magout');
-    rec.magTimer = later(() => { rec.magTimer = 0; if (state.reload === rec) sfx('magin'); }, Math.round(ms * 0.8));
-    rec.timer = later(() => {
+    rec.magTimer = laterRaw(() => { rec.magTimer = 0; if (state.reload === rec) sfx('magin'); }, Math.round(ms * 0.8));
+    rec.timer = laterRaw(() => {
       rec.timer = 0;
       if (state.reload !== rec) return;
       state.reload = null;
