@@ -303,7 +303,10 @@ const WANT_BLOCK = (name) => !BLOCKS_PICKED || BLOCKS_PICKED.includes(name);
 const PARTIAL_BLOCKS = !!BLOCKS_PICKED;
 // How many browsers may be alive at once. Each block lane owns one. The default leaves room for the
 // machine itself; CRS_LANES=1 serialises them when a loaded box starts dropping targets.
-const LANE_CAP = Math.max(1, Number(process.env.CRS_LANES || Math.min(4, Math.max(1, require('os').cpus().length - 1))));
+// Measured on this 12-core box with nine lanes in flight: 4 → 84 s, 5 → 61 s, 6 → 59 s, 8 → 61 s. Six is
+// where it flattens (past that the wall clock is just the longest single lane), so six is the ceiling. A
+// 4-core CI runner still resolves to 3, exactly as before. CRS_LANES=1 serialises when the box is busy.
+const LANE_CAP = Math.max(1, Number(process.env.CRS_LANES || Math.min(6, Math.max(1, require('os').cpus().length - 1))));
 
 
 function hookPage(page) {
@@ -8179,20 +8182,26 @@ async function suiteC(puppeteer, origin) {
     try { return await fn(); } finally { live--; const next = waiting.shift(); if (next) next(); }
   };
   const ownBrowserQueued = (fn) => slot(() => ownBrowser(fn));
+  /* Longest lane first. There are more lanes than slots (LANE_CAP), so the order they are QUEUED in decides
+   * the makespan: a 57 s lane queued last starts only once a slot frees and then adds its whole length to
+   * the wall clock on its own. This list is ordered by measured cost, longest to shortest — the classic
+   * longest-processing-time rule. Re-measure and reorder when a block grows: `CRS_BLOCKS=<name>` prints it. */
   const A_BLOCKS = [
-    ['core', (b) => suiteA(b, origin, contentCss, contentJs)],
-    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],
-    ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],
-    ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],
-    ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],
-    ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],
-    ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],
+    ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],       // ~57 s
+    ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~56 s
+    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~42 s
+    ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],           // ~34 s
+    ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],     // ~30 s
+    ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~28 s
+    ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],   // ~6 s
   ];
-  if (WANT('A')) for (const [name, fn] of A_BLOCKS) {
-    if (WANT_BLOCK(name)) runLane(name, () => ownBrowserQueued(fn));
+  for (const [name, fn] of A_BLOCKS) {
+    if (WANT('A') && WANT_BLOCK(name)) runLane(name, () => ownBrowserQueued(fn));
+    if (name === 'settings') {   // the two short non-A suites go ahead of the shortest A block
+      if (WANT('C')) runLane('C', () => slot(() => suiteC(puppeteer, origin)));
+      if (WANT('B')) runLane('B', () => ownBrowserQueued((b) => suiteB(b, origin, contentCss, contentJs)));
+    }
   }
-  if (WANT('B')) runLane('B', () => ownBrowserQueued((b) => suiteB(b, origin, contentCss, contentJs)));
-  if (WANT('C')) runLane('C', () => slot(() => suiteC(puppeteer, origin)));
   try {
     for (const lane of lanes) {
       await lane.p;
