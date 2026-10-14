@@ -1,18 +1,28 @@
-// ── v1.4 §0.5: the three modes (rampage · quickdraw · survival) and everything that switches between them ──
-  /* v1.3 shipped ONE boolean, `combat`. v1.4 splits it on the axis the player actually feels — how the mouse is
-   * shared between aiming and dodging:
+// ── §A: the three modes (rampage · arcade · survival) and everything that switches between them ──
+  /* v1.3 shipped ONE boolean, `combat`. v1.4 split it three ways, and SPEC-combat §A now RETIRES the Virtua-Cop
+   * mode outright ("버추어 캅 개념은 빼줘. 커서가 캐릭터 / wasd로 조종하는 캐릭터 두 개만"). What is left is one
+   * axis — what the player is driving — and the two combat modes differ in CONTROL ONLY:
    *
-   *   rampage    mouse only                      no enemies at all; v1.2's pure demolition tool
-   *   quickdraw  one mouse (the cursor IS you)   enemies only ever lock on; you shoot the lock before it closes
-   *   survival   mouse aims, WASD flies a drone  orbs, slams and locks — and now dodging is a real input
+   *   rampage   mouse only                      no enemies at all; v1.2's pure demolition tool
+   *   arcade    the CURSOR is the character     one mouse aims AND dodges
+   *   survival  mouse aims, WASD flies a drone  the drone is the character, dodging is its own input
+   *
+   * §A1: failure conditions and enemy behaviour are IDENTICAL across arcade and survival — 100 HP, KO at 0,
+   * enemies attack and repair. Arcade pays for doing two jobs with one hand with a handicap on the enemy side:
+   * attack interval ×1.35 and projectile speed ×0.8. Without it the original complaint ("피하면 조준이 풀린다")
+   * comes straight back.
    *
    * `state.combat` survives as a derived getter (20-state.js), so the whole v1.2/v1.3 combat body still reads
    * "are enemies live?" from one place and needed no edit. The per-mode differences are asked here, by name. */
 
   debug.difficulty = 'normal';   // 'easy' ×1.5 | 'normal' ×1 | 'hard' ×0.7 repair interval (§3.1)
-  const MODES = ['rampage', 'quickdraw', 'survival'];
-  const MODE_NAME = { rampage: 'modeRampage', quickdraw: 'modeQuickdraw', survival: 'modeSurvival' };
-  const MODE_DESC = { rampage: 'modeRampageDesc', quickdraw: 'modeQuickdrawDesc', survival: 'modeSurvivalDesc' };
+  const MODES = ['rampage', 'arcade', 'survival'];
+  const MODE_NAME = { rampage: 'modeRampage', arcade: 'modeArcade', survival: 'modeSurvival' };
+  const MODE_DESC = { rampage: 'modeRampageDesc', arcade: 'modeArcadeDesc', survival: 'modeSurvivalDesc' };
+  /* §A1 the arcade handicap. These two numbers ARE the mode difference — everything else is identical. */
+  const ARCADE_ATTACK_MUL = 1.35;      // enemies attack 35 % less often
+  const ARCADE_PROJECTILE_MUL = 0.8;   // and what they throw flies at 80 % speed
+  const ORB_SPEED = 520;               // px/s, the survival baseline (v1.2 §5); arcade scales it
 
   /* §1.2 drone avatar */
   const AV_R = 17;                   // 34 px body
@@ -23,16 +33,22 @@
   const AV_MARGIN = 20;              // viewport inset the drone is clamped to
   const AV_HIT_R = 18;               // enemy hit radius against the drone
   const DASH_PX = 180, DASH_MS = 160, DASH_CD = 1500, DASH_IFRAME = 220, DASH_GHOSTS = 3;
-  /* §2 Virtua-Cop lock-on */
+  /* §A2 the lock-on — an ATTACK now, not a mode. The frame always sits on the player (cursor or drone). */
   const LOCK_MS = 3000;              // full lock; §10.2 shortens a `front` enemy to 2400
   const LOCK_MS_FRONT = 2400;
-  const LOCK_P1 = 1 / 3;             // warn → close  (1.0 s of 3.0 s)
-  const LOCK_P2 = 11 / 15;           // close → imminent (2.2 s of 3.0 s)
-  const LOCK_FOLLOW = 1 / 3;         // survival: the frame stops following the drone at 1.0 s
+  const LOCK_P1 = 1 / 3;             // 추적 → 고정  (1.0 s of 3.0 s)
+  const LOCK_P2 = 11 / 15;           // 고정 → 임박  (2.2 s of 3.0 s)
+  const LOCK_FOLLOW = 1 / 3;         // the frame stops following the player at 1.0 s — that freeze IS the dodge window
+  /* SPEC-combat §A2 names the stage boundaries (1.0 s / 2.2 s) and the BEEPS (0 s / 1.2 s / 2.4 s) as two
+   * separate lists, and they do not line up. Reading chosen: they really are separate — the brackets change
+   * at 1.0/2.2 and a three-beep countdown runs underneath at 0/1.2/2.4, which puts the last warning a steady
+   * 0.6 s before the shot. (The alternative — beeps welded to the stage changes, as v1.4 shipped them — would
+   * make the "0초·1.2초·2.4초" sentence say nothing the previous one had not already said.) */
+  const LOCK_BEEPS = [0, 0.4, 0.8];  // fractions of the lock duration: 0 s / 1.2 s / 2.4 s of 3.0 s
   const LOCK_GAP0 = 70, LOCK_GAP1 = 24, LOCK_GAP2 = 4;   // bracket size / thickness (20 / 3 px) are in content.css
-  const LOCK_MAX = 3;                // at most three concurrent locks (§2.2)
+  const LOCK_MAX = 3;                // at most three concurrent locks (§A2)
   const LOCK_RECOVER_MS = 1500;      // a broken lock cannot re-arm for this long
-  const LOCK_HIT_R = 56;             // survival: how far from the frozen centre still counts as a hit
+  const LOCK_HIT_R = 56;             // how far from the frozen centre still counts as a hit
   /* §3 repairing enemies + the destruction-ratio meter */
   const REPAIR_MS = { shooter: 6000, charger: 5000, laser: 4000, boss: 2500 };
   const REPAIR_BEAM_MS = 1500, REPAIR_RANGE = 600, REPAIR_PIECE_MS = 600;
@@ -48,14 +64,21 @@
   const DEPTH_ATTACK = { front: 0.7, mid: 1, back: 0 };     // 0 = this tier never attacks
   const DEPTH_REPAIR = { front: 0, mid: 1, back: 0.6 };     // 0 = this tier never repairs
 
-  /* ---- what exists in which mode (§0.5 / §6) ---- */
+  /* ---- what exists in which mode (§A / §A1) ----
+   * Only ONE of these separates arcade from survival — the avatar. §A1 is explicit that everything else about
+   * the fight (health, KO, enemy attacks, projectiles, repair, the meter) is the same in both; what differs is
+   * how the player moves, and the two handicap numbers below that pay for it. */
   function modeHasEnemies() { return state.mode !== 'rampage'; }
   function modeHasAvatar() { return state.mode === 'survival'; }
-  function modeHasHealth() { return state.mode === 'survival'; }     // health HUD, KO, the drone health ring
-  function modeHasProjectiles() { return state.mode === 'survival'; }   // §4: orbs and slams are survival-only
+  function modeHasHealth() { return state.mode !== 'rampage'; }        // §A1: 체력 100, 0이면 KO — in BOTH combat modes
+  function modeHasProjectiles() { return state.mode !== 'rampage'; }   // §A1: 적의 행동은 동일하다
   function modeHasRepair() { return state.mode !== 'rampage'; }
   function modeHasRatio() { return state.mode !== 'rampage'; }
-  function modeLockOnEnemy() { return state.mode === 'quickdraw'; }   // the frame sits on the enemy, not the drone
+  /* §A1 the arcade handicap: the enemy side is slowed down, the player side is untouched. Asked for by name at
+   * the two places it can be felt — when the next attack is scheduled, and when a projectile is launched. */
+  function modeAttackMul() { return state.mode === 'arcade' ? ARCADE_ATTACK_MUL : 1; }
+  function modeProjectileMul() { return state.mode === 'arcade' ? ARCADE_PROJECTILE_MUL : 1; }
+  function orbSpeed() { return ORB_SPEED * modeProjectileMul(); }
   /* §3.1 scales the repair interval by difficulty. There is no difficulty setting in this build yet, so the
    * knob lives on `debug` where it is reachable and documented rather than being silently dead. */
   function difficultyMul() { return DIFF_MUL[debug.difficulty] || 1; }
@@ -85,7 +108,7 @@
 
   /* The single entry point. Everything that only exists in some modes is torn down / stood up from here, so a
    * mode switch can never leave another mode's machinery running (a lock frame in rampage, a drone in
-   * quickdraw, a health bar where there is no health).
+   * arcade, a health bar where there is no health).
    * Named setPlayMode, not setMode: `setMode` is taken by the v1 WEAPON alias in 99-api.js, and two function
    * declarations of one name in this IIFE would silently leave only the last one. */
   function setPlayMode(id, opts) {
@@ -120,9 +143,9 @@
     return state.mode;
   }
   function cycleMode() { return setPlayMode(MODES[(MODES.indexOf(state.mode) + 1) % MODES.length]); }
-  /* Legacy boolean (api.setCombat / the v1.3 e2e): true means the mode the player last fought in — survival
-   * unless they explicitly chose quickdraw — and false is rampage. The STORED crsCombat migrates differently
-   * (§0.5: true → quickdraw), because a stored pref comes from someone who only ever used the cursor. */
+  /* Legacy boolean (api.setCombat / the v1.3 e2e): true means the mode the player last fought in (survival
+   * until they pick otherwise), false is rampage. A STORED crsCombat migrates differently — §A sends it to
+   * ARCADE, because that pref came from someone who only ever played with the cursor. */
   function setCombat(v, opts) {
     setPlayMode(v ? (state.lastCombatMode || 'survival') : 'rampage', opts);
     return state.combat;
@@ -130,11 +153,16 @@
   function persistMode() {
     safe(() => chrome.storage.sync.set({ crsMode: state.mode, crsCombat: state.mode !== 'rampage' }));
   }
-  /* loadPrefs (99-api.js) hands us whatever was stored; crsMode wins, a legacy crsCombat boolean migrates. */
+  /* loadPrefs (99-api.js) hands us whatever was stored; crsMode wins, then the two §A migrations.
+   * MODE_ALIASES is the one place the retired mode id is still SPOKEN: the string is gone from the product,
+   * but it is still sitting in the sync storage of everyone who ran v1.4, so it still has to be READ. */
+  const MODE_ALIASES = { quickdraw: 'arcade' };   // §A: 구 `quickdraw` 저장값 → `arcade`
+  function migrateModeId(id) { return (typeof id === 'string' && MODE_ALIASES[id]) || id; }
   function modeFromPrefs(res) {
     if (!res) return null;
-    if (MODES.includes(res.crsMode)) return res.crsMode;
-    if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'quickdraw' : 'rampage';
+    const m = migrateModeId(res.crsMode);
+    if (MODES.includes(m)) return m;
+    if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'arcade' : 'rampage';   // §A: crsCombat:true → arcade
     return null;
   }
 

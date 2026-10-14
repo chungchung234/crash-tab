@@ -1,15 +1,14 @@
-// ── v1.4 §2: the Virtua Cop lock-on — a frame that closes on a target, and you shoot it open again ──
-  /* The user was explicit: "the aim lock I meant is the Virtua Cop idea". In Virtua Cop a red frame snaps around
-   * the enemy that is drawing on you and closes over a couple of seconds; you shoot THAT ENEMY before the frame
-   * shuts and the shot never happens. So this is not a dodging device, it is an aiming device: the threat and
-   * the target are the same object, and the player only ever has one job — point and shoot.
+// ── §A2: the lock-on — a frame that closes on the PLAYER, and you dodge it or shoot it open ──
+  /* §A2 demotes the lock-on from a MODE to one attack among several. The frame no longer sits on the enemy; it
+   * is drawn over the player — the cursor in arcade, the drone in survival — follows for 1.0 s, then freezes.
+   * That freeze is the dodge window, and it is the same window in both modes:
    *
-   *   quickdraw  the frame sits on the ENEMY and shooting it is the only answer (there is nothing to dodge)
-   *   survival   the frame sits on the DRONE, stops following at 1.0 s, so you may shoot the enemy OR fly out
+   *   피하거나 그 적을 쏴서 끊거나 둘 다 가능하다.
    *
-   * Breaking it needs one point of damage from any weapon, not a kill. We detect that by watching the enemy's
-   * hp in the frame loop rather than by hooking the damage sink, so every weapon — hitscan, hold tick, AoE,
-   * slash, collapse — breaks a lock identically, with no special case anywhere in the weapon code. */
+   * So the answer is never forced. Move out of the frozen frame, or put one point of damage into the enemy that
+   * cast it, or both. Breaking it needs damage, not a kill. We detect that by watching the enemy's hp in the
+   * frame loop rather than by hooking the damage sink, so every weapon — hitscan, hold tick, AoE, slash,
+   * collapse — breaks a lock identically, with no special case anywhere in the weapon code. */
 
   function lockDuration(rec) { return (rec && rec.dtier === 'front') ? LOCK_MS_FRONT : LOCK_MS; }
   function lockPhaseOf(k) { return k < LOCK_P1 ? 'warn' : (k < LOCK_P2 ? 'close' : 'imminent'); }
@@ -36,13 +35,10 @@
     node.append(ring, tag);
     return { node, ring, tag, brackets };
   }
-  /* Where the frame is anchored this frame. quickdraw: the enemy rect. survival: the drone, until it freezes. */
+  /* Where the frame is anchored this frame. §A2: always the player — the cursor in arcade, the drone in
+   * survival — until it freezes. The two combat modes differ in what MOVES the player, not in where the frame
+   * goes, so there is one answer here and no mode question. */
   function lockAnchor(lk) {
-    if (lk.onEnemy) {
-      const r = rectOf(lk.rec.el);
-      if (!r) return null;
-      return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height };
-    }
     const p = state.player;
     return { cx: p.x, cy: p.y, w: 0, h: 0 };
   }
@@ -57,8 +53,8 @@
     try { lk.ring.style.borderColor = color; } catch (e) { /* ignore */ } 
   }
   /* §10.4: a covered enemy cannot be shot, so its frame is dashed and says so — unless the weapon in hand can
-   * punch through cover, in which case it says THAT instead. The answer holds for the enemy whether the frame is
-   * drawn on it (quickdraw) or on the drone (survival): either way it tells you whether shooting is an option.
+   * punch through cover, in which case it says THAT instead. The frame is drawn on the player, but the question
+   * it answers is about the ENEMY that cast it: can you take the "쏴서 끊는다" half of §A2's offer at all?
    * isCovered() runs a real hit test, so it is sampled a few times a second rather than every frame, and always
    * the moment the weapon changes — which is exactly when the answer can flip. */
   function lockCoverTag(lk, t) {
@@ -82,12 +78,15 @@
     if (!rec || !rec.el || !rec.el.isConnected) return null;
     if (rec.lock) return rec.lock;
     if (!forced && now() < (rec.lockReadyAt || 0)) return null;
-    if (state.locks.length >= LOCK_MAX) return null;   // §2.2: three at a time, the oldest ones finish first
+    if (state.locks.length >= LOCK_MAX) return null;   // §A2: three at a time, the oldest ones finish first
     const parts = buildLock();
     // SPEC-test-speed §3: "락온 3단계" — the three phases are fractions of lk.dur, so scaling the duration once
-    // here scales warn/close/imminent together and keeps their RATIOS exactly as §7.5 asserts them.
+    // here scales 추적/고정/임박 together and keeps their RATIOS exactly as §7.5 asserts them.
+    /* `onEnemy` is dead weight kept deliberately: §A2 anchors every frame on the player, so it is always false,
+     * and the §2.2 lock aim-assist in 50-target.js (which reads it) is therefore never taken. Left as an
+     * explicit boolean rather than deleted so that guard keeps reading a real value instead of `undefined`. */
     const lk = Object.assign({ id: ++state.lockSeq, rec, startedAt: now(), dur: scaleMs(forced ? LOCK_MS : lockDuration(rec)), phase: 'warn',
-      onEnemy: modeLockOnEnemy(), frozen: false, cx: 0, cy: 0, w: 0, h: 0, beeped: '', done: false, forced: !!forced, coverAt: 0, tagWeapon: null,
+      onEnemy: false, frozen: false, cx: 0, cy: 0, w: 0, h: 0, beeped: 0, done: false, forced: !!forced, coverAt: 0, tagWeapon: null,
       hp0: hpOf(rec.el).hp, tagText: null, coveredNow: null }, parts);
     const a = lockAnchor(lk);
     if (!a) { try { parts.node.remove(); } catch (e) { /* ignore */ } return null; }
@@ -99,7 +98,7 @@
     placeLock(lk, 0);
     lockCoverTag(lk);
     addAimLine(rec);         // v1.3 §3.2 still answers "which one, right now"
-    csfx('lockWarn');
+    csfx('lockWarn');        // §A2 beep 1 of 3 (t = 0); stepLocks() rings the other two off LOCK_BEEPS
     kick();
     return lk;
   }
@@ -149,40 +148,27 @@
     later(() => { removeLock(lk, true); if (r && state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }, 320);
     updatePlayerHud(); scheduleHud();
   }
-  /* §2.3 — what failing costs, which is the whole difference between the two combat modes. */
+  /* §A2 — what failing costs. One answer for both combat modes now: the frame froze where the player was, so
+   * either they are still in it and it hurts, or they left and it is a graze. (v1.4 had a second branch here
+   * for the mode with no health, which spent the shot undoing a kill instead; §A retired that mode and §A1
+   * gives both survivors the same 100 HP, so the branch went with it — and so did its screen-edge flash.) */
   function fireLock(lk) {
     if (lk.done) return;
     lk.done = true;
     const rec = lk.rec;
     csfx('lockFire');
-    if (lk.onEnemy) {
-      // quickdraw: no health to lose, so the enemy spends the shot UNDOING one of your kills (§3)
-      edgeFlash();
-      tryRepair(rec, true);
+    const p = state.player;
+    const d = Math.hypot(p.x - lk.cx, p.y - lk.cy);
+    if (d <= LOCK_HIT_R && now() >= state.invulUntil) {
+      damagePlayer(26 + Math.round(Math.sqrt(rec.area || 40000) / 70), { from: { x: lk.cx, y: lk.cy } });
     } else {
-      const p = state.player;
-      const d = Math.hypot(p.x - lk.cx, p.y - lk.cy);
-      if (d <= LOCK_HIT_R && now() >= state.invulUntil) {
-        damagePlayer(26 + Math.round(Math.sqrt(rec.area || 40000) / 70), { from: { x: lk.cx, y: lk.cy } });
-      } else {
-        state.nearMisses++;
-        selfGraze({ x: lk.cx, y: lk.cy });
-        sfx('whiff');
-      }
+      state.nearMisses++;
+      selfGraze({ x: lk.cx, y: lk.cy });
+      sfx('whiff');
     }
     const r = rec;
     removeLock(lk, false);
     if (r) { r.lockReadyAt = now() + scaleMs(LOCK_RECOVER_MS); if (state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }
-  }
-  /* A 150 ms red rim at the edge of the screen: quickdraw has no health bar to flash, so the failure still has
-   * to land somewhere the player is looking. */
-  function edgeFlash() {
-    if (!root) return;
-    const n = mk('div', 'crs-vignette crs-vignette-edge');
-    root.append(n);
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
-    try { const a = trackAnim(n.animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 150, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
-    later(kill, 400);
   }
   /* The frame loop. Runs from tickFrame(), so it inherits the hitstop and stops with everything else. */
   function stepLocks(t) {
@@ -192,19 +178,23 @@
       // the enemy went away (killed, restored, released, scrolled off) — the frame cannot outlive it
       if (!rec || !rec.el || !rec.el.isConnected || state.hostiles.get(rec.el) !== rec) { removeLock(lk, false); continue; }
       try { if (rec.el.hasAttribute('data-crs-broken')) { removeLock(lk, false); continue; } } catch (e) { removeLock(lk, false); continue; }
-      // §2.2 the break condition: ANY damage to this enemy, from any weapon, cancels the shot
+      // §A2 the break condition: ANY damage to this enemy, from any weapon, cancels the shot
       const hp = hpOf(rec.el).hp;
       if (hp < lk.hp0) { breakLock(lk); continue; }
       const k = clamp((t - lk.startedAt) / lk.dur, 0, 1);
       const phase = lockPhaseOf(k);
       if (phase !== lk.phase) {
         lk.phase = phase;
-        if (phase === 'close') csfx('lockClose');
-        else if (phase === 'imminent') { csfx('lockImminent'); try { rec.aura.classList.add('crs-lock-imminent'); } catch (e) { /* ignore */ } }
+        if (phase === 'imminent') { try { rec.aura.classList.add('crs-lock-imminent'); } catch (e) { /* ignore */ } }
       }
-      // survival: the frame follows the drone for the first third, then freezes — that freeze IS the dodge window
-      if (!lk.onEnemy && !lk.frozen && k >= LOCK_FOLLOW) lk.frozen = true;
-      if (lk.onEnemy || !lk.frozen) {
+      /* §A2's rising three-beep countdown, on its OWN clock (0 / 1.2 / 2.4 s of 3.0 s) — see LOCK_BEEPS. */
+      while (lk.beeped + 1 < LOCK_BEEPS.length && k >= LOCK_BEEPS[lk.beeped + 1]) {
+        lk.beeped++;
+        csfx(lk.beeped === 0 ? 'lockWarn' : (lk.beeped === 1 ? 'lockClose' : 'lockImminent'));
+      }
+      // §A2: the frame follows the player for the first third, then freezes — that freeze IS the dodge window
+      if (!lk.frozen && k >= LOCK_FOLLOW) lk.frozen = true;
+      if (!lk.frozen) {
         const a = lockAnchor(lk);
         if (a) { lk.cx = a.cx; lk.cy = a.cy; lk.w = a.w; lk.h = a.h; }
       }
@@ -215,8 +205,9 @@
       if (k >= 1) fireLock(lk);
     }
   }
-  /* §2.2 aim assist: a click anywhere inside a closing frame is a click on that enemy, not on whatever child
-   * element happens to be under the pointer. pickTarget() asks this before it returns. */
+  /* The v1.4 §2.2 aim assist's lookup: which closing frame, if any, covers this point. pickTarget() still asks
+   * it, but only acts on a frame with `onEnemy` — and §A2 put every frame on the player, so the assist is now
+   * unreachable by construction (see startLock). Kept as the frame hit-test it has always been. */
   function lockAt(x, y) {
     for (const lk of state.locks) {
       if (lk.done || !lk.rec || !lk.rec.el || !lk.rec.el.isConnected) continue;

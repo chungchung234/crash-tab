@@ -27,7 +27,7 @@
     // v1.3: player marker / aim lines / near-miss / hitstop (§3)
     self: null, aimlines: [], nearMisses: 0, nearShown: [], hitstopUntil: 0, lowVig: null, hpRatio: 1,
     player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null },
-    // ── v1.4 §0.5: three modes (rampage · quickdraw · survival) replace the combat boolean ──
+    // ── SPEC-combat §A: three modes (rampage · arcade · survival) replace the combat boolean ──
     mode: 'rampage', lastCombatMode: 'survival',
     // §1 drone avatar (survival only): keys held, physics, dash window, afterimages
     avatar: null, keys: { up: false, down: false, left: false, right: false },
@@ -44,9 +44,9 @@
     // §10 depth tiers, §4 boss stages, §3.2 ratio freshness
     depthTimer: 0, bossMode: false, ratioDirty: true, ratioAt: 0, ratioBrokenN: -1
   };
-  /* §0.5: every v1.2/v1.3 call site reads `state.combat` as "are enemies live?". It stays exactly that, derived
+  /* §A: every v1.2/v1.3 call site reads `state.combat` as "are enemies live?". It stays exactly that, derived
    * from the mode, so none of that code had to change. The setter keeps the legacy boolean writable: true picks
-   * the last combat mode the player actually used (survival unless they chose quickdraw), false is rampage. */
+   * the last combat mode the player actually used (survival until they pick otherwise), false is rampage. */
   Object.defineProperty(state, 'combat', {
     configurable: true,
     enumerable: false,

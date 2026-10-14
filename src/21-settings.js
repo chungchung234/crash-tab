@@ -86,8 +86,10 @@
    * `crsLoadout` (an array) and `crsSeenCombatHelp` (local, per machine) have no schema type and stay put. */
   const LEGACY_READ = {
     mode: (res) => {
-      if (MODES.indexOf(res.crsMode) !== -1) return res.crsMode;
-      if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'quickdraw' : 'rampage';
+      // SPEC-combat §A: the retired v1.4 id still has to be READ off disk, so it comes through migrateModeId()
+      const m = migrateModeId(res.crsMode);
+      if (MODES.indexOf(m) !== -1) return m;
+      if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'arcade' : 'rampage';
       return undefined;
     },
     defaultWeapon: (res) => {

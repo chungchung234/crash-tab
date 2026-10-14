@@ -231,9 +231,9 @@
     "message": "램페이지",
     "description": "Mode name: rampage (no enemies)"
   },
-  "modeQuickdraw": {
-    "message": "퀵드로우",
-    "description": "Mode name: quickdraw (shoot the lock-on)"
+  "modeArcade": {
+    "message": "아케이드",
+    "description": "Mode name: arcade (the cursor is the character)"
   },
   "modeSurvival": {
     "message": "서바이벌",
@@ -243,12 +243,12 @@
     "message": "적 없이 부수기",
     "description": "One-line description of the rampage mode"
   },
-  "modeQuickdrawDesc": {
-    "message": "먼저 쏘아 끊기",
-    "description": "One-line description of the quickdraw mode"
+  "modeArcadeDesc": {
+    "message": "커서로 피하며 쏘기",
+    "description": "One-line description of the arcade mode"
   },
   "modeSurvivalDesc": {
-    "message": "피하며 버티기",
+    "message": "드론으로 피하며 쏘기",
     "description": "One-line description of the survival mode"
   },
   "lockBlocked": {

@@ -1430,9 +1430,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     keyed.push({ key: KEYS[i], want, got: got || await api.weapon(page) });
   }
   check('A.keys 13: keys 1–9, 0 select hammer … collapse in default-loadout order', keyed.every((k) => k.got === k.want), keyed);
-  // SPEC-combat-v2 §5 reassigns stats().mode to the PLAY mode (rampage/quickdraw/survival); the v1 weapon alias
+  // SPEC-combat-v2 §5 reassigns stats().mode to the PLAY mode (rampage/arcade/survival); the v1 weapon alias
   // it used to carry lives on as stats().weaponMode and as the api.mode getter, both still asserted here.
-  check('A.keys 13: stats().weapon / weaponMode / api.mode mirror the selection, and stats().mode is now the play mode (§5)', await page.evaluate(() => { const a = window.__crashScreen, s = a.stats(); return s.weapon === 'collapse' && s.weaponMode === 'collapse' && a.mode === 'collapse' && ['rampage', 'quickdraw', 'survival'].includes(s.mode); }), await api.stats(page).then((s) => ({ weapon: s.weapon, weaponMode: s.weaponMode, mode: s.mode })));
+  check('A.keys 13: stats().weapon / weaponMode / api.mode mirror the selection, and stats().mode is now the play mode (§5)', await page.evaluate(() => { const a = window.__crashScreen, s = a.stats(); return s.weapon === 'collapse' && s.weaponMode === 'collapse' && a.mode === 'collapse' && ['rampage', 'arcade', 'survival'].includes(s.mode); }), await api.stats(page).then((s) => ({ weapon: s.weapon, weaponMode: s.weaponMode, mode: s.mode })));
   await api.setMode(page, 'gun');
   check('A.keys 13: setMode("gun") → api.weapon === "pistol"', (await api.weapon(page)) === 'pistol' && (await api.mode(page)) === 'pistol', { weapon: await api.weapon(page), mode: await api.mode(page) });
   check('A.keys 13: crsWeapon persisted in the shim storage', (await api.store(page)).crsWeapon === 'pistol', await api.store(page));
@@ -3102,7 +3102,7 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
       { badCap, debrisCap: afterBadCap && afterBadCap.debrisCap, errBefore: errBefore3, errAfter: errAfterCap });
     const badMode = await api.call(p, 'setSetting', 'mode', 'turbo');     // not one of the enum's options
     const afterBadMode = await api.call(p, 'settings');
-    check('A.settings 3 (§1.3): setSetting(\'mode\', \'turbo\') — not one of rampage/quickdraw/survival — is ignored (settings().mode stays \'rampage\')',
+    check('A.settings 3 (§1.3): setSetting(\'mode\', \'turbo\') — not one of rampage/arcade/survival — is ignored (settings().mode stays \'rampage\')',
       !!afterBadMode && afterBadMode.mode === 'rampage', { badMode, mode: afterBadMode && afterBadMode.mode });
 
     // ---- round trip (§4 완료 기준: 저장 → 재활성화 → 유지) --------------------------------------------
@@ -3113,7 +3113,8 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
     // carrying over exactly what this page wrote to chrome.storage.sync — the §8.1 legacy-loadout block
     // above uses this same reload-equivalent recipe, and its own FIRST activation already is the
     // "재활성화" the completion bar asks for (no extra toggle() needed on top of it).
-    await api.call(p, 'setSetting', 'mode', 'quickdraw');
+    // SPEC-combat §A retired `quickdraw`; the round trip now carries `arcade`, the mode that replaced it.
+    await api.call(p, 'setSetting', 'mode', 'arcade');
     const storeToCarry = await api.store(p);
     const h2 = await openSettingsPage((seedObj) => { Object.assign(window.__crsStore, seedObj); }, storeToCarry);
     const afterReload = await api.call(h2.page, 'settings');
@@ -3121,7 +3122,7 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
     check('A.settings 4 (§4 완료 기준): a SECOND page/activation reading the SAME storage sees every value set above (debrisCap/muted/debrisAnchor/defaultWeapon/mode) — NOT the hard defaults',
       h2.on === 'on' && !!afterReload &&
       afterReload.debrisCap === 240 && afterReload.muted === true && afterReload.debrisAnchor === 'viewport' &&
-      afterReload.defaultWeapon === 'sniper' && afterReload.mode === 'quickdraw',
+      afterReload.defaultWeapon === 'sniper' && afterReload.mode === 'arcade',
       { on: h2.on, storeToCarry, afterReload });
     check('A.settings 4 (§1.2): defaultWeapon governs the weapon a FRESH activation actually starts with (\'sniper\' persisted above → \'sniper\' on this new page, not the hard default \'hammer\')',
       weaponAfterReload === 'sniper', weaponAfterReload);
@@ -3150,6 +3151,37 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
       { on: h.on, settings: settingsM });
     check('A.settings 5 (§1.2): the one-time migration DELETES the old keys from storage — it MOVES them, it does not merely read-and-shadow them',
       !('crsMuted' in storeAfter) && !('crsDebrisAnchor' in storeAfter) && !('crsDebrisLifeMs' in storeAfter), storeAfter);
+    await closeSettingsPage(h);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // SPEC-combat §A — the retired Virtua-Cop mode. Both things a previous build could have left on
+  // disk ("crsCombat: true" from v1.3, "crsMode: 'quickdraw'" from v1.4) have to come back as
+  // `arcade`: that pref came from someone who only ever played with the cursor, and arcade is the
+  // mode where the cursor IS the player. Nothing else in the product says the old id any more —
+  // this is the ONE read path that still has to understand it.
+  // ---------------------------------------------------------------------------------------------
+  {
+    const h = await openSettingsPage(() => { window.__crsStore.crsMode = 'quickdraw'; });
+    const sQ = await api.call(h.page, 'settings');
+    const stQ = await api.stats(h.page);
+    check('A.settings 6 (§A): a stored crsMode: \'quickdraw\' (the retired v1.4 mode) migrates to \'arcade\' — settings().mode and stats().mode both report arcade, never the dead id',
+      h.on === 'on' && !!sQ && sQ.mode === 'arcade' && stQ.mode === 'arcade', { on: h.on, settings: sQ, statsMode: stQ.mode });
+    await closeSettingsPage(h);
+  }
+  {
+    const h = await openSettingsPage(() => { window.__crsStore.crsCombat = true; });
+    const sC = await api.call(h.page, 'settings');
+    const stC = await api.stats(h.page);
+    check('A.settings 6 (§A): a stored legacy crsCombat: true migrates to \'arcade\' as well (not survival — the v1.3 player had no drone)',
+      h.on === 'on' && !!sC && sC.mode === 'arcade' && stC.mode === 'arcade' && stC.combat === true, { on: h.on, settings: sC, statsMode: stC.mode });
+    await closeSettingsPage(h);
+  }
+  {
+    const h = await openSettingsPage(() => { window.__crsStore.crsCombat = false; });
+    const sF = await api.call(h.page, 'settings');
+    check('A.settings 6 (§A): a stored crsCombat: false still means rampage (the migration only rewrites the combat side)',
+      h.on === 'on' && !!sF && sF.mode === 'rampage', { on: h.on, settings: sF });
     await closeSettingsPage(h);
   }
 
@@ -4401,7 +4433,8 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.combat 10: setCombat(false) → no .crs-hostile / .crs-orb / .crs-beam / .crs-warn, stats().hostiles === 0, combat false', tier10 === 'shooter' && hostilesPre >= 1 && after10.hostile === 0 && after10.orb === 0 && after10.beam === 0 && after10.warn === 0 && s10.hostiles === 0 && s10.combat === false && (await api.combat(page)) === false, { ret: offRet, tier: tier10, hostilesPre, after10, stats: { hostiles: s10.hostiles, combat: s10.combat } });
   check('A.combat 10: player HUD (.crs-player) hidden while combat is off', !playerHud10 || !playerHud10.visible, playerHud10);
   check('A.combat 10: crsCombat === false persisted', (await api.store(page)).crsCombat === false, await api.store(page));
-  // SPEC-combat-v2 §0.5: H no longer toggles one boolean — it CYCLES rampage → quickdraw → survival → rampage.
+  // SPEC-combat-v2 §0.5 / SPEC-combat §A: H no longer toggles one boolean — it CYCLES the three modes, and §A
+  // replaced the middle one: rampage → ARCADE → survival → rampage (was rampage → quickdraw → survival).
   // Combat is "on" for the two middle modes and off at the wrap, so the old on/off claim is checked across the
   // full cycle, and the mode each press lands on is asserted as well.
   const pressH = async (want) => {
@@ -4409,8 +4442,8 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
     const got = await poll(async () => { const s = await api.stats(page); return s.mode === want ? s : null; }, 600, 15);
     return got ? { mode: got.mode, combat: got.combat } : { mode: (await api.stats(page)).mode, combat: (await api.stats(page)).combat };
   };
-  const hCycle = [await pressH('quickdraw'), await pressH('survival'), await pressH('rampage')];
-  check('A.combat 10: "H" cycles rampage → quickdraw → survival → rampage (§0.5), combat on for the two middle modes and off at the wrap', hCycle[0].mode === 'quickdraw' && hCycle[0].combat === true && hCycle[1].mode === 'survival' && hCycle[1].combat === true && hCycle[2].mode === 'rampage' && hCycle[2].combat === false, hCycle);
+  const hCycle = [await pressH('arcade'), await pressH('survival'), await pressH('rampage')];
+  check('A.combat 10: "H" cycles rampage → arcade → survival → rampage (§A), combat on for the two middle modes and off at the wrap', hCycle[0].mode === 'arcade' && hCycle[0].combat === true && hCycle[1].mode === 'survival' && hCycle[1].combat === true && hCycle[2].mode === 'rampage' && hCycle[2].combat === false, hCycle);
   await api.setCombat(page, true);
   await api.restore(page);
   await page.evaluate(() => { try { window.dispatchEvent(new Event('focus')); } catch (e) { /* ignore */ } });
@@ -4568,7 +4601,7 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
 // Written against the spec CONTRACT while the product code lands in parallel. Several points are
 // under-specified in the spec text itself; the readings picked (documented inline and in the
 // handoff notes) are the ones that make each assertion exercise real, observable behaviour:
-//   - No JS setter name is given for the new `mode` (rampage/survival/quickdraw) — only the `H`
+//   - No JS setter name is given for the new `mode` (rampage/arcade/survival) — only the `H`
 //     hotkey and a HUD button are named (§0.5). setCombatMode() below tries a same-named debug
 //     setter first (future-proofing) and otherwise drives the documented H-cycle.
 //   - debug.forceRepair(el)'s `el` is the HOSTILE (the healer), matching debug.forceAttack(el)'s
@@ -4608,8 +4641,8 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await api.restore(page);
   await sleep(80);
 
-  // Spec §0.5 names only the H hotkey / HUD button to cycle rampage → survival → quickdraw → rampage,
-  // not a JS setter. Try a same-named debug setter first (harmless if absent), then drive the hotkey.
+  // Spec §0.5 / SPEC-combat §A name only the H hotkey / HUD button to cycle rampage → arcade → survival →
+  // rampage, not a JS setter. Try a same-named debug setter first (harmless if absent), then drive the hotkey.
   async function setCombatMode(target) {
     try { await page.evaluate((m) => { const a = window.__crashScreen; if (a && typeof a.setCombatMode === 'function') a.setCombatMode(m); }, target); } catch (e) { /* ignore */ }
     for (let i = 0; i < 4; i++) {
@@ -5069,16 +5102,27 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   // that has nothing to do with eviction. Demand actual contact — the gap decides whether the lower piece
   // is really the support — and the pair that gets picked is then the pair the assertion is about.
   const CONTACT944 = 4;
+  // evictPieces()'s own wake test, read straight off src/65-pieces.js: ≥ 40 % overlap with the narrower of
+  // the two, and a bottom edge at or above the other piece's top.
+  const supports944 = (lower, upper) => {
+    const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
+    return ov >= 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l) && upper.bottom <= lower.top + 1;
+  };
   const findPair944 = (boxes) => {
     if (!Array.isArray(boxes)) return null;
     for (const lower of boxes) {
       if (!lower.resting) continue;
       for (const upper of boxes) {
         if (upper === lower || !upper.resting) continue;
-        const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
-        if (ov < 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l)) continue;
+        if (!supports944(lower, upper)) continue;
         const gap = lower.top - upper.bottom;
-        if (gap >= -1 && gap <= CONTACT944) return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
+        if (gap < -1 || gap > CONTACT944) continue;   // actually touching, not merely somewhere above
+        // …and `lower` must be its ONLY support. A chip can come to rest across two neighbours; retiring
+        // one of them leaves the other holding it up, and the piece correctly does not move — which the
+        // assertion below would read as "re-falling is broken". Demand a pair where the eviction really
+        // does remove the last thing underneath.
+        if (boxes.some((o) => o !== lower && o !== upper && o.resting && supports944(o, upper))) continue;
+        return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
       }
     }
     return null;
@@ -5287,10 +5331,11 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await sleep(80);
 
   // ---- (10) an occluded hostile's lock-on frame is dashed and labelled 가려짐 / 관통 가능 (§10.6.10) ----
-  // §2.1/§10.4: the "covered" tag is only ever written in quickdraw (modeLockOnEnemy() gates it) — in survival
-  // the frame sits over the drone instead and lockCoverTag() returns immediately, leaving it blank. Dashed
-  // styling toggles the `crs-lock-covered` class on the frame itself; the text lives on its `.crs-lock-tag` child.
-  await setCombatMode('quickdraw');
+  // §10.4: the cover tag answers a question about the ENEMY ("can you shoot it at all?"), so it is written
+  // whatever the frame is anchored to. CHANGED by SPEC-combat §A: this ran in `quickdraw`, which §A retired —
+  // it now runs in `arcade`, the mode that replaced it. Dashed styling toggles the `crs-lock-covered` class on
+  // the frame itself; the text lives on its `.crs-lock-tag` child. The assertion itself is unchanged.
+  await setCombatMode('arcade');
   await sleep(200);
   await resetScene(400, 400);
   await scrollToDepthLab();
@@ -5314,13 +5359,14 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await setCombatMode('survival');
   await sleep(150);
 
-  // ---- (11) §2.2 lock-frame aim assist: only where the frame actually sits ON the enemy ----
-  // "락온 틀 안을 클릭하면 자식 요소가 아니라 그 적대 요소가 대상이 된다" — a shot inside the closing brackets
-  // counts as a shot on the locked enemy, which is what makes "shoot the lock to break it" playable when the
-  // brackets still stand 70 px clear of the enemy's own rect. §2.1 puts that frame on the ENEMY in quickdraw;
-  // §2.3 puts it on the DRONE in survival, where the same rule would mean clicking near your own avatar damages
-  // an enemy somewhere else entirely — survival gets shoot-or-dodge (§2.3) instead of this assist.
-  await setCombatMode('quickdraw');
+  // ---- (11) §A2: the frame rides the PLAYER in both combat modes, and the enemy is what you shoot ----
+  // CHANGED by SPEC-combat §A2. This used to assert the v1.4 §2.2 aim assist in `quickdraw`: the frame sat on
+  // the ENEMY there, so a click inside the brackets but outside the enemy's own rect still counted as a shot on
+  // it. §A2 retires that mode and anchors EVERY frame on the player ("틀은 플레이어(커서 또는 드론) 위에 뜬다"),
+  // which makes the assist unreachable — a click near your own cursor must not damage an enemy across the page.
+  // So the arcade half now asserts the rule that replaced it, the same way the survival half below always has,
+  // plus the other half of §A2's offer: "그 적에게 아무 무기로든 한 대만 맞히면 즉시 취소된다" (차단!, 점수 +15).
+  await setCombatMode('arcade');
   await sleep(150);
   await resetScene(400, 400);
   await api.setWeapon(page, 'pistol');
@@ -5330,16 +5376,27 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
     const n = document.querySelector('.crs-lock'); const el = document.querySelector('#figure');
     if (!n || !el) return null;
     const lr = n.getBoundingClientRect(), er = el.getBoundingClientRect();
-    return { lock: { left: lr.left, top: lr.top, right: lr.right, bottom: lr.bottom }, el: { left: er.left, top: er.top, right: er.right, bottom: er.bottom } };
+    const clear = lr.right < er.left || lr.left > er.right || lr.bottom < er.top || lr.top > er.bottom;
+    return { cx: lr.left + lr.width / 2, cy: lr.top + lr.height / 2, clear, lock: { left: lr.left, top: lr.top, right: lr.right, bottom: lr.bottom }, el: { left: er.left, top: er.top, right: er.right, bottom: er.bottom } };
   });
-  // a point inside the brackets but clear of the enemy's own rect — the gap the assist exists to cover
-  const assistPt = assistGeom ? { x: (assistGeom.el.left + assistGeom.el.right) / 2, y: (assistGeom.lock.top + assistGeom.el.top) / 2 } : null;
-  const assistOutside = !!(assistGeom && assistPt && assistPt.y < assistGeom.el.top - 2 && assistPt.y > assistGeom.lock.top);
   const figAssistB = await api.hpOf(page, '#figure');
-  if (assistPt) await api.smashAt(page, assistPt.x, assistPt.y);
+  if (assistGeom) await api.smashAt(page, assistGeom.cx, assistGeom.cy);
   await sleep(120);
   const figAssistA = await api.hpOf(page, '#figure');
-  check('A.v2 §2.2: in quickdraw a shot inside the lock brackets but outside the enemy rect still damages that enemy', !!lockAssistId && assistOutside === true && figAssistA.hp === figAssistB.hp - DMG14('pistol'), { lockAssistId, assistGeom, assistPt, before: figAssistB, after: figAssistA, dmg: DMG14('pistol') });
+  check('A.v2 §A2: in arcade the lock frame rides the CURSOR, so a shot inside it does NOT reach the locked enemy across the page', !!lockAssistId && !!assistGeom && assistGeom.clear === true && figAssistA.hp === figAssistB.hp, { lockAssistId, assistGeom, before: figAssistB, after: figAssistA });
+
+  // ...and shooting the ENEMY itself cancels the shot: 차단!, score +15, the frame gone (§A2)
+  await resetScene(400, 400);
+  const lockBreakId = await force('#figure', 'forceLock');
+  await sleep(150);
+  const figBreakRect = await api.rect(page, '#figure');
+  const breakBefore = await api.stats(page);
+  await api.smashAt(page, figBreakRect.cx, figBreakRect.cy);
+  const breakGone = await poll(async () => ((await api.count(page, '.crs-lock')) === 0 ? true : null), 1200, 60);
+  const breakAfter = await api.stats(page);
+  check('A.v2 §A2: one hit on the locked ENEMY cancels the lock in arcade — stats().locksBroken +1, score +15 and the .crs-lock node goes',
+    !!lockBreakId && breakGone === true && breakAfter.locksBroken === breakBefore.locksBroken + 1 && breakAfter.score === breakBefore.score + 15,
+    { lockBreakId, breakGone, before: { locksBroken: breakBefore.locksBroken, score: breakBefore.score }, after: { locksBroken: breakAfter.locksBroken, score: breakAfter.score } });
 
   await api.restore(page);
   await sleep(80);
@@ -5427,6 +5484,120 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   info(`screenshot test/out/combat.png (${JSON.stringify(shotNodes)})`);
   check('A.v2 §8: combat.png frame carries the drone + its health ring, the lock-on brackets, a live repair beam, the destruction-ratio meter and the mode control all at once', shotNodes.avatar === true && shotNodes.ring === true && shotNodes.ringOnAvatar === true && shotNodes.lock === true && shotNodes.repair === true && shotNodes.meter === true && /%/.test(shotNodes.meterText || '') && shotNodes.modeControl === true, shotNodes);
   check('A.v2 §8 / readability §7: the same frame also keeps the aim line and the enlarged ammo + health panels on screen', shotNodes.aimline === true && shotNodes.ammo === true && shotNodes.health === true, shotNodes);
+  await api.restore(page);
+  await sleep(80);
+
+  // =======================================================================================
+  // SPEC-combat §A — the mode roster after the Virtua-Cop mode was retired, and the ONE thing
+  // that separates the two combat modes. Completion bar: §F "모드".
+  // =======================================================================================
+
+  // ---- (A-1) the roster itself: three modes, in order, with §A's names and descriptions ----
+  await setCombatMode('rampage');
+  await sleep(150);
+  const roster = await page.evaluate(() => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const sr = host && host.shadowRoot;
+    const btns = sr ? [...sr.querySelectorAll('.modes [data-mode]')] : [];
+    return btns.map((b) => ({ id: b.getAttribute('data-mode'), label: (b.textContent || '').trim(), title: b.getAttribute('title') || '' }));
+  });
+  check('A.§A: the mode control lists exactly rampage → arcade → survival, in that order (the Virtua-Cop mode is gone)',
+    roster.length === 3 && roster.map((r) => r.id).join(',') === 'rampage,arcade,survival', roster);
+  check('A.§A: the three carry §A\'s names (램페이지 / 아케이드 / 서바이벌) and its 7–9 자 descriptions (적 없이 부수기 / 커서로 피하며 쏘기 / 드론으로 피하며 쏘기)',
+    roster.length === 3 &&
+    roster[0].label === '램페이지' && /적 없이 부수기/.test(roster[0].title) &&
+    roster[1].label === '아케이드' && /커서로 피하며 쏘기/.test(roster[1].title) &&
+    roster[2].label === '서바이벌' && /드론으로 피하며 쏘기/.test(roster[2].title), roster);
+
+  // ---- (A-2) each mode builds only its own furniture (§F: "세 모드가 각자의 요소만 만든다") ----
+  // Rampage is the strong half of the claim — §F spells out that 적·락온·복구·미터·체력 HUD are ALL absent.
+  // (§7.13 above already covers avatar/lock/repair/progress; this adds the enemy itself and the health HUD,
+  // and then states the positive half for the two combat modes so "각자의" is a comparison, not one snapshot.)
+  const furniture = async () => ({
+    avatar: await api.count(page, '.crs-avatar'),
+    ring: await api.count(page, '.crs-self'),
+    lock: await api.count(page, '.crs-lock'),
+    repair: await api.count(page, '.crs-repair'),
+    progress: !!(await api.hudQ(page, '.crs-progress.on') || {}).visible,   // the meter lives in the HUD shadow root
+    hostiles: (await api.stats(page)).hostiles,
+    health: !!(await api.hudQ(page, '.crs-player') || {}).visible,
+  });
+  await api.restore(page);
+  await sleep(80);
+  const rampageAttack = await force('#figure', 'forceAttack');
+  await sleep(150);
+  const fRampage = await furniture();
+  check('A.§A/§F: rampage has no enemy, no lock-on, no repair beam, no meter and no health HUD — forceAttack cannot even start one',
+    !rampageAttack && fRampage.hostiles === 0 && fRampage.lock === 0 && fRampage.repair === 0 && fRampage.progress === false && fRampage.health === false && fRampage.avatar === 0 && fRampage.ring === 0,
+    { rampageAttack, fRampage });
+
+  await setCombatMode('arcade');
+  await sleep(200);
+  await resetScene(400, 400);
+  await force('#figure', 'forceAttack');
+  await force('#figure', 'forceLock');
+  await sleep(200);
+  const fArcade = await furniture();
+  check('A.§A1: arcade builds the enemy, the lock-on, the meter and the health ring + HUD — but NO drone (the cursor is the character)',
+    fArcade.avatar === 0 && fArcade.ring === 1 && fArcade.lock >= 1 && fArcade.hostiles >= 1 && fArcade.progress === true && fArcade.health === true,
+    fArcade);
+  // §A1 "체력 링이 커서를 두른다": the ring is drawn at the player point, which in arcade is the cursor
+  await debugCall('setPlayerPos', 300, 500);
+  await sleep(120);
+  const ringAt = await page.evaluate(() => { const n = document.querySelector('.crs-self'); if (!n) return null; const r = n.getBoundingClientRect(); return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; });
+  check('A.§A1: in arcade the health ring follows the CURSOR (moved to 300,500 → the ring centres there)',
+    !!ringAt && near(ringAt.cx, 300, 6) && near(ringAt.cy, 500, 6), ringAt);
+  // §A1 "체력 100, 0이면 KO" — the failure condition is the same as survival's, not a resource model
+  const koBefore = (await api.stats(page)).ko;
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(0));
+  const koAfter = await poll(async () => ((await api.stats(page)).ko === true ? true : null), 1200, 60);
+  check('A.§A1: arcade KOs at 0 HP exactly like survival (the retired mode had no health at all)',
+    koBefore === false && koAfter === true, { koBefore, koAfter });
+  await api.restore(page);
+  await sleep(120);
+
+  await setCombatMode('survival');
+  await sleep(200);
+  const fSurvival = await furniture();
+  check('A.§A1: survival builds the same furniture AND the drone — the avatar is the only piece the two combat modes do not share',
+    fSurvival.avatar === 1 && fSurvival.ring === 1 && fSurvival.health === true && fSurvival.progress === true, fSurvival);
+
+  // ---- (A-3) the arcade handicap: attack interval ×1.35, projectile speed ×0.8 (§A1, §F) ----
+  // Measured in arcade FIRST and then one H press to survival: the cycle order is rampage → arcade → survival,
+  // so going the other way would pass through rampage, which releases every hostile and would leave the second
+  // reading to a different enemy record (different depth tier, different interval).
+  await setCombatMode('arcade');
+  await sleep(200);
+  await api.restore(page);
+  await sleep(100);
+  await api.rect(page, '#figure');
+  await debugCall('setAvatarPos', 60, 60);
+  const tierTuneA = await force('#figure', 'forceAttack');
+  await sleep(80);
+  const tuneArcade = await force('#figure', 'modeTuning');
+  const orbsArcade = await debugCall('orbList');
+  await setCombatMode('survival');
+  await sleep(200);
+  await debugCall('setAvatarPos', 60, 60);
+  const tuneSurvival = await force('#figure', 'modeTuning');
+  check('A.§A1/§F: arcade\'s attack interval is 1.35× survival\'s, measured on the SAME enemy record (both the bare T1 baseline and the live, depth-adjusted interval)',
+    !!tuneArcade && !!tuneSurvival && tuneArcade.mode === 'arcade' && tuneSurvival.mode === 'survival' &&
+    near(tuneArcade.attackMul / tuneSurvival.attackMul, 1.35, 0.001) &&
+    near(tuneArcade.attackIntervalMs / tuneSurvival.attackIntervalMs, 1.35, 0.02),
+    { tuneArcade, tuneSurvival, ratio: tuneArcade && tuneSurvival && tuneArcade.attackIntervalMs / tuneSurvival.attackIntervalMs });
+
+  await api.restore(page);
+  await sleep(100);
+  await api.rect(page, '#figure');
+  await debugCall('setAvatarPos', 60, 60);
+  const tierTuneS = await force('#figure', 'forceAttack');
+  await sleep(80);
+  const orbsSurvival = await debugCall('orbList');
+  const spdA = Array.isArray(orbsArcade) && orbsArcade.length ? orbsArcade[0].speed : null;
+  const spdS = Array.isArray(orbsSurvival) && orbsSurvival.length ? orbsSurvival[0].speed : null;
+  check('A.§A1/§F: a projectile actually launched in arcade flies at 0.8× the survival speed (416 vs 520 px/s), read off the live orb, not a constant',
+    tierTuneA === 'shooter' && tierTuneS === 'shooter' && spdA != null && spdS != null && near(spdS, 520, 1) && near(spdA / spdS, 0.8, 0.005),
+    { tierTuneA, tierTuneS, spdA, spdS, ratio: spdA != null && spdS ? spdA / spdS : null });
   await api.restore(page);
   await sleep(80);
 

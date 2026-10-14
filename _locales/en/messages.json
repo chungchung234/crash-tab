@@ -231,9 +231,9 @@
     "message": "Rampage",
     "description": "Mode name: rampage (no enemies)"
   },
-  "modeQuickdraw": {
-    "message": "Quickdraw",
-    "description": "Mode name: quickdraw (shoot the lock-on)"
+  "modeArcade": {
+    "message": "Arcade",
+    "description": "Mode name: arcade (the cursor is the character)"
   },
   "modeSurvival": {
     "message": "Survival",
@@ -243,12 +243,12 @@
     "message": "No enemies, just smash",
     "description": "One-line description of the rampage mode"
   },
-  "modeQuickdrawDesc": {
-    "message": "Shoot before they lock on",
-    "description": "One-line description of the quickdraw mode"
+  "modeArcadeDesc": {
+    "message": "Dodge and shoot with the cursor",
+    "description": "One-line description of the arcade mode"
   },
   "modeSurvivalDesc": {
-    "message": "Fly, dodge, survive",
+    "message": "Dodge and shoot with the drone",
     "description": "One-line description of the survival mode"
   },
   "lockBlocked": {
