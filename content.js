@@ -5303,7 +5303,12 @@
       /* SPEC-destruction §B/§C add `w`/`h` (the piece's own size, which never changes) and `cx`/`cy` (the
        * centre it was BORN at). A reader comparing "the cell the blast went off in" with a far one, or the
        * average distance of imploding debris, must not be fooled by how far each piece has since flown. */
+      /* evictPieces() decides what an eviction knocks loose in the piece's OWN anchor frame (p.ox/p.oy, no
+       * scroll applied), while l/r/top/bottom above are viewport boxes. For one anchor the two differ by a
+       * constant and relative comparisons agree, but a reader asking "would this eviction wake that piece?"
+       * should ask in the frame the product answers in — so the raw numbers are published too. */
       return { pid: p.pid, resting: !!p.resting, anchor: p.docAnchor ? 'document' : 'viewport', l: b.l, r: b.r, top: b.top, bottom: b.bottom,
+        rawL: p.ox + p.x + p.bb.minX, rawR: p.ox + p.x + p.bb.maxX, rawTop: p.oy + p.y + p.bb.minY, rawBottom: p.oy + p.y + p.bb.maxY,
         w: p.bb.maxX - p.bb.minX, h: p.bb.maxY - p.bb.minY, cx: viewOx(p) + p.cx, cy: viewOy(p) + p.cy, chip: !!p.chip, ash: !!p.ash,
         vx: p.vx, vy: p.vy, vr: p.vr, rot: p.rot };
     });
