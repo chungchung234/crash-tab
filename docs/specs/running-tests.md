@@ -5,13 +5,18 @@
 
 측정값(블록 분할 이후):
 
-| 명령 | 시간 |
-|---|---|
-| 전체 (`node test/e2e.js`) | **86초** |
-| `CRS_BLOCKS=settings` | 5.5초 |
-| `CRS_BLOCKS=ammo` | 41초 |
-| `CRS_BLOCKS=core` | 49초 |
-| `CRS_BLOCKS=combat` | 86초 |
+| 명령 | 시간 | 내용 |
+|---|---|---|
+| 전체 (`node test/e2e.js`) | **57초** | 696 단언 |
+| `CRS_BLOCKS=core` | 56초 | 픽스처·주입·HP·무기 아트·재질 |
+| `CRS_BLOCKS=ammo` | 42초 | 탄창·저격경·로드아웃·가독성 |
+| `CRS_BLOCKS=combat` | 35초 | 드론·락온·복구 (§7) |
+| `CRS_BLOCKS=debris` | 30초 | 파편 수명 (§9.4) |
+| `CRS_BLOCKS=depth` | 24초 | 깊이·관통 (§10.6) |
+| `CRS_BLOCKS=rules` | 19초 | 모드·적만 피해·적만 포커싱 (§A/§B/§D1) |
+| `CRS_BLOCKS=settings` | 6초 | 스키마·성능 가드·접근성 |
+
+전체 실행 시간은 이제 가장 느린 한 레인인 `core` 가 정한다.
 
 ## 절대 규칙
 
@@ -35,9 +40,8 @@ CRS_BLOCKS=settings node test/e2e.js
 CRS_BLOCKS=core,ammo node test/e2e.js
 ```
 
-블록은 `core` · `ammo` · `combat` · `settings` 넷이다. 각각 자기 브라우저와 자기 페이지를
-열고 자기 전제를 스스로 만들기 때문에 단독으로 돌아간다. 무엇이 어느 블록인지는
-`test-speed.md` §5 표에 있다.
+블록은 일곱이다. 각각 자기 브라우저와 자기 페이지를 열고 자기 전제를 스스로 만들기 때문에
+단독으로 돌아간다. 무엇이 어느 블록인지는 위 표에 있다.
 
 **완료 판정은 항상 전체 실행이다.** 부분 실행은 요약에 `*** PARTIAL RUN ***` 을 찍고
 총 실행 시간 단언을 건너뛴다. 모르는 블록 이름을 주면 즉시 종료한다.

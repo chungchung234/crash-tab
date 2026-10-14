@@ -290,7 +290,7 @@ const WANT = (id) => SUITES.includes(id);
 // A typo must not look green: an unknown name is a hard error, never a silent zero-block run.
 const BLOCK_ARG = (process.argv.find((a) => a.startsWith('--blocks=')) || '').slice(9);
 const BLOCKS_RAW = String(process.env.CRS_BLOCKS || BLOCK_ARG || '').trim().toLowerCase();
-const BLOCK_NAMES = ['core', 'ammo', 'combat', 'settings'];
+const BLOCK_NAMES = ['core', 'ammo', 'combat', 'debris', 'depth', 'rules', 'settings'];
 const BLOCKS_PICKED = BLOCKS_RAW ? BLOCKS_RAW.split(/[,\s]+/).filter(Boolean) : null;
 if (BLOCKS_PICKED) {
   const bad = BLOCKS_PICKED.filter((b) => !BLOCK_NAMES.includes(b));
@@ -4662,8 +4662,13 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
 //     .crs-avatar node count stays exactly 1 through a dash (no extra same-class ghost copies),
 //     since no afterimage class name is in the contract either.
 // ---------------------------------------------------------------------------
-async function suiteA14(browser, origin, contentCss, contentJs) {
-  console.log('--- combat: combat v2 — drone avatar / aim lock-on / repairing enemies (SPEC-combat-v2 §7), debris lifetime (§9.4), depth-of-stack (§10.6) ---');
+/* ── SPEC-test-speed §5: the combat lane, split four ways ────────────────────────────────────
+ * suiteA14 was one 1430-line function and, at ~100 s, the single thing deciding how long a full run took.
+ * Its four parts never shared state — each sets its own mode, debug flags and scene on entry — they only
+ * shared the tab. So they are four blocks now, one browser each, running at the same time:
+ *   combat (§7) · debris (§9.4) · depth (§10.6) · rules (§A / §B / §D1)
+ * Everything they DID share is built here, once per block. */
+async function combatSetup(browser, origin, contentCss, contentJs, label) {
   // SPEC-test-speed §5: its own page. This block always rebuilt its own state on entry (it re-evaluates
   // content.js below), so the only thing it inherited from suite A was the tab itself.
   const h = await freshPage(browser, origin, contentCss, contentJs, { activate: false });
@@ -4674,7 +4679,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   // Activation first: window.__crashScreen only exists once content.js has run, and weaponTable() reads it.
   // (It used to be read before this line because suite A had already evaluated content.js on this tab.)
   const onV14 = await page.evaluate(contentJs);
-  check('A.v2: content.js reactivated for the combat-v2 / debris / depth block', onV14 === 'on', onV14);
+  check(`A.${label}: content.js activated for this block`, onV14 === 'on', onV14);
   const W14 = await weaponTable(page);
   const DMG14 = W14.dmg;
   // noFalloff was inherited from suite A's injection while this block shared that page; every exact-damage
@@ -4725,6 +4730,23 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   // every forceAttack/forceLock/depthOf/hpOf-tier read on it, not just once at the top of that section.
   const scrollToDepthLab = () => api.rect(page, '#depth-front');
 
+  return { h, page, log, label, W14, DMG14, near, norm360, angDist, setCombatMode, resetScene, force, debugCall, scrollToDepthLab };
+}
+async function combatTeardown(ctx) {
+  const { h, page, label, setCombatMode } = ctx;
+  // ---- tidy up: back to the block's baseline mode/weapon/debug flags before the evidence tally ----
+  await setCombatMode('rampage');
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: false });
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(100);
+  await closeBlockPage(`A.${label}`, h);
+}
+
+async function suiteA14(browser, origin, contentCss, contentJs) {
+  console.log('--- combat: combat v2 — drone avatar / aim lock-on / repairing enemies (SPEC-combat-v2 §7) ---');
+  const ctx = await combatSetup(browser, origin, contentCss, contentJs, 'combat');
+  const { page, log, W14, DMG14, near, norm360, angDist, setCombatMode, resetScene, force, debugCall, scrollToDepthLab } = ctx;
   // =======================================================================================
   // §7 — combat v2 (avatar / lock-on / repair) suite A tests 1–14
   // =======================================================================================
@@ -5034,6 +5056,13 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
   await sleep(1700);
 
+  await combatTeardown(ctx);
+}
+
+async function suiteA14Debris(browser, origin, contentCss, contentJs) {
+  console.log('--- debris: debris auto-despawn (SPEC-combat-v2 §9.4) ---');
+  const ctx = await combatSetup(browser, origin, contentCss, contentJs, 'debris');
+  const { page, log, W14, DMG14, near, norm360, angDist, setCombatMode, resetScene, force, debugCall, scrollToDepthLab } = ctx;
   // =======================================================================================
   // §9.4 — debris auto-despawn (SPEC-combat-v2 §9)
   // =======================================================================================
@@ -5210,7 +5239,11 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
       const boxes = await pieceBoxes944();
       return (Array.isArray(boxes) && !boxes.some((b) => b.pid === pairInfo944.lower)) ? true : null;
     }, 2000, 80);
-    check('A.v2 9.4.4: a piece resting on top of another re-falls once the piece underneath it despawns', expired944 === pairInfo944.lower && lowerGone944 === true && !!rose944, { pair: pairInfo944, expired944, lowerGone944, after: rose944 });
+    // What the upper piece actually did, so a failure says which half broke: never woken (evictPieces did not
+    // see it), or woken and then held up by something the pair search did not account for.
+    const upAfter944 = (await pieceBoxes944() || []).find((b) => b.pid === pairInfo944.upper) || null;
+    const floor944 = await page.evaluate(() => document.documentElement.clientHeight);
+    check('A.v2 9.4.4: a piece resting on top of another re-falls once the piece underneath it despawns', expired944 === pairInfo944.lower && lowerGone944 === true && !!rose944, { pair: pairInfo944, expired944, lowerGone944, after: rose944, upAfter: upAfter944, floor: floor944 });
   }
 
   // ---- (5) in-flight pieces do not count toward the debris lifetime (§9.4.5) ----
@@ -5251,6 +5284,13 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await api.restore(page);
   await sleep(80);
 
+  await combatTeardown(ctx);
+}
+
+async function suiteA14Depth(browser, origin, contentCss, contentJs) {
+  console.log('--- depth: depth-of-stack affects combat (SPEC-combat-v2 §10.6) ---');
+  const ctx = await combatSetup(browser, origin, contentCss, contentJs, 'depth');
+  const { page, log, W14, DMG14, near, norm360, angDist, setCombatMode, resetScene, force, debugCall, scrollToDepthLab } = ctx;
   // =======================================================================================
   // §10.6 — depth-of-stack affects combat (SPEC-combat-v2 §10)
   // =======================================================================================
@@ -5560,6 +5600,13 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await api.restore(page);
   await sleep(80);
 
+  await combatTeardown(ctx);
+}
+
+async function suiteA14Rules(browser, origin, contentCss, contentJs) {
+  console.log('--- rules: modes (§A) / hostiles-only damage (§B) / enemy-only focus (§D1) ---');
+  const ctx = await combatSetup(browser, origin, contentCss, contentJs, 'rules');
+  const { page, log, W14, DMG14, near, norm360, angDist, setCombatMode, resetScene, force, debugCall, scrollToDepthLab } = ctx;
   // =======================================================================================
   // SPEC-combat §A — the mode roster after the Virtua-Cop mode was retired, and the ONE thing
   // that separates the two combat modes. Completion bar: §F "모드".
@@ -6085,14 +6132,9 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await api.restore(page);
   await sleep(100);
 
-  // ---- tidy up: back to the block's baseline mode/weapon/debug flags before the evidence tally ----
-  await setCombatMode('rampage');
-  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: false });
-  await api.setWeapon(page, 'hammer');
-  await api.restore(page);
-  await sleep(100);
-  await closeBlockPage('A.combat', h);
+  await combatTeardown(ctx);
 }
+
 
 // ---------------------------------------------------------------------------
 // Suite B — strict CSP + Trusted Types
@@ -6438,6 +6480,9 @@ async function suiteC(puppeteer, origin) {
     ['core', (b) => suiteA(b, origin, contentCss, contentJs)],
     ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],
     ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],
+    ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],
+    ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],
+    ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],
     ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],
   ];
   if (WANT('A')) for (const [name, fn] of A_BLOCKS) {

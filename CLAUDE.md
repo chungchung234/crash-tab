@@ -63,11 +63,14 @@ CSS 를 병합할 때는 규칙 본문 안에서 충돌이 나면 중괄호가 �
 ## 테스트
 
 ```bash
-node test/e2e.js                      # 전체, 86초, 605 단언
-CRS_BLOCKS=core node test/e2e.js      # 49초
-CRS_BLOCKS=ammo node test/e2e.js      # 41초
-CRS_BLOCKS=combat node test/e2e.js    # 86초
-CRS_BLOCKS=settings node test/e2e.js  # 5.5초
+node test/e2e.js                      # 전체, 57초, 696 단언
+CRS_BLOCKS=core node test/e2e.js      # 56초 — 픽스처·주입·HP·무기 아트·재질
+CRS_BLOCKS=ammo node test/e2e.js      # 42초 — 탄창·저격경·로드아웃·가독성
+CRS_BLOCKS=combat node test/e2e.js    # 35초 — 드론·락온·복구 (§7)
+CRS_BLOCKS=debris node test/e2e.js    # 30초 — 파편 수명 (§9.4)
+CRS_BLOCKS=depth node test/e2e.js     # 24초 — 깊이·관통 (§10.6)
+CRS_BLOCKS=rules node test/e2e.js     # 19초 — 모드·적만 피해·적만 포커싱 (§A/§B/§D1)
+CRS_BLOCKS=settings node test/e2e.js  # 6초  — 스키마·성능 가드·접근성
 ```
 
 - 반복 중에는 건드린 블록만 돌린다. **완료 판정은 항상 전체 실행이다.**
