@@ -106,7 +106,42 @@
     '@keyframes crs-scan{0%{opacity:1}50%{opacity:.25}100%{opacity:1}}',
     '@media (prefers-reduced-motion:reduce){.crs-progress.scan .rscan{animation:none;opacity:.8}}',
     '.crs-player .pdash{display:none;width:10px;height:10px;margin-left:8px;border-radius:50%;vertical-align:-1px;background:rgba(255,255,255,.22);box-shadow:0 0 0 1px rgba(255,255,255,.35) inset}',
-    '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}'
+    '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}',
+    /* ── SPEC-product §4: the boss bar (상단 중앙에 고정), the locked loadout slot, ──────────────────
+       and §3's challenge progress row + result overlay, and §5's replay badge. All of them are shadow
+       siblings of `.panel`, like the ammo / health / toast / KO nodes above, so they go away with the HUD. */
+    '.crs-bossbar{position:fixed;left:50%;top:14px;transform:translate(-50%,0);pointer-events:none;display:none;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff;z-index:7}',
+    '.crs-bossbar.on{display:block}',
+    '.crs-bossbar .blabel{display:block;font-size:13px;font-weight:800;text-align:center;margin-bottom:4px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.95)}',
+    '.crs-bossbar .bbar{width:320px;height:12px;background:rgba(255,255,255,.18);border:1px solid rgba(255,214,102,.8);border-radius:7px;overflow:hidden;box-shadow:0 0 0 2px rgba(0,0,0,.45)}',
+    '.crs-bossbar .bfill{height:100%;width:100%;background:#ffd166;border-radius:6px}',
+    '.crs-bossbar[data-phase="2"] .bfill{background:#ffa94d}',
+    '.crs-bossbar[data-phase="3"] .bfill{background:#e5484d}',
+    // the boss bar takes the top strip, so the toast and the ratio meter step down out of its way
+    ':host(.crs-boss-on) .crs-toast{top:62px}',
+    ':host(.crs-boss-on) .crs-progress{top:100px}',
+    ':host(.crs-boss-on) .crs-chal{top:140px}',
+    // §4 해금: a locked slot is dimmed, carries 🔒 and says how much damage is still owed
+    '.grid button.locked{opacity:.42}',
+    '.grid button.locked .em{filter:grayscale(1)}',
+    '.grid button .lockv{position:absolute;left:0;right:0;bottom:0;font-size:8px;line-height:1.25;text-align:center;font-weight:700;color:#ffd166;white-space:nowrap;overflow:hidden}',
+    // §3 챌린지 진행 행 (남은 시간 · 목표 · 생존 시간) + 막대
+    '.crs-chal{position:fixed;left:50%;top:92px;transform:translate(-50%,0);pointer-events:none;display:none;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff;z-index:4}',
+    '.crs-chal.on{display:block}',
+    '.crs-chal .clabel{display:block;font-size:13px;font-weight:700;text-align:center;margin-bottom:4px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.9)}',
+    '.crs-chal .cbar{width:240px;height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}',
+    '.crs-chal .cfill{height:100%;width:0;background:#58a6ff;border-radius:5px}',
+    // §3 결과 오버레이 — same curtain as the KO screen, its own node so neither can hide the other
+    '.crs-result{position:fixed;inset:0;background:rgba(0,0,0,.78);pointer-events:auto;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:6;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff}',
+    '.crs-result.show{display:flex}',
+    '.crs-result .rt{font-size:30px;font-weight:800;letter-spacing:.3px}',
+    '.crs-result .rs{font-size:15px;color:rgba(255,255,255,.88)}',
+    '.crs-result .rbest{font-size:16px;font-weight:800;color:#ffd166;min-height:19px}',
+    '.crs-result .rb{display:flex;gap:10px;margin-top:8px}',
+    '.crs-result button{flex:none;height:38px;padding:0 18px;font-size:14px;background:rgba(255,255,255,.12)}',
+    // §5 리플레이 배지 — bottom centre, clear of the ammo / health plates and of every top-strip panel
+    '.crs-replay{position:fixed;left:50%;bottom:96px;transform:translate(-50%,0);background:rgba(88,166,255,.95);color:#06121f;font-weight:800;font-size:13px;padding:7px 14px;border-radius:999px;pointer-events:none;display:none;white-space:nowrap;z-index:8}',
+    '.crs-replay.on{display:block}'
   ].join('\n');
 
   function hudButton(label, title, onClick) {
@@ -139,6 +174,7 @@
     const grid = doc.createElement('div'); grid.className = 'grid';
     hudEls.grid = grid;
     hudEls.weaponBtns = {}; hudEls.badges = {};
+    hudEls.lockTags = {};   // SPEC-product §4 해금: one 🔒 caption node per grid button
     let gridDrag = null, suppressClick = false;
     for (const id of WEAPON_IDS) {
       const W = WEAPONS[id];
@@ -148,7 +184,10 @@
       b.setAttribute('aria-pressed', 'false');
       const badge = doc.createElement('span'); badge.className = 'badge';
       const em = doc.createElement('span'); em.className = 'em'; em.textContent = W.emoji;
-      b.append(badge, em);
+      // SPEC-product §4 해금: empty until the slot is locked; syncLockedSlots() (src/97-challenge.js) fills it
+      const lockv = doc.createElement('span'); lockv.className = 'lockv';
+      b.append(badge, em, lockv);
+      hudEls.lockTags[id] = lockv;
       b.addEventListener('click', (e) => {
         e.preventDefault();
         if (suppressClick) { suppressClick = false; return; }   // the click that follows a drag
@@ -316,6 +355,32 @@
     // ── v1.4 §1.2: one dash-cooldown dot on the health panel ──
     hudEls.dashDot = doc.createElement('span'); hudEls.dashDot.className = 'pdash';
     try { hudEls.pStats.append(hudEls.dashDot); } catch (err) { /* ignore */ }
+
+    // ── SPEC-product §4: the boss health bar, pinned to the top centre ──
+    hudEls.host = host;   // bossBarSync() toggles `crs-boss-on` on it, which steps the other top panels down
+    const bbox = mk('div', 'crs-bossbar');
+    const blabel = doc.createElement('span'); blabel.className = 'blabel crs-num';
+    const bbar = doc.createElement('div'); bbar.className = 'bbar';
+    const bfill = doc.createElement('div'); bfill.className = 'bfill';
+    bbar.append(bfill);
+    bbox.append(blabel, bbar);
+    mountPoint.append(bbox);
+    state.bossNodes = { box: bbox, label: blabel, fill: bfill };
+
+    // ── SPEC-product §3: the challenge progress row (남은 시간 · 목표 · 생존 시간) and its bar ──
+    const cbox = mk('div', 'crs-chal');
+    const clabel = doc.createElement('span'); clabel.className = 'clabel crs-num';
+    const cbar = doc.createElement('div'); cbar.className = 'cbar';
+    const cfill = doc.createElement('div'); cfill.className = 'cfill';
+    cbar.append(cfill);
+    cbox.append(clabel, cbar);
+    mountPoint.append(cbox);
+    hudEls.chal = { box: cbox, label: clabel, fill: cfill };
+
+    // ── SPEC-product §5: the replay badge ──
+    hudEls.replay = mk('div', 'crs-replay');
+    hudEls.replay.textContent = msg('replayBadge');
+    mountPoint.append(hudEls.replay);
     return host;
   }
   function hudFallbackCheck() {
@@ -346,6 +411,29 @@
           state.ratioNodes.fill.style.height = '100%'; state.ratioNodes.fill.style.background = '#e5484d';
           // §D1: the scan tag has no stylesheet to hide it here either — syncEnemyScan() drives `display` directly
           if (state.ratioNodes.scan) { const sc = state.ratioNodes.scan.style; sc.display = 'none'; sc.marginLeft = '10px'; sc.fontSize = '12px'; sc.fontWeight = '700'; sc.color = '#ffd166'; sc.whiteSpace = 'nowrap'; }
+        }
+        /* SPEC-product §3 / §4 / §5: the three new shadow siblings need the same minimal fixed placement.
+         * Their `.on` classes are mirrored by style.display from bossBarSync() / chalHud() / replayBadge(). */
+        if (state.bossNodes && state.bossNodes.box) {
+          fixed(state.bossNodes.box, '50%', 'auto', '14px', 'auto');
+          state.bossNodes.box.style.transform = 'translate(-50%, 0)';
+          state.bossNodes.box.style.display = 'none';
+          const bb = state.bossNodes.fill.parentNode;
+          if (bb) { bb.style.width = '320px'; bb.style.height = '12px'; bb.style.background = 'rgba(255,255,255,.18)'; bb.style.borderRadius = '7px'; bb.style.overflow = 'hidden'; }
+          state.bossNodes.fill.style.height = '100%'; state.bossNodes.fill.style.background = '#ffd166';
+        }
+        if (hudEls.chal && hudEls.chal.box) {
+          fixed(hudEls.chal.box, '50%', 'auto', '92px', 'auto');
+          hudEls.chal.box.style.transform = 'translate(-50%, 0)';
+          hudEls.chal.box.style.display = 'none';
+          const cb = hudEls.chal.fill.parentNode;
+          if (cb) { cb.style.width = '240px'; cb.style.height = '10px'; cb.style.background = 'rgba(255,255,255,.2)'; cb.style.borderRadius = '5px'; cb.style.overflow = 'hidden'; }
+          hudEls.chal.fill.style.height = '100%'; hudEls.chal.fill.style.background = '#58a6ff';
+        }
+        if (hudEls.replay) {
+          fixed(hudEls.replay, '50%', 'auto', 'auto', '96px');
+          hudEls.replay.style.transform = 'translate(-50%, 0)';
+          hudEls.replay.style.display = 'none';
         }
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
@@ -425,6 +513,9 @@
       hudEls.combatBtn.title = msg('labelCombat') + ' ' + (state.combat ? 'ON' : 'OFF') + ' (H)';
       hudEls.combatBtn.setAttribute('aria-pressed', state.combat ? 'true' : 'false');
       updateModeHud();   // ── v1.4 §0.5 ──
+      bossBarSync();        // SPEC-product §4: every hit the player lands passes through here
+      syncLockedSlots();    // SPEC-product §4 해금: 🔒 and what is still owed, on the grid
+      progressSample();     // SPEC-product §4 해금: fold the new damage into the cumulative total
     } catch (e) { /* ignore */ }
   }
   // ── SPEC-combat §A: which of the three is pressed, and the one-line description under them ──

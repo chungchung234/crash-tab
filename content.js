@@ -375,7 +375,25 @@
     // ── SPEC-combat §B1: the word a deflected hit prints instead of a damage number ──
     invulLabel: '무적',
     // ── SPEC-combat §D1: what the meter says while the roster is empty ──
-    scanningEnemies: '적 탐색 중…'
+    scanningEnemies: '적 탐색 중…',
+    /* ── SPEC-product (10단계) §3 챌린지 · §4 보스와 해금 · §5 인스펙터·공유·리플레이 ──────────────
+     * Every string the product renders has a hard-coded Korean fallback here: chrome.i18n is unavailable
+     * in a page whose extension context has gone away (and in the e2e harness's shim), and a HUD that
+     * prints its own message keys is a broken HUD. The _locales files carry the same keys for both locales. */
+    labelChallenge: '챌린지', chalTimeAttack: '타임어택', chalTargetRush: '목표 돌파', chalSurvivalRun: '생존',
+    chalResult: '챌린지 결과', chalNewBest: '최고 기록 갱신!', chalRetry: '다시', chalClose: '닫기',
+    chalRemain: '남은 시간', chalTargets: '목표', chalElapsed: '소요', chalStopped: '챌린지를 멈췄어요',
+    labelBoss: '보스', bossArrived: '👑 보스 등장!', bossDown: '👑 보스 격파!',
+    toastLocked: '아직 잠긴 무기예요', toastUnlocked: '무기 해금!',
+    setUnlockAll: '모든 무기 잠금 해제', setRecordReplay: '리플레이 기록',
+    inspectOn: '🔍 인스펙터 — 클릭하면 선택자를 복사해요 (I로 끄기)', inspectOff: '인스펙터 모드 꺼짐',
+    inspectCopied: '선택자 복사됨', inspectSelector: '선택자', inspectBox: '박스', inspectFont: '글꼴',
+    inspectColors: '색', inspectContrast: '대비', inspectStacking: '쌓임', inspectRole: '역할',
+    inspectName: '이름', inspectChildren: '자식', inspectFail: '미달',
+    shareFailed: '이 페이지는 캡처할 수 없어요', shareOpened: '공유 이미지를 열었어요', shareTitle: '화면부수기 결과',
+    shareSave: '저장', shareCopy: '클립보드 복사', shareCopied: '복사했어요', shareNone: '공유할 이미지가 없어요',
+    replayBadge: '▶ 리플레이 재생 중', replayScaled: '뷰포트가 달라 좌표를 보정했어요',
+    replayDone: '리플레이 재생 끝', replayBad: '리플레이 파일이 올바르지 않아요'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));
@@ -504,7 +522,7 @@
   /* schema file is absent (build.js then only warns): the unresolved form   */
   /* is Object.freeze([].concat()) — a frozen empty schema.                  */
   /* ===================================================================== */
-  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","breach","combo","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
+  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","breach","combo","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"},{"key":"unlockAll","type":"bool","default":true,"labelKey":"setUnlockAll","group":"advanced"},{"key":"recordReplay","type":"bool","default":true,"labelKey":"setRecordReplay","group":"advanced"}])));
   const SETTING_GROUPS = ['general', 'combat', 'accessibility', 'advanced'];
   /* chrome.storage.sync keys are namespaced `crs.<key>` so they can never collide with the v1 flat keys
    * (crsWeapon, crsMuted, …) that §1.2 migrates away from. Only big things go to `local` — the one that
@@ -656,6 +674,8 @@
       else if (key === 'reduceMotion') a11yMotionChanged();
       else if (key === 'highContrastMarkers') a11yContrastChanged();
       else if (key === 'keyboardAim') a11yAimChanged();
+      // SPEC-product §4: turning the unlock gate on or off has to repaint the loadout grid at once
+      else if (key === 'unlockAll') syncLockedSlots();
     } catch (e) { /* a page that fights back must never break a settings write */ }
   }
   /* The runtime half of api.setDebrisLife(), with no storage write of its own. */
@@ -3809,7 +3829,42 @@
     '@keyframes crs-scan{0%{opacity:1}50%{opacity:.25}100%{opacity:1}}',
     '@media (prefers-reduced-motion:reduce){.crs-progress.scan .rscan{animation:none;opacity:.8}}',
     '.crs-player .pdash{display:none;width:10px;height:10px;margin-left:8px;border-radius:50%;vertical-align:-1px;background:rgba(255,255,255,.22);box-shadow:0 0 0 1px rgba(255,255,255,.35) inset}',
-    '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}'
+    '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}',
+    /* ── SPEC-product §4: the boss bar (상단 중앙에 고정), the locked loadout slot, ──────────────────
+       and §3's challenge progress row + result overlay, and §5's replay badge. All of them are shadow
+       siblings of `.panel`, like the ammo / health / toast / KO nodes above, so they go away with the HUD. */
+    '.crs-bossbar{position:fixed;left:50%;top:14px;transform:translate(-50%,0);pointer-events:none;display:none;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff;z-index:7}',
+    '.crs-bossbar.on{display:block}',
+    '.crs-bossbar .blabel{display:block;font-size:13px;font-weight:800;text-align:center;margin-bottom:4px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.95)}',
+    '.crs-bossbar .bbar{width:320px;height:12px;background:rgba(255,255,255,.18);border:1px solid rgba(255,214,102,.8);border-radius:7px;overflow:hidden;box-shadow:0 0 0 2px rgba(0,0,0,.45)}',
+    '.crs-bossbar .bfill{height:100%;width:100%;background:#ffd166;border-radius:6px}',
+    '.crs-bossbar[data-phase="2"] .bfill{background:#ffa94d}',
+    '.crs-bossbar[data-phase="3"] .bfill{background:#e5484d}',
+    // the boss bar takes the top strip, so the toast and the ratio meter step down out of its way
+    ':host(.crs-boss-on) .crs-toast{top:62px}',
+    ':host(.crs-boss-on) .crs-progress{top:100px}',
+    ':host(.crs-boss-on) .crs-chal{top:140px}',
+    // §4 해금: a locked slot is dimmed, carries 🔒 and says how much damage is still owed
+    '.grid button.locked{opacity:.42}',
+    '.grid button.locked .em{filter:grayscale(1)}',
+    '.grid button .lockv{position:absolute;left:0;right:0;bottom:0;font-size:8px;line-height:1.25;text-align:center;font-weight:700;color:#ffd166;white-space:nowrap;overflow:hidden}',
+    // §3 챌린지 진행 행 (남은 시간 · 목표 · 생존 시간) + 막대
+    '.crs-chal{position:fixed;left:50%;top:92px;transform:translate(-50%,0);pointer-events:none;display:none;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff;z-index:4}',
+    '.crs-chal.on{display:block}',
+    '.crs-chal .clabel{display:block;font-size:13px;font-weight:700;text-align:center;margin-bottom:4px;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.9)}',
+    '.crs-chal .cbar{width:240px;height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}',
+    '.crs-chal .cfill{height:100%;width:0;background:#58a6ff;border-radius:5px}',
+    // §3 결과 오버레이 — same curtain as the KO screen, its own node so neither can hide the other
+    '.crs-result{position:fixed;inset:0;background:rgba(0,0,0,.78);pointer-events:auto;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:6;font:13px/1.3 system-ui,-apple-system,"Segoe UI",Roboto,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;color:#fff}',
+    '.crs-result.show{display:flex}',
+    '.crs-result .rt{font-size:30px;font-weight:800;letter-spacing:.3px}',
+    '.crs-result .rs{font-size:15px;color:rgba(255,255,255,.88)}',
+    '.crs-result .rbest{font-size:16px;font-weight:800;color:#ffd166;min-height:19px}',
+    '.crs-result .rb{display:flex;gap:10px;margin-top:8px}',
+    '.crs-result button{flex:none;height:38px;padding:0 18px;font-size:14px;background:rgba(255,255,255,.12)}',
+    // §5 리플레이 배지 — bottom centre, clear of the ammo / health plates and of every top-strip panel
+    '.crs-replay{position:fixed;left:50%;bottom:96px;transform:translate(-50%,0);background:rgba(88,166,255,.95);color:#06121f;font-weight:800;font-size:13px;padding:7px 14px;border-radius:999px;pointer-events:none;display:none;white-space:nowrap;z-index:8}',
+    '.crs-replay.on{display:block}'
   ].join('\n');
 
   function hudButton(label, title, onClick) {
@@ -3842,6 +3897,7 @@
     const grid = doc.createElement('div'); grid.className = 'grid';
     hudEls.grid = grid;
     hudEls.weaponBtns = {}; hudEls.badges = {};
+    hudEls.lockTags = {};   // SPEC-product §4 해금: one 🔒 caption node per grid button
     let gridDrag = null, suppressClick = false;
     for (const id of WEAPON_IDS) {
       const W = WEAPONS[id];
@@ -3851,7 +3907,10 @@
       b.setAttribute('aria-pressed', 'false');
       const badge = doc.createElement('span'); badge.className = 'badge';
       const em = doc.createElement('span'); em.className = 'em'; em.textContent = W.emoji;
-      b.append(badge, em);
+      // SPEC-product §4 해금: empty until the slot is locked; syncLockedSlots() (src/97-challenge.js) fills it
+      const lockv = doc.createElement('span'); lockv.className = 'lockv';
+      b.append(badge, em, lockv);
+      hudEls.lockTags[id] = lockv;
       b.addEventListener('click', (e) => {
         e.preventDefault();
         if (suppressClick) { suppressClick = false; return; }   // the click that follows a drag
@@ -4019,6 +4078,32 @@
     // ── v1.4 §1.2: one dash-cooldown dot on the health panel ──
     hudEls.dashDot = doc.createElement('span'); hudEls.dashDot.className = 'pdash';
     try { hudEls.pStats.append(hudEls.dashDot); } catch (err) { /* ignore */ }
+
+    // ── SPEC-product §4: the boss health bar, pinned to the top centre ──
+    hudEls.host = host;   // bossBarSync() toggles `crs-boss-on` on it, which steps the other top panels down
+    const bbox = mk('div', 'crs-bossbar');
+    const blabel = doc.createElement('span'); blabel.className = 'blabel crs-num';
+    const bbar = doc.createElement('div'); bbar.className = 'bbar';
+    const bfill = doc.createElement('div'); bfill.className = 'bfill';
+    bbar.append(bfill);
+    bbox.append(blabel, bbar);
+    mountPoint.append(bbox);
+    state.bossNodes = { box: bbox, label: blabel, fill: bfill };
+
+    // ── SPEC-product §3: the challenge progress row (남은 시간 · 목표 · 생존 시간) and its bar ──
+    const cbox = mk('div', 'crs-chal');
+    const clabel = doc.createElement('span'); clabel.className = 'clabel crs-num';
+    const cbar = doc.createElement('div'); cbar.className = 'cbar';
+    const cfill = doc.createElement('div'); cfill.className = 'cfill';
+    cbar.append(cfill);
+    cbox.append(clabel, cbar);
+    mountPoint.append(cbox);
+    hudEls.chal = { box: cbox, label: clabel, fill: cfill };
+
+    // ── SPEC-product §5: the replay badge ──
+    hudEls.replay = mk('div', 'crs-replay');
+    hudEls.replay.textContent = msg('replayBadge');
+    mountPoint.append(hudEls.replay);
     return host;
   }
   function hudFallbackCheck() {
@@ -4049,6 +4134,29 @@
           state.ratioNodes.fill.style.height = '100%'; state.ratioNodes.fill.style.background = '#e5484d';
           // §D1: the scan tag has no stylesheet to hide it here either — syncEnemyScan() drives `display` directly
           if (state.ratioNodes.scan) { const sc = state.ratioNodes.scan.style; sc.display = 'none'; sc.marginLeft = '10px'; sc.fontSize = '12px'; sc.fontWeight = '700'; sc.color = '#ffd166'; sc.whiteSpace = 'nowrap'; }
+        }
+        /* SPEC-product §3 / §4 / §5: the three new shadow siblings need the same minimal fixed placement.
+         * Their `.on` classes are mirrored by style.display from bossBarSync() / chalHud() / replayBadge(). */
+        if (state.bossNodes && state.bossNodes.box) {
+          fixed(state.bossNodes.box, '50%', 'auto', '14px', 'auto');
+          state.bossNodes.box.style.transform = 'translate(-50%, 0)';
+          state.bossNodes.box.style.display = 'none';
+          const bb = state.bossNodes.fill.parentNode;
+          if (bb) { bb.style.width = '320px'; bb.style.height = '12px'; bb.style.background = 'rgba(255,255,255,.18)'; bb.style.borderRadius = '7px'; bb.style.overflow = 'hidden'; }
+          state.bossNodes.fill.style.height = '100%'; state.bossNodes.fill.style.background = '#ffd166';
+        }
+        if (hudEls.chal && hudEls.chal.box) {
+          fixed(hudEls.chal.box, '50%', 'auto', '92px', 'auto');
+          hudEls.chal.box.style.transform = 'translate(-50%, 0)';
+          hudEls.chal.box.style.display = 'none';
+          const cb = hudEls.chal.fill.parentNode;
+          if (cb) { cb.style.width = '240px'; cb.style.height = '10px'; cb.style.background = 'rgba(255,255,255,.2)'; cb.style.borderRadius = '5px'; cb.style.overflow = 'hidden'; }
+          hudEls.chal.fill.style.height = '100%'; hudEls.chal.fill.style.background = '#58a6ff';
+        }
+        if (hudEls.replay) {
+          fixed(hudEls.replay, '50%', 'auto', 'auto', '96px');
+          hudEls.replay.style.transform = 'translate(-50%, 0)';
+          hudEls.replay.style.display = 'none';
         }
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
@@ -4128,6 +4236,9 @@
       hudEls.combatBtn.title = msg('labelCombat') + ' ' + (state.combat ? 'ON' : 'OFF') + ' (H)';
       hudEls.combatBtn.setAttribute('aria-pressed', state.combat ? 'true' : 'false');
       updateModeHud();   // ── v1.4 §0.5 ──
+      bossBarSync();        // SPEC-product §4: every hit the player lands passes through here
+      syncLockedSlots();    // SPEC-product §4 해금: 🔒 and what is still owed, on the grid
+      progressSample();     // SPEC-product §4 해금: fold the new damage into the cumulative total
     } catch (e) { /* ignore */ }
   }
   // ── SPEC-combat §A: which of the three is pressed, and the one-line description under them ──
@@ -14182,7 +14293,11 @@
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= hostileFloor ? 'shooter' : null)); }
   /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0).
    * SPEC-combat §A1: arcade stretches every interval by ×1.35 — the hand that dodges is the hand that aims. */
-  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul(); }
+  /* SPEC-product §4: a boss in its THIRD stage attacks twice as often ("마지막엔 간격이 절반"), and
+   * SPEC-product §3's 생존 challenge ramps every enemy's interval down as the run goes on
+   * (chalIntervalMul(), src/97-challenge.js — 1 whenever no challenge is running). Both are multipliers on
+   * the one interval every scheduler already reads, so nothing else had to learn about either. */
+  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul() * bossIntervalMul(rec) * chalIntervalMul(); }
   function resetPlayer() {
     const p = state.player;
     p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
@@ -14221,10 +14336,14 @@
     if (area < Math.min(hostileFloor, archMinArea(el)) || area > 0.7 * vw * vh) return null;
     return area;
   }
+  /* SPEC-product §4: the boss scheduler keeps its handles beside the other combat timers rather than in a
+   * module of its own, so clearTimers() / pauseCombat() reach them exactly like every other one. */
+  state.bossTimer = 0; state.bossRespawnAt = 0; state.bossNodes = null; state.slowmoUntil = 0;
   function armCombat() {
     untrack(state.combatTimer); state.combatTimer = 0;
     untrack(state.clockTimer); state.clockTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
+    armBossTick();   // SPEC-product §4
     state.graceUntil = now() + scaleMs(GRACE_MS);   // SPEC-test-speed §3: "전투 유예" is a deadline, not a later()
     state.combatTimer = later(selectTick, GRACE_MS);
     state.clockTimer = later(clockTick, 1000);
@@ -14382,19 +14501,24 @@
     dropAimLine(rec, true);   // the hostile itself is going — its line cannot linger
     try { if (rec.pulse) { rec.pulse.cancel(); state.anims.delete(rec.pulse); } } catch (e) { /* ignore */ }
     try { rec.aura.remove(); } catch (e) { /* ignore */ }
+    if (rec.boss) bossBarSync();   // SPEC-product §4: the bar never outlives the boss it belongs to
     updatePlayerHud();
   }
   function hostileKilled(el, max) {
     const rec = state.hostiles.get(el);
     if (!rec) return;
     const clutch = rec.phase !== 'idle';   // mid-telegraph / wind-up / track / lock / fire → ×1.5 (A10)
+    const wasBoss = isBoss(rec);           // SPEC-product §4: read BEFORE releaseHostile() drops the record
     const r = rectOf(el);
     releaseHostile(el);
     const p = state.player;
-    p.score += clutch ? Math.round(max * 1.5) : max;
+    /* SPEC-product §4: "처치 시 점수 ×3". The ×3 is applied to whatever the kill was already worth, so a
+     * clutch kill on a boss still pays its ×1.5 on top rather than being quietly replaced by the ×3. */
+    p.score += Math.round((clutch ? max * 1.5 : max) * (wasBoss ? 3 : 1));
     p.kills++;
     if (r) { const v = intersectRect(r, { left: 0, top: 0, right: viewW(), bottom: viewH() }); spawnDmg(v.left + v.width / 2, v.top + v.height / 2, 0, true, { text: msg('killLabel'), color: '#7ee787' }); }
     sfx('kill');
+    if (wasBoss) bossKilled(r);   // SPEC-product §4: 1 s slow motion, extra fragments, a new boss in 15 s
     scheduleRefill();   // SPEC-combat §B3
     updatePlayerHud(); scheduleHud();
   }
@@ -14412,6 +14536,7 @@
      * an enemy frozen mid-lunge. */
     clearArchetypes();
     hostileFloor = HOSTILE_AREA;
+    bossBarSync();   // SPEC-product §4: every boss just went with them
   }
   /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
    * reports exactly that. v1.4 §4: T3 everywhere draws a lock instead of the laser, §10.2 silences the back
@@ -14706,6 +14831,7 @@
     untrack(state.regenTimer); state.regenTimer = 0;
     untrack(state.depthTimer); state.depthTimer = 0;
     untrack(state.ratioTimer); state.ratioTimer = 0;
+    untrack(state.bossTimer); state.bossTimer = 0;   // SPEC-product §4
     for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; untrack(rec.repairTimer); rec.repairTimer = 0; clearPhase(rec); }
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
     clearLocks(); clearRepairs();   // v1.4 §2 / §3
@@ -14720,6 +14846,7 @@
     untrack(state.clockTimer); state.clockTimer = later(clockTick, 1000);
     for (const rec of state.hostiles.values()) { scheduleAttack(rec, Math.max(1000, attackInterval(rec))); scheduleRepair(rec); }
     armDepthTick(); armRatioTick();   // v1.4 §10.1 / §3.2
+    armBossTick();                    // SPEC-product §4
     if (modeHasAvatar()) ensureAvatar();
     if (state.player.hp < state.player.max) startRegen();
   }
@@ -14827,8 +14954,12 @@
     const area = hostileArea(el);
     const rec = state.hostiles.get(el) || (area != null ? markHostile(el, area) : null);
     if (!rec) return null;
-    rec.boss = true;
     state.bossMode = true;
+    /* SPEC-product §4: forceBoss() has to produce a REAL boss — ×3 max HP, the crown, the double border and
+     * the bar — not just the flag the v1.4 attack ladder reads. bossPromote() is the one place that does all
+     * of it; it sets rec.boss itself and is a no-op on an element that is already the boss. */
+    bossPromote(rec);
+    rec.boss = true;
     if (ratio != null && isFinite(ratio) && ratio >= 0 && ratio <= 1) {
       const h = hpOf(el);
       // floor, so the caller's "drive it to 30 %" loop sees a value that is already AT or BELOW the threshold
@@ -14847,6 +14978,193 @@
     state.bossMode = true;   // nothing eligible on screen: every T3 hostile still fights as a boss
     for (const r of state.hostiles.values()) if (r.tier === 'laser') r.boss = true;
     return true;
+  };
+  /* ═════════════════════════════════════════════════════════════════════════════════════════════════
+   * SPEC-product §4 보스전 — 승격 · 체력 바 · 3단계 · 처치 보상 · 15초 뒤 재승격
+   *
+   * v1.4 already shipped the READING half of this (isBoss / bossPhase / the three-stage attack ladder in
+   * hostileAttack(), and debug.forceBoss to reach it). What §4 adds is everything around it: the automatic
+   * PROMOTION, the ×3 max HP, the fixed bar at the top of the screen, the crown and the double border, the
+   * kill reward, and the 15-second wait before a new boss is crowned.
+   *
+   * AMBIGUITY, reading chosen (reported). §4 says "전투 중 가장 큰 자격 요소를 보스로 승격" without saying
+   * where that element comes from. Read as: the biggest of the enemies ALREADY IN THE FIGHT. The selection
+   * ladder (selectOne(), §B3) is the one place that decides what is "자격" — area floors, archetype floors,
+   * viewport, skip rules — and running a second, different scan here would mean two answers to one question.
+   * It also means a boss is always something the player can already see attacking them. When no enemy is
+   * live the tick simply waits; selectTick() puts one up within 900 ms.
+   *
+   * The scheduler is gated by bossEligible(), which is selectEligible()'s list plus `debug.noBoss` — so a
+   * suite that runs with `noAttacks: true` (every combat block does) sees no promotion at all, exactly as it
+   * sees no selection. ═════════════════════════════════════════════════════════════════════════════════ */
+  const BOSS_HP_MUL = 3;              // §4 "maxHp ×3"
+  const BOSS_RESPAWN_MS = 15000;      // §4 "15초 뒤 새 보스"
+  const BOSS_SCAN_MS = 1000;          // how often the scheduler looks for something to crown
+  const BOSS_SLOWMO_MS = 1000;        // §4 "1초 슬로모션"
+  const BOSS_SLOWMO_RATE = 0.25;      // how much of real time the integrator advances while it lasts
+  const BOSS_PHASE3_MUL = 0.5;        // §4 "마지막엔 간격이 절반"
+  debug.noBoss = false;               // the escape hatch, named like noAttacks / noRepair / noInvuln
+  function bossIntervalMul(rec) { return (isBoss(rec) && bossPhase(rec) >= 3) ? BOSS_PHASE3_MUL : 1; }
+  function bossRec() {
+    for (const rec of state.hostiles.values()) if (isBoss(rec)) return rec;
+    return null;
+  }
+  function bossAlive() { const rec = bossRec(); return !!(rec && rec.el && rec.el.isConnected); }
+  function bossEligible() {
+    const p = state.player;
+    if (!state.active || !state.combat || state.paused) return false;
+    if (!modeHasProjectiles() || debug.noBoss || debug.noAttacks) return false;
+    if (state.ko || !p.alive) return false;
+    if (state.bossRespawnAt && now() < state.bossRespawnAt) return false;   // §4: the 15 s wait
+    return true;
+  }
+  /* §4 "maxHp ×3". Same shape as applyDepthHp() (src/87-depth.js): the ratio is preserved, the scaling is
+   * recorded so it can never be applied twice, and nothing else in the HP pipeline had to change. */
+  function applyBossHp(el) {
+    const rec = state.hp.get(el) || hpOf(el);
+    if (!rec || rec.bossScaled) return;
+    const ratio = rec.max > 0 ? clamp(rec.hp / rec.max, 0, 1) : 1;
+    rec.max = Math.round(rec.max * BOSS_HP_MUL);
+    rec.hp = Math.max(1, Math.round(rec.max * ratio));
+    rec.bossScaled = true;
+  }
+  /* §4 "이중 테두리와 👑". The border is content.css (`.crs-hostile.crs-boss`); the crown is composed into
+   * the aura label, which src/87-depth.js rebuilds from parts — so it is added by WRAPPING that one
+   * composer rather than by appending to a string somebody else owns. */
+  const setHostileLabelBoss = setHostileLabel;
+  setHostileLabel = function (rec) {
+    setHostileLabelBoss(rec);
+    if (!rec || !rec.label || !isBoss(rec)) return;
+    try { rec.label.textContent = '👑 ' + rec.label.textContent; } catch (e) { /* ignore */ }
+  };
+  function bossPromote(rec) {
+    if (!rec || !rec.el || !rec.el.isConnected || rec.boss) return null;
+    rec.boss = true;
+    applyBossHp(rec.el);
+    try { rec.aura.classList.add('crs-boss'); } catch (e) { /* ignore */ }
+    setHostileLabel(rec);
+    setAuraPulse(rec, 900);
+    bossBarSync();
+    refreshHover(); scheduleHud(); updatePlayerHud();
+    toast(msg('bossArrived'));
+    sfx('rumble', { gain: 0.8 });
+    return rec;
+  }
+  /* The biggest enemy currently in the fight — see the reading above. */
+  function bossCandidate() {
+    let best = null, bestArea = 0;
+    for (const rec of state.hostiles.values()) {
+      const el = rec.el;
+      if (!el || !el.isConnected) continue;
+      try { if (el.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+      const r = rectOf(el);
+      if (!r || r.width < 1 || r.height < 1) continue;
+      const a = r.width * r.height;
+      if (a > bestArea) { bestArea = a; best = rec; }
+    }
+    return best;
+  }
+  function bossTick() {
+    state.bossTimer = 0;
+    if (!state.active || !state.combat || state.paused) return;
+    if (!bossAlive() && bossEligible()) { const rec = bossCandidate(); if (rec) bossPromote(rec); }
+    bossBarSync();
+    state.bossTimer = later(bossTick, BOSS_SCAN_MS);
+  }
+  function armBossTick() {
+    if (state.bossTimer || !state.active || !state.combat || !modeHasProjectiles()) return;
+    state.bossTimer = later(bossTick, BOSS_SCAN_MS);
+  }
+  /* §4 "처치 시 점수 ×3 (hostileKilled), 1초 슬로모션, 추가 파편. 15초 뒤 새 보스."
+   * INTERPRETATION (reported): "추가 파편" is read as fragments thrown ON TOP of whatever the weapon's own
+   * break already produced — the element has already been broken by the time this runs, so adding pieces to
+   * it is not available any more; three extra particle bursts at the kill point are. */
+  function bossKilled(r) {
+    state.bossRespawnAt = now() + scaleMs(BOSS_RESPAWN_MS);
+    state.slowmoUntil = now() + scaleMs(BOSS_SLOWMO_MS);
+    const cx = r ? clamp(r.left + r.width / 2, 0, viewW()) : viewW() / 2;
+    const cy = r ? clamp(r.top + r.height / 2, 0, viewH()) : viewH() / 2;
+    let frags = 0;
+    for (const kind of ['dust', 'spark', 'smoke']) { try { frags += fracParticles(kind, cx, cy) || 0; } catch (e) { /* ignore */ } }
+    state.bossFrags = frags;
+    try { shake('bomb', { amp: 12, dur: 420 }); } catch (e) { /* ignore */ }
+    try { flash(cx, cy, 'bomb', { size: 220, dur: 320 }); } catch (e) { /* ignore */ }
+    toast(msg('bossDown'));
+    bossBarSync();
+    kick();
+    untrack(state.bossTimer); state.bossTimer = 0;
+    state.bossTimer = later(bossTick, BOSS_RESPAWN_MS + 50);
+  }
+  /* §4 "상단 중앙에 고정 체력 바". The nodes live in the HUD shadow root (src/45-hud.js) beside the KO
+   * curtain and the ratio meter, so they go away with the HUD and leave nothing on the page. */
+  let bossBarOn = false;
+  function bossBarSync() {
+    const n = state.bossNodes;
+    if (!n || !n.box) { bossBarOn = false; return; }
+    const rec = state.active ? bossRec() : null;
+    if (!rec && !bossBarOn) return;   // updateHud() runs once a frame: say nothing when there is nothing to say
+    bossBarOn = !!rec;
+    try {
+      if (!rec) {
+        n.box.classList.remove('on');
+        if (hudEls.host) hudEls.host.classList.remove('crs-boss-on');
+        if (hudEls.fallback) n.box.style.display = 'none';
+        return;
+      }
+      if (hudEls.host) hudEls.host.classList.add('crs-boss-on');
+      const h = state.hp.get(rec.el) || hpOf(rec.el);
+      const ratio = h && h.max > 0 ? clamp(h.hp / h.max, 0, 1) : 1;
+      n.box.classList.add('on');
+      if (hudEls.fallback) n.box.style.display = 'block';
+      n.label.textContent = '👑 ' + msg('labelBoss') + ' · ' + tagOf(rec.el).toUpperCase() + ' · ' + Math.max(0, Math.round(h.hp)) + '/' + h.max;
+      n.fill.style.width = (ratio * 100).toFixed(1) + '%';
+      n.box.setAttribute('data-phase', String(bossPhase(rec)));
+    } catch (e) { /* ignore */ }
+  }
+  /* §4 "1초 슬로모션". The integrator reads ONE number, `state.lastT`; pulling it toward the current frame
+   * time is a time dilation for every body on the loop at once (pieces, orbs, displaced elements, the drone)
+   * with no second clock and nothing to unwind afterwards. */
+  const tickFrameBoss = tickFrame;
+  tickFrame = function (t) {
+    const slow = state.slowmoUntil > t;
+    if (slow && state.lastT) state.lastT = t - (t - state.lastT) * BOSS_SLOWMO_RATE;
+    else if (!slow && state.slowmoUntil) state.slowmoUntil = 0;
+    const busy = tickFrameBoss(t);
+    return slow ? true : busy;
+  };
+  debug.bossInfo = () => {
+    const rec = bossRec();
+    if (!rec) return { live: false, respawnInMs: state.bossRespawnAt ? Math.max(0, Math.round(state.bossRespawnAt - now())) : 0, frags: state.bossFrags || 0, slowmo: state.slowmoUntil > now() };
+    const h = state.hp.get(rec.el) || hpOf(rec.el);
+    const r = rectOf(rec.el) || { left: 0, top: 0, width: 0, height: 0 };
+    return {
+      live: true, tag: tagOf(rec.el).toUpperCase(), tier: rec.tier, phase: bossPhase(rec),
+      id: rec.el.id || null, rect: { left: r.left, top: r.top, width: r.width, height: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 },
+      hp: Math.max(0, Math.round(h.hp)), max: h.max, scaled: !!h.bossScaled,
+      intervalMs: attackInterval(rec), baseIntervalMs: attackInterval(rec) / bossIntervalMul(rec),
+      respawnInMs: state.bossRespawnAt ? Math.max(0, Math.round(state.bossRespawnAt - now())) : 0,
+      frags: state.bossFrags || 0, slowmo: state.slowmoUntil > now()
+    };
+  };
+  /* The scheduler is normally gated by bossEligible() (noAttacks off, a live enemy, no 15 s wait in
+   * progress). This runs ONE promotion pass with that gate lifted, which is what a test of "승격" means. */
+  debug.bossPromote = () => {
+    const rec = bossCandidate();
+    if (!rec) return null;
+    return bossPromote(rec) ? debug.bossInfo() : null;
+  };
+  debug.bossRespawnNow = () => { state.bossRespawnAt = 0; untrack(state.bossTimer); state.bossTimer = 0; bossTick(); return debug.bossInfo(); };
+  /* Drives the LIVE boss's remaining HP to a fraction of its max — the counterpart of forceBoss(ratio) for a
+   * boss the scheduler crowned on its own, whose element the caller has no name for. */
+  debug.bossWeaken = (ratio) => {
+    const rec = bossRec();
+    if (!rec) return null;
+    const r = Number(ratio);
+    if (!isFinite(r) || r < 0 || r > 1) return debug.bossInfo();
+    const h = state.hp.get(rec.el) || hpOf(rec.el);
+    h.hp = Math.max(1, Math.floor(h.max * r));
+    refreshHover(); scheduleHud(); bossBarSync();
+    return debug.bossInfo();
   };
   debug.setAvatarPos = (x, y) => {
     x = +x; y = +y;
@@ -16309,6 +16627,11 @@
     if (e.type === 'pointerdown' || e.type === 'pointerup') { ensureAudio(); trackPlayer(e); rmbSync(e); }
     if (e.type === 'pointerdown' && e.button === 0 && e.isPrimary !== false) {
       if (state.ko) return;   // KO screen: holds / slashes / shots disabled
+      // SPEC-product §5: 재생 중에는 입력을 무시한다 — the press is still swallowed, it just does nothing
+      if (replayPlaying()) return;
+      /* SPEC-product §5: 인스펙터에서 "클릭하면 선택자를 복사한다", and nothing else happens at all —
+       * this returns before the one entry point every weapon's press goes through. */
+      if (inspectActive()) { inspectCopy(); return; }
       /* SPEC-arsenal §A1: the three-way branch that used to live here (hold / drag / click) IS the problem
        * §A sets out to fix — "지금은 무기마다 누르는 의미가 다르다". Every press now goes to ONE entry point
        * which starts a charge, a hold or a marquee as the weapon asks, and the RELEASE decides what comes
@@ -16417,21 +16740,35 @@
         else if (c === 'KeyZ' || k === 'z' || k === 'Z') action = 'restore';
         else if (c === 'KeyM' || k === 'm' || k === 'M') action = 'mute';
         else if (c === 'KeyH' || k === 'h' || k === 'H') action = 'combat';
+        // ── SPEC-product §3 챌린지 순환 (C) · §5 인스펙터 (I) · §5 공유 (P) ──
+        else if (c === 'KeyC' || k === 'c' || k === 'C') action = 'challenge';
+        else if (c === 'KeyI' || k === 'i' || k === 'I') action = 'inspect';
+        else if (c === 'KeyP' || k === 'p' || k === 'P') action = 'share';
+        else if ((c === 'Enter' || k === 'Enter') && chalResultOpen()) action = 'chalRetry';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
         else if (modeHasAvatar() && isSpaceKey(c, k)) action = 'dash';          // v1.4 §1.2
         else if (modeHasAvatar() && moveDirOf(c, k)) { action = 'move'; arg = moveDirOf(c, k); }
       }
     }
     if (!action) return;
+    /* SPEC-product §5: "재생 중에는 입력을 무시한다." Escape is the ONE exception — a replay must never be
+     * able to trap the player on a page they are trying to leave, and §7's traceless test presses exactly
+     * that key with a replay in flight. */
+    if (replayPlaying() && action !== 'escape') { handledKeys.add(e); try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ } return; }
     handledKeys.add(e);
     try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
     if (action === 'move') { state.keys[arg] = true; kick(); return; }   // v1.4: a held key is simply a held key
-    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash')) return;
+    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash' || action === 'challenge' || action === 'inspect' || action === 'share' || action === 'chalRetry')) return;
     if (action === 'escape') {   // layered (A2): scope-out if scoped, else exit (stops holds and the KO screen)
       /* SPEC-arsenal §A5 lists Escape among the 중단 조건 (전부 취소 + 환불). It is layered like the rest:
        * a charge in progress is the innermost layer, so the first Escape gives the rounds back rather than
        * tearing the whole overlay down under the player's hand. */
       if (altEscape()) return;
+      /* SPEC-product §3: the result overlay's own `닫기 (Esc)`. It is an innermost layer like the charge
+       * refund above — closing a card the player is reading must not tear the whole overlay down.
+       * The inspector and a replay in flight are deliberately NOT layers here: §7 requires ONE Escape to
+       * leave no trace while either is live, so Escape still exits outright and deactivate() ends them. */
+      if (chalResultOpen()) { chalResultClose(); return; }
       if (state.scoped) { scopeOff(); return; }
       stopHold(); cancelSlash(); deactivate();
     }
@@ -16446,6 +16783,10 @@
     else if (action === 'combat') cycleMode();   // SPEC-combat §A: H cycles rampage → arcade → survival
     else if (action === 'restart') restartFromKo();
     else if (action === 'dash') startDash();
+    else if (action === 'challenge') challengeCycle();   // SPEC-product §3: C cycles off → 타임어택 → 목표 돌파 → 생존 → off
+    else if (action === 'inspect') inspectToggle();      // SPEC-product §5
+    else if (action === 'share') shareNow();             // SPEC-product §5
+    else if (action === 'chalRetry') chalRetry();        // SPEC-product §3: 결과 오버레이의 `다시 (Enter)`
   }
   function onWheel(e) {
     if (!state.active) return;
@@ -16886,6 +17227,1031 @@
     koDialog: hudEls.ko ? hudEls.ko.getAttribute('role') : null
   });
 
+// ── 97-challenge.js ──
+  /* ===================================================================== */
+  /* 16. 챌린지 모드 · 무기 해금 (SPEC-product §3 / §4 해금)                   */
+  /*                                                                        */
+  /* §3 gives the product its first END CONDITION. Everything before this    */
+  /* step runs until the player gets bored; a challenge starts from a clean  */
+  /* page, counts one thing, stops by itself and writes down what happened.  */
+  /*                                                                        */
+  /* §4's other half — the weapon unlocks — lives here too, because it is    */
+  /* the same kind of thing: a number that survives the tab, read from       */
+  /* storage once and written back on a debounce. The BOSS half of §4 is in  */
+  /* src/90-combat.js, where the rest of the enemy code already is.          */
+  /* ===================================================================== */
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * §4 무기 해금 — 누적 피해로 열린다
+   *
+   * "기본 설정 `unlockAll: true` 라 아무도 막히지 않는다. 켜면 누적 피해로 열린다."
+   * READ AS (reported): `unlockAll` is the setting and its default is TRUE, so the shipped product locks
+   * nothing at all; "켜면" is the player turning the gate ON by setting unlockAll to false. Everything below
+   * is therefore dormant on a default install — weaponLocked() answers false for every weapon — and the
+   * cumulative damage is still counted, so switching the gate on later does not start the player at zero.
+   * ─────────────────────────────────────────────────────────────────────── */
+  const UNLOCK_AT = {
+    smg: 5000, axe: 15000, katana: 30000, sniper: 60000,
+    bomb: 100000, rocket: 180000, flame: 300000, collapse: 500000
+  };
+  const UNLOCK_ORDER = ['smg', 'axe', 'katana', 'sniper', 'bomb', 'rocket', 'flame', 'collapse'];
+  const PROGRESS_KEY = 'crsProgress';
+  const PROGRESS_VERSION = 1;
+  const PROGRESS_SAVE_MS = 1500;
+  const progressData = { version: PROGRESS_VERSION, totalDamage: 0, unlocked: [], loaded: false, dirty: false, timer: 0 };
+  let progressSeen = 0;   // the value of state.damageDealt already folded into totalDamage
+
+  function unlockGateOn() { return settingsGet('unlockAll') === false; }
+  function unlockedAlready(id) { return progressData.unlocked.indexOf(id) !== -1; }
+  /* A weapon with no threshold is never locked; neither is anything at all while the gate is off or while
+   * the stored progress has not been read back yet (a slow or broken read must never take the arsenal away). */
+  function weaponLocked(id) {
+    if (!unlockGateOn() || !progressData.loaded) return false;
+    if (!Object.prototype.hasOwnProperty.call(UNLOCK_AT, id)) return false;
+    return !unlockedAlready(id);
+  }
+  function unlockRemaining(id) {
+    const need = UNLOCK_AT[id];
+    return need == null ? 0 : Math.max(0, need - progressData.totalDamage);
+  }
+  function unlockList() { return UNLOCK_ORDER.map((id) => ({ id, need: UNLOCK_AT[id], unlocked: !weaponLocked(id), remaining: unlockRemaining(id) })); }
+
+  function progressSave() {
+    progressData.timer = 0;
+    if (!progressData.dirty) return;
+    progressData.dirty = false;
+    const payload = { version: PROGRESS_VERSION, totalDamage: Math.round(progressData.totalDamage), unlocked: progressData.unlocked.slice() };
+    const patch = {}; patch[PROGRESS_KEY] = payload;
+    safe(() => chrome.storage.local.set(patch));
+  }
+  function progressQueueSave() {
+    progressData.dirty = true;
+    if (progressData.timer) return;
+    progressData.timer = later(() => progressSave(), PROGRESS_SAVE_MS);
+  }
+  /* Which thresholds the new total has just crossed. Crossing one is announced once, and only while the
+   * gate is actually on — nobody wants a toast about unlocking something they were never missing. */
+  function progressUnlockCheck() {
+    const opened = [];
+    for (const id of UNLOCK_ORDER) {
+      if (unlockedAlready(id)) continue;
+      if (progressData.totalDamage < UNLOCK_AT[id]) continue;
+      progressData.unlocked.push(id);
+      opened.push(id);
+    }
+    if (!opened.length) return opened;
+    progressQueueSave();
+    if (unlockGateOn() && state.active) {
+      const W = WEAPONS[opened[0]];
+      toast('🔓 ' + msg('toastUnlocked') + ' ' + W.emoji + ' ' + msg(W.name));
+    }
+    syncLockedSlots();
+    return opened;
+  }
+  function progressAdd(n) {
+    if (!(n > 0)) return;
+    progressData.totalDamage += n;
+    progressQueueSave();
+    progressUnlockCheck();
+  }
+  /* state.damageDealt is the session counter the HUD already prints; the cumulative total is its integral.
+   * restore() zeroes it, which reads here as "the baseline moved" rather than as negative damage. */
+  function progressSample() {
+    const d = state.damageDealt;
+    if (!isFinite(d)) return;
+    if (d < progressSeen) { progressSeen = d; return; }
+    if (d > progressSeen) { const add = d - progressSeen; progressSeen = d; progressAdd(add); }
+  }
+  function progressRead() {
+    safeThen(() => chrome.storage.local.get([PROGRESS_KEY]), (res) => {
+      const raw = res && res[PROGRESS_KEY];
+      if (raw && typeof raw === 'object') {
+        const t = Number(raw.totalDamage);
+        if (isFinite(t) && t >= 0) progressData.totalDamage = t;
+        if (Array.isArray(raw.unlocked)) {
+          for (const id of raw.unlocked) if (typeof id === 'string' && UNLOCK_AT[id] != null && !unlockedAlready(id)) progressData.unlocked.push(id);
+        }
+      }
+      progressData.loaded = true;
+      progressUnlockCheck();   // a stored total above a threshold opens it even if the list was short
+      syncLockedSlots();
+    });
+    /* No local storage at all (an old Chrome, a shimmed harness): the gate stays open rather than closed.
+     * "망가진 저장값이 활성화를 막아서는 안 된다" is §6's sentence, and the same rule is right here. */
+    if (safe(() => chrome.storage.local) === undefined) progressData.loaded = true;
+  }
+
+  /* §4 "잠긴 슬롯은 흐리게 🔒 와 남은 수치를 보인다."
+   * Called from updateHud(), which runs once a frame while a hold weapon is firing — so it has to cost
+   * nothing when there is nothing to say. With the gate off (the default) the signature is a constant and
+   * the second call onwards returns on the first line; with it on, only a change in the cumulative damage
+   * or in what is unlocked does any DOM work, and even then each node is written only if it differs. */
+  let lockSig = '';
+  function syncLockedSlots() {
+    if (!hudEls.weaponBtns || !hudEls.lockTags) { lockSig = ''; return; }
+    const gate = unlockGateOn() && progressData.loaded;
+    const sig = gate ? ('1:' + Math.round(progressData.totalDamage) + ':' + progressData.unlocked.length) : '0';
+    if (sig === lockSig) return;
+    lockSig = sig;
+    for (const id of WEAPON_IDS) {
+      const b = hudEls.weaponBtns[id], tag = hudEls.lockTags[id];
+      if (!b || !tag) continue;
+      try {
+        const locked = weaponLocked(id);
+        b.classList.toggle('locked', locked);
+        const want = locked ? 'true' : 'false';
+        if (b.getAttribute('aria-disabled') !== want) b.setAttribute('aria-disabled', want);
+        const text = locked ? '🔒 ' + unlockRemaining(id) : '';
+        if (tag.textContent !== text) tag.textContent = text;
+      } catch (e) { /* ignore */ }
+    }
+  }
+  /* The gate itself. Wrapped rather than inlined into setWeapon() so §4 owns its own rule: a locked weapon
+   * is simply not selectable, and nothing about the swap, the reload or the HUD had to learn about locks. */
+  const setWeaponUnlock = setWeapon;
+  setWeapon = function (rawId, opts) {
+    const id = migrateWeaponId(rawId);
+    if (weaponLocked(id) && id !== state.weapon) {
+      const W = WEAPONS[id];
+      if (!(opts && opts.silent) && W) toast('🔒 ' + msg('toastLocked') + ' · ' + W.emoji + ' ' + msg(W.name) + ' · ' + unlockRemaining(id));
+      return false;
+    }
+    return setWeaponUnlock(rawId, opts);
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * §3 챌린지 모드
+   *
+   * | timeAttack | 60초, 점수 최대화 | 시간 종료 |
+   * | targetRush | 40개를 가장 빨리  | 40개 파괴 |
+   * | survival   | 전투 강제, 난이도 가파르게 | KO |
+   *
+   * AMBIGUITY, reading chosen (reported). §3 says survival "전투 강제" without naming WHICH combat mode, and
+   * the product has two (arcade · survival). Taken as: whatever combat mode the player last chose, falling
+   * back to the drone mode — the same rule state.combat's setter has used since v1.4, so a challenge never
+   * silently changes how the player controls the game. "난이도 가파르게" is read as the enemy attack interval
+   * ramping down to 40 % over the first 60 seconds (chalIntervalMul(), multiplied into attackInterval()).
+   * timeAttack and targetRush leave the mode alone: they are about the page, not about the fight.
+   * ─────────────────────────────────────────────────────────────────────── */
+  const CHAL_IDS = ['timeAttack', 'targetRush', 'survival'];
+  const CHAL_NAME = { timeAttack: 'chalTimeAttack', targetRush: 'chalTargetRush', survival: 'chalSurvivalRun' };
+  const CHAL_TIME_MS = 60000;      // timeAttack
+  const CHAL_TARGETS = 40;         // targetRush
+  const CHAL_TICK_MS = 200;
+  const CHAL_RAMP_MS = 60000;      // survival: the window the difficulty ramp is spread over
+  const CHAL_RAMP_MIN = 0.4;       // …down to 40 % of the usual interval
+  const chal = {
+    id: null, startedAt: 0, endsAt: 0, timer: 0, broken0: 0,
+    result: null, resultNode: null, restores: 0, lastEnd: null
+  };
+  const chalRecords = Object.create(null);   // mode -> { plays, bestScore, bestMs, lastScore, lastMs, lastAt }
+
+  function chalRunning() { return !!chal.id; }
+  function chalElapsed() { return chal.startedAt ? Math.max(0, now() - chal.startedAt) : 0; }
+  /* Read by attackInterval() (src/90-combat.js) on every schedule. 1 unless a 생존 challenge is running. */
+  function chalIntervalMul() {
+    if (chal.id !== 'survival') return 1;
+    const k = clamp(chalElapsed() / Math.max(1, scaleMs(CHAL_RAMP_MS)), 0, 1);
+    return 1 - (1 - CHAL_RAMP_MIN) * k;
+  }
+  function chalBrokenNow() { return Math.max(0, state.broken.length - chal.broken0); }
+  function chalProgress() {
+    if (chal.id === 'timeAttack') return clamp(chalElapsed() / Math.max(1, chal.endsAt - chal.startedAt), 0, 1);
+    if (chal.id === 'targetRush') return clamp(chalBrokenNow() / CHAL_TARGETS, 0, 1);
+    if (chal.id === 'survival') return clamp(1 - state.player.hp / Math.max(1, state.player.max), 0, 1);
+    return 0;
+  }
+  function chalLabel() {
+    if (chal.id === 'timeAttack') return msg('chalTimeAttack') + ' · ' + msg('chalRemain') + ' ' + Math.max(0, Math.ceil((chal.endsAt - now()) / 1000)) + msg('unitSec') + ' · ' + msg('labelScore') + ' ' + state.player.score;
+    if (chal.id === 'targetRush') return msg('chalTargetRush') + ' · ' + msg('chalTargets') + ' ' + chalBrokenNow() + '/' + CHAL_TARGETS;
+    return msg('chalSurvivalRun') + ' · ' + msg('labelTime') + ' ' + Math.floor(chalElapsed() / 1000) + msg('unitSec') + ' · ' + msg('labelKills') + ' ' + state.player.kills;
+  }
+  function chalHud() {
+    const n = hudEls.chal;
+    if (!n || !n.box) return;
+    const on = !!(state.active && chalRunning());
+    try {
+      n.box.classList.toggle('on', on);
+      if (hudEls.fallback) n.box.style.display = on ? 'block' : 'none';
+      if (!on) return;
+      n.label.textContent = chalLabel();
+      n.fill.style.width = (chalProgress() * 100).toFixed(1) + '%';
+    } catch (e) { /* ignore */ }
+  }
+  function chalTick() {
+    chal.timer = 0;
+    if (!state.active || !chalRunning()) { chalHud(); return; }
+    if (chal.id === 'timeAttack' && now() >= chal.endsAt) { chalEnd('time'); return; }
+    if (chal.id === 'targetRush' && chalBrokenNow() >= CHAL_TARGETS) { chalEnd('targets'); return; }
+    if (chal.id === 'survival' && (state.ko || !state.player.alive)) { chalEnd('ko'); return; }
+    chalHud();
+    chal.timer = laterRaw(chalTick, CHAL_TICK_MS);
+  }
+  function chalArm() {
+    untrack(chal.timer);
+    chal.timer = chalRunning() && state.active ? laterRaw(chalTick, CHAL_TICK_MS) : 0;
+  }
+
+  /* ---- records: crsStats.challenges[mode] (§3's last sentence) -------------------------------------
+   * §2 (누적 통계) belongs to a later workstream and owns the rest of crsStats. This touches ONE key of
+   * it — `challenges` — with a read-modify-write that preserves every other field, so the two can land in
+   * either order without either one losing the other's data. */
+  const STATS_KEY = 'crsStats';
+  function chalRecordsRead() {
+    safeThen(() => chrome.storage.local.get([STATS_KEY]), (res) => {
+      const raw = res && res[STATS_KEY] && res[STATS_KEY].challenges;
+      if (!raw || typeof raw !== 'object') return;
+      for (const id of CHAL_IDS) {
+        const r = raw[id];
+        if (!r || typeof r !== 'object') continue;
+        chalRecords[id] = {
+          plays: Number(r.plays) || 0,
+          bestScore: Number(r.bestScore) || 0,
+          bestMs: Number(r.bestMs) || 0,
+          lastScore: Number(r.lastScore) || 0,
+          lastMs: Number(r.lastMs) || 0,
+          lastAt: Number(r.lastAt) || 0
+        };
+      }
+    });
+  }
+  /* "최고" is not the same number in all three modes: timeAttack maximises SCORE, targetRush minimises the
+   * TIME it took, survival maximises the time survived. One field (`bestMs`) with a per-mode comparison
+   * keeps the stored shape uniform while still meaning the right thing in each. */
+  function chalIsBest(id, score, ms, completed) {
+    const rec = chalRecords[id];
+    if (!rec || !rec.plays) return true;
+    if (id === 'timeAttack') return score > rec.bestScore;
+    if (id === 'targetRush') return completed && (!rec.bestMs || ms < rec.bestMs);
+    return ms > rec.bestMs;
+  }
+  function chalRecordWrite(id, score, kills, ms, completed, best) {
+    const prev = chalRecords[id] || { plays: 0, bestScore: 0, bestMs: 0, lastScore: 0, lastMs: 0, lastAt: 0 };
+    const rec = {
+      plays: prev.plays + 1,
+      bestScore: Math.max(prev.bestScore, score),
+      bestMs: best ? ms : prev.bestMs,
+      lastScore: score, lastKills: kills, lastMs: ms, lastAt: Date.now()
+    };
+    if (id === 'targetRush' && !completed) rec.bestMs = prev.bestMs;   // an abandoned rush sets no record
+    chalRecords[id] = rec;
+    safeThen(() => chrome.storage.local.get([STATS_KEY]), (res) => {
+      const stats = (res && res[STATS_KEY] && typeof res[STATS_KEY] === 'object') ? res[STATS_KEY] : {};
+      const ch = (stats.challenges && typeof stats.challenges === 'object') ? stats.challenges : {};
+      ch[id] = rec;
+      stats.challenges = ch;
+      const patch = {}; patch[STATS_KEY] = stats;
+      safe(() => chrome.storage.local.set(patch));
+    });
+    return rec;
+  }
+
+  /* ---- the result overlay (§3: 모드·점수·처치·소요·최고 기록 갱신 여부, 다시 (Enter) / 닫기 (Esc)) ---- */
+  function chalResultOpen() { return !!chal.resultNode; }
+  function chalResultClose() {
+    const n = chal.resultNode;
+    chal.resultNode = null;
+    if (n) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+  }
+  function chalResultShow(r) {
+    chalResultClose();
+    if (!hudEls.mount) return;
+    try {
+      const box = mk('div', 'crs-result');
+      const rt = doc.createElement('div'); rt.className = 'rt'; rt.textContent = '🏁 ' + msg('chalResult');
+      const rs = doc.createElement('div'); rs.className = 'rs';
+      rs.textContent = msg(CHAL_NAME[r.mode]) + ' · ' + msg('labelScore') + ' ' + r.score + ' · ' + msg('labelKills') + ' ' + r.kills
+        + ' · ' + msg('chalElapsed') + ' ' + (r.elapsedMs / 1000).toFixed(1) + msg('unitSec');
+      const rb2 = doc.createElement('div'); rb2.className = 'rbest'; rb2.textContent = r.best ? '🏆 ' + msg('chalNewBest') : '';
+      const rb = doc.createElement('div'); rb.className = 'rb';
+      rb.append(
+        hudButton(msg('chalRetry') + ' (Enter)', msg('chalRetry') + ' (Enter)', () => chalRetry()),
+        hudButton(msg('chalClose') + ' (Esc)', msg('chalClose') + ' (Esc)', () => chalResultClose())
+      );
+      box.append(rt, rs, rb2, rb);
+      box.classList.add('show');
+      box.setAttribute('role', 'dialog');
+      box.setAttribute('aria-modal', 'true');
+      box.setAttribute('aria-label', msg('chalResult'));
+      if (hudEls.fallback) {
+        const s = box.style;
+        s.position = 'fixed'; s.left = '0'; s.top = '0'; s.right = '0'; s.bottom = '0'; s.background = 'rgba(0,0,0,.78)';
+        s.color = '#fff'; s.display = 'flex'; s.alignItems = 'center'; s.justifyContent = 'center'; s.flexDirection = 'column';
+        s.pointerEvents = 'auto'; s.font = '16px system-ui, sans-serif';
+        for (const b of box.querySelectorAll('button')) { b.style.margin = '4px'; b.style.padding = '6px 12px'; b.style.color = '#fff'; b.style.background = 'rgba(255,255,255,.15)'; b.style.border = '1px solid rgba(255,255,255,.3)'; b.style.borderRadius = '8px'; b.style.cursor = 'pointer'; }
+      }
+      hudEls.mount.append(box);
+      chal.resultNode = box;
+      const btns = box.querySelectorAll('button');
+      if (btns.length) { try { btns[0].focus(); } catch (e) { /* ignore */ } }
+    } catch (e) { chal.resultNode = null; }
+  }
+  function chalRetry() {
+    const id = (chal.result && chal.result.mode) || chal.id;
+    chalResultClose();
+    if (id) challengeStart(id);
+  }
+
+  /* ---- start / stop / end ---- */
+  function challengeStart(mode) {
+    if (!state.active || CHAL_IDS.indexOf(mode) === -1) return false;
+    chalResultClose();
+    chal.id = null;                       // so restore()'s updateHud does not draw a half-started run
+    untrack(chal.timer); chal.timer = 0;
+    /* §3: "시작 시 restore() 를 먼저 불러 깨끗한 페이지에서 출발한다." */
+    restore();
+    chal.restores++;
+    if (mode === 'survival' && !modeHasEnemies()) setPlayMode(state.lastCombatMode || 'survival');
+    chal.id = mode;
+    chal.startedAt = now();
+    chal.endsAt = chal.startedAt + scaleMs(CHAL_TIME_MS);
+    chal.broken0 = state.broken.length;
+    chal.result = null;
+    announceChallenge(true);
+    toast('🏁 ' + msg('labelChallenge') + ': ' + msg(CHAL_NAME[mode]));
+    chalHud();
+    chalArm();
+    return mode;
+  }
+  function challengeStop(silent) {
+    if (!chalRunning()) return false;
+    chal.id = null;
+    untrack(chal.timer); chal.timer = 0;
+    chalHud();
+    announceChallenge(false);
+    if (!silent) toast(msg('chalStopped'));
+    return true;
+  }
+  function chalEnd(reason) {
+    const id = chal.id;
+    if (!id) return null;
+    const ms = Math.round(chalElapsed());
+    const score = state.player.score, kills = state.player.kills;
+    const completed = reason === 'time' || reason === 'targets' || reason === 'ko';
+    const best = chalIsBest(id, score, ms, reason === 'targets');
+    chal.id = null;
+    untrack(chal.timer); chal.timer = 0;
+    chalHud();
+    const r = { mode: id, reason, score, kills, elapsedMs: ms, broken: chalBrokenNow(), completed, best, at: Date.now() };
+    chal.result = r; chal.lastEnd = r;
+    chalRecordWrite(id, score, kills, ms, reason === 'targets', best);
+    announceChallenge(false);
+    chalResultShow(r);
+    return r;
+  }
+  function challengeState() {
+    return {
+      mode: chal.id, running: chalRunning(),
+      elapsedMs: chalRunning() ? Math.round(chalElapsed()) : 0,
+      remainMs: chal.id === 'timeAttack' ? Math.max(0, Math.round(chal.endsAt - now())) : 0,
+      targets: CHAL_TARGETS, broken: chalRunning() ? chalBrokenNow() : 0,
+      progress: chalRunning() ? chalProgress() : 0,
+      score: state.player.score, kills: state.player.kills,
+      intervalMul: chalIntervalMul(),
+      resultOpen: chalResultOpen(), result: chal.result ? Object.assign({}, chal.result) : null,
+      records: challengeRecords(), restores: chal.restores
+    };
+  }
+  function challengeRecords() {
+    const out = {};
+    for (const id of CHAL_IDS) if (chalRecords[id]) out[id] = Object.assign({}, chalRecords[id]);
+    return out;
+  }
+  /* `C` cycles off → 타임어택 → 목표 돌파 → 생존 → off (§3: "C 키로 순환"). */
+  function challengeCycle() {
+    const i = chal.id ? CHAL_IDS.indexOf(chal.id) : -1;
+    const next = CHAL_IDS[i + 1];
+    if (!next) { challengeStop(); return null; }
+    return challengeStart(next);
+  }
+
+  /* ---- lifecycle ---------------------------------------------------------------------------------
+   * restore() clears every tracked timer, so the challenge tick is re-armed behind it exactly as the perf
+   * sample and the a11y layer are (src/99-api.js). deactivate() ends the run outright. */
+  const restoreChal = restore;
+  restore = function () {
+    restoreChal();
+    progressSeen = 0;        // restore() zeroed state.damageDealt; the cumulative total keeps what it had
+    if (!state.active) return;
+    chalArm();
+    chalHud();
+    bossBarSync();
+  };
+  const deactivateChal = deactivate;
+  deactivate = function (silent) {
+    challengeStop(true);
+    chalResultClose();
+    untrack(chal.timer); chal.timer = 0;
+    progressSave();          // whatever is still owed goes to disk before the page lets go
+    untrack(progressData.timer); progressData.timer = 0;
+    const r = deactivateChal(silent);
+    untrack(state.bossTimer); state.bossTimer = 0;
+    state.bossRespawnAt = 0; state.slowmoUntil = 0; state.bossNodes = null;
+    return r;
+  };
+
+  debug.challengeRecordsReset = () => { for (const id of CHAL_IDS) delete chalRecords[id]; return true; };
+  debug.setProgress = (n) => {
+    n = Number(n);
+    if (!isFinite(n) || n < 0) return progressData.totalDamage;
+    progressData.totalDamage = n;
+    progressData.unlocked.length = 0;
+    progressData.loaded = true;
+    progressUnlockCheck();
+    syncLockedSlots();
+    return progressData.totalDamage;
+  };
+  debug.unlockInfo = () => ({
+    gate: unlockGateOn(), loaded: progressData.loaded, totalDamage: Math.round(progressData.totalDamage),
+    unlocked: progressData.unlocked.slice(), locked: WEAPON_IDS.filter(weaponLocked), list: unlockList()
+  });
+  debug.challengeEnd = () => chalEnd('forced');
+
+  /* The public surface is attached in src/99-api.js: `api` is a `const` declared there, so touching it from
+   * here — which the bundle evaluates first — would hit its temporal dead zone. These two are what that file
+   * publishes as api.challenge / api.progress. */
+  const CHALLENGE_API = {
+    start: (mode) => challengeStart(mode),
+    stop: () => challengeStop(),
+    state: () => challengeState(),
+    cycle: () => challengeCycle(),
+    records: () => challengeRecords(),
+    modes: () => CHAL_IDS.slice()
+  };
+  function progressInfo() {
+    return {
+      totalDamage: Math.round(progressData.totalDamage),
+      unlocked: progressData.unlocked.slice(),
+      locked: WEAPON_IDS.filter(weaponLocked),
+      thresholds: Object.assign({}, UNLOCK_AT),
+      gate: unlockGateOn()
+    };
+  }
+
+  progressRead();
+  chalRecordsRead();
+
+// ── 98-inspect.js ──
+  /* ===================================================================== */
+  /* 17. 인스펙터 모드 · 결과 공유 · 리플레이 (SPEC-product §5)                */
+  /*                                                                        */
+  /* Three features that share one property: none of them is a weapon.      */
+  /* The inspector is the clearest case — §5 calls it 개발자용 차별화 기능    */
+  /* and says "이 모드는 아무것도 부수지 않고 페이지에 쓰지 않는다", which is  */
+  /* asserted rather than promised: every entry point a press can reach is   */
+  /* wrapped and refuses while it is on.                                    */
+  /* ===================================================================== */
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * §5 인스펙터 (`I`)
+   * ─────────────────────────────────────────────────────────────────────── */
+  const inspect = { on: false, panel: null, title: null, list: null, el: null, sel: '', copied: '', copies: 0 };
+  function inspectActive() { return !!(inspect.on && state.active); }
+
+  /* ---- colour maths (the §7 assertion is "대비비가 손계산과 ±0.05") ---- */
+  function inspectColor(str) {
+    const m = /rgba?\(([^)]+)\)/.exec(str || '');
+    if (!m) return null;
+    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(Number);
+    if (p.length < 3 || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2])) return null;
+    const a = p.length >= 4 && isFinite(p[3]) ? p[3] : 1;
+    return { r: p[0], g: p[1], b: p[2], a };
+  }
+  function inspectOver(top, under) {
+    const a = clamp(top.a, 0, 1);
+    return { r: top.r * a + under.r * (1 - a), g: top.g * a + under.g * (1 - a), b: top.b * a + under.b * (1 - a), a: 1 };
+  }
+  /* WCAG 2.x relative luminance, exactly as the recommendation states it. */
+  function inspectLum(c) {
+    const f = (v) => { v = clamp(v, 0, 255) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  }
+  /* The background a reader actually sees behind this element: the first opaque ancestor background with
+   * every translucent layer above it composited back down onto it, and the canvas (white) underneath. */
+  function inspectBgOf(el) {
+    const stack = [];
+    let n = el, guard = 0;
+    while (n && n.nodeType === 1 && guard++ < 40) {
+      const s = gcs(n);
+      const c = s ? inspectColor(s.backgroundColor) : null;
+      if (c && c.a > 0) { stack.push(c); if (c.a >= 1) break; }
+      n = parentOf(n);
+    }
+    let base = { r: 255, g: 255, b: 255, a: 1 };
+    for (let i = stack.length - 1; i >= 0; i--) base = inspectOver(stack[i], base);
+    return base;
+  }
+  function inspectRatio(fg, bg) {
+    const l1 = inspectLum(fg), l2 = inspectLum(bg);
+    const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  /* §5 "대비비와 WCAG 판정". Large text is 24 px, or 18.66 px at weight ≥ 700 — the recommendation's own
+   * definition, so the verdict a reader gets here is the verdict an audit tool would give. */
+  function inspectWcag(ratio, fontPx, weight) {
+    const large = fontPx >= 24 || (fontPx >= 18.66 && weight >= 700);
+    if (large) return ratio >= 4.5 ? 'AAA' : (ratio >= 3 ? 'AA' : msg('inspectFail'));
+    return ratio >= 7 ? 'AAA' : (ratio >= 4.5 ? 'AA' : msg('inspectFail'));
+  }
+
+  /* ---- the unique selector (§7: `document.querySelector(sel) === el`) ---- */
+  function inspectEscape(s) {
+    try { return win.CSS.escape(s); } catch (e) { return String(s).replace(/[^A-Za-z0-9_-]/g, (c) => '\\' + c); }
+  }
+  function inspectUnique(el) {
+    if (!el || el.nodeType !== 1) return '';
+    const hits = (sel) => { try { return doc.querySelectorAll(sel).length === 1 && doc.querySelector(sel) === el; } catch (e) { return false; } };
+    if (el.id && hits('#' + inspectEscape(el.id))) return '#' + inspectEscape(el.id);
+    const parts = [];
+    let n = el, guard = 0;
+    while (n && n.nodeType === 1 && guard++ < 40) {
+      const p = parentOf(n);
+      let seg;
+      if (n.id) seg = tagOf(n) + '#' + inspectEscape(n.id);
+      else {
+        seg = tagOf(n);
+        if (p) {
+          let same = 0, mine = 0;
+          for (const c of p.children) { if (tagOf(c) === tagOf(n)) { same++; if (c === n) mine = same; } }
+          if (same > 1) seg += ':nth-of-type(' + mine + ')';
+        }
+      }
+      parts.unshift(seg);
+      const sel = parts.join(' > ');
+      if (hits(sel)) return sel;
+      if (!p) break;
+      n = p;
+    }
+    return parts.join(' > ');
+  }
+
+  /* ---- accessible name and role ----
+   * A pragmatic subset of the accname / ARIA-in-HTML mappings: aria-label, aria-labelledby, alt, title and
+   * then the element's own text, and the role table the §D3 archetypes already read the page through. */
+  const INSPECT_ROLE = {
+    a: 'link', button: 'button', input: 'textbox', select: 'combobox', textarea: 'textbox',
+    img: 'img', svg: 'graphics-document', video: 'video', canvas: 'canvas',
+    h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading',
+    nav: 'navigation', main: 'main', header: 'banner', footer: 'contentinfo', aside: 'complementary',
+    section: 'region', article: 'article', form: 'form', table: 'table', tr: 'row', td: 'cell', th: 'columnheader',
+    ul: 'list', ol: 'list', li: 'listitem', p: 'paragraph', summary: 'button', dialog: 'dialog'
+  };
+  function inspectRoleOf(el) {
+    let r = null;
+    try { r = el.getAttribute('role'); } catch (e) { r = null; }
+    if (r && r.trim()) return r.trim();
+    const tag = tagOf(el);
+    if (tag === 'a') { let href = null; try { href = el.getAttribute('href'); } catch (e) { href = null; } return href == null ? 'generic' : 'link'; }
+    return INSPECT_ROLE[tag] || 'generic';
+  }
+  function inspectNameOf(el) {
+    try {
+      const al = el.getAttribute('aria-label');
+      if (al && al.trim()) return al.trim().slice(0, 80);
+      const lb = el.getAttribute('aria-labelledby');
+      if (lb) {
+        const t = lb.split(/\s+/).map((id) => { const n = doc.getElementById(id); return n ? (n.textContent || '').trim() : ''; }).filter(Boolean).join(' ');
+        if (t) return t.slice(0, 80);
+      }
+      const alt = el.getAttribute('alt');
+      if (alt != null && alt.trim()) return alt.trim().slice(0, 80);
+      const ti = el.getAttribute('title');
+      if (ti && ti.trim()) return ti.trim().slice(0, 80);
+      return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    } catch (e) { return ''; }
+  }
+  function inspectClasses(el) {
+    let cls = '';
+    try { cls = typeof el.className === 'string' ? el.className : (el.getAttribute('class') || ''); } catch (e) { cls = ''; }
+    return cls.split(/\s+/).filter(Boolean);
+  }
+  /* Everything §5 lists, as data. The panel renders this object and debug.inspectAt() returns it. */
+  function inspectData(el) {
+    if (!el || el.nodeType !== 1) return null;
+    const s = gcs(el) || {};
+    const r = rectOf(el) || { width: 0, height: 0 };
+    const fontPx = parseFloat(s.fontSize) || 0;
+    const weight = parseInt(s.fontWeight, 10) || (s.fontWeight === 'bold' ? 700 : 400);
+    const bg = inspectBgOf(el);
+    const fgRaw = inspectColor(s.color) || { r: 0, g: 0, b: 0, a: 1 };
+    const fg = fgRaw.a < 1 ? inspectOver(fgRaw, bg) : fgRaw;
+    const ratio = inspectRatio(fg, bg);
+    const h = hpOf(el);
+    const sel = inspectUnique(el);
+    let kids = 0;
+    try { kids = el.children ? el.children.length : 0; } catch (e) { kids = 0; }
+    const rgb = (c) => 'rgb(' + Math.round(c.r) + ', ' + Math.round(c.g) + ', ' + Math.round(c.b) + ')';
+    return {
+      tag: tagOf(el).toUpperCase(),
+      id: el.id || null,
+      classes: inspectClasses(el),
+      selector: sel,
+      /* §7's acceptance test is literally `querySelector(sel) === el`, so the product answers it itself —
+       * a selector that does not come back to this element is a bug the panel can show rather than hide. */
+      selectorOk: (function () { try { return doc.querySelector(sel) === el; } catch (e) { return false; } })(),
+      width: Math.round(r.width * 10) / 10, height: Math.round(r.height * 10) / 10,
+      fontFamily: String(s.fontFamily || '').split(',')[0].replace(/["']/g, '').trim(),
+      fontSize: fontPx, fontWeight: weight,
+      color: rgb(fg), background: rgb(bg),
+      contrast: Math.round(ratio * 100) / 100, wcag: inspectWcag(ratio, fontPx, weight),
+      zIndex: String(s.zIndex || 'auto'), position: String(s.position || 'static'), display: String(s.display || ''),
+      role: inspectRoleOf(el), name: inspectNameOf(el),
+      children: kids,
+      hp: Math.max(0, Math.round(h.hp)), hpMax: h.max
+    };
+  }
+
+  /* ---- the panel. Our own overlay node under `root`; nothing is written to the page. ---- */
+  function inspectBuild() {
+    if (inspect.panel && inspect.panel.isConnected) return inspect.panel;
+    if (!root) return null;
+    const box = mk('div', 'crs-inspect');
+    const title = mk('div', 'crs-inspect-title');
+    const list = mk('div', 'crs-inspect-rows');
+    box.append(title, list);
+    root.append(box);
+    inspect.panel = box; inspect.title = title; inspect.list = list;
+    return box;
+  }
+  function inspectClear() {
+    const n = inspect.panel;
+    inspect.panel = inspect.title = inspect.list = null;
+    inspect.el = null; inspect.sel = '';
+    if (n) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+  }
+  function inspectRow(label, value) {
+    const row = mk('div', 'crs-inspect-row');
+    const k = mk('span', 'crs-inspect-k'); k.textContent = label;
+    const v = mk('span', 'crs-inspect-v'); v.textContent = value;
+    row.append(k, v);
+    return row;
+  }
+  function inspectRender(el) {
+    const box = inspectBuild();
+    if (!box) return null;
+    const d = el ? inspectData(el) : null;
+    inspect.el = el || null;
+    inspect.sel = d ? d.selector : '';
+    try {
+      if (!d) { box.classList.remove('on'); return null; }
+      box.classList.add('on');
+      inspect.title.textContent = d.tag + (d.id ? '#' + d.id : '') + (d.classes.length ? '.' + d.classes.slice(0, 3).join('.') : '');
+      while (inspect.list.firstChild) inspect.list.removeChild(inspect.list.firstChild);
+      const rows = [
+        [msg('inspectSelector'), d.selector],
+        [msg('inspectBox'), d.width + ' × ' + d.height],
+        [msg('inspectFont'), d.fontFamily + ' ' + d.fontSize + 'px / ' + d.fontWeight],
+        [msg('inspectColors'), d.color + ' · ' + d.background],
+        [msg('inspectContrast'), d.contrast.toFixed(2) + ' : 1 · ' + d.wcag],
+        [msg('inspectStacking'), 'z ' + d.zIndex + ' · ' + d.position + ' · ' + d.display],
+        [msg('inspectRole'), d.role],
+        [msg('inspectName'), d.name || '—'],
+        [msg('inspectChildren'), String(d.children)],
+        [msg('labelHealth'), d.hp + ' / ' + d.hpMax]
+      ];
+      for (const [k, v] of rows) inspect.list.append(inspectRow(k, v));
+      // keep the panel out from under the cursor: it sits on the side of the screen the pointer is not on
+      const left = state.hoverX > viewW() / 2;
+      box.style.setProperty('left', left ? '24px' : 'auto');
+      box.style.setProperty('right', left ? 'auto' : '24px');
+    } catch (e) { /* ignore */ }
+    return d;
+  }
+  function inspectHide() {
+    inspect.el = null; inspect.sel = '';
+    if (inspect.panel) { try { inspect.panel.classList.remove('on'); } catch (e) { /* ignore */ } }
+  }
+  /* §5 "클릭하면 선택자를 복사한다." The clipboard write is best-effort (a page may deny it); the selector is
+   * published on the API either way, so the feature is still usable and still testable where it is denied. */
+  function inspectCopy() {
+    if (!inspect.sel) return false;
+    inspect.copied = inspect.sel;
+    inspect.copies++;
+    safe(() => win.navigator.clipboard.writeText(inspect.sel));
+    toast('📋 ' + msg('inspectCopied') + ' · ' + inspect.sel);
+    return inspect.sel;
+  }
+  function inspectEnable() {
+    if (inspect.on) return true;
+    inspect.on = true;
+    challengeStop(true);   // an inspector pass is not a run: nothing it does could advance a challenge
+    stopHold(); cancelSlash(); scopeOff();
+    try { docEl.classList.add('crs-inspect-on'); } catch (e) { /* ignore */ }
+    if (targetBox) { try { targetBox.classList.add('crs-inspect-box'); } catch (e) { /* ignore */ } }
+    inspectBuild();
+    toast(msg('inspectOn'));
+    announce(msg('inspectOn'));
+    refreshHover();
+    return true;
+  }
+  function inspectDisable() {
+    if (!inspect.on) return false;
+    inspect.on = false;
+    try { docEl.classList.remove('crs-inspect-on'); } catch (e) { /* ignore */ }
+    if (targetBox) { try { targetBox.classList.remove('crs-inspect-box'); } catch (e) { /* ignore */ } }
+    inspectClear();
+    if (state.active) { toast(msg('inspectOff')); announce(msg('inspectOff')); refreshHover(); }
+    return true;
+  }
+  function inspectToggle() { return inspect.on ? (inspectDisable(), false) : (inspectEnable(), true); }
+  function inspectInfo() {
+    return { on: inspect.on, selector: inspect.sel, copied: inspect.copied, copies: inspect.copies, data: inspect.el ? inspectData(inspect.el) : null };
+  }
+
+  /* §5 "공격이 완전히 꺼지고". Every entry point a press, a drag or the keyboard cursor can reach goes
+   * through one of these three, so the refusal is structural rather than a checklist of call sites. */
+  const smashInspect = smashAt;
+  smashAt = function (x, y, weaponId) {
+    if (inspectActive()) return false;
+    const r = smashInspect(x, y, weaponId);
+    replayRecord('smash', [x, y]);
+    return r;
+  };
+  const slashInspect = slashSegment;
+  slashSegment = function (x1, y1, x2, y2, mid) {
+    if (inspectActive()) return false;
+    const r = slashInspect(x1, y1, x2, y2, mid);
+    replayRecord('slash', [x1, y1, x2, y2]);
+    return r;
+  };
+  const altPressInspect = altPressDown;
+  altPressDown = function (id, x, y, pointerId) {
+    if (inspectActive()) return false;
+    return altPressInspect(id, x, y, pointerId);
+  };
+  /* The keyboard aim cursor (SPEC-settings §3.3) fires a drag weapon by calling startSlash() + resolveSlash()
+   * directly rather than through altPressDown(), so the marquee has to be refused at its own door too. */
+  const startSlashInspect = startSlash;
+  startSlash = function (x, y, pointerId) {
+    if (inspectActive()) return false;
+    return startSlashInspect(x, y, pointerId);
+  };
+  /* §5 "호버 박스가 파랗게 바뀐다" and "패널에 … 를 보여준다". The hover pick is the PHYSICAL one here, not
+   * the §D1 focus answer: an inspector that could only look at enemies would be useless on a quiet page. */
+  const refreshHoverInspect = refreshHover;
+  refreshHover = function () {
+    if (!inspectActive()) return refreshHoverInspect();
+    if (!state.active) return;
+    if (state.overHud || state.hoverX < 0) { showTarget(null); inspectHide(); crosshairHover(); return; }
+    showTarget(pickPhysical(state.hoverX, state.hoverY, null, { noLock: true }));
+    inspectRender(state.hoverEl);
+    crosshairHover();
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * §5 결과 공유 (`P`)
+   *
+   * `chrome.tabs.*` does not exist in a content script, so the capture is asked for by MESSAGE and performed
+   * by the service worker — which is also the only context `chrome.tabs.captureVisibleTab` works in. It runs
+   * on the activeTab grant the toolbar click already gave us: NO new permission, which is §8's completion
+   * criterion. "제한된 페이지에서는 캡처 실패를 토스트로 알린다" is the else branch below, and it is also what
+   * a context with no runtime at all gets.
+   * ─────────────────────────────────────────────────────────────────────── */
+  const shareState = { pending: false, last: null, sent: 0 };
+  function shareCaption() {
+    const p = state.player;
+    let origin = '';
+    try { origin = String(win.location.host || win.location.origin || ''); } catch (e) { origin = ''; }
+    return {
+      title: String(doc.title || '').slice(0, 160),
+      origin: origin.slice(0, 160),
+      mode: state.mode,
+      score: p.score, kills: p.kills,
+      pieces: debrisCount(), damage: state.damageDealt,
+      at: Date.now()
+    };
+  }
+  function shareDone(res) {
+    shareState.pending = false;
+    const ok = !!(res && res.ok);
+    shareState.last = ok ? { ok: true, at: Date.now() } : { ok: false, reason: (res && res.reason) || 'unavailable', at: Date.now() };
+    toast(ok ? '📷 ' + msg('shareOpened') : '⚠ ' + msg('shareFailed'));
+    return ok;
+  }
+  function shareNow() {
+    if (!state.active) return false;
+    shareState.pending = true;
+    shareState.sent++;
+    const r = safe(() => chrome.runtime.sendMessage({ type: 'crash:share', caption: shareCaption() }));
+    if (r && typeof r.then === 'function') r.then((res) => shareDone(res), () => shareDone(null));
+    else shareDone(r === undefined ? null : r);
+    return true;
+  }
+  function shareInfo() { return { pending: shareState.pending, sent: shareState.sent, last: shareState.last ? Object.assign({}, shareState.last) : null }; }
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * §5 리플레이
+   *
+   * "`recordReplay` 가 켜져 있으면 모든 조작을 `{ t, op, args }` 로 2000개까지 기록한다."
+   * The recorder wraps the five calls that ARE the player's operations; the playback timer is deliberately
+   * NOT one of the tracked later() timers, because a recording may contain a `restore` op and restore()
+   * clears every tracked timer — the replay would cancel its own next step. It is cleared explicitly by
+   * replayStop() and by deactivate() instead, so nothing of it outlives the session either.
+   * ─────────────────────────────────────────────────────────────────────── */
+  const REPLAY_MAX = 2000;
+  const REPLAY_OPS = ['smash', 'slash', 'weapon', 'restore', 'reload'];
+  const REPLAY_KEY = 'crsReplays';
+  const REPLAY_KEEP = 10;              // §5 "최대 10, FIFO"
+  const REPLAY_MAX_BYTES = 1048576;    // §5 "1MB 상한"
+  const REPLAY_VIEWPORT_TOL = 0.05;    // §5 "뷰포트가 5% 이상 다르면"
+  const replay = { ops: [], startedAt: 0, playing: false, step: 0, scaled: false, loaded: null, played: 0, dropped: 0 };
+
+  function replayOn() { return settingsGet('recordReplay') === true; }
+  function replayPlaying() { return !!replay.playing; }
+  function replayRecord(op, args) {
+    if (!state.active || replay.playing || !replayOn()) return false;
+    if (REPLAY_OPS.indexOf(op) === -1) return false;
+    if (!replay.startedAt) replay.startedAt = now();
+    if (replay.ops.length >= REPLAY_MAX) { replay.dropped++; return false; }
+    const a = [];
+    for (const v of (args || [])) a.push(typeof v === 'number' ? Math.round(v * 100) / 100 : String(v));
+    replay.ops.push({ t: Math.round(now() - replay.startedAt), op, args: a });
+    return true;
+  }
+  function replayExport() {
+    return { v: 1, startedAt: replay.startedAt ? Math.round(replay.startedAt) : 0, viewport: { w: viewW(), h: viewH() }, ops: replay.ops.map((o) => ({ t: o.t, op: o.op, args: o.args.slice() })) };
+  }
+  /* Strict: anything it cannot vouch for is refused outright rather than repaired. */
+  function replayValidate(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    if (obj.v !== 1) return null;
+    const vp = obj.viewport;
+    if (!vp || typeof vp !== 'object' || !(vp.w > 0) || !(vp.h > 0) || !isFinite(vp.w) || !isFinite(vp.h)) return null;
+    if (!Array.isArray(obj.ops) || obj.ops.length > REPLAY_MAX) return null;
+    const ops = [];
+    let last = -1;
+    for (const o of obj.ops) {
+      if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+      const t = Number(o.t);
+      if (!isFinite(t) || t < 0 || t < last) return null;
+      if (typeof o.op !== 'string' || REPLAY_OPS.indexOf(o.op) === -1) return null;
+      const args = Array.isArray(o.args) ? o.args : [];
+      if (args.length > 4) return null;
+      for (const v of args) {
+        if (typeof v === 'number') { if (!isFinite(v)) return null; }
+        else if (typeof v === 'string') { if (v.length > 40) return null; }
+        else return null;
+      }
+      if (o.op === 'weapon' && WEAPON_IDS.indexOf(args[0]) === -1) return null;
+      if ((o.op === 'smash' && args.length !== 2) || (o.op === 'slash' && args.length !== 4)) return null;
+      ops.push({ t, op: o.op, args: args.slice() });
+      last = t;
+    }
+    return { v: 1, startedAt: Number(obj.startedAt) || 0, viewport: { w: vp.w, h: vp.h }, ops };
+  }
+  function replayImport(obj) {
+    let bytes = 0;
+    try { bytes = JSON.stringify(obj).length; } catch (e) { bytes = REPLAY_MAX_BYTES + 1; }
+    if (bytes > REPLAY_MAX_BYTES) { toast('⚠ ' + msg('replayBad')); return false; }
+    const data = replayValidate(obj);
+    if (!data) { toast('⚠ ' + msg('replayBad')); return false; }
+    replay.loaded = data;
+    return true;
+  }
+  function replayBadge(on) {
+    const n = hudEls.replay;
+    if (!n) return;
+    try {
+      n.classList.toggle('on', !!on);
+      if (hudEls.fallback) n.style.display = on ? 'block' : 'none';
+    } catch (e) { /* ignore */ }
+  }
+  function replayStop() {
+    if (replay.step) { try { clearT(replay.step); } catch (e) { /* ignore */ } replay.step = 0; }
+    if (!replay.playing) { replayBadge(false); return false; }
+    replay.playing = false;
+    replayBadge(false);
+    return true;
+  }
+  function replayRun(op, sx, sy) {
+    const a = op.args || [];
+    try {
+      if (op.op === 'smash') return smashAt(a[0] * sx, a[1] * sy);
+      if (op.op === 'slash') return slashSegment(a[0] * sx, a[1] * sy, a[2] * sx, a[3] * sy);
+      if (op.op === 'weapon') return setWeapon(a[0]);
+      if (op.op === 'restore') return restore();
+      if (op.op === 'reload') return reloadNow();
+    } catch (e) { state.lastError = String((e && e.stack) || e); }
+    return false;
+  }
+  function replayPlay(obj, opts) {
+    if (!state.active || replay.playing) return Promise.resolve(false);
+    const data = replayValidate(obj || replay.loaded || replayExport());
+    if (!data || !data.ops.length) { if (!data) toast('⚠ ' + msg('replayBad')); return Promise.resolve(false); }
+    let speed = Number(opts && opts.speed);
+    if (!isFinite(speed) || speed <= 0) speed = 1;
+    speed = clamp(speed, 0.1, 20);
+    /* §5 "뷰포트가 5% 이상 다르면 좌표를 보정하고 경고한다." */
+    const sx = viewW() / data.viewport.w, sy = viewH() / data.viewport.h;
+    replay.scaled = Math.abs(sx - 1) >= REPLAY_VIEWPORT_TOL || Math.abs(sy - 1) >= REPLAY_VIEWPORT_TOL;
+    replay.playing = true;
+    replay.played++;
+    replayBadge(true);
+    if (replay.scaled) toast('⚠ ' + msg('replayScaled'));
+    return new Promise((resolve) => {
+      let i = 0;
+      const finish = (ok) => {
+        replay.step = 0;
+        if (replay.playing) { replay.playing = false; replayBadge(false); if (ok && state.active) toast(msg('replayDone')); }
+        resolve(!!ok);
+      };
+      const step = () => {
+        replay.step = 0;
+        if (!replay.playing || !state.active) { finish(false); return; }
+        replayRun(data.ops[i], sx, sy);
+        i++;
+        if (i >= data.ops.length) { finish(true); return; }
+        const gap = Math.max(0, data.ops[i].t - data.ops[i - 1].t) / speed;
+        replay.step = setT(step, scaleMs(gap));
+      };
+      replay.step = setT(step, Math.min(50, scaleMs(data.ops[0].t / speed)));
+    });
+  }
+  function replayReset() { replay.ops.length = 0; replay.startedAt = 0; replay.dropped = 0; return true; }
+  function replayInfo() {
+    return {
+      recording: replayOn(), playing: replay.playing, scaled: replay.scaled,
+      count: replay.ops.length, dropped: replay.dropped, max: REPLAY_MAX, played: replay.played,
+      loaded: replay.loaded ? replay.loaded.ops.length : null
+    };
+  }
+  /* §5 "저장은 `crsReplays`(최대 10, FIFO)". */
+  function replaySave(obj) {
+    const data = replayValidate(obj || replayExport());
+    if (!data || !data.ops.length) return false;
+    safeThen(() => chrome.storage.local.get([REPLAY_KEY]), (res) => {
+      const list = (res && Array.isArray(res[REPLAY_KEY])) ? res[REPLAY_KEY].slice() : [];
+      list.push(Object.assign({ savedAt: Date.now() }, data));
+      while (list.length > REPLAY_KEEP) list.shift();   // FIFO: the oldest goes first
+      const patch = {}; patch[REPLAY_KEY] = list;
+      safe(() => chrome.storage.local.set(patch));
+    });
+    return true;
+  }
+  function replayList(cb) {
+    safeThen(() => chrome.storage.local.get([REPLAY_KEY]), (res) => {
+      const list = (res && Array.isArray(res[REPLAY_KEY])) ? res[REPLAY_KEY] : [];
+      try { cb(list); } catch (e) { /* ignore */ }
+    });
+    return true;
+  }
+
+  /* ---- the two remaining recorder wrappers (smashAt / slashSegment are above, with the inspector) ---- */
+  const setWeaponReplay = setWeapon;
+  setWeapon = function (rawId, opts) {
+    const r = setWeaponReplay(rawId, opts);
+    if (r && !(opts && opts.silent)) replayRecord('weapon', [r]);
+    return r;
+  };
+  const restoreReplay = restore;
+  restore = function () {
+    replayRecord('restore', []);
+    return restoreReplay();
+  };
+  const reloadReplay = reloadNow;
+  reloadNow = function () {
+    const r = reloadReplay();
+    if (r) replayRecord('reload', []);
+    return r;
+  };
+
+  /* ---- lifecycle: nothing here may outlive the session (§7 무흔적) ---- */
+  const deactivateInspect = deactivate;
+  deactivate = function (silent) {
+    replayStop();
+    inspect.on = false;
+    inspectClear();
+    try { docEl.classList.remove('crs-inspect-on'); } catch (e) { /* ignore */ }
+    return deactivateInspect(silent);
+  };
+
+  debug.inspectAt = (x, y) => {
+    const el = pickPhysical(+x, +y, null, { noLock: true });
+    return el ? inspectData(el) : null;
+  };
+  debug.inspectInfo = () => inspectInfo();
+  debug.replayInfo = () => replayInfo();
+  debug.shareInfo = () => shareInfo();
+
+  const INSPECT_API = {
+    on: () => inspectEnable(),
+    off: () => inspectDisable(),
+    toggle: () => inspectToggle(),
+    at: (x, y) => debug.inspectAt(x, y),
+    state: () => inspectInfo(),
+    copy: () => inspectCopy()
+  };
+  const REPLAY_API = {
+    export: () => replayExport(),
+    import: (obj) => replayImport(obj),
+    play: (obj, opts) => replayPlay(obj, opts),
+    stop: () => replayStop(),
+    reset: () => replayReset(),
+    save: (obj) => replaySave(obj),
+    list: (cb) => replayList(cb),
+    state: () => replayInfo()
+  };
+
 // ── 99-api.js ──
   /* ===================================================================== */
   /* 15. Public API: restore / activate / deactivate / toggle / prefs         */
@@ -16900,6 +18266,7 @@
     state.combatTimer = 0; state.clockTimer = 0; state.regenTimer = 0; state.toastTimer = 0; state.swapTimer = 0; state.scope.shiftTimer = 0;
     // ── v1.4: the depth refresh, the ratio refresh, the debris sweep and every per-enemy repair timer ──
     state.depthTimer = 0; state.ratioTimer = 0; state.debrisTimer = 0;
+    state.bossTimer = 0;   // SPEC-product §4: the boss scheduler is one of the tracked timers too
     for (const rec of state.hostiles.values()) { rec.timer = 0; rec.repairTimer = 0; }
     for (const rp of state.repairs) rp.timer = 0;
     for (const lk of state.locks) lk.timer = 0;
@@ -16962,6 +18329,8 @@
     // ── v1.4: locks, repairs and the ratio meter all reset with the page ──
     state.locks.length = 0; state.repairs.length = 0; state.locksBroken = 0; state.repaired = 0; state.ratio = 0;
     state.ratioDirty = true; state.ratioAt = 0; state.bossMode = false;
+    // SPEC-product §4: a restored page has no boss, no 15 s wait in progress and no slow motion left over
+    state.bossRespawnAt = 0; state.slowmoUntil = 0; state.bossFrags = 0;
     state.dashUntil = 0; state.dashReadyAt = 0; state.invulUntil = 0; state.dashVx = 0; state.dashVy = 0;
     state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
     resetPlayer(); hideKo(); hideToast();
@@ -17158,8 +18527,19 @@
       destroyRatio: ratioNow(), hostilesByTier: hostilesByTier(),
       avatar: state.avatar ? avatarInfo() : null, debrisLifeMs: state.debrisLifeMs,
       debrisAnchor: state.debrisAnchor,   // SPEC-material §4: 'document' (default) | 'viewport'
-      dashReadyAt: dashReadyWallClock()
+      dashReadyAt: dashReadyWallClock(),
+      /* ── SPEC-product §3 / §4 / §5: the five things a reader of stats() now also has to be able to ask ──
+       * They are one scalar each on purpose — the full shapes live on api.challenge.state(), api.progress(),
+       * api.inspect.state() and api.replay.state(), and stats() stays a glance rather than a dump. */
+      challenge: challengeState().mode, boss: bossStatus(),
+      slowmo: state.slowmoUntil > now(), inspecting: inspectActive(), replaying: replayPlaying(),
+      lockedWeapons: WEAPON_IDS.filter(weaponLocked)
     };
+  }
+  /* `null` when there is no boss; otherwise its tag and which of §4's three stages it is in. */
+  function bossStatus() {
+    const info = debug.bossInfo();
+    return info && info.live ? { tag: info.tag, phase: info.phase, hp: info.hp, max: info.max } : null;
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
   /* §B1: api.weapons() stays the LOADOUT in slot order — it is what the HUD and the hotkeys are built on.
@@ -17255,6 +18635,16 @@
   };
 
   /* ---- §1.3 the two entry points, plus the schema for the options page (step 10) ---- */
+  /* ---- SPEC-product §3 / §4 / §5: the public surface of the three new systems ----
+   * They are attached here rather than in their own files because `api` is a `const` declared in THIS file:
+   * touching it from src/97-challenge.js or src/98-inspect.js — both of which the bundle evaluates earlier —
+   * would hit its temporal dead zone. The objects themselves are built there. */
+  api.challenge = CHALLENGE_API;     // §3: start / stop / state / cycle / records / modes
+  api.progress = () => progressInfo();   // §4 해금: 누적 피해 · 열린 무기 · 잠긴 무기 · 문턱값
+  api.inspect = INSPECT_API;         // §5: on / off / toggle / at / state / copy
+  api.replay = REPLAY_API;           // §5: export / import / play / stop / reset / save / list / state
+  api.share = () => shareNow();      // §5: captureVisibleTab by message — no new permission
+
   api.settings = () => settingsNow();
   api.setSetting = (key, value) => setSettingValue(key, value);
   api.settingsSchema = () => settingsSchema();

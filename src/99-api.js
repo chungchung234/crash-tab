@@ -11,6 +11,7 @@
     state.combatTimer = 0; state.clockTimer = 0; state.regenTimer = 0; state.toastTimer = 0; state.swapTimer = 0; state.scope.shiftTimer = 0;
     // ── v1.4: the depth refresh, the ratio refresh, the debris sweep and every per-enemy repair timer ──
     state.depthTimer = 0; state.ratioTimer = 0; state.debrisTimer = 0;
+    state.bossTimer = 0;   // SPEC-product §4: the boss scheduler is one of the tracked timers too
     for (const rec of state.hostiles.values()) { rec.timer = 0; rec.repairTimer = 0; }
     for (const rp of state.repairs) rp.timer = 0;
     for (const lk of state.locks) lk.timer = 0;
@@ -73,6 +74,8 @@
     // ── v1.4: locks, repairs and the ratio meter all reset with the page ──
     state.locks.length = 0; state.repairs.length = 0; state.locksBroken = 0; state.repaired = 0; state.ratio = 0;
     state.ratioDirty = true; state.ratioAt = 0; state.bossMode = false;
+    // SPEC-product §4: a restored page has no boss, no 15 s wait in progress and no slow motion left over
+    state.bossRespawnAt = 0; state.slowmoUntil = 0; state.bossFrags = 0;
     state.dashUntil = 0; state.dashReadyAt = 0; state.invulUntil = 0; state.dashVx = 0; state.dashVy = 0;
     state.keys.up = state.keys.down = state.keys.left = state.keys.right = false;
     resetPlayer(); hideKo(); hideToast();
@@ -269,8 +272,19 @@
       destroyRatio: ratioNow(), hostilesByTier: hostilesByTier(),
       avatar: state.avatar ? avatarInfo() : null, debrisLifeMs: state.debrisLifeMs,
       debrisAnchor: state.debrisAnchor,   // SPEC-material §4: 'document' (default) | 'viewport'
-      dashReadyAt: dashReadyWallClock()
+      dashReadyAt: dashReadyWallClock(),
+      /* ── SPEC-product §3 / §4 / §5: the five things a reader of stats() now also has to be able to ask ──
+       * They are one scalar each on purpose — the full shapes live on api.challenge.state(), api.progress(),
+       * api.inspect.state() and api.replay.state(), and stats() stays a glance rather than a dump. */
+      challenge: challengeState().mode, boss: bossStatus(),
+      slowmo: state.slowmoUntil > now(), inspecting: inspectActive(), replaying: replayPlaying(),
+      lockedWeapons: WEAPON_IDS.filter(weaponLocked)
     };
+  }
+  /* `null` when there is no boss; otherwise its tag and which of §4's three stages it is in. */
+  function bossStatus() {
+    const info = debug.bossInfo();
+    return info && info.live ? { tag: info.tag, phase: info.phase, hp: info.hp, max: info.max } : null;
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
   /* §B1: api.weapons() stays the LOADOUT in slot order — it is what the HUD and the hotkeys are built on.
@@ -366,6 +380,16 @@
   };
 
   /* ---- §1.3 the two entry points, plus the schema for the options page (step 10) ---- */
+  /* ---- SPEC-product §3 / §4 / §5: the public surface of the three new systems ----
+   * They are attached here rather than in their own files because `api` is a `const` declared in THIS file:
+   * touching it from src/97-challenge.js or src/98-inspect.js — both of which the bundle evaluates earlier —
+   * would hit its temporal dead zone. The objects themselves are built there. */
+  api.challenge = CHALLENGE_API;     // §3: start / stop / state / cycle / records / modes
+  api.progress = () => progressInfo();   // §4 해금: 누적 피해 · 열린 무기 · 잠긴 무기 · 문턱값
+  api.inspect = INSPECT_API;         // §5: on / off / toggle / at / state / copy
+  api.replay = REPLAY_API;           // §5: export / import / play / stop / reset / save / list / state
+  api.share = () => shareNow();      // §5: captureVisibleTab by message — no new permission
+
   api.settings = () => settingsNow();
   api.setSetting = (key, value) => setSettingValue(key, value);
   api.settingsSchema = () => settingsSchema();

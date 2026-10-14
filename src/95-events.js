@@ -52,6 +52,11 @@
     if (e.type === 'pointerdown' || e.type === 'pointerup') { ensureAudio(); trackPlayer(e); rmbSync(e); }
     if (e.type === 'pointerdown' && e.button === 0 && e.isPrimary !== false) {
       if (state.ko) return;   // KO screen: holds / slashes / shots disabled
+      // SPEC-product §5: 재생 중에는 입력을 무시한다 — the press is still swallowed, it just does nothing
+      if (replayPlaying()) return;
+      /* SPEC-product §5: 인스펙터에서 "클릭하면 선택자를 복사한다", and nothing else happens at all —
+       * this returns before the one entry point every weapon's press goes through. */
+      if (inspectActive()) { inspectCopy(); return; }
       /* SPEC-arsenal §A1: the three-way branch that used to live here (hold / drag / click) IS the problem
        * §A sets out to fix — "지금은 무기마다 누르는 의미가 다르다". Every press now goes to ONE entry point
        * which starts a charge, a hold or a marquee as the weapon asks, and the RELEASE decides what comes
@@ -160,21 +165,35 @@
         else if (c === 'KeyZ' || k === 'z' || k === 'Z') action = 'restore';
         else if (c === 'KeyM' || k === 'm' || k === 'M') action = 'mute';
         else if (c === 'KeyH' || k === 'h' || k === 'H') action = 'combat';
+        // ── SPEC-product §3 챌린지 순환 (C) · §5 인스펙터 (I) · §5 공유 (P) ──
+        else if (c === 'KeyC' || k === 'c' || k === 'C') action = 'challenge';
+        else if (c === 'KeyI' || k === 'i' || k === 'I') action = 'inspect';
+        else if (c === 'KeyP' || k === 'p' || k === 'P') action = 'share';
+        else if ((c === 'Enter' || k === 'Enter') && chalResultOpen()) action = 'chalRetry';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
         else if (modeHasAvatar() && isSpaceKey(c, k)) action = 'dash';          // v1.4 §1.2
         else if (modeHasAvatar() && moveDirOf(c, k)) { action = 'move'; arg = moveDirOf(c, k); }
       }
     }
     if (!action) return;
+    /* SPEC-product §5: "재생 중에는 입력을 무시한다." Escape is the ONE exception — a replay must never be
+     * able to trap the player on a page they are trying to leave, and §7's traceless test presses exactly
+     * that key with a replay in flight. */
+    if (replayPlaying() && action !== 'escape') { handledKeys.add(e); try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ } return; }
     handledKeys.add(e);
     try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
     if (action === 'move') { state.keys[arg] = true; kick(); return; }   // v1.4: a held key is simply a held key
-    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash')) return;
+    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash' || action === 'challenge' || action === 'inspect' || action === 'share' || action === 'chalRetry')) return;
     if (action === 'escape') {   // layered (A2): scope-out if scoped, else exit (stops holds and the KO screen)
       /* SPEC-arsenal §A5 lists Escape among the 중단 조건 (전부 취소 + 환불). It is layered like the rest:
        * a charge in progress is the innermost layer, so the first Escape gives the rounds back rather than
        * tearing the whole overlay down under the player's hand. */
       if (altEscape()) return;
+      /* SPEC-product §3: the result overlay's own `닫기 (Esc)`. It is an innermost layer like the charge
+       * refund above — closing a card the player is reading must not tear the whole overlay down.
+       * The inspector and a replay in flight are deliberately NOT layers here: §7 requires ONE Escape to
+       * leave no trace while either is live, so Escape still exits outright and deactivate() ends them. */
+      if (chalResultOpen()) { chalResultClose(); return; }
       if (state.scoped) { scopeOff(); return; }
       stopHold(); cancelSlash(); deactivate();
     }
@@ -189,6 +208,10 @@
     else if (action === 'combat') cycleMode();   // SPEC-combat §A: H cycles rampage → arcade → survival
     else if (action === 'restart') restartFromKo();
     else if (action === 'dash') startDash();
+    else if (action === 'challenge') challengeCycle();   // SPEC-product §3: C cycles off → 타임어택 → 목표 돌파 → 생존 → off
+    else if (action === 'inspect') inspectToggle();      // SPEC-product §5
+    else if (action === 'share') shareNow();             // SPEC-product §5
+    else if (action === 'chalRetry') chalRetry();        // SPEC-product §3: 결과 오버레이의 `다시 (Enter)`
   }
   function onWheel(e) {
     if (!state.active) return;

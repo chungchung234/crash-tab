@@ -101,7 +101,25 @@
     // ── SPEC-combat §B1: the word a deflected hit prints instead of a damage number ──
     invulLabel: '무적',
     // ── SPEC-combat §D1: what the meter says while the roster is empty ──
-    scanningEnemies: '적 탐색 중…'
+    scanningEnemies: '적 탐색 중…',
+    /* ── SPEC-product (10단계) §3 챌린지 · §4 보스와 해금 · §5 인스펙터·공유·리플레이 ──────────────
+     * Every string the product renders has a hard-coded Korean fallback here: chrome.i18n is unavailable
+     * in a page whose extension context has gone away (and in the e2e harness's shim), and a HUD that
+     * prints its own message keys is a broken HUD. The _locales files carry the same keys for both locales. */
+    labelChallenge: '챌린지', chalTimeAttack: '타임어택', chalTargetRush: '목표 돌파', chalSurvivalRun: '생존',
+    chalResult: '챌린지 결과', chalNewBest: '최고 기록 갱신!', chalRetry: '다시', chalClose: '닫기',
+    chalRemain: '남은 시간', chalTargets: '목표', chalElapsed: '소요', chalStopped: '챌린지를 멈췄어요',
+    labelBoss: '보스', bossArrived: '👑 보스 등장!', bossDown: '👑 보스 격파!',
+    toastLocked: '아직 잠긴 무기예요', toastUnlocked: '무기 해금!',
+    setUnlockAll: '모든 무기 잠금 해제', setRecordReplay: '리플레이 기록',
+    inspectOn: '🔍 인스펙터 — 클릭하면 선택자를 복사해요 (I로 끄기)', inspectOff: '인스펙터 모드 꺼짐',
+    inspectCopied: '선택자 복사됨', inspectSelector: '선택자', inspectBox: '박스', inspectFont: '글꼴',
+    inspectColors: '색', inspectContrast: '대비', inspectStacking: '쌓임', inspectRole: '역할',
+    inspectName: '이름', inspectChildren: '자식', inspectFail: '미달',
+    shareFailed: '이 페이지는 캡처할 수 없어요', shareOpened: '공유 이미지를 열었어요', shareTitle: '화면부수기 결과',
+    shareSave: '저장', shareCopy: '클립보드 복사', shareCopied: '복사했어요', shareNone: '공유할 이미지가 없어요',
+    replayBadge: '▶ 리플레이 재생 중', replayScaled: '뷰포트가 달라 좌표를 보정했어요',
+    replayDone: '리플레이 재생 끝', replayBad: '리플레이 파일이 올바르지 않아요'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));

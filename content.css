@@ -1851,3 +1851,92 @@ crs-hud:popover-open {
   background: radial-gradient(circle at 34% 30%, #f6fafe 0%, #d4dae4 38%, #3f4654 100%);
   box-shadow: 0 0 3px 1px rgba(20, 23, 28, .5);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPEC-product §4 보스 · §5 인스펙터 — 10단계
+   USER 오리진이다. JS 가 쓰거나 애니메이션하는 속성에는 !important 를 붙이지 않는다:
+   인스펙터 패널의 left / right 는 inspectRender() 가 인라인으로 쓰고(커서 반대쪽으로
+   붙는다), 호버 괄호의 border-color 는 pulseTarget() 이 애니메이션한다.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* §4: 보스의 이중 테두리. 평상시 오라 위에 한 겹 더 두르는 금색 링이다. */
+.crs-hostile.crs-boss {
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 209, 102, .95),
+    inset 0 0 0 6px rgba(20, 23, 28, .85),
+    inset 0 0 36px 6px rgba(255, 209, 102, .22),
+    0 0 0 2px rgba(255, 209, 102, .55) !important;
+  border-radius: 6px;
+}
+.crs-hostile.crs-boss > .crs-hostile-label {
+  background: rgba(255, 209, 102, .92) !important;
+  color: #1a1206 !important;
+  font-weight: 800 !important;
+}
+
+/* §5: 인스펙터에서 호버 박스가 파래진다. 괄호 색만 바꾼다 — 굵기와 위치는 그대로다. */
+.crs-target.crs-inspect-box .crs-tb { border-color: rgba(88, 166, 255, .95); }
+.crs-target.crs-inspect-box { outline-color: rgba(88, 166, 255, .9) !important; }
+.crs-target.crs-inspect-box > .crs-target-label {
+  background: rgba(88, 166, 255, .92) !important;
+  color: #04121f !important;
+}
+
+/* §5: 인스펙터 패널. 우리 오버레이 안에 산다 — 페이지에는 아무것도 쓰지 않는다. */
+.crs-inspect {
+  position: fixed !important;
+  top: 24px;
+  right: 24px;
+  width: 340px !important;
+  max-height: 78vh !important;
+  overflow: hidden !important;
+  display: none;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  border: 1px solid rgba(88, 166, 255, .45) !important;
+  border-radius: 12px !important;
+  background: rgba(10, 14, 22, .93) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .55) !important;
+  color: #e9f2ff !important;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+  pointer-events: none !important;
+  z-index: 9 !important;
+  text-align: left !important;
+}
+.crs-inspect.on { display: block; }
+.crs-inspect-title {
+  display: block !important;
+  margin: 0 0 7px !important;
+  padding: 0 0 6px !important;
+  border-bottom: 1px solid rgba(88, 166, 255, .3) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  color: #9fd0ff !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.crs-inspect-rows { display: block !important; }
+.crs-inspect-row {
+  display: flex !important;
+  gap: 8px !important;
+  margin: 0 0 3px !important;
+  padding: 0 !important;
+  align-items: baseline !important;
+}
+.crs-inspect-k {
+  flex: 0 0 74px !important;
+  color: rgba(159, 208, 255, .78) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.crs-inspect-v {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  color: #e9f2ff !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}

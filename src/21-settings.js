@@ -164,6 +164,8 @@
       else if (key === 'reduceMotion') a11yMotionChanged();
       else if (key === 'highContrastMarkers') a11yContrastChanged();
       else if (key === 'keyboardAim') a11yAimChanged();
+      // SPEC-product §4: turning the unlock gate on or off has to repaint the loadout grid at once
+      else if (key === 'unlockAll') syncLockedSlots();
     } catch (e) { /* a page that fights back must never break a settings write */ }
   }
   /* The runtime half of api.setDebrisLife(), with no storage write of its own. */
