@@ -615,6 +615,34 @@ const api = {
   // `.crs-viewmodel` presence/shape, plus its live computed transform decomposed into translateX/Y (px) and
   // rotation (deg) via DOMMatrix — robust to whatever transform functions the implementation composes
   // (translate + rotate, a single matrix(), etc.), since items 4/5/14 only care about the net displacement.
+  /* How far the viewmodel TRAVELS over `ms`, sampled by requestAnimationFrame INSIDE the page: the peak-to-peak
+   * spread of its translate, with no reference point of its own.
+   *
+   * Two things were wrong with measuring the distance from a base sample taken just before the shot. The recoil
+   * one-shot is ~180 ms, so reading it over CDP at 25-40 ms a round trip takes six or seven samples and often
+   * misses the peak. And under normal motion the 2600 ms idle bob is still running underneath (WAAPI gives the
+   * property to the last-started animation, and the shot ends with fill:'none'), so that base sample is taken
+   * at an arbitrary bob phase somewhere in ±3 px while the recoil itself starts from the base pose — the
+   * "amplitude" it measured was part bob offset. Under reduced motion there is no bob at all, so the same
+   * number meant two different things on the two sides of the comparison, and which side came out larger was
+   * luck. A spread needs no baseline: over 220 ms the bob contributes about a pixel and the recoil dominates. */
+  viewmodelPeak: (page, _base, ms) => page.evaluate((t) => new Promise((resolve) => {
+    const el = document.querySelector('.crs-viewmodel');
+    if (!el) return resolve(null);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, frames = 0;
+    const t0 = performance.now();
+    const step = () => {
+      const cs = getComputedStyle(el);
+      let tx = 0, ty = 0;
+      try { const m = new DOMMatrix(cs.transform); tx = m.m41; ty = m.m42; } catch (e) { /* identity */ }
+      if (tx < minX) minX = tx; if (tx > maxX) maxX = tx;
+      if (ty < minY) minY = ty; if (ty > maxY) maxY = ty;
+      frames++;
+      if (performance.now() - t0 < t) requestAnimationFrame(step);
+      else resolve({ peak: Math.hypot(maxX - minX, maxY - minY), frames });
+    };
+    requestAnimationFrame(step);
+  }), ms),
   viewmodelXform: (page) => page.evaluate(() => {
     const el = document.querySelector('.crs-viewmodel');
     if (!el) return null;
@@ -2498,30 +2526,38 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     await api.restore(page);
     await api.setWeapon(page, 'pistol');
     await waitViewmodelIdle();
+    // The idle bob is a 2600 ms loop (src/46-viewmodel.js). Eight samples 150 ms apart cover barely 40 % of
+    // it, so where the window lands decides how much of the swing is seen; 350 ms × 8 covers a full period
+    // and the peak-to-peak range stops depending on phase.
     const idleSamplesNormal14 = [];
-    for (let i = 0; i < 8; i++) { idleSamplesNormal14.push(await api.viewmodelXform(page)); await sleep(150); }
+    for (let i = 0; i < 8; i++) { idleSamplesNormal14.push(await api.viewmodelXform(page)); await sleep(350); }
     const idleRangeNormal14 = Math.max(...idleSamplesNormal14.map((s) => s.ty)) - Math.min(...idleSamplesNormal14.map((s) => s.ty));
-    const baseIdle14 = await api.viewmodelXform(page);
     const ptFire14 = await arenaPt(page);
+    // What the bob alone travels over the measuring window, with no shot — reported beside the two recoil
+    // numbers so a future failure says straight away whether the bob was the thing that moved.
+    const bobOnly14 = await api.viewmodelPeak(page, null, 350);
+    // Start the sampler BEFORE the shot and fire inside its window. Starting it after the click left the
+    // recoil onset in the gap between the two CDP round trips, so whether the window caught the peak at all
+    // came down to timing and the normal-motion side kept coming back understated. 350 ms covers the ~180 ms
+    // one-shot with margin while keeping the bob's own contribution (6 px over 2600 ms) to about a pixel.
+    const samplingNormal14 = api.viewmodelPeak(page, null, 350);
     await page.mouse.click(ptFire14.x, ptFire14.y);
-    let maxDevNormal14 = 0;
-    const tN14 = Date.now();
-    while (Date.now() - tN14 < 220) { const x = await api.viewmodelXform(page); if (x && baseIdle14) maxDevNormal14 = Math.max(maxDevNormal14, Math.hypot(x.tx - baseIdle14.tx, x.ty - baseIdle14.ty)); await sleep(12); }
+    const peakNormal14 = await samplingNormal14;
+    const maxDevNormal14 = peakNormal14 ? peakNormal14.peak : 0;
     await sleep(250);
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
     await api.restore(page);
     await api.setWeapon(page, 'pistol');
     await waitViewmodelIdle();
     const idleSamplesRM14 = [];
-    for (let i = 0; i < 8; i++) { idleSamplesRM14.push(await api.viewmodelXform(page)); await sleep(150); }
+    for (let i = 0; i < 8; i++) { idleSamplesRM14.push(await api.viewmodelXform(page)); await sleep(350); }
     const idleRangeRM14 = Math.max(...idleSamplesRM14.map((s) => s.ty)) - Math.min(...idleSamplesRM14.map((s) => s.ty));
     check('A.weapons 14: prefers-reduced-motion → idle wobble suppressed (viewmodel Y stays flat) vs the normal idle sine sweep', idleRangeRM14 <= 0.5 && idleRangeNormal14 > 0.5, { idleRangeNormal14, idleRangeRM14 });
-    const baseIdleRM14 = await api.viewmodelXform(page);
+    const samplingRM14 = api.viewmodelPeak(page, null, 350);
     await page.mouse.click(ptFire14.x, ptFire14.y);
-    let maxDevRM14 = 0;
-    const tR14 = Date.now();
-    while (Date.now() - tR14 < 220) { const x = await api.viewmodelXform(page); if (x && baseIdleRM14) maxDevRM14 = Math.max(maxDevRM14, Math.hypot(x.tx - baseIdleRM14.tx, x.ty - baseIdleRM14.ty)); await sleep(12); }
-    check('A.weapons 14: prefers-reduced-motion → recoil is still present but its amplitude is at most half of normal motion\'s', maxDevRM14 > 0 && maxDevRM14 <= maxDevNormal14 * 0.5 + 0.5, { maxDevNormal14, maxDevRM14 });
+    const peakRM14 = await samplingRM14;
+    const maxDevRM14 = peakRM14 ? peakRM14.peak : 0;
+    check('A.weapons 14: prefers-reduced-motion → recoil is still present but its amplitude is at most half of normal motion\'s', maxDevRM14 > 0 && maxDevNormal14 > 0 && maxDevRM14 <= maxDevNormal14 * 0.5 + 0.5, { maxDevNormal14, maxDevRM14, bobOnly: bobOnly14 && bobOnly14.peak, framesNormal: peakNormal14 && peakNormal14.frames, framesRM: peakRM14 && peakRM14.frames });
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
 
     // ---- (13) traceless: Escape while the viewmodel idle animation is running → inactive, zero [data-crs]
