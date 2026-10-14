@@ -15,6 +15,7 @@
     "45-hud.js",
     "46-viewmodel.js",
     "50-target.js",
+    "51-crosshair.js",
     "55-geometry.js",
     "60-clone.js",
     "65-pieces.js",

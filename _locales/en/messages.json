@@ -394,5 +394,41 @@
   "scanningEnemies": {
     "message": "Scanning for enemies…",
     "description": "SPEC-combat D1: pulsed beside the meter in a combat mode while no enemy is live"
+  },
+  "setViewmodelScale": {
+    "message": "Weapon picture size",
+    "description": "SPEC-crosshair C: viewmodel layer scale (0.8 / 1 / 1.3)"
+  },
+  "setCrosshair": {
+    "message": "Crosshair",
+    "description": "SPEC-crosshair A9: crosshair shape — auto (per weapon) / cross / dot / circle / off"
+  },
+  "setCrosshairColor": {
+    "message": "Crosshair colour",
+    "description": "SPEC-crosshair A9: crosshair colour — white / green / cyan / magenta"
+  },
+  "setCrosshairScale": {
+    "message": "Crosshair size",
+    "description": "SPEC-crosshair A9: crosshair scale (0.75 / 1 / 1.25 / 1.5)"
+  },
+  "setCrosshairSpread": {
+    "message": "Show spread on the crosshair",
+    "description": "SPEC-crosshair A3: the arm gap follows the live spread"
+  },
+  "setHitmarker": {
+    "message": "Hit marker",
+    "description": "SPEC-crosshair A6: the short mark at the crosshair centre when a shot does damage"
+  },
+  "setShowHpNumber": {
+    "message": "Show health numbers",
+    "description": "SPEC-crosshair B2: show hp/max as a number beside the health bar"
+  },
+  "setTargetMarker": {
+    "message": "Target marker",
+    "description": "SPEC-crosshair B4: hover marker — brackets / full outline / off"
+  },
+  "setHostileMarker": {
+    "message": "Hostile marker",
+    "description": "SPEC-crosshair B4: hostile aura — quiet / always / off"
   }
 }

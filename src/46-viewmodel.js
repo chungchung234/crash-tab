@@ -15,11 +15,32 @@
   /* and a user-origin !important outranks Web Animations, so marking either */
   /* of those would silently freeze the whole viewmodel.                     */
   /* ===================================================================== */
-  /* The layer is 200 × 100 (§2); the picture is drawn WIDER than the layer and allowed to overflow it, because
-   * a weapon that only fills the middle band of its own 120 × 60 viewBox reads as a distant toy at 1:1. */
-  /* The layer is 200 × 100 and the `detail` drawing is 240 × 140, so at VM_W the picture is 268 × 156 and
-   * overflows its own layer on purpose (§2) — a weapon that fits inside the layer reads as a distant toy. */
-  const VM_W = 268;
+  /* ── SPEC-crosshair §C: 뷰모델 위치 ────────────────────────────────────────
+   * 사용자: "무기 위치가 너무 구석이라 안보여". v1.5 pinned the layer to 200 × 100 at
+   * right: 8px, bottom: −8px — 12 % of a 1280 × 800 screen, shoved into the corner
+   * and cut off at the bottom, so what you were holding simply could not be read.
+   *
+   * §C makes the layer a FRACTION OF THE VIEWPORT instead of a constant:
+   *   width  = clamp(300, vw × 0.30, 520) × viewmodelScale
+   *   height = width × 0.56
+   *   right  = vw × 0.05        (inset, not flush)
+   *   bottom = −height × 0.12   (only the grip is below the fold)
+   * At 1280 that is 384 × 215 — 24 % of the height, the usual first-person weight.
+   * Recomputed on every resize (the wrapper at the bottom of this module).
+   *
+   * The picture keeps the v1.5 ratio of 268 ∶ 200 against its layer, so it still
+   * overflows on purpose — a weapon that fits inside its own layer reads as a
+   * distant toy. The four geometry properties are written as INLINE styles and are
+   * therefore declared in content.css WITHOUT !important (the USER-origin trap). */
+  const VM_ART_RATIO = 268 / 200;    // picture ∶ layer — the v1.5 proportion (268 px of art on a 200 px layer)
+  const VM_MIN_W = 300, VM_MAX_W = 520, VM_VW_FRAC = 0.30;
+  const VM_ASPECT = 0.56;            // height = width × 0.56
+  const VM_RIGHT_FRAC = 0.05, VM_BOTTOM_FRAC = -0.12;
+  function vmScale() { const v = +settingsGet('viewmodelScale'); return isFinite(v) && v > 0 ? v : 1; }
+  function vmLayerW() { return clamp(viewW() * VM_VW_FRAC, VM_MIN_W, VM_MAX_W) * vmScale(); }
+  /* The art width the weapon SVG is rendered at. It tracks the layer, so a 0.8 / 1.3 scale or a narrow
+   * window shrinks the drawing instead of cropping it. */
+  function vmArtW() { return Math.round(vmLayerW() * VM_ART_RATIO); }
   const vm = {
     node: null, holder: null, mag: null, shot: null,
     weapon: null, want: null, phase: 'hidden', phaseUntil: 0, idle: null, seq: 0, timer: 0, hidden: false, lastFireAt: 0
@@ -70,15 +91,35 @@
     vmCancel();
     vmDropMag();
     const n = vm.node;
-    vm.node = null; vm.holder = null; vm.weapon = null; vm.want = null; vm.shot = null; vm.phase = 'hidden'; vm.phaseUntil = 0; vm.hidden = false; vm.lastFireAt = 0;
+    vm.node = null; vm.holder = null; vm.weapon = null; vm.want = null; vm.shot = null; vm.phase = 'hidden'; vm.phaseUntil = 0; vm.hidden = false; vm.lastFireAt = 0; vm.artW = null;
     if (n) { try { n.remove(); } catch (e) { /* ignore */ } }
     if (hudEls.ammo) { try { hudEls.ammo.style.bottom = ''; } catch (e) { /* ignore */ } }
   }
-  /* The ammo panel sits at bottom: 24px (v1.3 §2.1) and the viewmodel fills exactly that corner, so the panel
-   * moves up — only while the layer actually exists, so `viewmodel: false` restores the v1.3 layout byte for byte. */
-  function vmLiftAmmo(on) {
+  /* ── SPEC-crosshair §C, 탄약 HUD 와의 충돌 ────────────────────────────────
+   * v1.5 pushed the ammo panel up to 118 px to get it out of the viewmodel's corner. §C puts it back at
+   * bottom: 24px and lets the two OVERLAP, drawn in the real-FPS order: the panel is in the HUD host
+   * (z-index 2147483647) and the viewmodel in the glass root (2147483644), so the panel is already on
+   * top, and its own dark plate keeps the numbers readable over the weapon.
+   *
+   * The function is kept — every caller stays as it was — and now only ever CLEARS a lift, so a page
+   * that was activated under the old build cannot be left with a panel hanging in mid-air. */
+  function vmLiftAmmo() {
     if (!hudEls.ammo) return;
-    try { hudEls.ammo.style.bottom = on ? '118px' : ''; } catch (e) { /* ignore */ }
+    try { if (hudEls.ammo.style.bottom) hudEls.ammo.style.bottom = ''; } catch (e) { /* ignore */ }
+  }
+  /* §C: the four geometry numbers, written whenever the layer is built, synced or the window resizes. */
+  function vmPlace() {
+    const n = vm.node;
+    if (!n || !n.isConnected) return null;
+    const w = Math.round(vmLayerW()), h = Math.round(w * VM_ASPECT);
+    const right = Math.round(viewW() * VM_RIGHT_FRAC), bottom = Math.round(h * VM_BOTTOM_FRAC);
+    try {
+      n.style.width = px(w); n.style.height = px(h);
+      n.style.right = px(right); n.style.bottom = px(bottom);
+    } catch (e) { /* ignore */ }
+    // the picture is re-rendered only when its width actually moved by more than a pixel (resize drags)
+    if (vm.artW == null || Math.abs(vm.artW - vmArtW()) > 1) { vm.artW = vmArtW(); if (vm.weapon) vmSetArt(vm.weapon); }
+    return { w, h, right, bottom };
   }
   function buildViewmodel() {
     const n = mk('div', 'crs-viewmodel');
@@ -88,14 +129,17 @@
     n.style.opacity = '1';
     root.append(n);
     vm.node = n; vm.holder = holder; vm.weapon = null; vm.want = null; vm.phase = 'idle'; vm.phaseUntil = 0; vm.hidden = false;
-    vmLiftAmmo(true);
+    vm.artW = null;
+    vmPlace();
+    vmLiftAmmo();
   }
   function vmSetArt(id) {
     if (!vm.holder) return;
     vm.weapon = id;
+    vm.artW = vmArtW();
     try {
       while (vm.holder.firstChild) vm.holder.removeChild(vm.holder.firstChild);
-      vm.holder.append(weaponArt(id, VM_W, 'detail'));   // SPEC-weapon-art §2: the viewmodel is ALWAYS the detail LOD — never left to VM_W happening to clear the 64 px threshold
+      vm.holder.append(weaponArt(id, vm.artW, 'detail'));   // SPEC-weapon-art §2: the viewmodel is ALWAYS the detail LOD — never left to the width happening to clear the 64 px threshold
     } catch (e) { /* ignore */ }
   }
   function vmIdle() {
@@ -266,7 +310,8 @@
   function vmSync() {
     if (!vmEnabled()) { if (vm.node) clearViewmodel(); return; }
     if (!vm.node || !vm.node.isConnected) { clearViewmodel(); buildViewmodel(); }
-    vmLiftAmmo(true);
+    vmLiftAmmo();
+    vmPlace();   // SPEC-crosshair §C: 창 크기가 바뀌면 다시 계산한다 (and a viewmodelScale write lands here too)
     vmVisibility();
     /* `vm.want` is the weapon the swap is FOR; `vm.weapon` is the art actually on screen, which the draw only
      * swaps at its midpoint. Keeping them apart means a reload or a shot that lands mid-draw (emptying a
@@ -317,6 +362,7 @@
   /* debug.vmInfo(): the viewmodel's own bookkeeping, for diagnosing a viewmodel that is on screen but not
    * moving. A function, so api.debug's flag-copying helpers skip it. */
   debug.vmInfo = () => ({
+    layer: vmPlace(), scale: vmScale(), artW: vm.artW,   // ── SPEC-crosshair §C: the live layer geometry ──
     phase: vm.phase, reported: viewmodelPhase(), left: Math.round(vm.phaseUntil - now()),
     weapon: vm.weapon, want: vm.want, hidden: vm.hidden, connected: !!(vm.node && vm.node.isConnected),
     idle: !!vm.idle, idleState: vm.idle ? vm.idle.playState : null, shot: vm.shot ? vm.shot.playState : null,
@@ -329,6 +375,15 @@
    * updateHud() this wraps its binding: the generated bundle is one function
    * scope, and a function declaration's binding is writable. The art refresh is
    * signature-gated because updateHud() also runs once per frame on hot paths. */
+  /* SPEC-crosshair §C: "창 크기가 바뀌면 다시 계산한다." onResize() lives in src/92-tick.js, which this
+   * workstream does not own, so its binding is wrapped here — the same trick the HUD hook below uses.
+   * bindEvents() reads the binding when it registers the listener (at activate()), long after this. */
+  const onResizeVmBase = onResize;
+  onResize = function () {
+    onResizeVmBase();
+    try { vmPlace(); } catch (e) { /* ignore */ }
+  };
+
   const updateHudBase = updateHud;
   updateHud = function () {
     updateHudBase();

@@ -76,6 +76,20 @@
   zip 첨부 릴리스), `publish-store.yml`(수동 실행 전용 Chrome 웹 스토어 업로드/배포).
 - 문서: `CHANGELOG.md`, `CONTRIBUTING.md`, `docs/RELEASING.md`, `docs/ARCHITECTURE.md`.
 - 이슈·PR 템플릿(`.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md`).
+- **조준점 고도화 · 시각 정돈 · 뷰모델 위치 (SPEC-crosshair).** 조준점이 운영체제 커서 이미지라
+  애니메이션도, 무기별 구분도, 명중 피드백도 불가능했습니다. 커서를 끄고(`cursor: none`) 직접 그립니다.
+  - **산포가 조준점 간격에 그대로 보인다.** 네 팔의 간격이 `6 + spreadNow × 0.9` px 이라 기관총을 연사하면
+    눈에 띄게 벌어지고 손을 떼면 다시 모입니다. v1.5 의 반동 킥·블룸 스탯이 전부 눈에 보이게 됩니다.
+  - 무기 10종의 모양(폭탄·로켓은 **실제 폭발 반경**의 점선 원), 히트마커 4종(명중·치명타·파괴·락온 차단),
+    쿨다운·재장전·교체 진행도를 그리는 준비 상태 링, 가려진 적을 알리는 `▼` 관통 힌트.
+  - **외곽선을 줄였습니다.** 호버 대상은 모서리 괄호 4개만(실선과 배경 틴트 제거), 적대 요소는 평상시
+    조용하고 **공격 준비·락온·돌격·복구 중에만** 2px 실선과 맥동이 켜집니다. 동시에 떠 있는 실선은 하나입니다.
+  - **체력 표시가 조준점 아래 바 하나로** 옮겨갔습니다. 숫자는 기본적으로 없고, **바의 길이가 최대 체력**을
+    나타냅니다(`clamp(round(20 + √maxHp × 6), 24, 140)` px). 상처가 없으면 40% 불투명도로 조용합니다.
+  - **뷰모델이 구석에서 나왔습니다.** 200 × 100 고정에서 뷰포트 비례(`clamp(300, vw × 0.30, 520)`)로 커지고
+    안쪽으로 들어옵니다. 탄약 패널은 `bottom: 24px` 로 돌아가 뷰모델 위에 겹쳐 그립니다.
+  - 설정 9개 추가: `crosshair` · `crosshairColor` · `crosshairScale` · `crosshairSpread` · `hitmarker` ·
+    `showHpNumber` · `targetMarker` · `hostileMarker` · `viewmodelScale`.
 
 ### 제거
 

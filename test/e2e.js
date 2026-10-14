@@ -438,8 +438,11 @@ const api = {
     const cs = getComputedStyle(box);
     const r = box.getBoundingClientRect();
     const label = box.querySelector('.crs-target-label') || box.querySelector('span');
-    const bar = box.querySelector('.crs-target-bar');
-    const fill = box.querySelector('.crs-target-fill');
+    /* SPEC-crosshair §B2: the bar is the SAME node, re-parented under `.crs-crosshair` — "체력 표시를
+     * 요소에서 떼어 조준점 아래로 옮기고". It is looked up document-wide so every assertion written
+     * against the hover bar still measures the hover bar, wherever §B2 put it. */
+    const bar = box.querySelector('.crs-target-bar') || document.querySelector('.crs-target-bar');
+    const fill = bar ? bar.querySelector('.crs-target-fill') : null;
     let ratio = null, fillColor = null, barW = null;
     if (bar && fill) {
       barW = parseFloat(getComputedStyle(bar).width);
@@ -844,6 +847,15 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   let dbg = null;
   try { dbg = await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true }); } catch (e) { dbg = String(e && e.message || e); }
   check('A.inject: api.debug noCrit / noCooldown / noSpread / noAttacks / fastReload / noFalloff set for the suite', dbg && dbg.noCrit === true && dbg.noCooldown === true && dbg.noSpread === true && dbg.noAttacks === true && dbg.fastReload === true && dbg.noFalloff === true, dbg);
+  /* ── SPEC-crosshair §B2 / §A9 `showHpNumber` ────────────────────────────────────────────────────
+   * §B2 moved the health readout off the element and under the crosshair, and took the NUMBERS away
+   * with it ("숫자를 없앤다"); `showHpNumber` (default false) is the switch that puts them back, on the
+   * hover label and under the bar at once. Dozens of assertions in this block were written against the
+   * v1.1 `TAG hp/max` label and are about damage arithmetic, not about markers — so this block asks for
+   * the numbers explicitly and every one of them keeps asserting exactly what it asserted before.
+   * The DEFAULT (no numbers anywhere) is asserted in the `rules` block, which runs with stock settings. */
+  const hpNumOn = await api.call(page, 'setSetting', 'showHpNumber', true);
+  check('A.inject: showHpNumber: true accepted — this block reads the hover label\'s numbers (SPEC-crosshair §B2 made them opt-in)', hpNumOn === true, hpNumOn);
 
   // --- weapon table / HUD contract (§5, §6, A2) -----------------------------------------------
   const W = await weaponTable(page);
@@ -3052,6 +3064,96 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await page.mouse.move(2, 2);
   await sleep(80);
 
+  // =============================================================================================
+  // SPEC-crosshair §C — 뷰모델 위치. 사용자: "무기 위치가 너무 구석이라 안보여".
+  // v1.5 pinned the layer to 200 × 100 at right: 8px / bottom: −8px — 12 % of a 1280 × 800 screen,
+  // flush into the corner and cut off at the bottom. §C makes every number viewport-proportional.
+  // Appended at the END of this block (shared-file rule); it restores the suite viewport when done.
+  // =============================================================================================
+  console.log('--- core: SPEC-crosshair §C — 뷰모델이 구석에서 나온다 ---');
+  const nearVm = (a, b, tol) => Math.abs(a - b) <= tol;
+  const vmBox = () => page.evaluate(() => {
+    const el = document.querySelector('.crs-viewmodel');
+    if (!el) return null;
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    const art = el.querySelector('svg');
+    const ar = art ? art.getBoundingClientRect() : null;
+    const iw = Math.max(0, Math.min(ar ? ar.right : 0, innerWidth) - Math.max(ar ? ar.left : 0, 0));
+    const ih = Math.max(0, Math.min(ar ? ar.bottom : 0, innerHeight) - Math.max(ar ? ar.top : 0, 0));
+    const area = ar ? ar.width * ar.height : 0;
+    const og = String(cs.transformOrigin || '').split(/\s+/).map(parseFloat);
+    return {
+      // the LAYOUT box, not the bounding rect: the idle bob rotates the layer ±1.2°, which inflates a
+      // getBoundingClientRect() by a few px and would make a size assertion drift with the animation phase
+      w: Math.round(parseFloat(cs.width)), h: Math.round(parseFloat(cs.height)),
+      left: Math.round(r.left), right: Math.round(r.right),
+      cssRight: parseFloat(cs.right), cssBottom: parseFloat(cs.bottom), z: cs.zIndex,
+      ox: og[0], oy: og[1],
+      artInView: area > 0 ? iw * ih / area : 0,
+      artTilt: art ? getComputedStyle(art.parentElement).transform : '',
+      vw: innerWidth, vh: innerHeight,
+      info: (window.__crashScreen.debug.vmInfo ? window.__crashScreen.debug.vmInfo().layer : null)
+    };
+  });
+  await api.restore(page);
+  await api.setWeapon(page, 'pistol');
+  await sleep(260);   // the draw animation settles; the layer geometry itself is written synchronously
+  const vmC = await vmBox();
+  check('A.§C: 1280 × 900 에서 뷰모델 레이어가 384 × 215 다 (clamp(300, vw × 0.30, 520) · 높이 = 폭 × 0.56) — v1.5 의 200 × 100 에서 세로 12 % → 24 %',
+    !!vmC && vmC.vw === 1280 && nearVm(vmC.w, 384, 8) && nearVm(vmC.h, 215, 6), vmC);
+  check('A.§C: 구석에 붙지 않는다 — right 가 vw × 0.05 (64 px) 이고 bottom 이 −height × 0.12 라 아래가 조금만 잘린다',
+    !!vmC && nearVm(vmC.cssRight, Math.round(1280 * 0.05), 3) && nearVm(vmC.cssBottom, Math.round(-vmC.h * 0.12), 3) && vmC.right <= 1280 - 40, vmC);
+  check('A.§C: 그림의 바운딩 박스가 뷰포트 안에 70 % 이상 들어온다 — 무엇을 들고 있는지 보인다',
+    !!vmC && vmC.artInView >= 0.7, { inView: vmC && vmC.artInView, box: vmC });
+  check('A.§C: transform-origin 이 80 % 100 % (손잡이) 이고 그림이 −8도 기울어 총구가 화면 안쪽 위를 향한다',
+    !!vmC && nearVm(vmC.ox, 0.8 * vmC.w, 4) && nearVm(vmC.oy, 1.0 * vmC.h, 4) && /matrix/.test(vmC.artTilt), { ox: vmC && vmC.ox, oy: vmC && vmC.oy, w: vmC && vmC.w, h: vmC && vmC.h, tilt: vmC && vmC.artTilt });
+  // ---- 탄약 HUD 와의 충돌: 패널은 bottom: 24px 로 돌아가고, 겹쳐도 뷰모델보다 위에 그려진다 ----
+  const ammoC = await page.evaluate(() => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const a = host && host.shadowRoot ? host.shadowRoot.querySelector('.crs-ammo') : null;
+    const vmEl = document.querySelector('.crs-viewmodel');
+    const rootEl = document.querySelector('.crs-root');
+    if (!a || !vmEl || !host) return null;
+    const ar = a.getBoundingClientRect(), vr = vmEl.getBoundingClientRect();
+    const cs = getComputedStyle(a);
+    const big = a.querySelector('.abig');
+    return {
+      bottom: cs.bottom, plate: cs.backgroundColor,
+      hudZ: parseInt(getComputedStyle(host).zIndex, 10), rootZ: parseInt(getComputedStyle(rootEl).zIndex, 10),
+      overlap: !(ar.right <= vr.left || ar.left >= vr.right || ar.bottom <= vr.top || ar.top >= vr.bottom),
+      numColor: big ? getComputedStyle(big).color : '', numText: big ? (big.textContent || '') : ''
+    };
+  });
+  const plateAlpha = ammoC ? (/rgba?\(([^)]+)\)/.exec(ammoC.plate) || [0, ''])[1].split(/[\s,\/]+/).filter(Boolean) : [];
+  check('A.§C: 탄약 패널이 bottom: 24px 로 돌아갔다 (v1.5 의 118px 들어올리기 제거) 그리고 실제로 뷰모델과 겹친다',
+    !!ammoC && ammoC.bottom === '24px' && ammoC.overlap === true, ammoC);
+  check('A.§C: 겹쳐도 숫자가 읽힌다 — HUD 호스트의 z-index 가 글래스 루트보다 높고, 패널에 불투명한 어두운 배경판이 있다',
+    !!ammoC && ammoC.hudZ > ammoC.rootZ && plateAlpha.length >= 4 && parseFloat(plateAlpha[3]) >= 0.5 && /\d/.test(ammoC.numText), { ammo: ammoC, alpha: plateAlpha[3] });
+  // ---- viewmodelScale ----
+  const vmScaleSet = await api.call(page, 'setSetting', 'viewmodelScale', 1.3);
+  await sleep(120);
+  const vmC13 = await vmBox();
+  await api.call(page, 'setSetting', 'viewmodelScale', 1);
+  await sleep(120);
+  const vmC10 = await vmBox();
+  check('A.§C: viewmodelScale: 1.3 이면 폭이 1.3배가 되고 1 로 되돌리면 원래대로다',
+    vmScaleSet === true && !!vmC13 && !!vmC10 && nearVm(vmC13.w, Math.round(vmC.w * 1.3), 6) && nearVm(vmC10.w, vmC.w, 4), { base: vmC && vmC.w, at13: vmC13 && vmC13.w, back: vmC10 && vmC10.w });
+  // ---- the two clamp ends: 640 → 하한 300, 2400 → 상한 520 ----
+  await page.setViewport({ width: 640, height: 900, deviceScaleFactor: 1 });
+  await sleep(200);
+  const vm640 = await vmBox();
+  await page.setViewport({ width: 2400, height: 900, deviceScaleFactor: 1 });
+  await sleep(200);
+  const vm2400 = await vmBox();
+  await page.setViewport(VIEWPORT);
+  await sleep(220);
+  const vmBack = await vmBox();
+  check('A.§C: 창 크기가 바뀌면 다시 계산한다 — 640 폭에서 하한 300, 2400 폭에서 상한 520, 1280 으로 돌아오면 384',
+    !!vm640 && !!vm2400 && !!vmBack && nearVm(vm640.w, 300, 6) && nearVm(vm2400.w, 520, 6) && nearVm(vmBack.w, 384, 8),
+    { w640: vm640 && vm640.w, w2400: vm2400 && vm2400.w, back: vmBack && vmBack.w });
+  await api.restore(page);
+  await sleep(80);
+
   // --- console / CSP (this block's own page; every block tallies its own, SPEC-test-speed §5) -------
   await closeBlockPage('A.core', { page, log, client });
 }
@@ -3634,13 +3736,14 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.debug(page, { infiniteAmmo: false });
   const ammoHudPistol = await api.hudQ(page, '.crs-ammo');
   check('A.ammo 1: .crs-ammo HUD (HUD shadow root, bottom-right) shows "12 / ∞" for a full pistol', !!ammoHudPistol && ammoHudPistol.visible && /12\s*\/\s*∞/.test(ammoHudPistol.text), ammoHudPistol);
-  // v1.5 §2 (last bullet): the viewmodel layer and the ammo plate occupy the same bottom-right corner, so
-  // while `.crs-viewmodel` exists (the default) the plate is lifted to bottom: 118px instead of the v1.3
-  // 24px — only while the layer exists, so `viewmodel: false` restores the v1.3 24px exactly (vmLiftAmmo()).
-  // right: 24px is unchanged either way.
+  /* REWRITTEN for SPEC-crosshair §C ("탄약 HUD 와의 충돌"). v1.5 §2 pushed this plate up to bottom: 118px
+   * to get it out of the viewmodel's corner. §C takes that lift away — the panel goes back to the v1.3
+   * bottom: 24px and the two are allowed to OVERLAP, drawn in the real-FPS order: the HUD host's
+   * z-index is above the glass root, and the plate's own dark background keeps the numbers readable.
+   * So the expectation is now 24 px whether or not the viewmodel layer exists, and the overlap itself
+   * (plus the z-order that makes it legible) is asserted in the `core` block's §C section. */
   const hasViewmodelForAmmo = await api.has(page, '.crs-viewmodel');
-  const expectedAmmoBottomMargin = hasViewmodelForAmmo ? 118 : 24;
-  check('A.ammo 1: .crs-ammo sits bottom-right (right: 24px always; bottom: 118px while the viewmodel layer exists, else the v1.3 24px)', !!ammoHudPistol && near(ammoHudPistol.right, ammoHudPistol.vw - 24, 4) && near(ammoHudPistol.bottom, ammoHudPistol.vh - expectedAmmoBottomMargin, 4), ammoHudPistol && { right: ammoHudPistol.right, bottom: ammoHudPistol.bottom, vw: ammoHudPistol.vw, vh: ammoHudPistol.vh, hasViewmodelForAmmo, expectedAmmoBottomMargin });
+  check('A.ammo 1: .crs-ammo sits bottom-right at right: 24px / bottom: 24px — the v1.5 118px lift is gone (SPEC-crosshair §C: 패널을 밀어 올리던 처리를 제거하고 뷰모델보다 위 레이어에 그린다)', !!ammoHudPistol && near(ammoHudPistol.right, ammoHudPistol.vw - 24, 4) && near(ammoHudPistol.bottom, ammoHudPistol.vh - 24, 4), ammoHudPistol && { right: ammoHudPistol.right, bottom: ammoHudPistol.bottom, vw: ammoHudPistol.vw, vh: ammoHudPistol.vh, hasViewmodelForAmmo });
   await api.setWeapon(page, 'hammer');
   const ammoHudHammer = await poll(async () => { const q = await api.hudQ(page, '.crs-ammo'); return q && /∞/.test(q.text) && !/\d+\s*\/\s*∞/.test(q.text) ? q : null; }, 500, 20);
   check('A.ammo 1: .crs-ammo shows "∞" (no "n / ∞") for the hammer (melee)', !!ammoHudHammer, await api.hudQ(page, '.crs-ammo'));
@@ -3769,9 +3872,15 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   const panelScoped = await api.hudQ(page, '.panel');
   await api.scope(page, false);
   await sleep(220);
-  const adsOff = await page.evaluate(() => ({ html: document.documentElement.className, cursor: getComputedStyle(document.body).cursor }));
+  const adsOff = await page.evaluate(() => ({ html: document.documentElement.className, cursor: getComputedStyle(document.body).cursor, chHidden: !!document.querySelector('.crs-crosshair.crs-ch-hidden'), ch: !!document.querySelector('.crs-crosshair') }));
   const panelBack = await api.hudQ(page, '.panel');
-  check('A.sniper 3: scoping hides the page cursor (html.crs-scoped) and fades the weapon panel out of the circle; both come back on scope-out', /(^|\s)crs-scoped(\s|$)/.test(adsOn.html) && adsOn.cursor === 'none' && !/(^|\s)crs-scoped(\s|$)/.test(adsOff.html) && /url\(/.test(adsOff.cursor) && !!panelPlain && !!panelScoped && !!panelBack && parseFloat(panelPlain.opacity) > 0.9 && parseFloat(panelScoped.opacity) < 0.5 && parseFloat(panelBack.opacity) > 0.9, { on: adsOn, off: adsOff, panelOpacity: [panelPlain && panelPlain.opacity, panelScoped && panelScoped.opacity, panelBack && panelBack.opacity] });
+  /* REWRITTEN for SPEC-crosshair §A1/§A2. The second half of this check used to be "scope-out brings the
+   * 28 px hammer CURSOR IMAGE back" (`/url\(/`). There is no cursor image any more: §A1 turns the OS
+   * cursor off for the whole session (`html.crs-aim`) and draws `.crs-crosshair` instead, so `cursor:
+   * none` is now the resting state and the url cursor would be the regression. What scope-out actually
+   * restores is the CROSSHAIR — §A4's "저격총은 조준 중 숨고 해제 시 돌아온다" — so that is what is
+   * asserted here instead, alongside the unchanged html class and panel-opacity halves. */
+  check('A.sniper 3: scoping hides the page cursor (html.crs-scoped) and fades the weapon panel out of the circle; both come back on scope-out, and the drawn crosshair comes back with them (SPEC-crosshair §A4)', /(^|\s)crs-scoped(\s|$)/.test(adsOn.html) && adsOn.cursor === 'none' && !/(^|\s)crs-scoped(\s|$)/.test(adsOff.html) && adsOff.cursor === 'none' && adsOff.ch === true && adsOff.chHidden === false && !!panelPlain && !!panelScoped && !!panelBack && parseFloat(panelPlain.opacity) > 0.9 && parseFloat(panelScoped.opacity) < 0.5 && parseFloat(panelBack.opacity) > 0.9, { on: adsOn, off: adsOff, panelOpacity: [panelPlain && panelPlain.opacity, panelScoped && panelScoped.opacity, panelBack && panelBack.opacity] });
   // chord: right button scopes, a left press while RMB is held fires, an RMB release while LMB is held unscopes
   await api.restore(page);
   await sleep(60);
@@ -4118,12 +4227,18 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.setWeapon(page, 'rocket');
   await api.seenReset(page);
   const tier8 = await api.forceAttack(page, '#figure');
-  const aura8 = await page.evaluate(() => {
+  /* SPEC-crosshair §B3 made the 2 px outline conditional: an aura is QUIET until its enemy acts, and the
+   * line is only on while it is winding up (`crs-aimed`), locking, charging or repairing. This read used
+   * to race that window by accident — it fired straight after forceAttack() and happened to land inside
+   * the 250 ms wind-up — so it now POLLS for the attack-prep state it was always describing. The quiet
+   * half of §B3 (outline-width 0 before and after) is asserted in the `rules` block. */
+  const readAura8 = () => page.evaluate(() => {
     const a = document.querySelector('.crs-hostile');
     if (!a) return null;
     const r = a.getBoundingClientRect(); const cs = getComputedStyle(a);
     return { left: r.left, top: r.top, width: r.width, height: r.height, outline: `${cs.outlineStyle} ${cs.outlineWidth}`, label: (a.textContent || '').trim(), dataCrs: a.hasAttribute('data-crs') };
   });
+  const aura8 = await poll(async () => { const a = await readAura8(); return a && /solid 2px/.test(a.outline) ? a : null; }, 800, 20) || await readAura8();
   check('A.combat 8: a .crs-hostile aura (glass root, data-crs) covers the hostile #figure rect (± 3 px) with a 2 px outline and the 👿 FIGURE label', tier8 === 'shooter' && !!aura8 && aura8.dataCrs && near(aura8.left, fg8.left, 3) && near(aura8.top, fg8.top, 3) && near(aura8.width, fg8.width, 3) && near(aura8.height, fg8.height, 3) && /solid 2px/.test(aura8.outline) && /👿/.test(aura8.label) && /FIGURE/.test(aura8.label), { tier: tier8, aura: aura8, fig: fg8 });
   check('A.combat 8: stats().hostiles === 1 while the figure is hostile', (await api.stats(page)).hostiles === 1, (await api.stats(page)).hostiles);
   // A3: the glass layer keeps viewport geometry — scope-in / scope-out must re-measure the aura against the 2× page.
@@ -5987,14 +6102,23 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
     if (typeof d.burning !== 'function') return 'missing:debug.burning';
     return (d.burning() || []).find((b) => b.id === q) || null;
   }, id);
+  /* REWRITTEN for SPEC-crosshair §A5 (roadmap step 4). §B1's "조준점이 미리 알려준다" was parked on the
+   * PLAYER RING — the only aim-side marker v1.4 owned, with a note in src/91-combat-feedback.js saying
+   * step 4 should move it onto the real crosshair. Step 4 drew that crosshair, so the warning moved:
+   * `.crs-crosshair` wears §A5's grey (rgba(255,255,255,.35) → `.crs-ch-dim`) and drops its centre dot,
+   * and the ring went back to being nothing but the health gauge. The assertions below are unchanged in
+   * what they MEAN — grey + no dot over anything you cannot shoot — only in where they read it. */
   const aimMark = () => page.evaluate(() => {
-    const box = document.querySelector('.crs-selfbox');
-    if (!box) return null;
-    const dot = box.querySelector('.crs-self-dot'), ring = box.querySelector('.crs-self');
+    const n = document.querySelector('.crs-crosshair');
+    if (!n) return null;
+    const dot = n.querySelector('.crs-ch-dot');
+    const info = window.__crashScreen.debug.crosshair ? window.__crashScreen.debug.crosshair() : null;
     return {
-      invul: box.classList.contains('crs-invul'),
+      invul: n.classList.contains('crs-ch-dim'),
       dot: dot ? getComputedStyle(dot).display : null,
-      grad: ring ? (ring.style.backgroundImage || '') : '',
+      grad: info ? info.color : '',
+      state: info ? info.state : null,
+      armColor: n.querySelector('.crs-ch-arm') ? getComputedStyle(n.querySelector('.crs-ch-arm')).backgroundColor : '',
     };
   });
 
@@ -6053,10 +6177,10 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   await sleep(140);
   const aimEnemyB = await aimMark();
   check('A.§B 3 (§B1): #fire-enemy 가 적으로 선정된다 (T1 shooter, 54 000 px²)', enemyTierB === 'shooter', enemyTierB);
-  check('A.§B 3 (§B1): 조준점이 미리 알려준다 — 무적 대상 위에서 흐린 회색(.crs-invul)이고 중심 점이 없다',
-    !!aimWallB && aimWallB.invul === true && aimWallB.dot === 'none' && /168,\s*176,\s*190/.test(aimWallB.grad), aimWallB);
-  check('A.§B 3 (§B1): 적 위에서는 평소대로 — .crs-invul 이 빠지고 중심 점이 돌아온다',
-    !!aimEnemyB && aimEnemyB.invul === false && aimEnemyB.dot !== 'none' && !/168,\s*176,\s*190/.test(aimEnemyB.grad), aimEnemyB);
+  check('A.§B 3 (§B1 / SPEC-crosshair §A5): 조준점이 미리 알려준다 — 무적 대상 위에서 흐린 회색(.crs-ch-dim)이고 중심 점이 없다',
+    !!aimWallB && aimWallB.invul === true && aimWallB.dot === 'none' && aimWallB.state === 'dim' && /255,\s*255,\s*255,\s*\.?35/.test(aimWallB.grad), aimWallB);
+  check('A.§B 3 (§B1 / SPEC-crosshair §A5): 적 위에서는 평소대로 — 붉은색(#e5484d)으로 돌아오고 중심 점이 돌아온다',
+    !!aimEnemyB && aimEnemyB.invul === false && aimEnemyB.dot !== 'none' && aimEnemyB.state === 'hostile' && /#e5484d/i.test(aimEnemyB.grad), aimEnemyB);
 
   // ---- (B4) §F: 폭탄을 섞인 군집에 터뜨리면 적만 피해를 받는다 ----
   const hpEnemyB0 = await api.hpOf(page, '#fire-enemy');
@@ -6200,12 +6324,15 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
     const a = window.__crashScreen, d = a.debug;
     const box = document.querySelector('.crs-target');
     const cs = box ? getComputedStyle(box) : null;
-    const bar = box ? box.querySelector('.crs-target-bar') : null;
+    /* SPEC-crosshair §B2 moved this exact node under `.crs-crosshair`, so it is looked up document-wide
+     * and judged on its own `display` — "체력 바가 보이는가" is still the same question, asked where the
+     * bar now is. It is hidden (`.crs-ch-hp-on` off) whenever there is no focus target at all. */
+    const bar = document.querySelector('.crs-target-bar');
     const r = box ? box.getBoundingClientRect() : null;
     return {
       pick: (d && typeof d.pickAt === 'function') ? d.pickAt(px, py) : 'missing:pickAt',
       display: cs ? cs.display : null,
-      barVisible: !!(bar && cs && cs.display !== 'none' && getComputedStyle(bar).display !== 'none'),
+      barVisible: !!(bar && getComputedStyle(bar).display !== 'none'),
       label: box ? (box.textContent || '').trim() : null,
       rect: r ? { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) } : null,
       hostiles: a.stats().hostiles,
@@ -6270,13 +6397,13 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   await page.mouse.move(px70D.x, px70D.y);
   await sleep(150);
   const aimEmptyD = await aimMark();
-  check('A.§D1 3 (§D1): 조준점이 빈 곳에서도 흐린 회색(.crs-invul)이고 중심 점이 없다 — 쏠 수 있는 것은 적뿐이라는 말을 한 가지 색으로 한다',
-    !!aimEmptyD && aimEmptyD.invul === true && aimEmptyD.dot === 'none' && /168,\s*176,\s*190/.test(aimEmptyD.grad), aimEmptyD);
+  check('A.§D1 3 (§D1 / SPEC-crosshair §A5): 조준점이 빈 곳에서도 흐린 회색(.crs-ch-dim)이고 중심 점이 없다 — 쏠 수 있는 것은 적뿐이라는 말을 한 가지 색으로 한다',
+    !!aimEmptyD && aimEmptyD.invul === true && aimEmptyD.dot === 'none' && aimEmptyD.state === 'dim' && /255,\s*255,\s*255,\s*\.?35/.test(aimEmptyD.grad), aimEmptyD);
   await page.mouse.move(pxEnemyD.x, pxEnemyD.y);
   await sleep(150);
   const aimOnEnemyD = await aimMark();
-  check('A.§D1 3 (§D1): 적 위로 돌아오면 다시 붉고 활성이다 — .crs-invul 이 빠지고 중심 점이 돌아온다',
-    !!aimOnEnemyD && aimOnEnemyD.invul === false && aimOnEnemyD.dot !== 'none' && !/168,\s*176,\s*190/.test(aimOnEnemyD.grad), aimOnEnemyD);
+  check('A.§D1 3 (§D1 / SPEC-crosshair §A5): 적 위로 돌아오면 다시 붉고 활성이다 — .crs-ch-dim 이 빠지고 중심 점이 돌아온다',
+    !!aimOnEnemyD && aimOnEnemyD.invul === false && aimOnEnemyD.dot !== 'none' && aimOnEnemyD.state === 'hostile' && /#e5484d/i.test(aimOnEnemyD.grad), aimOnEnemyD);
 
   // ---- (D4) §F: 적 rect 에서 30 px 떨어진 빈 곳 → 보정되어 그 적이 피해를 받는다 ----
   await page.mouse.move(px30D.x, px30D.y);
@@ -7024,6 +7151,689 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   await archDrop();
   await api.restore(page);
   await sleep(100);
+
+  // =======================================================================================
+  // docs/specs/crosshair.md §A (그려진 조준점) · §B (시각 정돈) — the §D checklist.
+  // Appended at the END of this block (shared-file rule). Everything below builds its own
+  // scene and puts the block's baseline flags back before it finishes.
+  // =======================================================================================
+  console.log('--- rules: SPEC-crosshair §A 조준점 · §B 시각 정돈 ---');
+  const chInfo = () => debugCall('crosshair');
+  const msgRestore = '복구';   // the HUD restore button's label (btnRestore) — the one place to click that is ours
+  const chDom = () => page.evaluate(() => {
+    const n = document.querySelector('.crs-crosshair');
+    if (!n) return null;
+    const arm = n.querySelector('.crs-ch-arm'), dot = n.querySelector('.crs-ch-dot');
+    const cs = getComputedStyle(n);
+    return {
+      nodes: document.querySelectorAll('.crs-crosshair').length,
+      arms: n.querySelectorAll('.crs-ch-arm').length,
+      armH: arm ? parseFloat(getComputedStyle(arm).height) : null,
+      armColor: arm ? getComputedStyle(arm).backgroundColor : '',
+      dotDisplay: dot ? getComputedStyle(dot).display : null,
+      display: cs.display, opacity: cs.opacity, zIndex: cs.zIndex,
+      cursorBody: getComputedStyle(document.body).cursor,
+      cursorHtml: getComputedStyle(document.documentElement).cursor,
+      aimClass: document.documentElement.classList.contains('crs-aim'),
+      text: (n.textContent || '').trim()
+    };
+  });
+  const CH_RAMPAGE_FLAGS = { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: true, noRepair: true, noFalloff: true, noInvuln: true };
+  await setCombatMode('rampage');
+  await api.debug(page, CH_RAMPAGE_FLAGS);
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'pistol');
+  const cardCh = await api.rect(page, '#big-card');
+  await page.mouse.move(cardCh.cx, cardCh.cy);
+  await sleep(160);
+
+  // ---- (§A1/§A2) the OS cursor is off and exactly one crosshair is drawn ----
+  const chBase = await chDom();
+  const chBaseInfo = await chInfo();
+  check('A.§A1: 운영체제 커서가 꺼지고(cursor: none, html.crs-aim) `.crs-crosshair` 가 정확히 1개 그려진다 — 팔 4개를 가진 한 노드',
+    !!chBase && chBase.nodes === 1 && chBase.cursorBody === 'none' && chBase.cursorHtml === 'none' && chBase.aimClass === true && chBase.arms === 4 && chBase.display !== 'none',
+    chBase);
+  check('A.§A2: 조준경 레이어(z-index 7) 아래, 글래스 루트 안이다',
+    !!chBase && Number(chBase.zIndex) < 7 && (await api.count(page, '.crs-root .crs-crosshair')) === 1, { z: chBase && chBase.zIndex });
+
+  // ---- (§D) 포인터를 따라온다: 2 프레임 안에 ±2 px ----
+  /* Measured INSIDE the page over real animation frames (debug.chFollow) and fetched in ONE hop: a CDP
+   * round trip per frame measures the protocol, not the crosshair. The sampler is started FIRST and the
+   * pointer is moved while it runs, so the samples straddle the move and the index where the pointer
+   * jumps is visible in the data the failure message prints. */
+  const followP = page.evaluate(() => window.__crashScreen.debug.chFollow(8));
+  await page.mouse.move(cardCh.cx + 140, cardCh.cy + 70);
+  const follow = await followP;
+  const jumpAt = follow.findIndex((s) => Math.round(s.px) === Math.round(cardCh.cx + 140));
+  const settledBy = jumpAt >= 0 ? follow.slice(jumpAt + 2).concat(jumpAt + 2 >= follow.length ? [follow[follow.length - 1]] : []) : follow.slice(-1);
+  check('A.§A2/§D: 조준점이 포인터를 2 프레임 안에 ±2 px 로 따라온다 (페이지 안 rAF 샘플러로 측정)',
+    Array.isArray(follow) && follow.length >= 3 && settledBy.length > 0 && settledBy.every((s) => s.tx != null && Math.abs(s.tx - s.px) <= 2 && Math.abs(s.ty - s.py) <= 2),
+    { jumpAt, follow });
+
+  // ---- (§A3) 산포 연동 — 명세가 "핵심" 이라고 적은 단 하나의 절 ----
+  /* 기관총 15발 연사 중 팔 간격이 단조 증가하고, 손을 떼면 다시 모인다. gap = 6 + spreadNow × 0.9,
+   * and spreadNow is the v1.5 recoil-kick + bloom ledger itself — nothing is recomputed here, which is
+   * the whole point: 반동·블룸 스탯이 전부 눈에 보이게 된다. */
+  await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noSpread: false }));
+  await api.setWeapon(page, 'smg');
+  await sleep(160);
+  await page.mouse.move(cardCh.cx, cardCh.cy);
+  await sleep(120);
+  const gapStart = (await chInfo()).gap;
+  const gapSeries = [];
+  await page.mouse.down();
+  for (let i = 0; i < 10; i++) { await sleep(105); const g = await chInfo(); gapSeries.push({ gap: g.gap, spread: g.spread }); }
+  await page.mouse.up();
+  const shotsFired = (await api.stats(page)).shots;
+  const gapPeak = gapSeries[gapSeries.length - 1].gap;
+  const monotonic = gapSeries.every((s, i) => i === 0 || s.gap >= gapSeries[i - 1].gap - 0.6);
+  check('A.§A3 (핵심): 기관총을 15발 가까이 연사하는 동안 팔 간격이 단조 증가한다 — 반동 킥과 블룸이 그대로 보인다',
+    shotsFired >= 12 && monotonic === true && gapPeak > gapStart + 20,
+    { shotsFired, gapStart, gapPeak, series: gapSeries.map((s) => s.gap) });
+  await sleep(800);
+  const gap800 = (await chInfo()).gap;
+  const gapBack = await poll(async () => { const g = (await chInfo()).gap; return Math.abs(g - gapStart) <= 1 ? g : null; }, 2600, 80);
+  /* AMBIGUITY, reading chosen. §D says "0.8초 쉬면 초기값으로". The ledger §A3 reads (src/71) recovers
+   * bloom at 40 px/s after 0.4 s of quiet, and a 15-round burst caps the smg's bloom at 60 px — so the
+   * arm gap is provably FALLING by 0.8 s but needs ~1.9 s to be all the way home. Both halves are
+   * asserted rather than one of them being quietly dropped: 떨어지고 있다 at 0.8 s, 초기값 by 2.6 s. */
+  check('A.§A3: 손을 떼면 간격이 되돌아온다 — 0.8초에 이미 줄고 있고, 블룸이 다 식으면 초기값으로 (40 px/s 회복)',
+    gap800 < gapPeak - 5 && gapBack !== null && Math.abs(gapBack - gapStart) <= 1,
+    { gapStart, gapPeak, gap800, gapBack });
+  // ---- crosshairSpread: false 면 변하지 않는다 ----
+  await api.call(page, 'setSetting', 'crosshairSpread', false);
+  await sleep(80);
+  const gapOffStart = (await chInfo()).gap;
+  await page.mouse.down();
+  await sleep(500);
+  const gapOffMid = (await chInfo()).gap;
+  await page.mouse.up();
+  await sleep(120);
+  check('A.§A9: crosshairSpread: false 면 연사 중에도 간격이 변하지 않는다',
+    Math.abs(gapOffMid - gapOffStart) <= 0.01, { gapOffStart, gapOffMid });
+  await api.call(page, 'setSetting', 'crosshairSpread', true);
+  await api.debug(page, CH_RAMPAGE_FLAGS);
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (§A4) 10종의 구성이 다르다 · 폭탄/로켓의 점선 원 = 실제 폭발 반경 ----
+  await page.mouse.move(cardCh.cx, cardCh.cy);
+  await sleep(120);
+  const shapeRows = [];
+  for (const id of WEAPON_IDS) {
+    await api.setWeapon(page, id);
+    await sleep(90);
+    shapeRows.push(await page.evaluate((wid) => {
+      const n = document.querySelector('.crs-crosshair');
+      const shape = n ? n.querySelector('.crs-ch-shape') : null;
+      const arm = n ? n.querySelector('.crs-ch-arm') : null;
+      const blast = shape ? shape.querySelector('.crs-ch-blast') : null;
+      const parts = shape ? [...shape.children].map((c) => c.className + ':' + Math.round(c.getBoundingClientRect().width)) : [];
+      return {
+        id: wid,
+        sig: parts.join('|') + '#arm=' + (arm ? getComputedStyle(arm).height : 'none') + '#dot=' + (n && n.classList.contains('crs-ch-nodot') ? 'off' : 'on'),
+        blastR: blast ? blast.getBoundingClientRect().width / 2 : 0,
+        weaponR: window.__crashScreen.weapons().find((w) => w.id === wid).radius
+      };
+    }, id));
+  }
+  const sigs = shapeRows.map((r) => r.sig);
+  const bombRow = shapeRows.find((r) => r.id === 'bomb'), rocketRow = shapeRows.find((r) => r.id === 'rocket');
+  check('A.§A4: 무기 10종의 조준점 구성이 전부 다르다 — `.crs-ch-shape` 의 자식 구성 · 팔 길이 · 중심 점 유무를 합친 서명 10개가 모두 유일하다',
+    new Set(sigs).size === 10, shapeRows.map((r) => r.id + ' → ' + r.sig));
+  check('A.§A4: 폭탄 · 로켓의 점선 원 반지름이 각 무기의 실제 폭발 반경과 ±4 px 다 (240 / 360) — 조준점이 사거리를 거짓말하지 않는다',
+    !!bombRow && !!rocketRow && bombRow.weaponR === 240 && rocketRow.weaponR === 360 &&
+    Math.abs(bombRow.blastR - 240) <= 4 && Math.abs(rocketRow.blastR - 360) <= 4,
+    { bomb: bombRow, rocket: rocketRow });
+
+  // ---- (§A4) 저격총: 조준 시 숨고 해제 시 돌아온다 ----
+  await api.setWeapon(page, 'sniper');
+  await sleep(120);
+  const snipeBefore = await chDom();
+  await api.scope(page, true);
+  await poll(async () => (await api.stats(page)).scoped === true, 600, 20);
+  await sleep(120);
+  const snipeScoped = await page.evaluate(() => {
+    const n = document.querySelector('.crs-crosshair');
+    return { hidden: !!(n && n.classList.contains('crs-ch-hidden')), display: n ? getComputedStyle(n).display : null, scope: document.querySelectorAll('.crs-scope').length };
+  });
+  await api.scope(page, false);
+  await sleep(160);
+  await page.mouse.move(cardCh.cx, cardCh.cy);
+  await sleep(140);
+  const snipeAfter = await chDom();
+  check('A.§A4: 저격총으로 조준하면 조준점이 숨고(조준경 화면이 대신한다) 조준을 풀면 돌아온다',
+    !!snipeBefore && snipeBefore.display !== 'none' && snipeScoped.hidden === true && snipeScoped.display === 'none' && snipeScoped.scope === 1 && !!snipeAfter && snipeAfter.display !== 'none',
+    { before: snipeBefore && snipeBefore.display, scoped: snipeScoped, after: snipeAfter && snipeAfter.display });
+
+  // ---- (§A9) crosshairScale 1.5 → 팔 길이 1.5배 · crosshair 'off' → 노드 없음 + 커서 복귀 ----
+  await api.setWeapon(page, 'pistol');
+  await sleep(120);
+  const arm10 = (await chDom()).armH;
+  await api.call(page, 'setSetting', 'crosshairScale', 1.5);
+  await sleep(140);
+  const arm15 = (await chDom()).armH;
+  await api.call(page, 'setSetting', 'crosshairScale', 1);
+  await sleep(140);
+  check('A.§A9: crosshairScale: 1.5 면 팔 길이가 정확히 1.5배다 (DOM 에서 잰 높이)',
+    arm10 > 0 && Math.abs(arm15 - arm10 * 1.5) <= 0.6, { arm10, arm15 });
+  await api.call(page, 'setSetting', 'crosshair', 'off');
+  await sleep(140);
+  const chOff = await page.evaluate(() => ({
+    nodes: document.querySelectorAll('.crs-crosshair').length,
+    cursor: getComputedStyle(document.body).cursor,
+    aimClass: document.documentElement.classList.contains('crs-aim')
+  }));
+  await api.call(page, 'setSetting', 'crosshair', 'auto');
+  await sleep(140);
+  const chOn = await chDom();
+  check('A.§A9: crosshair: \'off\' 면 노드가 없고 cursor 가 crosshair 로 돌아온다 — 접근성과 취향 양쪽을 위해 필요하다',
+    chOff.nodes === 0 && chOff.aimClass === false && /crosshair/.test(chOff.cursor) && !!chOn && chOn.nodes === 1 && chOn.cursorBody === 'none',
+    { off: chOff, on: chOn && { nodes: chOn.nodes, cursor: chOn.cursorBody } });
+
+  // ---- (§A5/§A2) HUD 위에서는 조준점이 회색으로 숨고 기본 커서가 돌아온다 ----
+  const hudBtnCh = await api.hudButtonRect(page, msgRestore);
+  await page.mouse.move(hudBtnCh.cx, hudBtnCh.cy);
+  await sleep(220);
+  const overHudCh = await page.evaluate(() => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const n = document.querySelector('.crs-crosshair');
+    const info = window.__crashScreen.debug.crosshair();
+    const panel = host && host.shadowRoot ? host.shadowRoot.querySelector('.panel') : null;
+    return {
+      state: info.state, shown: info.shown, display: n ? getComputedStyle(n).display : null,
+      hudCursor: host ? getComputedStyle(host).cursor : null,
+      panelCursor: panel ? getComputedStyle(panel).cursor : null
+    };
+  });
+  await page.mouse.move(cardCh.cx, cardCh.cy);
+  await sleep(180);
+  const backOnPage = await chInfo();
+  check('A.§A5: HUD 위에서는 조준점이 회색(dim)이 되어 숨고 기본 커서가 돌아온다 — 패널은 커서가 필요한 유일한 곳이다',
+    overHudCh.state === 'dim' && overHudCh.shown === false && overHudCh.display === 'none' &&
+    overHudCh.hudCursor !== 'none' && overHudCh.panelCursor !== 'none' && backOnPage.shown === true && backOnPage.state === 'ok',
+    { overHud: overHudCh, back: { shown: backOnPage.shown, state: backOnPage.state } });
+
+  // ---- (§A9) 세 가지 고정 모양과 조준점 색 ----
+  const fixedRows = [];
+  for (const mode of ['cross', 'dot', 'circle']) {
+    await api.call(page, 'setSetting', 'crosshair', mode);
+    await sleep(160);
+    fixedRows.push(await page.evaluate((m) => {
+      const n = document.querySelector('.crs-crosshair');
+      const shape = n.querySelector('.crs-ch-shape');
+      const arm = n.querySelector('.crs-ch-arm');
+      return { mode: m, parts: [...shape.children].map((c) => c.className).join('|'), armH: parseFloat(getComputedStyle(arm).height), dot: getComputedStyle(n.querySelector('.crs-ch-dot')).display };
+    }, mode));
+  }
+  await api.call(page, 'setSetting', 'crosshair', 'auto');
+  await sleep(160);
+  check('A.§A9: crosshair 가 cross / dot / circle 이면 무기와 무관하게 그 모양 하나로 고정된다 — 덜 보여달라는 요청이다',
+    fixedRows[0].parts === '' && fixedRows[0].armH > 0 && fixedRows[0].dot === 'none' &&
+    fixedRows[1].parts === '' && fixedRows[1].armH === 0 && fixedRows[1].dot !== 'none' &&
+    fixedRows[2].parts === 'crs-ch-circle' && fixedRows[2].armH === 0,
+    fixedRows);
+  await api.call(page, 'setSetting', 'crosshairColor', 'green');
+  await sleep(180);
+  const colGreen = (await chDom()).armColor;
+  await api.call(page, 'setSetting', 'crosshairColor', 'white');
+  await sleep(180);
+  const colWhite = (await chDom()).armColor;
+  check('A.§A9: crosshairColor 가 기본 상태의 색을 바꾼다 (green → rgb(63, 185, 80), white 로 되돌아온다)',
+    colGreen === 'rgb(63, 185, 80)' && colWhite === 'rgb(255, 255, 255)', { green: colGreen, white: colWhite });
+
+  // ---- (§A7) 준비 상태 링: 쿨다운 0→1, 끝나면 사라진다 · 재장전은 색이 다르다 ----
+  /* The ring is the one §A7 promise that only exists with real timers running, so this section turns
+   * noCooldown / fastReload OFF for itself and puts the block's flags back afterwards. */
+  await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noCooldown: false, fastReload: false, infiniteAmmo: false }));
+  await api.setWeapon(page, 'rocket');
+  await sleep(560);   // the rocket's 480 ms swap window has to close before its own cooldown can be read
+  await page.mouse.move(cardCh.cx, cardCh.cy);
+  await sleep(100);
+  const ringRead = () => page.evaluate(() => {
+    const r = document.querySelector('.crs-ch-ring');
+    if (!r) return null;
+    const cs = getComputedStyle(r);
+    const m = /(\d+(?:\.\d+)?)deg,\s*rgba?\([^)]*\)\s+\1deg/.exec(cs.backgroundImage || '');
+    const deg = /([\d.]+)deg,\s*rgba?\(255,\s*255,\s*255,\s*0\.14\)/.exec(cs.backgroundImage || '');
+    return { on: r.classList.contains('crs-ch-ring-on'), display: cs.display, deg: deg ? parseFloat(deg[1]) : (m ? parseFloat(m[1]) : null), bg: (cs.backgroundImage || '').slice(0, 120), kind: window.__crashScreen.debug.crosshair().ring };
+  });
+  const ringIdle = await ringRead();
+  await api.smashAt(page, cardCh.cx, cardCh.cy);
+  await sleep(120);
+  const ringA = await ringRead();
+  await sleep(500);
+  const ringB = await ringRead();
+  const ringGone = await poll(async () => { const r = await ringRead(); return r && r.on === false ? r : null; }, 2000, 60);
+  check('A.§A7: 로켓을 쏘면 준비 링이 뜨고 0 → 1 로 차오르다가 쿨다운이 끝나면 사라진다 — 탄약 HUD 를 안 봐도 언제 쏠 수 있는지 안다',
+    !!ringIdle && ringIdle.on === false && !!ringA && ringA.on === true && ringA.kind === 'cooldown' && !!ringB && ringB.deg !== null && ringA.deg !== null && ringB.deg > ringA.deg && !!ringGone,
+    { idle: ringIdle, at120: ringA, at620: ringB, gone: !!ringGone });
+  // 재장전: 로켓은 탄창 2발이라 한 발 더 쏘면 자동 재장전에 들어간다
+  await poll(async () => (await api.ammo(page)).mag === 1, 2500, 60);
+  await api.smashAt(page, cardCh.cx, cardCh.cy);
+  const ringReload = await poll(async () => { const r = await ringRead(); return r && r.kind === 'reload' ? r : null; }, 2500, 50);
+  check('A.§A7: 재장전 중에는 링의 색이 다르다 (#e3b341) — 쿨다운과 재장전이 같은 자리에서 구별된다',
+    !!ringReload && /227,\s*179,\s*65/.test(ringReload.bg), ringReload);
+  await api.debug(page, CH_RAMPAGE_FLAGS);
+  await api.restore(page);
+  await sleep(140);
+
+  // =======================================================================================
+  // §B — 시각 정돈. 사용자: "타겟팅된 컴포넌트나 투사체의 외곽선은 오히려 집중을 방해하는듯해"
+  // =======================================================================================
+  await api.setWeapon(page, 'pistol');
+  await page.mouse.move(cardCh.cx, cardCh.cy);
+  await sleep(160);
+  const markerRead = () => page.evaluate(() => {
+    const box = document.querySelector('.crs-target');
+    if (!box) return null;
+    const cs = getComputedStyle(box);
+    const br = [...box.querySelectorAll('.crs-tb')].map((b) => {
+      const c = getComputedStyle(b);
+      return { display: c.display, color: c.borderTopColor || c.borderBottomColor, w: Math.round(parseFloat(c.width)), h: Math.round(parseFloat(c.height)) };
+    });
+    const bar = document.querySelector('.crs-target-bar');
+    const ch = document.querySelector('.crs-crosshair');
+    return {
+      outlineWidth: cs.outlineWidth, outlineStyle: cs.outlineStyle, bg: cs.backgroundColor, display: cs.display,
+      brackets: br, label: (document.querySelector('.crs-target-label') || {}).textContent || '',
+      barInCrosshair: !!(bar && ch && ch.contains(bar)),
+      barW: bar ? Math.round(parseFloat(getComputedStyle(bar).width)) : null,
+      barH: bar ? Math.round(parseFloat(getComputedStyle(bar).height)) : null,
+      barOpacity: bar ? getComputedStyle(bar).opacity : null,
+      barDisplay: bar ? getComputedStyle(bar).display : null,
+      fillRatio: (() => { const f = bar ? bar.querySelector('.crs-target-fill') : null; return f && bar ? parseFloat(getComputedStyle(f).width) / parseFloat(getComputedStyle(bar).width) : null; })(),
+      fillColor: (() => { const f = bar ? bar.querySelector('.crs-target-fill') : null; return f ? getComputedStyle(f).backgroundColor : null; })(),
+      chText: ch ? (ch.textContent || '').trim() : null
+    };
+  });
+  const mk1 = await markerRead();
+  check('A.§B2: 기본 설정에서 `.crs-target` 에 실선 외곽선이 없고(outline-width 0) 배경 틴트도 없다 — 가장 시끄럽던 것이 가장 덜 중요한 것이었다',
+    !!mk1 && parseFloat(mk1.outlineWidth) === 0 && (mk1.bg === 'rgba(0, 0, 0, 0)' || mk1.bg === 'transparent'), mk1);
+  check('A.§B2: 대신 10px \'ㄱ\'자 모서리 괄호 4개가 흰색 55 % 로 떠 있다',
+    !!mk1 && mk1.brackets.length === 4 && mk1.brackets.every((b) => b.display !== 'none' && b.w === 10 && b.h === 10 && /0\.55/.test(b.color)), mk1 && mk1.brackets);
+  check('A.§B2: 체력 바가 `.crs-crosshair` 의 자손이고(요소에서 떼어 조준점 아래로) 기본값에서는 숫자가 하나도 없다',
+    !!mk1 && mk1.barInCrosshair === true && mk1.barDisplay !== 'none' && mk1.barH === 4 && !/\d+\s*\/\s*\d+/.test(mk1.chText || '') && !/\d+\s*\/\s*\d+/.test(mk1.label || ''), mk1);
+  // ---- 바 길이 공식: clamp(round(20 + √maxHp × 6), 24, 140) ----
+  /* The bar is drawn for whatever pickTarget() FOCUSES, which inside a container is often a child — so the
+   * formula is checked against the max the product says it drew from (debug.crosshair().hp.max), and the
+   * independent element-level reading (api.hpOf of a leaf, #demo-img) is asserted beside it. Three targets
+   * of different size, so "큰 걸 겨누면 바도 길다" is a comparison and not one lucky number. */
+  const barFor = async (sel, pt) => {
+    const r = await api.rect(page, sel);
+    await page.mouse.move(pt ? r.left + pt[0] : r.cx, pt ? r.top + pt[1] : r.cy);
+    await sleep(160);
+    const hp = await api.hpOf(page, sel);
+    const m = await markerRead();
+    const info = await chInfo();
+    const max = info.hp ? info.hp.max : 0;
+    return { sel, elMax: hp.max, drawnMax: max, approx: hp.approx, barW: m.barW, want: Math.max(24, Math.min(140, Math.round(20 + Math.sqrt(max) * 6))) };
+  };
+  const barRows = [await barFor('#big-card', [6, 6]), await barFor('#small-card', [6, 6]), await barFor('#demo-img')];
+  check('A.§B2: 바의 가로 길이가 공식 clamp(round(20 + √maxHp × 6), 24, 140) 과 ±2 px 안에서 일치한다 — 큰 걸 겨누면 바도 길다',
+    barRows.every((r) => r.drawnMax > 0 && Math.abs(r.barW - r.want) <= 2) && new Set(barRows.map((r) => r.barW)).size >= 2, barRows);
+  check('A.§B2: 그 길이는 겨누고 있는 요소의 실제 최대 체력에서 나온다 — 잎 요소(#demo-img)에서 api.hpOf 의 max 와 바가 그린 max 가 같다',
+    barRows[2].drawnMax === barRows[2].elMax, barRows[2]);
+  // 400+ 에서 상한 140 (그리고 §C4 의 approx 가 바 끝에 점선으로 남는다)
+  await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'x-bar-cap';
+    Object.assign(box.style, { position: 'fixed', left: '160px', top: '160px', width: '620px', height: '420px', padding: '20px', boxSizing: 'border-box', background: '#eef3fa', zIndex: '60', overflow: 'hidden' });
+    for (let i = 0; i < 300; i++) { const k = document.createElement('div'); Object.assign(k.style, { width: '560px', height: '30px', background: '#9ab6d8' }); box.append(k); }
+    document.body.append(box);
+  });
+  await page.mouse.move(166, 166);   // inside the 20 px padding: the CONTAINER, not one of its 300 children
+  await sleep(220);
+  const capHp = await api.hpOf(page, '#x-bar-cap');
+  const capBar = await markerRead();
+  const capApprox = await page.evaluate(() => { const b = document.querySelector('.crs-target-bar'); return !!(b && b.classList.contains('crs-ch-hp-approx')); });
+  check('A.§B2: 최대 체력 400 을 넘어도 바는 140 px 을 넘지 않고, §C4 의 근사치(approx)는 바 끝의 점선으로 남는다 — 숫자가 사라진 자리를 바가 대신한다',
+    capHp.max > 400 && capBar.barW === 140 && capHp.approx === true && capApprox === true, { hp: capHp, barW: capBar.barW, approx: capApprox });
+  await page.evaluate(() => { const b = document.getElementById('x-bar-cap'); if (b) b.remove(); });
+  await api.restore(page);
+  await sleep(120);
+  // ---- 상처가 없으면 조용하다: 불투명도 40 % → 한 대 맞으면 100 % ----
+  await api.setWeapon(page, 'pistol');
+  const cardB = await api.rect(page, '#big-card');
+  await page.mouse.move(cardB.cx, cardB.cy);
+  await sleep(160);
+  const barFull = await markerRead();
+  await api.smashAt(page, cardB.cx, cardB.cy);
+  await sleep(160);
+  const barHurt = await markerRead();
+  check('A.§B2: 상처가 없으면 바가 조용하다 — 불투명도 0.4, 한 대 때리면 1.0 이고 채움이 줄어든다',
+    !!barFull && !!barHurt && Math.abs(parseFloat(barFull.barOpacity) - 0.4) < 0.02 && Math.abs(parseFloat(barHurt.barOpacity) - 1) < 0.02 && barHurt.fillRatio < barFull.fillRatio,
+    { full: { o: barFull && barFull.barOpacity, r: barFull && barFull.fillRatio }, hurt: { o: barHurt && barHurt.barOpacity, r: barHurt && barHurt.fillRatio } });
+  // ---- (§B4) targetMarker: full / off ----
+  await api.call(page, 'setSetting', 'targetMarker', 'full');
+  await sleep(160);
+  const mkFull = await markerRead();
+  await api.call(page, 'setSetting', 'targetMarker', 'off');
+  await sleep(160);
+  const mkOff = await page.evaluate(() => {
+    const box = document.querySelector('.crs-target');
+    return { brackets: document.querySelectorAll('.crs-tb').length, display: box ? getComputedStyle(box).display : null };
+  });
+  await api.call(page, 'setSetting', 'targetMarker', 'brackets');
+  await sleep(160);
+  const mkBack = await markerRead();
+  check('A.§B4: targetMarker: \'full\' 이면 실선이 돌아오고, \'off\' 면 표식 노드가 아예 없다, \'brackets\' 로 되돌리면 괄호가 돌아온다',
+    !!mkFull && parseFloat(mkFull.outlineWidth) === 2 && mkOff.brackets === 0 && mkOff.display === 'none' && !!mkBack && mkBack.brackets.length === 4 && parseFloat(mkBack.outlineWidth) === 0,
+    { full: mkFull && mkFull.outlineWidth, off: mkOff, back: mkBack && mkBack.outlineWidth });
+  // ---- (§B4) highContrastMarkers 가 두 설정을 자동으로 올린다 ----
+  await api.call(page, 'setSetting', 'highContrastMarkers', true);
+  await sleep(160);
+  const hcInfo = await chInfo();
+  const hcTarget = await markerRead();
+  await api.call(page, 'setSetting', 'highContrastMarkers', false);
+  await sleep(160);
+  const hcOffInfo = await chInfo();
+  check('A.§B4: highContrastMarkers: true 면 targetMarker 가 full, hostileMarker 가 always 로 자동으로 올라가고 실선이 돌아온다',
+    hcInfo.targetMarker === 'full' && hcInfo.hostileMarker === 'always' && parseFloat(hcTarget.outlineWidth) >= 2 &&
+    hcOffInfo.targetMarker === 'brackets' && hcOffInfo.hostileMarker === 'quiet',
+    { on: { t: hcInfo.targetMarker, h: hcInfo.hostileMarker, outline: hcTarget.outlineWidth }, off: { t: hcOffInfo.targetMarker, h: hcOffInfo.hostileMarker } });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- 전투 쪽 절반: §A5 상태 색 · §A6 히트마커 · §A7 대시 점 · §A8 힌트 · §B3 적대 오라 ----
+  await setCombatMode('survival');
+  await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noInvuln: false, infiniteAmmo: true }));
+  await resetScene(140, 140);
+  await api.setWeapon(page, 'pistol');
+  const srcCh = await api.rect(page, '#fire-src');
+  const enemyCh = await api.rectNoScroll(page, '#fire-enemy');
+  const tierCh = await force('#fire-enemy', 'forceAttack');
+  await sleep(160);
+  await page.mouse.move(enemyCh.cx, enemyCh.cy);
+  await sleep(160);
+  const onEnemyCh = await chDom();
+  const onEnemyInfo = await chInfo();
+  await page.mouse.move(enemyCh.right + 70, enemyCh.cy);
+  await sleep(160);
+  const onEmptyCh = await chDom();
+  check('A.§A5: 적대 요소 위에서 조준점이 붉어진다 (#e5484d) 그리고 빈 곳에서는 흐린 회색에 중심 점이 없다',
+    tierCh === 'shooter' && !!onEnemyCh && onEnemyCh.armColor === 'rgb(229, 72, 77)' && onEnemyInfo.state === 'hostile' &&
+    !!onEmptyCh && onEmptyCh.armColor === 'rgba(255, 255, 255, 0.35)' && onEmptyCh.dotDisplay === 'none',
+    { enemy: onEnemyCh && onEnemyCh.armColor, info: onEnemyInfo && onEnemyInfo.state, empty: onEmptyCh && { c: onEmptyCh.armColor, dot: onEmptyCh.dotDisplay } });
+  // 락온 중인 적 위: 붉은색 + 0.25초 주기 맥동 — "여기를 쏘면 끊긴다" 는 신호다
+  const lockRet = await force('#fire-enemy', 'forceLock');
+  await page.mouse.move(enemyCh.cx, enemyCh.cy);
+  const lockCh = await poll(async () => {
+    const r = await page.evaluate(() => {
+      const n = document.querySelector('.crs-crosshair');
+      const info = window.__crashScreen.debug.crosshair();
+      const an = n ? n.getAnimations().map((a) => { const t = a.effect.getTiming(); return { d: t.duration, forever: t.iterations === Infinity }; }) : [];
+      return { state: info.state, anims: an, locks: window.__crashScreen.stats().locks };
+    });
+    return r.state === 'lock' ? r : null;
+  }, 1500, 40);
+  check('A.§A5: 락온 중인 적 위에서는 붉은색에 0.25초 주기 맥동이 붙는다 — 여기를 쏘면 락온이 끊긴다는 신호',
+    !!lockRet && !!lockCh && lockCh.locks >= 1 && lockCh.anims.some((a) => a.forever === true && Math.abs(a.d - 250) < 1),
+    { lockRet, lockCh });
+  // ---- (§A6) 히트마커 4종 — 전부 진짜 피해 경로를 지나서 나온다 ----
+  const hitRead = () => page.evaluate(() => {
+    const n = document.querySelector('.crs-ch-hit');
+    if (!n) return { node: false };
+    const l = n.querySelector('.crs-ch-hit-line');
+    return { node: true, cls: n.className, color: l ? getComputedStyle(l).backgroundColor : '' };
+  });
+  const waitHit = (kind) => poll(async () => { const h = await hitRead(); return h.node && h.cls.indexOf('crs-ch-hit-' + kind) >= 0 ? h : null; }, 1500, 25);
+  /* The kind CLASS survives its own animation (only the opacity returns to 0), so every step below clears
+   * it first: without that, a poll for the next kind could be satisfied by the previous mark still sitting
+   * on the node — which is exactly how an earlier version of this section "passed" a 치명타 assertion with
+   * a 파괴 marker, because the crit happened to be the shot that finished the enemy off. */
+  const clearHit = () => page.evaluate(() => { const n = document.querySelector('.crs-ch-hit'); if (n) n.className = 'crs-ch-hit'; });
+  /* 락온 차단: the shot that cancels the lock. applyHit paints 명중 first and breakLock() paints 차단 on
+   * the next frame, so polling for the green one also proves the ORDER the player sees. */
+  await clearHit();
+  await api.smashAt(page, enemyCh.cx, enemyCh.cy);
+  const hitBlock = await waitHit('block');
+  /* "보인다" is an opacity that actually rises: the shot is fired INSIDE the sampler, so the rAF loop is
+   * already running when the 120 ms marker starts and cannot miss it between two CDP round trips. */
+  const hitVisible = await page.evaluate((x, y) => new Promise((res) => {
+    const n = document.querySelector('.crs-ch-hit');
+    let peak = 0;
+    const t0 = performance.now();
+    const step = () => {
+      if (n) peak = Math.max(peak, parseFloat(getComputedStyle(n).opacity) || 0);
+      if (performance.now() - t0 < 420) requestAnimationFrame(step); else res(peak);
+    };
+    requestAnimationFrame(step);
+    window.__crashScreen.smashAt(x, y);
+  }), enemyCh.cx, enemyCh.cy);
+  const hitPlain = await waitHit('hit');
+  /* 치명타 on a FRESH enemy: a crit is double damage, and on a worn-down target it is the shot that
+   * breaks it — which is a 파괴 marker, not a 치명타 one. The scene is rebuilt so the crit is survivable. */
+  await api.restore(page);
+  await sleep(120);
+  await resetScene(140, 140);
+  const enemyCrit = await api.rectNoScroll(page, '#fire-enemy');
+  await force('#fire-enemy', 'forceAttack');
+  await page.mouse.move(enemyCrit.cx, enemyCrit.cy);
+  await sleep(160);
+  await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noInvuln: false, infiniteAmmo: true, noCrit: false, forceCrit: true }));
+  await clearHit();
+  await api.smashAt(page, enemyCrit.cx, enemyCrit.cy);
+  const hitCrit = await waitHit('crit');
+  await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noInvuln: false, infiniteAmmo: true }));
+  await api.setWeapon(page, 'rocket');
+  await sleep(540);
+  await clearHit();
+  let hitKill = null;
+  for (let i = 0; i < 6 && !hitKill; i++) { await api.smashAt(page, enemyCrit.cx, enemyCrit.cy); hitKill = await waitHit('kill'); }
+  check('A.§A6: 히트마커 4종이 색으로 구분된다 — 명중 흰색 · 치명타 #ffd166 · 파괴 #e5484d · 락온 차단 #3fb950',
+    !!hitPlain && hitPlain.color === 'rgb(255, 255, 255)' &&
+    !!hitCrit && hitCrit.color === 'rgb(255, 209, 102)' &&
+    !!hitKill && hitKill.color === 'rgb(229, 72, 77)' &&
+    !!hitBlock && hitBlock.color === 'rgb(63, 185, 80)',
+    { plain: hitPlain, crit: hitCrit, kill: hitKill, block: hitBlock });
+  check('A.§A6: 그리고 실제로 보인다 — 명중 순간 `.crs-ch-hit` 의 불투명도가 0 에서 올라간다 (페이지 안 rAF 로 측정)',
+    typeof hitVisible === 'number' && hitVisible > 0.2, { peakOpacity: hitVisible });
+  // hitmarker: false 면 노드가 아예 생기지 않는다
+  await api.call(page, 'setSetting', 'hitmarker', false);
+  await sleep(160);
+  const hitOffNodes = await api.count(page, '.crs-ch-hit');
+  await api.smashAt(page, srcCh.cx, srcCh.cy);
+  await sleep(160);
+  const hitOffAfter = await api.count(page, '.crs-ch-hit');
+  await api.call(page, 'setSetting', 'hitmarker', true);
+  await sleep(140);
+  check('A.§A9: hitmarker: false 면 히트마커 노드가 생성되지 않는다 (쏜 뒤에도 0개) 그리고 다시 켜면 돌아온다',
+    hitOffNodes === 0 && hitOffAfter === 0 && (await api.count(page, '.crs-ch-hit')) === 1,
+    { before: hitOffNodes, afterShot: hitOffAfter });
+
+  // ---- (§A8) 깊이·관통 힌트: 가려진 적 위에서 ▼ / ▼2 / 표시 없음 ----
+  await api.restore(page);
+  await sleep(120);
+  await page.evaluate(() => {
+    const lab = document.createElement('div'); lab.id = 'x-cover-lab';
+    Object.assign(lab.style, { position: 'fixed', left: '140px', top: '220px', width: '520px', height: '360px', zIndex: '70' });
+    const en = document.createElement('div'); en.id = 'x-cover-enemy';
+    Object.assign(en.style, { position: 'absolute', left: '0px', top: '0px', width: '360px', height: '240px', background: '#c8d8e8' });
+    const cv = document.createElement('div'); cv.id = 'x-cover-top';
+    Object.assign(cv.style, { position: 'absolute', left: '40px', top: '40px', width: '260px', height: '170px', background: '#2d3a46', zIndex: '5' });
+    lab.append(en, cv);
+    document.body.append(lab);
+  });
+  await resetScene(1000, 200);
+  const coverTier = await force('#x-cover-enemy', 'forceAttack');
+  const coverPt = { x: 140 + 40 + 130, y: 220 + 40 + 85 };
+  const hintFor = async (id) => {
+    await api.setWeapon(page, id);
+    await sleep(620);   // the swap window closes, and the hint re-reads the cover at most every 150 ms
+    await page.mouse.move(coverPt.x + 1, coverPt.y);
+    await sleep(120);
+    await page.mouse.move(coverPt.x, coverPt.y);
+    await sleep(260);
+    const i = await chInfo();
+    return { id, hint: i.hint, bright: i.hintBright };
+  };
+  const hintPistol = await hintFor('pistol');
+  const hintSniper = await hintFor('sniper');
+  const hintRocket = await hintFor('rocket');
+  check('A.§A8: 가려진 적 위에서 권총이면 흐린 ▼, 저격총이면 밝은 ▼2 (관통 2층), 로켓이면 표시가 없다 — 폭발은 엄폐를 무시하므로 할 말이 없다',
+    coverTier === 'shooter' && hintPistol.hint === '▼' && hintPistol.bright === false &&
+    hintSniper.hint === '▼2' && hintSniper.bright === true && hintRocket.hint === '',
+    { pistol: hintPistol, sniper: hintSniper, rocket: hintRocket });
+  await page.evaluate(() => { const l = document.getElementById('x-cover-lab'); if (l) l.remove(); });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (§B3) 적대 요소는 평상시 조용하고 공격 준비 때만 실선이다 ----
+  const auraRead = () => page.evaluate(() => {
+    const a = document.querySelector('.crs-hostile');
+    if (!a) return null;
+    const cs = getComputedStyle(a);
+    return { w: parseFloat(cs.outlineWidth), style: cs.outlineStyle, shadow: cs.boxShadow, cls: a.className, anims: a.getAnimations().length };
+  });
+  const solidNodes = () => page.evaluate(() => [...document.querySelectorAll('[data-crs]')].filter((n) => {
+    const cs = getComputedStyle(n);
+    return cs.outlineStyle === 'solid' && parseFloat(cs.outlineWidth) >= 2;
+  }).map((n) => n.className));
+  await resetScene(1000, 760);
+  await api.setWeapon(page, 'pistol');
+  const enemyB3 = await api.rectNoScroll(page, '#fire-enemy');
+  const tierB3 = await force('#fire-enemy', 'forceAttack');
+  const auraLoud = await poll(async () => { const a = await auraRead(); return a && a.w >= 2 ? a : null; }, 900, 20);
+  const solidLoud = await solidNodes();
+  const auraQuiet = await poll(async () => { const a = await auraRead(); return a && a.w === 0 ? a : null; }, 3000, 60);
+  const solidQuiet = await solidNodes();
+  check('A.§B3: 적대 요소는 공격 준비에 들어갈 때만 2px 실선 + 맥동이고, 끝나면 다시 outline-width 0 으로 조용해진다 — 조용히 있다가 행동할 때 소리친다',
+    tierB3 === 'shooter' && !!auraLoud && auraLoud.w === 2 && auraLoud.anims >= 1 && !!auraQuiet && auraQuiet.w === 0 && auraQuiet.anims === 0,
+    { loud: auraLoud, quiet: auraQuiet });
+  check('A.§B3: 평상시에도 안쪽 그림자와 작은 라벨은 남는다 — 적이라는 사실은 사라지지 않는다',
+    !!auraQuiet && /inset/.test(auraQuiet.shadow) && (await page.evaluate(() => { const l = document.querySelector('.crs-hostile-label'); return !!l && getComputedStyle(l).display !== 'none' && /👿/.test(l.textContent || ''); })) === true,
+    auraQuiet);
+  check('A.§B1: 동시에 떠 있는 2px 실선 외곽선 노드가 1개 이하다 — 평상시 0개, 공격 준비 중 1개',
+    solidQuiet.length === 0 && solidLoud.length <= 1, { quiet: solidQuiet, loud: solidLoud });
+  // ---- (§B4) hostileMarker: 'off' ----
+  await api.call(page, 'setSetting', 'hostileMarker', 'off');
+  await sleep(200);
+  const auraOff = await auraRead();
+  await api.call(page, 'setSetting', 'hostileMarker', 'quiet');
+  await sleep(200);
+  const auraBack = await auraRead();
+  check('A.§B4: hostileMarker: \'off\' 면 오라가 아예 그려지지 않고(그림자도 라벨도), \'quiet\' 로 되돌리면 돌아온다',
+    !!auraOff && /crs-hostile-off/.test(auraOff.cls) && auraOff.shadow === 'none' && !!auraBack && /inset/.test(auraBack.shadow),
+    { off: auraOff, back: auraBack });
+
+  // ---- (§B / SPEC-combat §D4) 투사체: 도착 링은 비행 60 % 지점까지 없고, 맞을/빗나갈 궤적이 다르다 ----
+  await api.restore(page);
+  await sleep(120);
+  await resetScene(1080, 800);
+  /* MEASUREMENT NOTE. The ring appears at 60 % of the orb's FLIGHT TIME, and the orb flies at a constant
+   * speed toward where the player was at launch — so "how far along is it?" has to be measured against
+   * that fixed point, not against the last sample. An earlier version of this check moved the drone mid
+   * flight and then normalised by the distance actually travelled: the orb sailed on past the old target,
+   * the denominator grew, and perfectly correct rings looked "early". The flight and the dodge are two
+   * separate shots now — this one never moves the player. */
+  const orbFlight = (moveAt) => page.evaluate((mv) => new Promise((res) => {
+    const out = [];
+    const t0 = performance.now();
+    const p0 = window.__crashScreen.player();
+    const target = { x: p0.x, y: p0.y };
+    const step = () => {
+      const o = document.querySelector('.crs-orb');
+      if (o) {
+        const r = o.getBoundingClientRect();
+        out.push({ x: r.left + r.width / 2, y: r.top + r.height / 2, rings: document.querySelectorAll('.crs-orb-ring').length, op: +parseFloat(getComputedStyle(o).opacity).toFixed(2) });
+        if (mv > 0 && out.length === mv) window.__crashScreen.debug.setPlayerPos(80, 120);
+      }
+      if (performance.now() - t0 < 2200) requestAnimationFrame(step); else res({ out, target });
+    };
+    requestAnimationFrame(step);
+  }), moveAt);
+  const tierOrb = await force('#fire-enemy', 'forceAttack');
+  await poll(async () => (await api.stats(page)).orbs >= 1, 1200, 20);
+  const flightA = await orbFlight(0);
+  const orbMoving = flightA.out.filter((s, i) => i === 0 || Math.hypot(s.x - flightA.out[0].x, s.y - flightA.out[0].y) > 2);
+  const orbTotal = orbMoving.length ? Math.hypot(flightA.target.x - orbMoving[0].x, flightA.target.y - orbMoving[0].y) : 0;
+  const orbProg = orbMoving.map((s) => ({ p: orbTotal > 0 ? Math.hypot(s.x - orbMoving[0].x, s.y - orbMoving[0].y) / orbTotal : 0, rings: s.rings, op: s.op }));
+  const early = orbProg.filter((s) => s.p < 0.55), late = orbProg.filter((s) => s.p >= 0.7);
+  check('A.§B/§D4: 투사체 도착 링이 비행 60 % 지점까지 아예 없다 (노드 0개) 그리고 마지막 구간에서 나타난다 — 조용히 날아오다 마지막에만 경고한다',
+    tierOrb === 'shooter' && early.length >= 5 && early.every((s) => s.rings === 0) && late.some((s) => s.rings >= 1),
+    { samples: orbProg.length, total: Math.round(orbTotal), early: early.length, earlyRings: early.filter((s) => s.rings > 0).length, late: late.filter((s) => s.rings >= 1).length });
+  // 두 번째 발사: 비행 중에 드론을 선 밖으로 옮겨 맞을/빗나갈 궤적의 불투명도를 같은 탄에서 비교한다
+  await api.restore(page);
+  await sleep(120);
+  await resetScene(1080, 800);
+  await force('#fire-enemy', 'forceAttack');
+  await poll(async () => (await api.stats(page)).orbs >= 1, 1200, 20);
+  const flightB = await orbFlight(18);
+  const bMoving = flightB.out.filter((s, i) => i === 0 || Math.hypot(s.x - flightB.out[0].x, s.y - flightB.out[0].y) > 2);
+  const opHit = bMoving.slice(0, 10).map((s) => s.op), opMiss = bMoving.slice(24).map((s) => s.op);
+  check('A.§B/§D4: 맞을 궤적은 불투명도 1.0, 빗나갈 궤적은 0.55 다 — 비행 중에 드론을 선 밖으로 옮기면 그 자리에서 흐려진다',
+    opHit.length >= 3 && opHit.every((o) => Math.abs(o - 1) < 0.02) && opMiss.length >= 3 && opMiss.every((o) => Math.abs(o - 0.55) < 0.02),
+    { hit: opHit.slice(0, 5), miss: opMiss.slice(0, 5), samples: bMoving.length });
+
+  // ---- 모션 축소: 맥동과 히트마커 확대가 없고 색 변화만 남는다 ----
+  await api.restore(page);
+  await sleep(120);
+  await api.call(page, 'setSetting', 'reduceMotion', 'on');
+  await sleep(160);
+  await page.mouse.move(enemyB3.cx, enemyB3.cy);
+  await sleep(160);
+  const rmHit = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    d.hitMarker('crit');   // same code path the real damage sink uses; read synchronously, so no race
+    const n = document.querySelector('.crs-ch-hit');
+    const keys = n.getAnimations().map((a) => a.effect.getKeyframes().map((k) => Object.keys(k).filter((x) => x !== 'offset' && x !== 'computedOffset' && x !== 'easing').join('+')).join('/'));
+    return { keys, color: n.style.getPropertyValue('--crs-ch-hit-c'), cls: n.className };
+  });
+  const rmLockTier = await force('#fire-enemy', 'forceLock');
+  await page.mouse.move(enemyB3.cx, enemyB3.cy);
+  await sleep(300);
+  const rmLock = await page.evaluate(() => {
+    const n = document.querySelector('.crs-crosshair');
+    return { state: window.__crashScreen.debug.crosshair().state, forever: n.getAnimations().filter((a) => a.effect.getTiming().iterations === Infinity).length };
+  });
+  await api.call(page, 'setSetting', 'reduceMotion', 'auto');
+  await sleep(160);
+  check('A.모션 축소: 히트마커에서 확대가 빠지고 색만 남는다 — 키프레임에 transform 이 하나도 없다',
+    !!rmHit && rmHit.keys.length >= 1 && rmHit.keys.every((k) => !/transform/.test(k)) && rmHit.color === '#ffd166' && /crs-ch-hit-crit/.test(rmHit.cls),
+    rmHit);
+  check('A.모션 축소: 락온 맥동도 없다 — 조준점에 무한 반복 애니메이션이 0개다 (색은 그대로 붉다)',
+    rmLockTier !== 'missing:forceLock' && !!rmLock && rmLock.forever === 0, { rmLockTier, rmLock });
+
+  // ---- 무흔적: 히트마커 애니메이션 중 Escape → 노드 0 · 애니메이션 0 · 커서 복원 ----
+  await api.restore(page);
+  await sleep(120);
+  await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noInvuln: false, infiniteAmmo: true }));
+  await resetScene(1000, 760);
+  await api.setWeapon(page, 'pistol');
+  const enemyEsc = await api.rectNoScroll(page, '#fire-enemy');
+  await force('#fire-enemy', 'forceAttack');
+  await page.mouse.move(enemyEsc.cx, enemyEsc.cy);
+  await sleep(160);
+  // the shot and the reading are one evaluate, so Escape lands while the 120 ms marker is still running
+  const chAlive = await page.evaluate((x, y) => {
+    window.__crashScreen.smashAt(x, y);
+    const n = document.querySelector('.crs-ch-hit');
+    return { ch: document.querySelectorAll('.crs-crosshair').length, cursor: getComputedStyle(document.body).cursor, hitAnims: n ? n.getAnimations().length : -1 };
+  }, enemyEsc.cx, enemyEsc.cy);
+  await page.keyboard.press('Escape');
+  const chInactive = await poll(async () => !(await api.active(page)), 1500, 20);
+  await settleRaf(page);
+  const chTrace = await page.evaluate(() => ({
+    nodes: document.querySelectorAll('[data-crs]').length,
+    anims: document.getAnimations().length,
+    cursorBody: getComputedStyle(document.body).cursor,
+    cursorHtml: getComputedStyle(document.documentElement).cursor,
+    aimClass: document.documentElement.classList.contains('crs-aim'),
+    activeClass: document.documentElement.classList.contains('crs-active')
+  }));
+  const chPend = await api.pending(page);
+  const chRaf = await api.pendingRaf(page);
+  check('A.§D 무흔적: 히트마커 애니메이션 중에 Escape → [data-crs] 0개, 애니메이션 0개, 타이머·프레임 0, 그리고 운영체제 커서가 돌아온다',
+    chAlive.ch === 1 && chAlive.cursor === 'none' && chAlive.hitAnims >= 1 && chInactive === true && chTrace.nodes === 0 && chTrace.anims === 0 &&
+    chPend === 0 && chRaf === 0 && chTrace.cursorBody !== 'none' && chTrace.aimClass === false && chTrace.activeClass === false,
+    { alive: chAlive, trace: chTrace, pending: chPend, raf: chRaf });
+  const chReOn = await page.evaluate(contentJs);
+  check('A.§D 무흔적: content.js 가 그 뒤 깨끗하게 다시 켜지고 조준점이 다시 하나 그려진다',
+    chReOn === 'on' && (await api.count(page, '.crs-crosshair')) >= 0, chReOn);
+  await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noInvuln: true }));
+  await api.restore(page);
+  await sleep(120);
 
   await combatTeardown(ctx);
 }
