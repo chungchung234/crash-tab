@@ -28,6 +28,11 @@ const REPO_ROOT = path.resolve(__dirname, '..');
  * asserts exit 1 with the §F6 rule numbers it expected. Nothing in CI sets it. */
 const SRC_DIR = process.env.CRS_BALANCE_SRC ? path.resolve(process.env.CRS_BALANCE_SRC) : path.join(REPO_ROOT, 'src');
 const DOC_PATH = path.join(REPO_ROOT, 'docs', 'BALANCE.md');
+/* SPEC-product §1 무기 비교표. The options page is an extension page: content.js never runs there, so it
+ * cannot ask the product what the arsenal is. Rather than keep a second hand-written copy of the weapon
+ * table (which would drift), the table is GENERATED here from the same static parse the balance model uses
+ * — `--write` writes it, `--check` fails when it is stale, exactly like docs/BALANCE.md. */
+const ARSENAL_PATH = path.join(REPO_ROOT, 'options', 'arsenal.json');
 
 /* ===================================================================== */
 /* 0. Static parsing of src/ — text in, plain objects out                 */
@@ -117,13 +122,21 @@ function numericConsts(src) {
   return out;
 }
 
+/* SPEC-product §6: 사용자 정의 무기(`cw_…`)는 런타임에 chrome.storage.local 에서 붙는다. 이 도구는
+ * src/ 를 정적으로 읽으므로 구조적으로 그것들을 볼 수 없고, **보여서도 안 된다** — §F 의 밴드는 내장
+ * 무기들 사이의 관계이고, 사용자가 만든 무기를 그 중앙값 계산에 넣으면 밸런스 검사가 사용자 데이터에
+ * 따라 통과했다 말았다 하게 된다. 아래 한 줄은 그 사실을 "우연히 그렇다" 에서 "그렇게 정했다" 로
+ * 바꾸는 가드다: 어떤 경로로든 `cw_` 로 시작하는 id 가 들어오면 모델에서 떨어진다. */
+const CUSTOM_ID_RE = /^cw_/;
+
 /** Read the whole arsenal: WEAPONS (src/00) merged with WEAPON_STATS (src/71). */
 function readArsenal() {
   const prelude = stripComments(readSrc('00-prelude.js'));
   const helpers = stripComments(readSrc('71-weapon-helpers.js'));
   const preludeConsts = numericConsts(prelude);
   const helperConsts = numericConsts(helpers);
-  const ids = literalToData(sliceLiteral(prelude, 'WEAPON_IDS', '[', ']'), preludeConsts);
+  const idsAll = literalToData(sliceLiteral(prelude, 'WEAPON_IDS', '[', ']'), preludeConsts);
+  const ids = idsAll.filter((id) => !CUSTOM_ID_RE.test(String(id)));   // §6: 사용자 정의 무기는 밸런스 검사 대상이 아니다
   const weapons = literalToData(sliceLiteral(prelude, 'WEAPONS', '{', '}'), preludeConsts);
   const stats = literalToData(sliceLiteral(helpers, 'WEAPON_STATS', '{', '}'), helperConsts);
   const roles = literalToData(sliceLiteral(prelude, 'WEAPON_ROLES', '{', '}'), preludeConsts);
@@ -305,7 +318,7 @@ const MODES = {
 };
 
 function model() {
-  const { ids, weapons, presets, swapDefault, loadoutMax, burn } = readArsenal();
+  const { ids, weapons, presets, swapDefault, loadoutMax, burn, roles } = readArsenal();
   const rows = ids.map((id) => {
     const W = Object.assign({ id }, weapons[id]);
     const b = burstDPS(W, burn);
@@ -359,7 +372,64 @@ function model() {
     : (fieldVals[fieldVals.length / 2 - 1] + fieldVals[fieldVals.length / 2]) / 2) : 0;
   for (const r of rows) r.ratio = median > 0 ? r.rated / median : 0;
 
-  return { ids, rows, byId, presets, median, loadoutMax, burn, swapDefault, violations: violations(rows, byId, median) };
+  return { ids, rows, byId, weapons, roles, presets, median, loadoutMax, burn, swapDefault, violations: violations(rows, byId, median) };
+}
+
+/* ---- SPEC-product §1 무기 비교표 — options/arsenal.json ----------------------------------------
+ * 옵션 페이지가 읽는 **생성물**이다. 손으로 고치지 않는다 — `node tools/balance.js --check` 가
+ * content.js 와 같은 이유로 낡은 생성물을 잡는다.
+ *
+ * 무엇을 넣는가: 무기 비교표가 보여 줄 수 있는 전부 — 표에 적힌 수치(`damage` … `pierce`)와,
+ * 같은 파일이 이미 계산하고 있는 파생값(`burstDPS` · `uptime` · `handling` · `effective` · 표적별
+ * 처치 시간). 이름은 **메시지 키**로 넣는다: 옵션 페이지가 chrome.i18n 으로 번역한다.          */
+function renderArsenal(m) {
+  const round = (v, n) => (isFinite(v) ? Math.round(v * Math.pow(10, n)) / Math.pow(10, n) : null);
+  const out = {
+    generatedBy: 'tools/balance.js --write',
+    loadoutMax: m.loadoutMax,
+    median: round(m.median, 3),
+    targets: TARGETS.map((t) => ({ key: t.key, hp: t.hp, label: t.label })),
+    presets: m.presets,
+    roleLabels: ROLE_LABEL,
+    weapons: m.rows.map((r) => {
+      const W = m.weapons[r.id] || {};
+      return {
+        id: r.id,
+        emoji: W.emoji || '',
+        nameKey: W.name || null,
+        kind: W.kind || null,
+        cat: r.cat,
+        role: r.role,
+        quirk: r.quirk,
+        damage: W.damage === '__INFINITY__' || W.damage === Infinity ? null : W.damage,
+        pellets: r.pellets,
+        cooldownMs: W.cooldownMs == null ? null : W.cooldownMs,
+        tickMs: W.tickMs == null ? null : W.tickMs,
+        hold: !!W.hold,
+        input: W.input || 'click',
+        mag: r.mag,
+        reloadMs: r.reloadMs,
+        radius: W.radius === Infinity || W.radius === '__INFINITY__' ? null : (W.radius || 0),
+        swapMs: r.swapMs,
+        moveSpeed: round(r.moveSpeed, 3),
+        spread: round(r.spread, 2),
+        pierce: W.pierce === 999 ? 999 : (W.pierce || 0),
+        critChance: round(W.critChance == null ? 0.1 : W.critChance, 3),
+        knockback: round(W.knockback == null ? 1 : W.knockback, 2),
+        falloff: round(W.falloff || 0, 2),
+        maxTargets: r.maxTargets,
+        burstDPS: round(r.burstDPS, 2),
+        uptime: round(r.uptime, 4),
+        handling: round(r.handling, 4),
+        effective: round(r.effective, 2),
+        utility: r.utility,
+        rated: round(r.rated, 2),
+        ratio: round(r.ratio, 4),
+        ttk: TARGETS.reduce((acc, t) => { acc[t.key] = round(r.ttk[t.key], 3); return acc; }, {})
+      };
+    })
+  };
+  return JSON.stringify(out, null, 2) + '\n';
 }
 
 /* ===================================================================== */
@@ -665,11 +735,17 @@ if (require.main === module) {
   if (!args.includes('--quiet')) process.stdout.write(printTable(m) + '\n');
 
   const doc = renderDoc(m);
+  const arsenal = renderArsenal(m);
   let bad = 0;
   if (args.includes('--write')) {
     fs.mkdirSync(path.dirname(DOC_PATH), { recursive: true });
     fs.writeFileSync(DOC_PATH, doc, 'utf8');
-    if (!args.includes('--quiet')) process.stdout.write('\nbalance: wrote ' + path.relative(REPO_ROOT, DOC_PATH) + '\n');
+    fs.mkdirSync(path.dirname(ARSENAL_PATH), { recursive: true });
+    fs.writeFileSync(ARSENAL_PATH, arsenal, 'utf8');
+    if (!args.includes('--quiet')) {
+      process.stdout.write('\nbalance: wrote ' + path.relative(REPO_ROOT, DOC_PATH) + '\n');
+      process.stdout.write('balance: wrote ' + path.relative(REPO_ROOT, ARSENAL_PATH) + '\n');
+    }
   }
   for (const v of m.violations) { process.stderr.write('balance: §F6-' + v.rule + ' ' + v.id + ': ' + v.msg + '\n'); bad++; }
   if (args.includes('--check')) {
@@ -679,6 +755,14 @@ if (require.main === module) {
     try { onDisk = fs.readFileSync(DOC_PATH, 'utf8'); } catch (e) { onDisk = null; }
     if (onDisk !== doc) {
       process.stderr.write('balance: docs/BALANCE.md ' + (onDisk == null ? 'does not exist' : 'is stale') + ' — run `node tools/balance.js --write`\n');
+      bad++;
+    }
+    /* SPEC-product §1: options/arsenal.json is the same kind of generated file and is held to the same rule.
+     * It only exists once the options page does, so its ABSENCE is not a failure — a stale one is. */
+    let arsenalOnDisk = null;
+    try { arsenalOnDisk = fs.readFileSync(ARSENAL_PATH, 'utf8'); } catch (e) { arsenalOnDisk = null; }
+    if (arsenalOnDisk !== null && arsenalOnDisk !== arsenal) {
+      process.stderr.write('balance: options/arsenal.json is stale — run `node tools/balance.js --write`\n');
       bad++;
     }
   }

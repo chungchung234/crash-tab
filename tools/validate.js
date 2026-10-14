@@ -79,7 +79,7 @@ const SHIP_SPEC = [
   { rel: 'settings-schema.json',  kind: 'file', optional: true, note: 'spec B1 — settings schema not created yet' },
   { rel: 'icons',                 kind: 'dir',  optional: false },
   { rel: '_locales',              kind: 'dir',  optional: false },
-  { rel: 'options',               kind: 'dir',  optional: true, note: 'spec B2 — options page not created yet' },
+  { rel: 'options',               kind: 'dir',  optional: true, note: 'SPEC-product §1 — options page not created yet' },
   { rel: 'share',                 kind: 'dir',  optional: true, note: 'spec C6 — share page not created yet' },
   { rel: 'LICENSE',               kind: 'file', optional: true, note: 'spec A1 — `git checkout origin/main -- LICENSE` has not run yet' },
 ];
@@ -286,10 +286,28 @@ const FORBIDDEN_INJECTED = [
   { label: 'setInterval(',         re: /\bsetInterval\s*\(/ },
 ];
 
+/* CLAUDE.md: "확장 페이지도 같은 규칙으로 만든다". The injected list's style/timer rules do not apply
+ * here (an options page has no USER-origin stylesheet to fight and may own a repeating timer), but the
+ * markup-injection family does — it is the rule that keeps every page in this extension buildable the
+ * same way, and share/ and options/ are both written to it. */
 const FORBIDDEN_EXT_PAGES = [
-  { label: 'eval(',        re: /\beval\s*\(/ },
-  { label: 'new Function', re: /\bnew\s+Function\b/ },
+  { label: 'eval(',              re: /\beval\s*\(/ },
+  { label: 'new Function',       re: /\bnew\s+Function\b/ },
+  { label: 'innerHTML',          re: /\binnerHTML\b/ },
+  { label: 'outerHTML',          re: /\bouterHTML\b/ },
+  { label: 'insertAdjacentHTML', re: /\binsertAdjacentHTML\b/ },
+  { label: 'document.write',     re: /\bdocument\s*\.\s*write\b/ },
 ];
+
+/* A line that is ENTIRELY a comment is not code. Without this, a file cannot say in its own header
+ * which APIs it refuses to use — which is exactly what share/share.js and options/options.js do, and
+ * what CLAUDE.md asks every file in this repo to do. The test is deliberately crude (the line's first
+ * non-space characters are a comment opener) so it can never mis-parse a regex literal the way a real
+ * comment stripper can; a trailing comment after code is still scanned, which only errs conservative. */
+function commentOnly(line) {
+  const t = line.trim();
+  return t.startsWith('//') || t.startsWith('/*') || t.startsWith('*');
+}
 
 function scanForbidden(root, rels, patterns) {
   const hits = [];
@@ -298,6 +316,7 @@ function scanForbidden(root, rels, patterns) {
     if (!isFile(full)) continue;
     const lines = readText(full).split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
+      if (commentOnly(lines[i])) continue;
       for (const p of patterns) {
         const m = p.re.exec(lines[i]);
         if (m) hits.push({ rel, line: i + 1, col: m.index + 1, label: p.label, text: lines[i].trim().slice(0, 100) });
@@ -518,7 +537,7 @@ rule('R9', 'forbidden-api-extension-pages', (r, ctx) => {
     r.fail(h.rel + ':' + h.line + ':' + h.col + '  ' + h.label);
     r.detail('    ' + h.text);
   }
-  if (!r.failed()) r.note(rels.length + ' extension-page file(s) clean (eval / new Function only)');
+  if (!r.failed()) r.note(rels.length + ' extension-page file(s) clean across ' + FORBIDDEN_EXT_PAGES.length + ' patterns');
 });
 
 /* ---- R10 ---- */

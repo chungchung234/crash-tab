@@ -1,0 +1,396 @@
+/* 화면부수기 — 옵션 페이지 (SPEC-product §1).
+ *
+ * 외부 리소스를 전혀 쓰지 않는다: 폰트는 시스템 폰트 스택뿐이고 이미지·아이콘은 전부 인라인 SVG 다
+ * (options.js 가 createElementNS 로 만든다). `prefers-color-scheme` 로 밝은/어두운 테마를 따른다.
+ *
+ * content.css 의 USER 오리진 함정과는 무관한 파일이다 — 이건 확장 페이지의 AUTHOR 오리진 스타일시트라
+ * !important 가 인라인 스타일을 이기지 않는다. 그래도 JS 가 쓰는 속성에는 !important 를 붙이지 않았다. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --fg: #16181d;
+  --muted: #5d6572;
+  --plate: #ffffff;
+  --plate2: #eef1f5;
+  --line: rgba(20, 23, 28, .14);
+  --accent: #e5484d;
+  --ok: #2f8a4c;
+  --drop: rgba(229, 72, 77, .14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0f16;
+    --fg: #e9f2ff;
+    --muted: rgba(233, 242, 255, .66);
+    --plate: #141926;
+    --plate2: #1b2232;
+    --line: rgba(233, 242, 255, .16);
+    --accent: #ffd166;
+    --ok: #6ee7a0;
+    --drop: rgba(255, 209, 102, .16);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 64px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 8px 14px;
+  background: var(--plate);
+  color: var(--fg);
+  z-index: 10;
+}
+.skip:focus { left: 8px; top: 8px; }
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 14px 20px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nav a {
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.nav a:hover { border-color: var(--accent); }
+.nav a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px 16px 0;
+}
+
+/* 끈끈한 머리글이 앵커 이동과 scrollIntoView 의 착지점을 가린다 — 섹션과 조작 가능한 요소에
+ * 그만큼의 여유를 준다. 키보드 탐색과 자동화 양쪽에 필요하다. */
+.card, .btn, .chip, .slot, select, input, textarea, h2, h3 { scroll-margin-top: 110px; }
+
+.card {
+  margin: 0 0 20px;
+  padding: 18px 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--plate);
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+h3 {
+  margin: 16px 0 8px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.hint, .empty {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.empty {
+  padding: 14px 14px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+.privacy {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--ok);
+  border-radius: 10px;
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+fieldset {
+  margin: 0 0 14px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+legend {
+  padding: 0 6px;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.setting {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 260px);
+  align-items: center;
+  gap: 10px 14px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.setting:first-of-type { border-top: 0; }
+
+.setting > label { font-weight: 600; }
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.inline { font-weight: 700; }
+
+.btn {
+  appearance: none;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--plate2);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); }
+.btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.btn[disabled] { opacity: .45; cursor: default; }
+.btn.danger { border-color: var(--accent); }
+
+select, input[type="number"], input[type="text"], textarea {
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--plate2);
+  color: var(--fg);
+  font: inherit;
+}
+textarea.json {
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre;
+}
+select:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; }
+
+.rangewrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rangewrap input[type="range"] { flex: 1 1 auto; width: auto; }
+.rangewrap output { min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+
+.two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+
+.pool {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  min-height: 96px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+
+.catrow {
+  width: 100%;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: .4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--plate2);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.chip[data-in="1"] { opacity: .42; }
+.chip .art { width: 18px; height: 18px; flex: 0 0 auto; }
+.chip.ghost {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  opacity: .9;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .3);
+}
+
+.loadout {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--plate2);
+}
+.slot.over { background: var(--drop); border-color: var(--accent); }
+.slot .key {
+  flex: 0 0 auto;
+  width: 22px;
+  text-align: center;
+  font-weight: 800;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.slot .blank { color: var(--muted); font-size: 12.5px; }
+
+.scroll { overflow-x: auto; }
+
+.cmp {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.cmp th, .cmp td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.cmp th:first-child, .cmp td:first-child,
+.cmp th.t, .cmp td.t { text-align: left; }
+.cmp thead th {
+  position: sticky;
+  top: 0;
+  background: var(--plate);
+  font-weight: 800;
+}
+.cmp thead th button {
+  appearance: none;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cmp thead th button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.cmp td .art { width: 20px; height: 20px; vertical-align: -4px; margin-right: 6px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 6px 18px;
+  margin: 0;
+}
+.grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+}
+.grid dt { color: var(--muted); }
+.grid dd { margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; }
+.grid dd a { color: inherit; }
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px 14px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.form .field { display: flex; flex-direction: column; gap: 3px; }
+.form .field > span { font-size: 12px; font-weight: 700; color: var(--muted); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  max-width: 90vw;
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--plate);
+  color: var(--fg);
+  font-weight: 700;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+  opacity: 0;
+  transition: opacity .18s ease;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { transition: none; }
+}

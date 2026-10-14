@@ -390,6 +390,15 @@
   api.replay = REPLAY_API;           // §5: export / import / play / stop / reset / save / list / state
   api.share = () => shareNow();      // §5: captureVisibleTab by message — no new permission
 
+  /* ---- SPEC-product §2 누적 통계 · §6 사용자 정의 무기 ----
+   * Same reason as the block above: `api` is a `const` of THIS file, so the two modules that build these
+   * (src/96-stats.js, src/96-custom.js) cannot reach it from inside their own bodies. */
+  api.lifetime = () => lifeNow();              // §2: 읽기 — 기기 밖으로 나가지 않는다
+  api.lifetimeReset = () => lifeReset();       // §2: "초기화는 명시적 확인 후" — 확인은 옵션 페이지가 받는다
+  api.customWeapons = () => cwInfo();          // §6: 등록된 것과 버려진 것, 둘 다
+  api.setCustomWeapons = (list) => cwSave(list);
+  api.customWeaponExample = (n) => cwExample(n);
+
   api.settings = () => settingsNow();
   api.setSetting = (key, value) => setSettingValue(key, value);
   api.settingsSchema = () => settingsSchema();
@@ -493,6 +502,10 @@
 
   /* One storage read and one chrome.storage.onChanged subscription per page, before the first activate(). */
   settingsBoot();
+  /* SPEC-product §6: the custom arsenal is read the same way — ONCE per page, asynchronously, and with
+   * every access inside safe(). Nothing in activate() waits for it, which is what makes "망가진 저장값이
+   * 활성화를 막아서는 안 된다" true by construction rather than by care. */
+  cwBoot();
 
   try {
     activate();

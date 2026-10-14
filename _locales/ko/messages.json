@@ -686,5 +686,601 @@
   "replayBad": {
     "message": "리플레이 파일이 올바르지 않아요",
     "description": "SPEC-product 5: strict import validation refused the object"
+  },
+  "setCollectLocalStats": {
+    "message": "기기 안 통계 수집",
+    "description": "SPEC-product 2: settings-schema.json collectLocalStats label"
+  },
+  "cwBad": {
+    "message": "사용자 정의 무기 항목이 올바르지 않아요",
+    "description": "SPEC-product 6: first rejected custom weapon, announced as a toast"
+  },
+  "optTitle": {
+    "message": "화면부수기 설정",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavSettings": {
+    "message": "설정",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavArsenal": {
+    "message": "무기고",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavTable": {
+    "message": "무기 비교",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavStats": {
+    "message": "통계",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavCustom": {
+    "message": "사용자 정의 무기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavReplay": {
+    "message": "리플레이",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavAbout": {
+    "message": "정보",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupGeneral": {
+    "message": "일반",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupCombat": {
+    "message": "전투",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupAccessibility": {
+    "message": "접근성",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupAdvanced": {
+    "message": "고급",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optResetGroup": {
+    "message": "이 그룹 되돌리기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optResetAll": {
+    "message": "전체 기본값으로 되돌리기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optResetDone": {
+    "message": "기본값으로 되돌렸어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optConfirmResetAll": {
+    "message": "모든 설정을 기본값으로 되돌릴까요?",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optSaved": {
+    "message": "저장했어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optInvalid": {
+    "message": "값이 올바르지 않아요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optArsenalTitle": {
+    "message": "무기고 편집기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optArsenalHint": {
+    "message": "드래그해서 로드아웃에 넣고 빼고, 순서를 바꾸세요. 빈 칸이 있어도 됩니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optArsenalAll": {
+    "message": "무기고 전체",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optLoadoutTitle": {
+    "message": "로드아웃",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optSlot": {
+    "message": "슬롯",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optEmptySlot": {
+    "message": "빈 칸",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAdd": {
+    "message": "넣기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optRemove": {
+    "message": "빼기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optLoadoutFull": {
+    "message": "로드아웃이 가득 찼어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatField": {
+    "message": "실전",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatSpecial": {
+    "message": "특수",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatFun": {
+    "message": "예능",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatCustom": {
+    "message": "사용자 정의",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optTableTitle": {
+    "message": "무기 비교표",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optSortHint": {
+    "message": "열 제목을 눌러 정렬합니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColWeapon": {
+    "message": "무기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColCat": {
+    "message": "범주",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColRole": {
+    "message": "역할",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColKind": {
+    "message": "동작",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColDamage": {
+    "message": "피해",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColInterval": {
+    "message": "쿨다운/틱",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColMag": {
+    "message": "탄창",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColReload": {
+    "message": "재장전",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColRadius": {
+    "message": "반경",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColSwap": {
+    "message": "교체",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColDps": {
+    "message": "화력",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColUptime": {
+    "message": "가동률",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColHandling": {
+    "message": "핸들링",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColEffective": {
+    "message": "실효 화력",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindHammer": {
+    "message": "근접",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindGun": {
+    "message": "사격",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindBomb": {
+    "message": "폭발",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindCollapse": {
+    "message": "붕괴",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsTitle": {
+    "message": "누적 통계",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsLocal": {
+    "message": "이 숫자는 이 기기 밖으로 나가지 않습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsOff": {
+    "message": "기기 안 통계 수집이 꺼져 있습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatSessions": {
+    "message": "사용 횟수",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatPlayed": {
+    "message": "총 사용 시간",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatDamage": {
+    "message": "누적 피해",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatBroken": {
+    "message": "부순 요소",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatKills": {
+    "message": "처치",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatRestores": {
+    "message": "복구",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatExits": {
+    "message": "종료",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatBest": {
+    "message": "최고 점수",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatFirstUse": {
+    "message": "처음 사용",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatLastUse": {
+    "message": "마지막 사용",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatAvgSession": {
+    "message": "평균 세션 길이",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatRestoreRatio": {
+    "message": "복구 비율",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatDays7": {
+    "message": "최근 7일 사용 일수",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatTopOrigins": {
+    "message": "상위 출처 10개",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColOrigin": {
+    "message": "출처",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColPlays": {
+    "message": "횟수",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColLast": {
+    "message": "마지막",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsEmpty": {
+    "message": "아직 기록이 없습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsReset": {
+    "message": "통계 초기화",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optConfirmStatsReset": {
+    "message": "누적 통계를 모두 지울까요? 챌린지 기록은 남습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsResetDone": {
+    "message": "통계를 지웠어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitDays": {
+    "message": "일",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitHours": {
+    "message": "시간",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitMinutes": {
+    "message": "분",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitSeconds": {
+    "message": "초",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomTitle": {
+    "message": "사용자 정의 무기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomHint": {
+    "message": "최대 10개까지 만들 수 있습니다. 무기고 끝에 붙고 로드아웃에 넣을 수 있습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomNew": {
+    "message": "예시 추가",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomSave": {
+    "message": "저장",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomDelete": {
+    "message": "삭제",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomExport": {
+    "message": "JSON 내보내기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomImport": {
+    "message": "JSON 가져오기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomSaved": {
+    "message": "사용자 정의 무기를 저장했어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomRejected": {
+    "message": "거절된 항목이 있어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomEmpty": {
+    "message": "아직 만든 무기가 없습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomFull": {
+    "message": "10개가 가득 찼어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomBadJson": {
+    "message": "JSON 이 올바르지 않아요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldId": {
+    "message": "아이디",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldEmoji": {
+    "message": "이모지",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldNameKo": {
+    "message": "이름 (한국어)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldNameEn": {
+    "message": "이름 (영어)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldKind": {
+    "message": "동작",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldDamage": {
+    "message": "피해",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldCooldown": {
+    "message": "쿨다운 (ms)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldMag": {
+    "message": "탄창 (비우면 무한)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldReload": {
+    "message": "재장전 (ms)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldRadius": {
+    "message": "반경 (px)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldTick": {
+    "message": "틱 (ms)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldCrack": {
+    "message": "자국",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldSound": {
+    "message": "소리",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayTitle": {
+    "message": "리플레이",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayHint": {
+    "message": "저장된 리플레이를 파일로 내보내고 다시 가져옵니다. 1MB 상한, 엄격 검증.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayExport": {
+    "message": "내보내기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayImport": {
+    "message": "가져오기",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayEmpty": {
+    "message": "저장된 리플레이가 없습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayImported": {
+    "message": "리플레이를 가져왔어요",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayOps": {
+    "message": "조작 수",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplaySavedAt": {
+    "message": "저장 시각",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutTitle": {
+    "message": "정보",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutVersion": {
+    "message": "버전",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutRepo": {
+    "message": "저장소",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutLicense": {
+    "message": "라이선스",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutPrivacy": {
+    "message": "네트워크 통신이 없습니다. 아무것도 수집하지 않고 어디로도 보내지 않습니다. 설정·통계·리플레이·사용자 정의 무기는 전부 이 브라우저 안에만 있습니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutPerms": {
+    "message": "권한",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutPermsValue": {
+    "message": "activeTab · scripting · storage — 이 셋뿐입니다.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvAuto": {
+    "message": "자동",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvOn": {
+    "message": "켬",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvOff": {
+    "message": "끔",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvDocument": {
+    "message": "문서",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvViewport": {
+    "message": "화면",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvSvg": {
+    "message": "SVG 그림",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvEmoji": {
+    "message": "이모지",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvQuiet": {
+    "message": "조용히",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvAlways": {
+    "message": "항상",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvBrackets": {
+    "message": "괄호",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvFull": {
+    "message": "전체",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvCross": {
+    "message": "십자",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvDot": {
+    "message": "점",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvCircle": {
+    "message": "원",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvWhite": {
+    "message": "흰색",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvGreen": {
+    "message": "초록",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvCyan": {
+    "message": "청록",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvMagenta": {
+    "message": "자홍",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvEasy": {
+    "message": "쉬움",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvNormal": {
+    "message": "보통",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvHard": {
+    "message": "어려움",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvQuality": {
+    "message": "품질",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvPerformance": {
+    "message": "성능",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvUnlimited": {
+    "message": "무제한",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvNone": {
+    "message": "없음",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColBroken": {
+    "message": "부순 요소",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColBest": {
+    "message": "최고 점수",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomEdit": {
+    "message": "편집",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
   }
 }
