@@ -162,23 +162,51 @@
     later(() => { if (fracGetCurve() === cu) fracSetCurve(null); }, 0);
     return hits.length;
   }
+  /* ══ SPEC-destruction §E4 — 순서가 있는 연출 ═══════════════════════════════════════════════════
+   * | 0ms | 흰 섬광(반지름 0.5R, 90ms), 흔들림 시작 · 충격파 링이 0 에서 R 까지 260ms 에 걸쳐 퍼진다
+   * | 0~60ms | 대상들이 차례로 부서진다 (aoeHit 의 edgeDist/4 스태거가 그대로 그 창이다)
+   * | 40ms | blastMark 를 그린다. 섬광이 걷히며 드러난다
+   * | 60~500ms | 중심에서 연기가 피어오른다
+   * Every size is R. `flash`'s `size` is a DIAMETER, so 반지름 0.5R 은 size R 이다. */
+  function blastFx(x, y, R, k, shakeOpts, W) {
+    flash(x, y, 'bomb', { size: R, dur: 90 });
+    ring(x, y, { r: R });
+    shake('bomb', shakeOpts);
+    later(() => { if (state.active) blastMark(x, y, R, k, { ink: 1, weapon: W || null }); }, 40);
+    for (let i = 0, n = reducedMotion() ? 0 : randInt(4, 7); i < n; i++) {
+      later(() => { if (state.active) smokePuff(x + rand(-0.12, 0.12) * R, y + rand(-0.12, 0.12) * R, { size: rand(0.12, 0.26) * R }); }, rand(60, 500));
+    }
+  }
+  /* §F4: 연소 중 요소가 폭발에 휘말리면 반경 ×1.15. The rings scale with it so the candidate sampling stays
+   * proportional; the weapon table itself is never written to — aoeHit() is handed a copy. */
+  function blastWeaponAt(x, y, W) {
+    const R = burnBlastRadius(x, y, W.radius);
+    if (R === W.radius) return W;
+    const k = R / W.radius;
+    return Object.assign({}, W, { radius: R, rings: (W.rings || []).map((r) => r * k) });
+  }
   function fireBomb(x, y) {
     state.shots++;
-    interceptOrbsWithin(x, y, WEAPONS.bomb.radius);   // v1.2 A9: every orb in the blast pops (+5 each) AND the page is hit
+    const W = blastWeaponAt(x, y, WEAPONS.bomb);
+    interceptOrbsWithin(x, y, W.radius);   // v1.2 A9: every orb in the blast pops (+5 each) AND the page is hit
     sfx('bomb');
-    flash(x, y, 'bomb'); ring(x, y); shake('bomb');
-    drawCrack(x, y, 'bomb', { ink: 1 });
-    aoeHit(x, y, WEAPONS.bomb);
+    blastFx(x, y, W.radius, 1, undefined, W);
+    /* §F5 (폭탄 범위 15) BEFORE the damage: aoeHit() destroys its nearest targets synchronously, and
+     * asking aoeCandidates() a second time afterwards would resolve the blast CENTRE to whatever is left
+     * under the point — usually the dead element's own container, which would then catch fire and char
+     * right across the gaps between its children. The fire is laid on the page the blast actually found. */
+    blastIgnite(x, y, W, BURN_BOMB_DIRECT, BURN_BOMB_SPLASH);
+    aoeHit(x, y, W);
     return null;
   }
   function rocketImpact(x, y) {
     if (!state.active) return;
-    interceptOrbsWithin(x, y, WEAPONS.rocket.radius);
+    const W = blastWeaponAt(x, y, WEAPONS.rocket);
+    interceptOrbsWithin(x, y, W.radius);
     sfx('bomb', { gain: 1.3 });
-    flash(x, y, 'bomb'); ring(x, y, { xl: true }); shake('bomb', { amp: 16, dur: 480 });
-    scorchDab(x, y, 140, 0.45);
-    drawCrack(x, y, 'bomb', { lenScale: 1.3, ink: 1 });
-    aoeHit(x, y, WEAPONS.rocket);
+    blastFx(x, y, W.radius, 1.5, { amp: 16, dur: 480 }, W);   // §E3: 로켓은 intensity 1.5
+    blastIgnite(x, y, W, BURN_ROCKET_DIRECT, BURN_ROCKET_SPLASH);   // §F5: 로켓 직격 25 · 범위 12 (see fireBomb for the order)
+    aoeHit(x, y, W);
     scheduleHud(); kick();
   }
   /* Rocket (A7): a bright capsule streaks from bottom-centre to the click point over 150 ms (WAAPI, tracked),
@@ -223,6 +251,11 @@
       later(kill, 1000);
     }
   }
+  /* SPEC-destruction §F6: 화염방사기는 틱 피해 15 → 8, 틱당 스택 9. "즉시 화력 최하위, 20초 누적 화력
+   * 최상위" — the damage the trigger does NOW is halved and the work is moved into the burn. The weapon
+   * table keeps its published `damage` (15) because that is what the HUD, the balance readout and
+   * api.weapons() mean by it; this is the per-tick number the flame actually applies. */
+  const FLAME_TICK_DMG = 8;
   function fireFlame(x, y, c) {
     state.shots++;
     const h = (c && c.hold && c.h) || null;
@@ -235,135 +268,20 @@
     let crit = false, win = null, dmg = 0;
     if (el) {   // roll before any sound / effect (A4)
       if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('flame');
-      dmg = rollDamage(WEAPONS.flame.damage, crit, falloffMul('flame', x, y));
+      dmg = rollDamage(FLAME_TICK_DMG, crit, falloffMul('flame', x, y));   // §F6: 15 → 8
     }
     spawnFire(x, y, 2);
-    if (!h || n % 4 === 0) { scorchDab(x, y, 24, 0.08); state.scorch++; }   // the glass blackens over time; no crack (A3/A9)
+    // §E3: 화염방사기의 기존 그을음은 blastMark(x, y, 24, 0.25) 로 통일한다 — no second scorch routine in the build
+    if (!h || n % 4 === 0) { blastMark(x, y, 24, 0.25, { count: false }); state.scorch++; }
     if (!h) sfx('puff', { crit });
     if (el) applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win, burnt: true });
-    /* SPEC-combat §B2: in a combat mode the flame LEAVES something behind — see the burning block below
-     * for why the ignition is scoped to the combat modes and not (yet) switched on in rampage. */
-    if (el && modeHasEnemies()) igniteEl(el, BURN_FLAME_STACKS);
+    /* §F5 불을 붙이는 무기: 화염방사기 틱당 9. SPEC-combat §B2 scoped this to the combat modes because
+     * the general case was step 6's to decide; step 6 decided — §F is the system, and fire burns in rampage
+     * too. (§F6 pays for it in the same breath by dropping the tick damage to 8.) */
+    if (el) igniteEl(el, BURN_FLAME_STACKS);
     return el;
   }
 
-  /* ══ SPEC-combat §B2: 상태 효과는 그대로 퍼진다 ═══════════════════════════════════════════
-   * 무적은 **피해에만** 적용된다. 불은 무적 요소에도 붙고 그 위로 번진다. 체력이 줄지 않으니 타기만
-   * 하지만, 불길이 **적에게 도달하면** 그때부터 실제 피해가 들어간다 — 불을 길처럼 깔아 적을 태우는
-   * 플레이가 성립하고, 무적이 플레이를 좁히는 대신 간접 공격 수단을 만든다.
-   *
-   * SCOPE — this is the SEED of SPEC-destruction §F (연소 시스템, 로드맵 6단계), not that system.
-   * What is here is the minimum §B2 actually claims, with §F's own names and numbers so step 6 extends
-   * rather than replaces: stacks 0–100, 지속 피해 초당 2 + stacks × 0.14 at 250 ms, 자연 감소 초당 6,
-   * 동시 연소 상한 20 (성능 모드 10), 확산 700 ms · stacks ≥ 45 · 24 px 인접 · 최대 2개 · ×0.35.
-   * What is NOT here, and is step 6's: §F3's flame overlay / scorch ramp / smoke / crackle loop, §F4's
-   * ash debris and the wet · frozen interaction table (neither state exists in this build — the water
-   * pistol and the freeze gun are roadmap step 8), §F5's per-weapon ignition table, §F6's 화염탄.
-   *
-   * TWO READINGS CHOSEN, both because §B2 is about combat and step 6 owns the general case:
-   *   · ignition is wired to the flamethrower ONLY, and only while modeHasEnemies(). Turning §F5's full
-   *     table on everywhere would re-balance rampage's flamethrower (a DoT on top of its unreduced 15
-   *     per tick — §F6 drops that to 8 in the same breath), and that trade is step 6's to make, not §B's.
-   *   · fire does not spread into an element's own ancestors or descendants. They are always "맞닿은"
-   *     by rect, so without this a single tick on a card would climb its whole wrapper chain in 700 ms.
-   *     §F2 says 인접 — "번진다", not "번져 올라간다" — so it spreads sideways.
-   *
-   * No page element is given an inline style by any of this (CLAUDE.md: 흔적을 남기지 않는다). The fire is
-   * drawn with the existing `.crs-fire` particles, which restore() already sweeps, and the ledger below is
-   * emptied by clearBurning() from clearCombatNodes(). */
-  const BURN_TICK_MS = 250;                              // §F1: 250 ms 마다 1/4씩
-  const BURN_DOT_BASE = 2, BURN_DOT_PER_STACK = 0.14;    // §F1: 지속 피해 초당 2 + stacks × 0.14
-  const BURN_DECAY = 6;                                  // §F1: 자연 감소 초당 6
-  const BURN_MAX = 100, BURN_MIN = 1;                    // §F1: stacks 0~100
-  const BURN_CAP = 20, BURN_CAP_PERF = 10;               // §F1: 동시 연소 상한 20 (성능 모드 10)
-  const BURN_SPREAD_MS = 700;                            // §F2: 700ms 마다 번질 곳을 찾는다
-  const BURN_SPREAD_MIN = 45;                            // §F2: stacks >= 45 일 때만
-  const BURN_SPREAD_GAP = 24;                            // §F2: rect 가 24px 이내로 맞닿거나 겹칠 것
-  const BURN_SPREAD_MAX = 2, BURN_SPREAD_MUL = 0.35;     // §F2: 최대 2개, stacks × 0.35, 원래 쪽은 줄지 않는다
-  const BURN_FLAME_STACKS = 9;                           // §F5: 화염방사기 틱당 9
-  /* A Map, not a WeakMap: every tick walks the whole set, so it has to be enumerable (§F1). */
-  const burning = new Map();
-  let burnTimer = 0;
-  function burnCap() { return perfOn() ? BURN_CAP_PERF : BURN_CAP; }
-  function burnAlive(el) {
-    if (!el || el.nodeType !== 1 || !el.isConnected || isOurs(el)) return false;
-    try { return !el.hasAttribute('data-crs-broken'); } catch (e) { return false; }
-  }
-  function igniteEl(el, stacks) {
-    if (!state.active || !burnAlive(el) || !(stacks > 0)) return null;
-    let rec = burning.get(el);
-    if (!rec) {
-      if (burning.size >= burnCap()) return null;
-      rec = { stacks: 0, spreadAt: now() };
-      burning.set(el, rec);
-    }
-    rec.stacks = clamp(rec.stacks + stacks, 0, BURN_MAX);
-    armBurn();
-    return rec;
-  }
-  function armBurn() {
-    if (burnTimer || !burning.size || !state.active) return;
-    burnTimer = later(burnStep, BURN_TICK_MS);
-  }
-  function clearBurning() { untrack(burnTimer); burnTimer = 0; burning.clear(); }
-  /* Gap between two rects — 0 when they touch or overlap. §F2 wants ADJACENCY, not distance between
-   * centres: fire that jumps a gap is teleportation, not fire. */
-  function rectGap(a, b) {
-    const dx = Math.max(a.left - b.right, b.left - a.right, 0);
-    const dy = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
-    return Math.hypot(dx, dy);
-  }
-  /* §F2: the three sparks that make the jump visible. Drawn with the flame particles already in use. */
-  function spreadSparks(a, b) {
-    const x = (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2;
-    const y = (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2;
-    if (isFinite(x) && isFinite(y) && !reducedMotion()) spawnFire(x, y, 3);
-  }
-  function burnSpread(el, rec, r) {
-    if (burning.size >= burnCap()) return;
-    /* descendCollected: a collected container is still walked INTO. Without it the walk stops at the first
-     * box under the limit — a section, say — and the cards inside it, which are the things that are actually
-     * 맞닿은, are never candidates at all. (§F2 names the 300 ms memo; walkCandidates keys it on these very
-     * options, so this stays a separate, correctly-cached signature.) */
-    const cands = walkCandidates(r.left + r.width / 2, r.top + r.height / 2, { limit: 0.7 * viewW() * viewH(), minArea: 1200, descendCollected: true });
-    let n = 0;
-    for (const c of cands) {
-      if (n >= BURN_SPREAD_MAX || burning.size >= burnCap()) break;
-      const o = c.el;
-      if (o === el || burning.has(o) || !burnAlive(o)) continue;
-      try { if (o.contains(el) || el.contains(o)) continue; } catch (e) { continue; }   // reading chosen: sideways only
-      if (rectGap(r, c.r) > BURN_SPREAD_GAP) continue;
-      if (igniteEl(o, rec.stacks * BURN_SPREAD_MUL)) { n++; spreadSparks(r, c.r); }
-    }
-  }
-  function burnStep() {
-    burnTimer = 0;
-    if (!state.active) { burning.clear(); return; }
-    const t = now(), dt = BURN_TICK_MS / 1000;
-    for (const [el, rec] of Array.from(burning)) {
-      if (!burnAlive(el)) { burning.delete(el); continue; }
-      const r = rectOf(el);
-      if (r && r.width >= 1 && r.height >= 1) {
-        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-        /* THE §B2 LINE. The element burns whatever it is; only the DAMAGE asks whether it may be hurt.
-         * An invulnerable element just chars, and the moment the fire has reached an enemy it bites —
-         * which is the whole indirect-attack route §B2 is paying for. */
-        if (damageable(el)) {
-          applyHit(el, Math.max(1, Math.round((BURN_DOT_BASE + rec.stacks * BURN_DOT_PER_STACK) * dt)), 'gun', cx, cy, { burnt: true, aoe: true, toward: { x: cx, y: cy } });
-        }
-        if (!reducedMotion() && state.fire.length < particleCap()) spawnFire(cx + rand(-r.width / 3, r.width / 3), cy + rand(-r.height / 3, r.height / 3), 1);
-        if (rec.stacks >= BURN_SPREAD_MIN && t - rec.spreadAt >= BURN_SPREAD_MS) { rec.spreadAt = t; burnSpread(el, rec, r); }
-      }
-      rec.stacks -= BURN_DECAY * dt;
-      if (rec.stacks < BURN_MIN) burning.delete(el);
-    }
-    if (burning.size) { burnTimer = later(burnStep, BURN_TICK_MS); kick(); }
-  }
-  /* §5 debug hooks: what is on fire, how hot, and whether the thing burning is the enemy or a wall. */
-  debug.burning = () => Array.from(burning, ([el, rec]) => ({
-    tag: tagOf(el).toUpperCase(), id: el.id || null, stacks: Math.round(rec.stacks), hostile: hostileUnit(el)
-  }));
-  debug.ignite = (el, stacks) => { const r = igniteEl(el, stacks == null ? 60 : +stacks); return r ? Math.round(r.stacks) : null; };
   /* One BFS for collapse AND the hostile picker (v1.2 A7). opts: { limit: max area to COLLECT, minArea,
    * descendCollected: keep walking into collected elements (hostile: nested cards), skip(el) }. Same visited
    * cap 2000 / out cap 60 / viewport-intersection and visibility rules as the v1 collapseCandidates. */
@@ -407,8 +325,12 @@
     cancelCollapse();
     sfx('rumble');
     pullOrbsIn(x, y);   // SPEC-combat §D4: 중력탄은 빨아들인다 (src/88-archetypes.js)
-    flash(x, y, 'collapse'); ring(x, y); shake('collapse');
-    drawCrack(x, y, 'bomb');
+    flash(x, y, 'collapse'); ring(x, y, { r: BOMB_RADIUS }); shake('collapse');
+    /* §E2: the collapse used to draw the (now deleted) `bomb` crack web. §A's table gives 붕괴 no mark of
+     * its own ("없음(즉시 파괴)"), but it has always left ONE on the page and `stats().cracks` counts it, so
+     * it keeps a mark and takes the blast one — INTERPRETATION, reported. Its radius is Infinity, so it
+     * borrows the bomb's 240 px exactly as blastWeapon() already did for its decal targets. */
+    blastMark(x, y, BOMB_RADIUS, 0.9, { ink: 1 });
     const cands = collapseCandidates(x, y);
     const textIdx = new Set();
     for (const c of cands) { if (textIdx.size >= 8) break; if (textDominant(c.el)) textIdx.add(c.el); }

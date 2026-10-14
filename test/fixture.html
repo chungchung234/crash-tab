@@ -210,6 +210,23 @@
     <div id="fire-enemy" class="fire-enemy">적 후보</div>
     <div id="fire-far" class="fire-far">떨어진 카드</div>
   </section>
+
+  <!-- SPEC-destruction §F2 (연소 확산): a row of cards that really TOUCH, plus a control 40 px away.
+       Why the MIDDLE card is the one a test lights: §F2 moves fire to at most two neighbours per 700 ms
+       tick and a neighbour receives stacks × 0.35, which is under the 45 needed to spread again — so a
+       chain A→B→C cannot carry a 60-stack ignition, and only a card adjacent to BOTH others can light
+       both. #burn-b is that card.
+       All four are 200 × 90 = 18 000 px², under every hostile floor, so no combat mode can turn one into
+       an enemy and the row behaves identically in rampage and survival. #burn-off sits 40 px past
+       #burn-c — outside §F2's 24 px adjacency — so "it spread" is told apart from "everything nearby
+       caught". -->
+  <h2 class="section-title">연소 확산 격자</h2>
+  <section id="burn-row" class="burn-row">
+    <div id="burn-a" class="burn-card">카드 A</div>
+    <div id="burn-b" class="burn-card">카드 B</div>
+    <div id="burn-c" class="burn-card">카드 C</div>
+    <div id="burn-off" class="burn-card burn-off">떨어진 카드</div>
+  </section>
 </main>
 </body>
 </html>

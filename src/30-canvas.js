@@ -20,9 +20,11 @@
   }
 
   /* Per-WEAPON profile: how big the mark is and how many strands it has (unchanged from v1). */
+  /* SPEC-destruction §E2: the `bomb` profile is GONE. 거미줄 균열은 맞아서 깨진 자국이지 폭발 자국이
+   * 아니다 — a blast now goes through blastMark() below, whose every size is a fraction of the weapon's
+   * real radius, and nothing here is reachable with kind === 'bomb' any more. */
   const CRACK = {
     hammer: { rays: [9, 14], len: [90, 190], rings: [0.3, 0.62], w0: 2.0, w1: 0.6, alpha: 0.55 },
-    bomb: { rays: [14, 22], len: [220, 420], rings: [0.28, 0.55, 0.8], w0: 2.6, w1: 0.7, alpha: 0.55 },
     gun: { rays: [5, 8], len: [22, 60], rings: [0.18, 0.35, 0.6], w0: 1.3, w1: 0.4, alpha: 0.4 },
     smg: { rays: [3, 5], len: [8, 20], rings: [0.3, 0.6], w0: 1.0, w1: 0.35, alpha: 0.4 }   // per smg shot (A6)
   };
@@ -95,7 +97,7 @@
     const grow = (pxv, pyv) => { if (pxv < minX) minX = pxv; if (pxv > maxX) maxX = pxv; if (pyv < minY) minY = pyv; if (pyv > maxY) maxY = pyv; };
     for (const r of rays) for (const p of r.pts) grow(p[0], p[1]);
     for (const b of branches) for (const p of b.pts) grow(b.ox + p[0], b.oy + p[1]);
-    const margin = (kind === 'bomb' ? 96 : 20);
+    const margin = 20;
     minX -= margin; minY -= margin; maxX += margin; maxY += margin;
     const bw = Math.ceil(maxX - minX), bh = Math.ceil(maxY - minY);
     const D = decalDpr();
@@ -109,12 +111,6 @@
       octx.setTransform(D, 0, 0, D, -minX * D, -minY * D);
     } catch (e) { return null; }
     octx.lineCap = 'round'; octx.lineJoin = 'round';
-    // bomb scorch under the mark
-    if (kind === 'bomb') {
-      const g = octx.createRadialGradient(0, 0, 0, 0, 0, 90);
-      g.addColorStop(0, 'rgba(20,15,10,0.45)'); g.addColorStop(1, 'rgba(20,15,10,0)');
-      octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, 90, 0, Math.PI * 2); octx.fill();
-    }
     // §4 plastic / panel: the material whitens around the impact before it cracks
     if (M.blotch > 0) {
       const r0 = Math.max(12, maxLen * 0.45);
@@ -204,7 +200,7 @@
       octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, 7, 0, Math.PI * 2); octx.fill();
       octx.strokeStyle = 'rgba(255,255,255,0.8)'; octx.lineWidth = 0.8; octx.beginPath(); octx.arc(0, 0, 8, 0, Math.PI * 2); octx.stroke();
     } else if (M.core === 'spark') {
-      const r0 = kind === 'bomb' ? 26 : 14;
+      const r0 = 14;
       const g = octx.createRadialGradient(0, 0, 0, 0, 0, r0);
       g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(1, 'rgba(255,255,255,0)');
       octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, r0, 0, Math.PI * 2); octx.fill();
@@ -221,8 +217,13 @@
       octx.fillStyle = ink.ink; octx.fill();
       octx.strokeStyle = ink.light; octx.lineWidth = 1.2; octx.stroke();
     }
+    /* §G read-back: the crack web's longest strand. §E's blast mark caps its own polylines at 0.25R, so
+     * "폭발 자국과 망치 자국이 외곽 폴리라인으로 구분된다" is a comparison of these two numbers. */
+    debug.lastMarkRec = { kind, mat, rays: nRays, maxLen: Math.round(maxLen) };
     return { off, minX, minY, bw, bh, maxLen };
   }
+  debug.lastMarkRec = null;
+  debug.lastMark = () => debug.lastMarkRec;
 
   /* ── which elements one shot marks ──
    * A point weapon marks exactly the element it hit. A blast marks the elements it actually DAMAGED: the
@@ -233,17 +234,8 @@
     const ok = W && typeof W.radius === 'number' && isFinite(W.radius) && W.radius > 0 && Array.isArray(W.rings);
     return ok ? W : WEAPONS.bomb;   // collapse's radius is Infinity: fall back to the bomb's 240 px
   }
-  function decalTargetsForBlast(x, y) {
-    const W = blastWeapon();
-    let cands = [];
-    try { cands = aoeCandidates(x, y, W.radius, Math.min(W.maxTargets || 10, DECAL_MAX_TARGETS), W.rings, true); } catch (e) { cands = []; }
-    const out = [];
-    for (const c of cands) { const rec = ensureDecal(c.el); if (rec) out.push(rec); }
-    if (!out.length) { const rec0 = ensureDecal(decalTargetAt(x, y)); if (rec0) out.push(rec0); }
-    return out;
-  }
   function decalTargetsFor(x, y, radius) {
-    if (radius > 0) return decalTargetsForBlast(x, y);
+    if (radius > 0) return blastTargets(x, y, radius, blastWeapon());
     const rec = ensureDecal(decalTargetAt(x, y));
     return rec ? [rec] : [];
   }
@@ -257,7 +249,7 @@
     state.cracks++;
     state.crackInk += (opts.ink != null ? opts.ink : 1);
     if (!root) return;
-    const radius = opts.radius != null ? opts.radius : (kind === 'bomb' ? BOMB_RADIUS : 0);
+    const radius = opts.radius != null ? opts.radius : 0;   // §E2: no kind implies a radius any more
     const recs = decalTargetsFor(x, y, radius);
     if (!recs.length) return;
     const tiles = new Map();      // material id -> tile
@@ -358,18 +350,151 @@
     };
     later(paint, SLASH_SCAR_MS);
   }
-  /* Scorch dab (flame every 4th tick r 24 / rocket impact r 140, A7 / A9) — burnt into the elements it
-   * touches, never onto the page behind them. */
-  function scorchDab(x, y, r, a) {
-    if (!root) return;
-    const recs = decalTargetsFor(x, y, r > 60 ? r : 0);
-    for (const rec of recs) {
-      try {
-        const c = rec.ctx;
-        const lx = x - rec.left, ly = y - rec.top;
-        const g = c.createRadialGradient(lx, ly, 0, lx, ly, r);
-        g.addColorStop(0, 'rgba(30,20,10,' + a + ')'); g.addColorStop(1, 'rgba(30,20,10,0)');
-        c.fillStyle = g; c.beginPath(); c.arc(lx, ly, r, 0, Math.PI * 2); c.fill();
-      } catch (e) { /* ignore */ }
+  /* ══ SPEC-destruction §E — 폭발 자국 ═══════════════════════════════════════════════════════════
+   * §E1's diagnosis: four numbers that had nothing to do with each other — 실제 반경 240/360, 그을음 90
+   * 고정, 균열 220~420, 링 480 고정. Everything below is a FRACTION OF R, the weapon's own radius, and
+   * the shock ring (src/35-effects.js) and the crosshair's dashed circle (src/51-crosshair.js) are sized
+   * from the same WEAPONS[id].radius — §E5's "세 곳이 같은 상수를 쓴다".
+   *
+   * §E2 also changes WHAT is left behind. 거미줄 균열은 맞아서 깨진 자국이다; 폭발이 남기는 것은
+   * 그을음·검댕·분출 흔적·그을린 테두리다. The five layers below are §E3's, in §E3's order:
+   *   1 그을음 중심 (0.42R, 24각형 ±12% 지터)  2 검댕 흩뿌림 (0.42R~0.85R)  3 분출 줄기 (곧은 선)
+   *   4 중심부 짧은 균열 (상한 0.25R)           5 열 테두리 (0.42R)
+   * Layers 3 and 4 must READ differently: a jet is a straight line of force, a crack is a bent, branching
+   * polyline of brittle failure. That is why the jets are filled tapering triangles and the cracks are the
+   * only polylines in the mark.
+   *
+   * The geometry is generated ONCE in viewport space and then drawn into EACH affected element's decal in
+   * that element's own local frame (§E3, 1단계 모델): one coherent mark, cut along the real boundaries
+   * between things, with nothing left in the gaps between them. */
+  const BLAST_SOOT = 0.42;      // §E3-1 그을음 중심 반지름 / §E3-5 열 테두리
+  const BLAST_SCATTER = 0.85;   // §E3-2 검댕이 날아간 바깥 끝
+  const BLAST_CRACK = 0.25;     // §E3-4 중심부 균열 길이 상한
+  function blastGeometry(x, y, R, k) {
+    const blob = [];
+    for (let i = 0; i < 24; i++) {                      // 1. 완전한 원이면 폭발로 안 보인다
+      const a = (i / 24) * Math.PI * 2, d = BLAST_SOOT * R * rand(0.88, 1.12);
+      blob.push([x + Math.cos(a) * d, y + Math.sin(a) * d]);
     }
+    /* 2. 검댕: 밀도는 반지름에 반비례 — uniform in r (an area-uniform scatter would crowd the rim).
+     * Stratified over [0.42R, 0.85R] so the outermost sample really does reach the layer's edge instead of
+     * landing wherever 60–110 independent draws happen to stop: "바깥으로 날아갔다" is the whole point of
+     * this layer and §G measures exactly that distance. */
+    const soot = [], nSoot = randInt(60, 110);
+    let sootOuter = 0;
+    for (let i = 0; i < nSoot; i++) {
+      const lo = BLAST_SOOT + (BLAST_SCATTER - BLAST_SOOT) * (i / nSoot);
+      const hi = BLAST_SOOT + (BLAST_SCATTER - BLAST_SOOT) * ((i + 1) / nSoot);
+      const a = rand(0, Math.PI * 2), d = rand(lo, hi) * R;
+      soot.push([x + Math.cos(a) * d, y + Math.sin(a) * d, rand(1, 3)]);
+      if (d > sootOuter) sootOuter = d;
+    }
+    // 3. 분출 줄기: 10~16개, 0.15R 에서 0.6R~1.0R 까지. 로켓(intensity 1.5)은 1.1R 까지 닿는 3~5개를 더 얹는다
+    const jets = [];
+    let jetOuter = 0;
+    const addJet = (far) => {
+      const a = rand(0, Math.PI * 2), r0 = 0.15 * R, r1 = far * R;
+      const ux = Math.cos(a), uy = Math.sin(a), nx = -uy, ny = ux, w = 1.5;
+      jets.push([
+        [x + ux * r0 + nx * w, y + uy * r0 + ny * w],
+        [x + ux * r0 - nx * w, y + uy * r0 - ny * w],
+        [x + ux * r1, y + uy * r1]
+      ]);
+      if (r1 > jetOuter) jetOuter = r1;
+    };
+    for (let i = 0, n = randInt(10, 16); i < n; i++) addJet(rand(0.6, 1.0));
+    if (k >= 1.5) for (let i = 0, n = randInt(3, 5); i < n; i++) addJet(rand(1.0, 1.1));
+    // 4. 중심부 짧은 균열: 5~8개만, 길이 상한 0.25R. The only bent polylines in the mark.
+    const cracks = [];
+    let crackMax = 0;
+    for (let i = 0, n = randInt(5, 8); i < n; i++) {
+      const len = rand(0.45, 1) * BLAST_CRACK * R;
+      const ray = makeRay(rand(0, Math.PI * 2), len, 0.9);
+      cracks.push(ray.pts.map((p) => [x + p[0], y + p[1]]));
+      if (ray.len > crackMax) crackMax = ray.len;
+    }
+    return { x, y, R, k, blob, soot, jets, cracks, sootOuter, jetOuter, crackMax };
   }
+  function paintBlast(rec, g) {
+    const c = rec.ctx;
+    if (!c) return;
+    const ox = rec.left, oy = rec.top, k = g.k, R = g.R;
+    const lx = g.x - ox, ly = g.y - oy;
+    try {
+      c.save();
+      c.lineCap = 'round'; c.lineJoin = 'round';
+      // 1. 그을음 중심 — rgba(18,12,8,.55) → 0.75 에서 .18 → 가장자리 0
+      const rad = c.createRadialGradient(lx, ly, 0, lx, ly, BLAST_SOOT * R);
+      rad.addColorStop(0, 'rgba(18,12,8,' + clamp(0.55 * k, 0, 1).toFixed(3) + ')');
+      rad.addColorStop(0.75, 'rgba(18,12,8,' + clamp(0.18 * k, 0, 1).toFixed(3) + ')');
+      rad.addColorStop(1, 'rgba(18,12,8,0)');
+      c.fillStyle = rad;
+      c.beginPath();
+      for (let i = 0; i < g.blob.length; i++) { const p = g.blob[i]; if (i === 0) c.moveTo(p[0] - ox, p[1] - oy); else c.lineTo(p[0] - ox, p[1] - oy); }
+      c.closePath(); c.fill();
+      // 2. 검댕 흩뿌림
+      c.fillStyle = 'rgba(16,11,7,' + clamp(0.5 * k, 0, 1).toFixed(3) + ')';
+      for (const s of g.soot) c.fillRect(s[0] - ox, s[1] - oy, s[2], s[2]);
+      // 3. 분출 줄기 — 뿌리 3px, 끝 0 으로 가늘어지는 곧은 선
+      c.fillStyle = 'rgba(20,14,9,' + clamp(0.42 * k, 0, 1).toFixed(3) + ')';
+      for (const j of g.jets) {
+        c.beginPath();
+        c.moveTo(j[0][0] - ox, j[0][1] - oy);
+        c.lineTo(j[1][0] - ox, j[1][1] - oy);
+        c.lineTo(j[2][0] - ox, j[2][1] - oy);
+        c.closePath(); c.fill();
+      }
+      // 4. 중심부 짧은 균열
+      c.strokeStyle = 'rgba(14,16,20,' + clamp(0.5 * k, 0, 1).toFixed(3) + ')';
+      c.lineWidth = 1.2;
+      c.beginPath();
+      for (const poly of g.cracks) for (let i = 0; i < poly.length; i++) { if (i === 0) c.moveTo(poly[0][0] - ox, poly[0][1] - oy); else c.lineTo(poly[i][0] - ox, poly[i][1] - oy); }
+      c.stroke();
+      // 5. 열 테두리
+      c.strokeStyle = 'rgba(255,228,196,' + clamp(0.18 * k, 0, 1).toFixed(3) + ')';
+      c.lineWidth = 2;
+      c.beginPath(); c.arc(lx, ly, BLAST_SOOT * R, 0, Math.PI * 2); c.stroke();
+      c.restore();
+    } catch (e) { /* ignore */ }
+  }
+  /* §E3: the ONE entry point for every blast mark — 폭탄 · 로켓 · 붕괴, and 화염방사기's own soot, which
+   * §E3 unifies as blastMark(x, y, 24, 0.25) so there is no second scorch routine left in the build. */
+  function blastMark(x, y, R, intensity, opts) {
+    opts = opts || {};
+    /* `count: false` — the flamethrower's 24 px dab. §E3 unifies it onto this path, but a scorch is not a
+     * crack: `stats().cracks` still means "a mark a BLOW drew", which is what A3 and §9 assert on. */
+    if (opts.count !== false) { state.cracks++; state.crackInk += (opts.ink != null ? opts.ink : 1); }
+    if (!root) return null;
+    R = (isFinite(R) && R > 0) ? R : BOMB_RADIUS;
+    const k = (isFinite(intensity) && intensity > 0) ? intensity : 1;
+    const g = blastGeometry(x, y, R, k);
+    debug.lastBlastRec = {
+      x: Math.round(x), y: Math.round(y), R: Math.round(R), intensity: k,
+      soot: Math.round(BLAST_SOOT * R), sootOuter: Math.round(g.sootOuter),
+      jets: g.jets.length, jetOuter: Math.round(g.jetOuter),
+      cracks: g.cracks.length, crackMax: Math.round(g.crackMax), scatter: Math.round(BLAST_SCATTER * R)
+    };
+    const recs = blastTargets(x, y, R, opts.weapon || null);
+    if (!recs.length) return debug.lastBlastRec;
+    for (const rec of recs) paintBlast(rec, g);
+    kick();
+    return debug.lastBlastRec;
+  }
+  /* Which decals one blast paints into. Above 60 px it is the same aoeCandidates() set the weapon resolves,
+   * so the mark and the damage agree; below it (the flamethrower's 24 px dab) it is the single element the
+   * point is over, exactly as a point weapon's mark. */
+  function blastTargets(x, y, R, W) {
+    if (!(R > 60)) { const rec0 = ensureDecal(decalTargetAt(x, y)); return rec0 ? [rec0] : []; }
+    /* The weapon's OWN rings and target cap when there is one, so the mark lands on exactly the elements
+     * aoeHit() damaged; the proportional fallback is for a blast with no weapon behind it (the collapse). */
+    const rings = (W && Array.isArray(W.rings) && W.rings.length) ? W.rings : [0.25 * R, 0.55 * R, 0.9 * R];
+    const maxT = Math.min((W && W.maxTargets) || 10, DECAL_MAX_TARGETS);
+    let cands = [];
+    try { cands = aoeCandidates(x, y, R, maxT, rings, true); } catch (e) { cands = []; }
+    const out = [];
+    for (const c of cands) { const rec = ensureDecal(c.el); if (rec) out.push(rec); }
+    if (!out.length) { const rec0 = ensureDecal(decalTargetAt(x, y)); if (rec0) out.push(rec0); }
+    return out;
+  }
+  debug.lastBlastRec = null;
+  debug.lastBlast = () => debug.lastBlastRec;
