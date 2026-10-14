@@ -10,6 +10,9 @@
   WEAPONS.shockwave.fire = fireShockwave; WEAPONS.tractor.fire = fireTractor; WEAPONS.rubber.fire = fireRubber;
   WEAPONS.squeaky.fire = fireSqueaky; WEAPONS.watergun.fire = fireWater; WEAPONS.horn.fire = fireHorn;
   WEAPONS.chicken.fire = fireChicken;
+  /* ── SPEC-arsenal §E 무기 다양화 (샷건 · 못총 · 냉각총 · 중력탄) ── */
+  WEAPONS.shotgun.fire = fireShotgun; WEAPONS.nailgun.fire = fireNailgun;
+  WEAPONS.freezegun.fire = fireFreezegun; WEAPONS.gravity.fire = fireGravity;
 
   /* --- actions (A3 ordering + v1.2 A5 gates): mount → cooldown → swap delay → spend → counters/combo/swing → fire → HUD --- */
   function action(id, x, y, run) {

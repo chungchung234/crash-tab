@@ -490,5 +490,29 @@
   "presetFun": {
     "message": "Fun",
     "description": "SPEC-arsenal D: loadout preset built around the joke weapons"
+  },
+  "weaponShotgun": {
+    "message": "Shotgun",
+    "description": "SPEC-arsenal E: shotgun — nine pellets in a cone, hits a cluster of small elements at once, reloads one shell at a time"
+  },
+  "weaponNailgun": {
+    "message": "Nail Gun",
+    "description": "SPEC-arsenal E: nail gun — pins debris in place, pinned pieces stop in mid air and ignore the debris lifetime"
+  },
+  "weaponFreezegun": {
+    "message": "Freeze Gun",
+    "description": "SPEC-arsenal E: freeze gun — frozen elements take 1.8x damage, break into 2.5x pieces and enemies stop for 2 s"
+  },
+  "weaponGravity": {
+    "message": "Gravity Round",
+    "description": "SPEC-arsenal E: gravity round — pulls debris and enemy projectiles into one point, zero direct damage"
+  },
+  "presetBreach": {
+    "message": "Breach",
+    "description": "SPEC-arsenal E: loadout preset built around the shotgun and the nail gun"
+  },
+  "presetCombo": {
+    "message": "Combo",
+    "description": "SPEC-arsenal E: loadout preset for the soak then freeze then smash chain"
   }
 }

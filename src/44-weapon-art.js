@@ -1098,6 +1098,190 @@
         poly([[45, 24], [48, 26], [45, 28]], c.mat('hot', 'h'), { 'data-part': 'beak' }),
         artPath('M24,36 Q22,41 18,44 L20,45 Q26,41 27,37 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' })
       ]
+    },
+
+    /* ───────── 샷건 · SPEC-arsenal §E ─────────
+     * 상하 2연 총열에 나무 개머리판과 앞으로 뺀 펌프 손잡이. 무기고에서 유일하게 **총구가 둘**이라
+     * 24px 에서도 샷건으로 읽힌다 — 아이콘은 그 두 개의 구멍과 개머리판 경사만 남긴다. */
+    shotgun: {
+      detail: (c) => [
+        artPath('M12,78 Q22,62 44,58 L58,56 L62,84 L34,94 Q16,96 12,78 Z', c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        artPath('M12,78 Q22,62 44,58 L58,56 L57.6,60 L44,62 Q24,66 15.4,80 Z', RIM2),
+        artPath('M34,94 Q52,92 62,84 L62,88 Q50,97 35,98 Z', SEAM2),
+        artRect(56, 54, 26, 34, c.cyl('metal', 'v'), 3, { 'data-part': 'receiver' }),
+        artRect(57, 55, 24, 2.4, RIM, 1.2),
+        artRect(56, 86, 26, 2.4, SEAM, 1.2),
+        artRect(62, 88, 10, 14, c.mat('dark', 'd'), 2, { 'data-part': 'trigger-guard' }),
+        artPath('M66,90 Q70,98 66,102 Q63,97 66,90 Z', ART.dark[2], { 'data-part': 'trigger' }),
+        artRect(80, 56, 24, 12, c.cyl('rubber', 'v'), 3, { 'data-part': 'pump' }),
+        artRect(81, 57, 22, 1.8, RIM2, 0.9),
+        artRect(84, 58, 2, 8, SEAM2),
+        artRect(90, 58, 2, 8, SEAM2),
+        artRect(96, 58, 2, 8, SEAM2),
+        artRect(80, 58, 128, 13, c.cyl('metal', 'v'), 5, { 'data-part': 'barrel-top' }),
+        artRect(80, 59, 128, 2.2, RIM, 1.1),
+        artRect(80, 72, 128, 13, c.cyl('metal', 'v'), 5, { 'data-part': 'barrel-bottom' }),
+        artRect(80, 73, 128, 1.8, RIM2, 0.9),
+        artRect(80, 70, 128, 2.6, SEAM, 1.3),
+        artEllipse(207, 64.5, 5, 6.5, c.cyl('metal', 'h'), { 'data-part': 'muzzle-top' }),
+        artEllipse(207, 64.5, 2.6, 4.2, ART.dark[1], { 'data-part': 'bore' }),
+        artEllipse(207, 78.5, 5, 6.5, c.cyl('metal', 'h'), { 'data-part': 'muzzle-bottom' }),
+        artEllipse(207, 78.5, 2.6, 4.2, ART.dark[1], { 'data-part': 'bore' }),
+        artRect(196, 56, 4, 6, c.mat('metal', 'h'), 1, { 'data-part': 'bead' }),
+        artRect(104, 86, 46, 9, c.cyl('brass', 'v'), 3, { 'data-part': 'shell' }),
+        artRect(104, 87, 46, 1.6, RIM2, 0.8),
+        artRect(104, 86, 11, 9, c.mat('brass', 'h'), 2, { 'data-part': 'shell-rim' }),
+        artRect(148, 88, 6, 5, c.mat('accent', 'd'), 1.5, { 'data-part': 'shell-tip' }),
+        artCircle(70, 72, 3.2, ART.dark[2], { 'data-part': 'pin' }),
+        artRect(84, 96, 30, 4, 'rgba(0,0,0,.16)', 2, { 'data-part': 'shade' }),
+        artEllipse(150, 92, 34, 4, 'rgba(0,0,0,.14)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artPath('M2,30 Q6,22 16,20 L22,19 L24,32 L10,37 Q3,37 2,30 Z', c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        artRect(20, 18, 10, 14, c.cyl('metal', 'v'), 2, { 'data-part': 'receiver' }),
+        artRect(28, 19, 20, 6, c.cyl('metal', 'v'), 2.5, { 'data-part': 'barrel-top' }),
+        artRect(28, 26, 20, 6, c.cyl('metal', 'v'), 2.5, { 'data-part': 'barrel-bottom' }),
+        artCircle(45, 22, 2, ART.dark[1], { 'data-part': 'bore' }),
+        artCircle(45, 29, 2, ART.dark[1], { 'data-part': 'bore' }),
+        artRect(22, 32, 6, 7, c.mat('dark', 'd'), 1.5, { 'data-part': 'trigger-guard' }),
+        artRect(29, 20, 19, 1.4, RIM, 0.7)
+      ]
+    },
+
+    /* ───────── 못총 · SPEC-arsenal §E ─────────
+     * 공구다. 총이 아니라 **박는 물건**이라는 것이 실루엣에서 읽혀야 해서, 비스듬히 꽂힌 못 탄창 띠와
+     * 코끝의 접촉 안전핀을 가장 크게 그렸다. 못 세 자루가 띠 밖으로 나와 있다. */
+    nailgun: {
+      detail: (c) => [
+        artPath('M44,100 L70,54 L92,62 L66,112 Z', c.cyl('metal', 'r'), { 'data-part': 'magazine' }),
+        artPath('M44,100 L70,54 L72.6,55 L47,101 Z', RIM2),
+        artPath('M50,96 L74,60 L78,62 L54,98 Z', c.mat('dark', 'v'), { 'data-part': 'nail-strip' }),
+        artRect(52, 86, 3, 16, ART.metal[0], 0, { 'data-part': 'nail' }),
+        artRect(58, 78, 3, 16, ART.metal[1], 0, { 'data-part': 'nail' }),
+        artRect(64, 70, 3, 16, ART.metal[0], 0, { 'data-part': 'nail' }),
+        artRect(62, 48, 96, 40, c.cyl('accent', 'v'), 8, { 'data-part': 'body' }),
+        artRect(64, 50, 92, 3, RIM, 1.5),
+        artRect(62, 84, 96, 3, SEAM, 1.5),
+        artPath('M70,48 Q104,36 140,44 L140,50 Q106,42 72,53 Z', 'rgba(255,122,125,.55)', { 'data-part': 'shell-light' }),
+        artRect(94, 60, 44, 16, c.mat('dark', 'd'), 4, { 'data-part': 'vent' }),
+        artRect(100, 63, 3, 10, ART.dark[2]),
+        artRect(108, 63, 3, 10, ART.dark[2]),
+        artRect(116, 63, 3, 10, ART.dark[2]),
+        artRect(124, 63, 3, 10, ART.dark[2]),
+        artPath('M62,88 L86,88 L80,118 L56,118 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M62,88 L86,88 L85.2,91.4 L61.4,91.4 Z', RIM2),
+        artRect(84, 88, 12, 5, c.mat('dark', 'v'), 2, { 'data-part': 'trigger' }),
+        artRect(156, 54, 34, 28, c.cyl('metal', 'v'), 4, { 'data-part': 'nose-housing' }),
+        artRect(157, 55, 32, 2.2, RIM, 1.1),
+        artRect(186, 60, 20, 16, c.cyl('metal', 'h'), 3, { 'data-part': 'nose' }),
+        artRect(204, 64, 10, 8, c.mat('dark', 'd'), 2, { 'data-part': 'tip' }),
+        artRect(212, 66, 14, 4, ART.metal[0], 1, { 'data-part': 'driven-nail' }),
+        artRect(224, 63, 4, 10, c.mat('metal', 'h'), 1, { 'data-part': 'nail-head' }),
+        artPath('M188,52 L200,52 L198,60 L186,60 Z', c.mat('brass', 'd'), { 'data-part': 'safety' }),
+        artCircle(80, 68, 4, ART.dark[2], { 'data-part': 'pivot' }),
+        artCircle(81.2, 66.6, 1.5, RIM),
+        artEllipse(110, 120, 40, 5, 'rgba(0,0,0,.16)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artPath('M8,40 L17,18 L26,22 L17,44 Z', c.cyl('metal', 'r'), { 'data-part': 'magazine' }),
+        artRect(14, 14, 22, 14, c.cyl('accent', 'v'), 3, { 'data-part': 'body' }),
+        artRect(15, 15, 20, 1.6, RIM, 0.8),
+        artPath('M14,28 L23,28 L20,42 L11,42 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(35, 17, 9, 9, c.cyl('metal', 'h'), 2, { 'data-part': 'nose' }),
+        artRect(42, 20, 6, 3, ART.metal[0], 1, { 'data-part': 'nail' }),
+        artRect(24, 18, 9, 5, c.mat('dark', 'd'), 1.5, { 'data-part': 'vent' })
+      ]
+    },
+
+    /* ───────── 냉각총 · SPEC-arsenal §E ─────────
+     * 등에 지는 냉매 탱크에서 호스가 나와 뭉툭한 노즐로 들어간다. 노즐 앞에는 서리 결정 셋 —
+     * 화염방사기와 같은 골격을 쓰되 모든 뜨거운 색을 유리/금속의 찬 색으로 바꿔 쌍을 이루게 했다. */
+    freezegun: {
+      detail: (c) => [
+        artRect(14, 40, 40, 72, c.cyl('metal', 'h'), 14, { 'data-part': 'tank' }),
+        artRect(16, 42, 36, 4, RIM, 2),
+        artRect(14, 104, 40, 4, SEAM, 2),
+        artEllipse(34, 42, 20, 7, c.cyl('metal', 'v'), { 'data-part': 'tank-cap' }),
+        artRect(28, 28, 12, 14, c.mat('dark', 'v'), 3, { 'data-part': 'valve' }),
+        artCircle(34, 28, 7, c.cyl('brass', 'd'), { 'data-part': 'wheel' }),
+        artCircle(34, 28, 3, ART.dark[2]),
+        artRect(20, 58, 28, 22, c.mat('gloss', 'v'), 3, { 'data-part': 'gauge-plate' }),
+        artCircle(34, 69, 9, c.cyl('gloss', 'd'), { 'data-part': 'gauge' }),
+        artPath('M34,69 L40,63 L41.6,65 Z', ART.dark[2], { 'data-part': 'needle' }),
+        artPath('M54,66 Q82,58 96,70 Q84,78 56,76 Z', c.cyl('rubber', 'd'), { 'data-part': 'hose' }),
+        artPath('M54,66 Q82,58 96,70 L94,72 Q82,62 55,69 Z', RIM2),
+        artRect(94, 56, 44, 32, c.cyl('metal', 'v'), 6, { 'data-part': 'body' }),
+        artRect(95, 57, 42, 2.4, RIM, 1.2),
+        artRect(94, 85, 44, 3, SEAM, 1.5),
+        artPath('M100,88 L124,88 L118,118 L94,118 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M100,88 L124,88 L123.2,91.4 L99.4,91.4 Z', RIM2),
+        artRect(122, 88, 12, 5, c.mat('dark', 'v'), 2, { 'data-part': 'trigger' }),
+        artRect(136, 60, 54, 24, c.cyl('metal', 'h'), 5, { 'data-part': 'nozzle' }),
+        artRect(136, 61, 54, 2, RIM2, 1),
+        artRect(150, 56, 6, 32, c.mat('gloss', 'v'), 2, { 'data-part': 'fin' }),
+        artRect(162, 56, 6, 32, c.mat('gloss', 'v'), 2, { 'data-part': 'fin' }),
+        artRect(174, 56, 6, 32, c.mat('gloss', 'v'), 2, { 'data-part': 'fin' }),
+        artEllipse(190, 72, 7, 14, c.cyl('gloss', 'h'), { 'data-part': 'mouth' }),
+        artEllipse(190, 72, 3.6, 10, ART.dark[1], { 'data-part': 'bore' }),
+        artPath('M202,58 L206,66 L214,62 L209,72 L218,76 L208,78 L210,88 L202,80 L196,88 L198,78 L188,76 L197,72 L192,62 Z', 'rgba(246,250,254,.75)', { 'data-part': 'frost' }),
+        artPath('M222,46 L224,52 L230,50 L226,56 L232,60 L225,60 L226,67 L221,61 L216,66 L218,59 L211,58 L217,55 L214,49 Z', 'rgba(242,246,253,.55)', { 'data-part': 'frost' }),
+        artPath('M224,96 L226,101 L231,99 L228,104 L233,108 L227,108 L228,113 L224,108 L219,112 L221,106 L215,105 L220,102 L218,97 Z', 'rgba(246,250,254,.4)', { 'data-part': 'frost' }),
+        artCircle(112, 70, 4, ART.dark[2], { 'data-part': 'port' }),
+        artEllipse(120, 122, 44, 5, 'rgba(0,0,0,.16)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artRect(3, 14, 12, 22, c.cyl('metal', 'h'), 5, { 'data-part': 'tank' }),
+        artRect(4, 15, 10, 2, RIM, 1),
+        artPath('M15,22 Q22,19 26,24 Q21,27 16,26 Z', c.cyl('rubber', 'd'), { 'data-part': 'hose' }),
+        artRect(24, 18, 13, 11, c.cyl('metal', 'v'), 3, { 'data-part': 'body' }),
+        artPath('M26,29 L34,29 L31,42 L23,42 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(36, 20, 9, 8, c.cyl('metal', 'h'), 2, { 'data-part': 'nozzle' }),
+        artPath('M44,17 L45.6,21 L49,19 L46.8,23.6 L50,26 L46,26 L46.6,30 L43.6,27 L41,30 L42,26 L38,25 L41.6,23.4 L39.6,19.6 Z', 'rgba(246,250,254,.75)', { 'data-part': 'frost' })
+      ]
+    },
+
+    /* ───────── 중력탄 · SPEC-arsenal §E ─────────
+     * 직접 피해가 0 인 무기라 **총구에 아무것도 없고 구멍만 있다** — 사출관 끝의 검은 구와 그것을
+     * 감는 두 개의 호가 전부다. 무기고에서 유일하게 가장 밝은 색이 하나도 없는 그림. */
+    gravity: {
+      detail: (c) => [
+        artPath('M16,84 Q26,70 48,66 L62,64 L66,92 L38,100 Q20,102 16,84 Z', c.mat('dark', 'd'), { 'data-part': 'stock' }),
+        artPath('M16,84 Q26,70 48,66 L62,64 L61.6,68 L48,70 Q28,74 19.4,86 Z', RIM2),
+        artRect(58, 56, 36, 38, c.cyl('metal', 'v'), 5, { 'data-part': 'receiver' }),
+        artRect(59, 57, 34, 2.4, RIM, 1.2),
+        artRect(58, 92, 36, 2.6, SEAM, 1.3),
+        artRect(64, 94, 12, 16, c.mat('dark', 'd'), 2, { 'data-part': 'trigger-guard' }),
+        artPath('M69,96 Q73,104 69,109 Q66,103 69,96 Z', ART.dark[2], { 'data-part': 'trigger' }),
+        artRect(66, 42, 20, 16, c.cyl('brass', 'v'), 3, { 'data-part': 'magazine' }),
+        artRect(67, 43, 18, 1.8, RIM2, 0.9),
+        artRect(92, 58, 72, 34, c.cyl('metal', 'v'), 8, { 'data-part': 'tube' }),
+        artRect(92, 60, 72, 2.4, RIM, 1.2),
+        artRect(92, 88, 72, 2.6, SEAM, 1.3),
+        artRect(104, 56, 5, 38, c.mat('dark', 'v'), 1.5, { 'data-part': 'band' }),
+        artRect(126, 56, 5, 38, c.mat('dark', 'v'), 1.5, { 'data-part': 'band' }),
+        artRect(148, 56, 5, 38, c.mat('dark', 'v'), 1.5, { 'data-part': 'band' }),
+        artEllipse(164, 75, 9, 20, c.cyl('metal', 'h'), { 'data-part': 'mouth' }),
+        artEllipse(164, 75, 5, 15, ART.dark[1], { 'data-part': 'bore' }),
+        artCircle(196, 75, 22, c.cyl('dark', 'd'), { 'data-part': 'well' }),
+        artCircle(196, 75, 14, ART.dark[2], { 'data-part': 'core' }),
+        artCircle(196, 75, 6, '#14171c', { 'data-part': 'singularity' }),
+        artPath('M196,45 Q226,52 226,75 L221,75 Q221,56 195,50 Z', 'rgba(142,151,166,.55)', { 'data-part': 'arc' }),
+        artPath('M196,105 Q166,98 166,75 L171,75 Q171,94 197,100 Z', 'rgba(142,151,166,.38)', { 'data-part': 'arc' }),
+        artPath('M232,62 Q242,75 232,88 L236,88 Q246,75 236,62 Z', 'rgba(58,64,73,.5)', { 'data-part': 'arc' }),
+        artCircle(176, 58, 3, 'rgba(212,218,228,.5)', { 'data-part': 'mote' }),
+        artCircle(212, 96, 2.4, 'rgba(212,218,228,.4)', { 'data-part': 'mote' }),
+        artCircle(82, 74, 4, ART.dark[2], { 'data-part': 'port' }),
+        artEllipse(120, 112, 42, 5, 'rgba(0,0,0,.18)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artPath('M2,32 Q6,24 16,22 L22,21 L24,34 L10,39 Q3,39 2,32 Z', c.mat('dark', 'd'), { 'data-part': 'stock' }),
+        artRect(20, 19, 10, 14, c.cyl('metal', 'v'), 2, { 'data-part': 'receiver' }),
+        artRect(28, 20, 12, 11, c.cyl('metal', 'v'), 3, { 'data-part': 'tube' }),
+        artRect(29, 21, 10, 1.4, RIM, 0.7),
+        artCircle(43, 25, 6, c.cyl('dark', 'd'), { 'data-part': 'well' }),
+        artCircle(43, 25, 2.6, '#14171c', { 'data-part': 'singularity' }),
+        artRect(22, 33, 6, 7, c.mat('dark', 'd'), 1.5, { 'data-part': 'trigger-guard' })
+      ]
     }
   };
 

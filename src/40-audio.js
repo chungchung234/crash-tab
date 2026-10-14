@@ -219,5 +219,20 @@
       else if (kind === 'horn') { tone(t, 'sawtooth', 300, 290, 0.3, 0.3 * gm, 0.32); tone(t + 0.01, 'sawtooth', 600, 585, 0.26, 0.14 * gm, 0.28); noiseBurst(t, 0.05, { type: 'bandpass', freq: 1800, Q: 1.2 }, 0.1 * gm, 0.06); }
       /* 고무 치킨: two squawks, the second lower and later, because one is a squeak and two is a chicken. */
       else if (kind === 'chicken') { tone(t, 'sawtooth', 820, 520, 0.09, 0.2 * gm, 0.1); tone(t + 0.1, 'sawtooth', 620, 330, 0.11, 0.17 * gm, 0.13); noiseBurst(t + 0.02, 0.05, { type: 'bandpass', freq: 2400, Q: 1.6 }, 0.1 * gm, 0.06); }
+      /* ── SPEC-arsenal §E 무기 다양화 (9단계) ──
+       * 여섯 개 전부 기존의 tone() / noiseBurst() / noiseSweep() 세 가지로만 만든다. 새 오디오 그래프는
+       * 없다. 구분의 기준도 §C/§D 때와 같다 — HUD 를 안 보고 **귀로만** 다른 무기임을 알 수 있을 것.
+       * 샷건: 넓은 저역 충격과 그 위의 산탄 쇳소리. 권총보다 낮고, 폭탄보다 짧다. */
+      else if (kind === 'shotgun') { noiseSweep(t, 0.16, 'lowpass', 2600, 420, 0.85 * gm); tone(t, 'square', 180, 60, 0.12, 0.42 * gm, 0.14); noiseBurst(t + 0.02, 0.07, { type: 'highpass', freq: 3800, Q: 0.8 }, 0.26 * gm, 0.08); }
+      /* 한 발씩 장전: 약실에 한 발 밀어 넣는 소리. 재장전 막대가 한 발마다 다시 차는 것과 짝이다. */
+      else if (kind === 'shell') { noiseBurst(t, 0.045, { type: 'bandpass', freq: 1500, Q: 2.4 }, 0.3 * gm, 0.05); tone(t + 0.03, 'square', 420, 300, 0.04, 0.12 * gm, 0.05); }
+      /* 못총: 공압이다. 짧은 쉿 소리 뒤에 금속이 박히는 딱 소리 — 총성이 아니다. */
+      else if (kind === 'nail') { noiseBurst(t, 0.03, { type: 'highpass', freq: 5200, Q: 0.7 }, 0.2 * gm, 0.035); tone(t + 0.02, 'square', 1800, 900, 0.035, 0.22 * gm, 0.045); }
+      /* 냉각총: 음정이 없는 가는 고역 분사. 물총보다 높고 차갑고, 레이저와 달리 톤이 섞이지 않는다. */
+      else if (kind === 'freeze') { noiseSweep(t, 0.09, 'highpass', 2600, 7200, 0.22 * gm); }
+      /* 서리 파편: 유리가 얼어붙는 소리 — 위로 치솟는 삼각파 둘과 잔금. */
+      else if (kind === 'frostShard') { tone(t, 'triangle', 900, 2600, 0.12, 0.26 * gm, 0.14); tone(t + 0.04, 'triangle', 1400, 3200, 0.1, 0.16 * gm, 0.12); tinks(3, 0.03, 0.09 * gm); }
+      /* 중력탄: 유일하게 **내려가는** 소리다. 빨려 들어가는 것에는 올라가는 음이 붙으면 안 된다. */
+      else if (kind === 'gravity') { tone(t, 'sine', 520, 40, 0.5, 0.34 * gm, 0.55); noiseSweep(t, 0.45, 'lowpass', 2400, 160, 0.3 * gm); tone(t + 0.06, 'triangle', 300, 30, 0.4, 0.14 * gm, 0.45); }
     } catch (e) { /* ignore */ }
   }

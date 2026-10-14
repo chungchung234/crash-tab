@@ -23,16 +23,21 @@
   /* 붕괴's pierce is "전부" (all). A sentinel integer, not Infinity: Infinity does not survive the structured
    * clone / JSON hop that api.weapons() takes to reach an extension page or a test harness. */
   const PIERCE_ALL = 999;
+  /* ── SPEC-arsenal §F7 (9단계) ─────────────────────────────────────────────
+   * 이 표의 `swapMs` 와 `moveSpeed` 가 §F 의 조정 대상이다. §F7 이 "피해량보다 핸들링(교체 · 이동 ·
+   * 산포 · 재장전)을 먼저 건드린다" 고 했고, 피해량은 §A2 가 못박은 값이라 여기부터 움직였다.
+   * 무엇이 왜 움직였는지는 `docs/BALANCE.md` 에 한 줄씩 적혀 있고, `node tools/balance.js --check` 가
+   * 이 표를 정적으로 읽어 밴드를 검사한다 — 숫자를 되돌리면 CI 가 진다. */
   const WEAPON_STATS = {
-    hammer:   { swapMs: 220, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 1.00, falloff: 0,    pierce: 0 },
-    pistol:   { swapMs: 150, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.10, falloff: 0.25, pierce: 0 },
-    smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40, pierce: 0 },
-    sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.75, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
-    axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0,    pierce: 0 },
-    katana:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
-    bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
-    rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
-    flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55, pierce: 0 },
+    hammer:   { swapMs: 440, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 0.88, falloff: 0,    pierce: 0 },
+    pistol:   { swapMs: 130, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.00, falloff: 0.25, pierce: 0 },
+    smg:      { swapMs: 280, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40, pierce: 0 },
+    sniper:   { swapMs: 320, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.82, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
+    axe:      { swapMs: 430, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.60, falloff: 0,    pierce: 0 },
+    katana:    { swapMs: 260, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
+    bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.90, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
+    rocket:   { swapMs: 380, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.92, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
+    flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55, pierce: 0 },
     collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0,    pierce: PIERCE_ALL, aoeIgnoresCover: true }
   };
   for (const id of WEAPON_IDS) Object.assign(WEAPONS[id], WEAPON_STATS[id]);

@@ -535,3 +535,104 @@
     }
     return el;
   }
+
+  /* ══ SPEC-arsenal §E 무기 다양화 (9단계) ══════════════════════════════════════════════════════════
+   * 네 개의 fire() 는 전부 얇다 — 새 동사의 본체는 src/69-utility.js 에 있고 여기서는 그것을 제품의
+   * 공격 한 번으로 묶을 뿐이다. §C/§D 의 일곱이 그랬던 것과 같은 모양이다. */
+
+  /* 샷건: "펠릿 9발 원뿔. 밀집한 작은 요소를 한 번에."
+   * 펠릿은 각자 자기 pickTarget 을 돈다 — 그래야 "한 번에 여럿" 이 연출이 아니라 사실이 된다. 캐시를
+   * 한 개 공유하므로 아홉 번의 적중 판정이 한 번의 레이아웃 읽기 비용으로 끝난다. 사거리 감쇠는
+   * falloff 0.86 으로 무기고 최대다(§E). */
+  function fireShotgun(x, y) {
+    state.shots++;
+    const W = WEAPONS.shotgun;
+    const sp = shotPoint(x, y, 'shotgun');
+    x = sp.x; y = sp.y;
+    noteShot('shotgun');
+    sfx('shotgun');
+    flash(x, y, 'gun', { size: 72, dur: 150 });
+    shake('gun', { amp: 4.6 });
+    drawCrack(x, y, 'gun', { ink: 0.4 });
+    spawnChips(x, y, randInt(5, 8));
+    if (interceptOrb(x, y)) return null;
+    const cache = new Map();
+    const R = W.pelletSpread;
+    const hit = new Map();
+    let first = null;
+    for (let i = 0; i < W.pellets; i++) {
+      /* 첫 펠릿은 조준점 그대로, 나머지 여덟은 반경 R 의 원 안에 고르게 — 면적 균등이므로 sqrt. */
+      const a = rand(0, Math.PI * 2), d = i === 0 ? 0 : R * Math.sqrt(Math.random());
+      const px0 = clamp(x + Math.cos(a) * d, 0, viewW()), py0 = clamp(y + Math.sin(a) * d, 0, viewH());
+      const el = pickTarget(px0, py0, cache);
+      if (!el) continue;
+      if (!first) first = el;
+      const crit = rollCrit('shotgun');
+      const dmg = rollDamage(W.damage, crit, falloffMul('shotgun', px0, py0));
+      applyHit(el, dmg, 'gun', px0, py0, { crit });
+      hit.set(el, (hit.get(el) || 0) + 1);
+    }
+    state.lastShotgunSpread = hit.size;    // §E: "밀집한 작은 요소를 한 번에" — 몇 개를 한 번에 쳤는가
+    return first;
+  }
+  /* 못총: "고정. 맞은 조각이 그 자리에 박힌다." 피해는 평범한 연사고, 새로운 것은 pnPinAt() 하나다. */
+  function fireNailgun(x, y, c) {
+    state.shots++;
+    const h = (c && c.hold && c.h) || null;
+    const W = WEAPONS.nailgun;
+    const sp = shotPoint(x, y, 'nailgun');
+    x = sp.x; y = sp.y;
+    noteShot('nailgun');
+    if (!h || h.tick % 2 === 1) sfx('nail');
+    flash(x, y, 'gun', { size: 30, dur: 90 });
+    drawCrack(x, y, 'gun', { ink: 0.22 });
+    /* 못은 조각을 먼저 잡는다. 때려서 생긴 조각이 아니라 **이미 날고 있는** 조각을 박는 무기이기 때문에,
+     * 이 순서가 바뀌면 방금 만든 조각이 태어나기도 전에 고정 대상을 찾게 된다. */
+    const pinned = pnPinAt(x, y, W.pinRadius, W.pinMax);
+    if (pinned) pnNailFx(x, y);
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    if (!el) return null;
+    let crit = false, win = null;
+    if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('nailgun');
+    const dmg = rollDamage(W.damage, crit, falloffMul('nailgun', x, y));
+    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    return el;
+  }
+  /* 냉각총: "빙결. 받는 피해 ×1.8, 조각 수 ×2.5, 적은 2초 정지."
+   * 피해 4 가 전부다 — §E 가 "혼자 쓰면 가장 약하다" 고 적었고 그 말이 숫자로 지켜져야 조합이 뜻을
+   * 갖는다. 얼리는 양은 ixFreeze() 를 통과하므로 젖은 표적에서는 자동으로 2.5배가 된다(8단계 §D). */
+  function fireFreezegun(x, y, c) {
+    state.shots++;
+    const h = (c && c.hold && c.h) || null;
+    const W = WEAPONS.freezegun;
+    const sp = shotPoint(x, y, 'freezegun');
+    x = sp.x; y = sp.y;
+    noteShot('freezegun');
+    if (!h || h.tick % 4 === 1) sfx('freeze', { gain: 0.6 });
+    flash(x, y, 'gun', { size: 26, dur: 80 });
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    if (!el) return null;
+    let crit = false, win = null;
+    if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('freezegun');
+    const dmg = rollDamage(W.damage, crit, falloffMul('freezegun', x, y));
+    /* 얼리는 것이 먼저다. applyHit() 은 빙결 배수를 읽으므로, 이 순서라야 같은 틱의 4 도 ×1.8 을 받는다
+     * — "받는 피해 ×1.8" 에 예외를 두지 않는다는 뜻이다. */
+    fzFreeze(el, W.freezePerTick, 0);
+    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    return el;
+  }
+  /* 중력탄: "끌어모으기. 조각과 적의 탄환을 빨아들인다. 직접 피해 0."
+   * applyHit() 을 한 번도 부르지 않는다. 이 무기의 피해는 0 이고, 그건 버그가 아니라 §E 의 문장이다. */
+  function fireGravity(x, y) {
+    state.shots++;
+    const W = WEAPONS.gravity;
+    sfx('gravity');
+    flash(x, y, 'bomb', { size: W.radius * 0.5, dur: 160 });
+    ring(x, y, { r: W.radius });
+    shake('bomb', { amp: 3, dur: 220 });
+    gwSpawn(x, y, W.radius, W.wellMs, 1);
+    scheduleHud();
+    return null;
+  }

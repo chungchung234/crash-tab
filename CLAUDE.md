@@ -22,6 +22,18 @@ node tools/build.js --check   # 소스와 생성물이 어긋나면 실패
 node tools/validate.js    # 16개 규칙 (버전 일치, i18n, 아이콘, 텍스트 위생 등)
 ```
 
+밸런스도 생성물이다. `tools/balance.js` 가 `src/` 의 무기 표를 **정적 파싱**해 SPEC-arsenal §F 의
+밴드를 검사하고 사람이 읽을 표를 만든다. CI 가 `--check` 를 돌린다.
+
+```bash
+node tools/balance.js          # 실전/특수/예능 밴드와 표적 5종 처치 시간을 표로 낸다
+node tools/balance.js --write  # docs/BALANCE.md 를 다시 만든다 (생성물이다 — 손으로 고치지 않는다)
+node tools/balance.js --check  # §F6 위반 · §F5 역할 겹침 · docs/BALANCE.md 가 낡았으면 exit 1
+```
+
+무기 수치를 고쳤으면 `--write` 를 돌리고 **같이 커밋한다.** `--check` 가 content.js 와 똑같은
+이유로 어긋난 생성물을 잡는다.
+
 모듈은 **하나의 클로저로 이어 붙인다.** 서로 다른 모듈의 최상위 이름이 겹치면 뒤 모듈이
 이긴다. 조용히 깨지므로 새 최상위 이름은 먼저 `grep` 한다.
 
@@ -63,8 +75,8 @@ CSS 를 병합할 때는 규칙 본문 안에서 충돌이 나면 중괄호가 �
 ## 테스트
 
 ```bash
-node test/e2e.js                      # 전체, 102초, 953 단언
-CRS_BLOCKS=ammo node test/e2e.js      # 92초 — 탄창·저격경·로드아웃·가독성·보조 공격(§A)·레이저·미니건(§B)·무기 표와 예능 밴드(§C·§D)
+node test/e2e.js                      # 전체, 107초, 978 단언
+CRS_BLOCKS=ammo node test/e2e.js      # 107초 — 탄창·저격경·로드아웃·가독성·보조 공격(§A)·레이저·미니건(§B)·무기 표와 밴드(§C·§D·§E·§F)
 CRS_BLOCKS=rules node test/e2e.js     # 76초 — 모드·적만 피해·적만 포커싱·아키타입·투사체·연소(§F)·나팔과 견인(§C·§D)
 CRS_BLOCKS=core node test/e2e.js      # 60초 — 픽스처·주입·HP·무기 아트·재질·조준점·파괴·폭발(§E)
 CRS_BLOCKS=depth node test/e2e.js     # 48초 — 깊이·관통·변위·상호작용 무기 물리(§C)·젖음(§D)
@@ -74,6 +86,8 @@ CRS_BLOCKS=settings node test/e2e.js  # 7초  — 스키마·성능 가드·접�
 ```
 
 - 반복 중에는 건드린 블록만 돌린다. **완료 판정은 항상 전체 실행이다.**
+- `ammo` 가 가장 긴 레인이고 **벽시계가 곧 그 블록의 시간이다**. 거기에 단언을 더하면 전체가 그만큼
+  늘어난다 — 9단계 §E 가 92 → 107초로 올렸다. `A_BLOCKS` 큐는 긴 것부터이고 `ammo` 가 이미 맨 앞이다.
 - 블록은 자기 브라우저와 자기 페이지를 열고 **자기 전제를 스스로 만든다.**
   새 단언을 추가할 때 앞 단언이 남긴 상태에 기대지 않는다.
 - **단언을 지우지 않는다.** 느리다고 검증을 버리는 건 거래가 아니다.
