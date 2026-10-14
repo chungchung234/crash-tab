@@ -314,3 +314,27 @@ footer { padding: 20px; color: #6a7389; font-size: 13px; border-top: 1px solid #
   font-size: 14px;
   color: #1f2430;
 }
+
+/* feat/hostiles-only (SPEC-combat §B2) — the fire-spread lab. Absolutely positioned so the three
+   gaps are exact numbers the assertions can quote, not whatever the flow layout happened to give. */
+/* margin-top 40 (not 16): adjacent-sibling margins collapse, and the §F2 spread rule is 24 px of
+   ADJACENCY — a 16 px gap would let the heading above catch fire too and muddy the assertions. */
+.fire-lab { position: relative; height: 200px; margin-top: 40px; margin-bottom: 28px; }
+.fire-src, .fire-enemy, .fire-far {
+  position: absolute;
+  top: 0;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2430;
+}
+/* 200 x 80 = 16 000 px²: under every hostile floor, so always the invulnerable side */
+.fire-src { left: 20px; width: 200px; height: 80px; background: #ffe0cf; border: 1px solid #e8a06a; }
+/* 300 x 180 = 54 000 px²: inside the T1 window — forceAttack can make this one the enemy.
+   left 230 = 20 + 200 + 10, i.e. a 10 px gap from #fire-src (inside §F2's 24 px) */
+.fire-enemy { left: 230px; width: 300px; height: 180px; background: #d8e7ff; border: 1px solid #8fb6ea; }
+/* left 610 = 230 + 300 + 80: an 80 px gap from #fire-enemy, outside the adjacency rule */
+.fire-far { left: 610px; width: 200px; height: 80px; background: #e9e9ef; border: 1px solid #c2c2cf; }

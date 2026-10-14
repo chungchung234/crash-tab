@@ -193,6 +193,23 @@
 
   <div id="mat-tall-spacer" aria-hidden="true"></div>
   <div id="mat-scroll-target" class="mat-scroll-target">스크롤 추적 테스트 카드</div>
+
+  <!-- feat/hostiles-only (SPEC-combat §B2): the fire-spread lab. Appended last; nothing above is
+       reordered or resized.
+       - #fire-src: 200 x 80 = 16 000 px², far under the T1 40 000 px² hostile floor (and under §B3's
+         relaxed 20 000 one), so it can never be auto-selected as an enemy — it is always the
+         INVULNERABLE element in a combat mode, which is exactly what §B2's claim is about.
+       - #fire-enemy: 300 x 180 = 54 000 px², inside the T1 window, so debug.forceAttack can make it a
+         hostile. 10 px away from #fire-src, inside §F2's 24 px adjacency, so fire laid on the wall
+         next to it reaches it.
+       - #fire-far: the control. 80 px away — further than the adjacency rule allows — so "it spread"
+         can be told apart from "everything near the flame catches". -->
+  <h2 class="section-title">연소 확산 테스트</h2>
+  <section id="fire-lab" class="fire-lab">
+    <div id="fire-src" class="fire-src">불씨</div>
+    <div id="fire-enemy" class="fire-enemy">적 후보</div>
+    <div id="fire-far" class="fire-far">떨어진 카드</div>
+  </section>
 </main>
 </body>
 </html>

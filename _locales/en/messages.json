@@ -386,5 +386,9 @@
   "a11yChallengeEnd": {
     "message": "Challenge ended",
     "description": "Screen reader: a challenge ended"
+  },
+  "invulLabel": {
+    "message": "IMMUNE",
+    "description": "SPEC-combat B1: shown instead of a damage number when a hit lands on an invulnerable (non-hostile) element in a combat mode"
   }
 }

@@ -16,10 +16,14 @@
   /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, cap 40 --- */
   function dmgText(n, dmg, crit, tag) { n.textContent = (tag ? tag + ' ' : '') + '-' + dmg + (crit ? '!' : ''); }
   /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) }
-   * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page. */
+   * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page.
+   * opts.opacity / opts.dur (SPEC-combat §B1): the `무적` of a deflected hit is drawn at 11 px, 55 % opacity
+   * and lives 350 ms — a word that says "nothing happened" must not shout as loud as a damage number. */
   function spawnDmg(x, y, dmg, crit, opts) {
     if (!root) return null;
     opts = opts || {};
+    const op = opts.opacity != null ? clamp(+opts.opacity, 0, 1) : 1;
+    const dur = opts.dur > 0 ? opts.dur : 650;
     const n = mk('div', 'crs-dmg');
     if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag);
     n.style.left = px(x); n.style.top = px(y);
@@ -37,11 +41,11 @@
        * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
        * centring transform the node already carries is left exactly where it is. */
       const kf = reducedMotion()
-        ? [{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0 }]
+        ? [{ opacity: op }, { opacity: op, offset: 0.35 }, { opacity: 0 }]
         : (crit
-          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: 1, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
-          : [{ transform: base + 'translateY(0px)', opacity: 1 }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
-      const a = trackAnim(n.animate(kf, { duration: 650, easing: 'ease-out', fill: 'forwards' }));
+          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: op, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: op * 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
+          : [{ transform: base + 'translateY(0px)', opacity: op }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
+      const a = trackAnim(n.animate(kf, { duration: dur, easing: 'ease-out', fill: 'forwards' }));
       a.addEventListener('finish', kill);
     } catch (e) { /* ignore */ }
     later(kill, 1500);
@@ -143,12 +147,52 @@
     if (w && rec && w.sum > 0) hudLastHit(el, w.sum, rec.hp, rec.max, w.crit);
   }
 
+  /* ── SPEC-combat §B: 전투 중에는 적만 부서진다 ──────────────────────────────────────────
+   * rampage keeps v1.2's "everything on the page is destructible". arcade and survival make every
+   * NON-hostile element invulnerable: the shot still costs its round (action() / holdStep() spend
+   * before fire() ever runs), it simply takes no HP and makes no pieces, and §B1's deflect says so in
+   * the same frame. Without this there is no reason to fight the enemy at all — anything under the
+   * cursor is worth the same swing.
+   *
+   * §B2 is the other half of the rule and deliberately NOT expressed here: invulnerability applies to
+   * DAMAGE ONLY. Fire (src/76-weapon-fire.js), and wet / frozen / displacement when those exist, still
+   * attach to an invulnerable element and still carry damage into any enemy they reach — which is what
+   * turns "무적" from a wall into an indirect attack.
+   *
+   * `debug.noInvuln` turns the rule off. It exists for the suites that were written against v1.2/v1.4
+   * behaviour and are about something else entirely (stacking depth, pierce layers, debris lifetime,
+   * the repair beam) while enemies happen to be live — same escape hatch as debug.noAttacks /
+   * debug.noRepair, and nothing in the product reads it. */
+  debug.noInvuln = false;
+  function hostileUnit(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (state.hostiles.has(el)) return true;
+    /* v1.2 §5: a hostile fights as a UNIT. pickTarget() already promotes a click on a descendant up to
+     * the hostile itself, but an AoE ring sample, a pierce layer and a burn tick can each land on a
+     * child directly — they are the enemy too. */
+    for (const h of state.hostiles.keys()) { try { if (h.contains(el)) return true; } catch (e) { /* ignore */ } }
+    return false;
+  }
+  function damageable(el) { return !modeHasEnemies() || debug.noInvuln || hostileUnit(el); }
+
+  /* ── SPEC-combat §B2 / §E: 변위 충돌 피해가 걸릴 자리 ──────────────────────────────────
+   * §E (변위 시스템, 로드맵 3.5) is NOT in this build. When it arrives, its AABB collision step must
+   * route damage through HERE instead of calling applyHit() itself: §B2 says displacement applies to
+   * EVERY element while the collision damage only lands on hostiles, and the gate above is already the
+   * single place that answers that question. The number is §E3's own — clamp(round(상대속도/14), 1, 60).
+   * Nothing calls this yet and there is deliberately no assertion for it; it is the seam, written down
+   * next to the rule it belongs to rather than rediscovered later. */
+  function collisionHit(el, relSpeed, ix, iy) {
+    return applyHit(el, clamp(Math.round(relSpeed / 14), 1, 60), 'hammer', ix, iy, { aoe: true, toward: { x: ix, y: iy } });
+  }
+
   /* applyHit — the single damage sink. opts: { crit, hold, win, aoe, slash, toward, pieces, textSplit, splitLine,
    * burnt, radius }. Returns 'broken' | 'damaged' | 'none'. */
   function applyHit(el, dmg, kind, ix, iy, opts) {
     opts = opts || {};
     if (!el) return 'none';
     try { if (el.hasAttribute('data-crs-broken')) return 'none'; } catch (e) { return 'none'; }   // broken meanwhile (staggered AoE, hold tick, collapse chain)
+    if (!damageable(el)) { deflectHit(el, ix, iy, opts); return 'none'; }   // SPEC-combat §B / §B1
     const rec = hpOf(el);
     rec.hp -= dmg;
     state.damageDealt += dmg;

@@ -322,6 +322,24 @@
       }
     } catch (e) { /* ignore */ }
   }
+  /* ── SPEC-combat §B4: 미터의 의미 ──────────────────────────────────────────────────────
+   * 전투 모드에서는 파괴율 대신 **처치 진행도**: `처치 N` + `적 K`.
+   * 막대는 `처치 / (처치 + 살아있는 적 + 복구된 수)` — 적이 복구하면 왼쪽으로 빠진다.
+   * 램페이지에서는 기존 파괴율 미터를 쓴다.
+   *
+   * CONFLICT, reading chosen. §B4's last sentence and §F's mode paragraph ("램페이지에 적·락온·복구·
+   * **미터**·체력 HUD 가 전부 없다", the acceptance test for step 3.2, asserted today by A.v2 7.13) cannot
+   * both be read as "rampage SHOWS a meter". Taken as: rampage's meter DEFINITION is unchanged — it is
+   * still the destruction ratio, still hidden, exactly as it ships — and §B4 changes what the meter
+   * SAYS where there is one, i.e. in the two combat modes. The 'ratio' branch below is therefore
+   * unreachable today on purpose; it is the one line step 4 flips if rampage is ever given the bar.
+   * Nothing is deleted and no existing assertion is broken by the reading. */
+  function meterKind() { return modeHasEnemies() ? 'kills' : 'ratio'; }
+  function killProgress() {
+    const p = state.player;
+    const total = p.kills + state.hostiles.size + state.repaired;
+    return total > 0 ? clamp(p.kills / total, 0, 1) : 0;
+  }
   function weaponLabel(W) {
     if (W.id === 'smg') return W.damage + msg('unitPerShot');
     if (W.id === 'flame') return W.damage + msg('unitPerTick');

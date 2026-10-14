@@ -1075,3 +1075,44 @@ crs-hud:popover-open {
 .crs-hcm .crs-lock {
   outline-style: solid !important;
 }
+
+/* ===================================================================== */
+/* SPEC-combat §B — 전투 중에는 적만 부서진다                               */
+/* ===================================================================== */
+/* §B1 item 1: the deflect mark. A white arc thrown along the surface normal of the element
+   that just refused the hit, gone in 180 ms. Positioned by left/top at the impact point and
+   centred by its own negative margin, so the WAAPI keyframes own `transform` outright and
+   never have to carry a centring offset.
+
+   USER-ORIGIN TRAP (CLAUDE.md): `transform` and `opacity` are what JS animates here, so
+   neither may be !important — a user-origin !important outranks a Web Animation and the arc
+   would sit still and never fade. Everything the JS does NOT touch is !important, because
+   this node is injected into an arbitrary, possibly hostile page. */
+.crs-deflect {
+  position: fixed !important;
+  width: 28px !important;
+  height: 28px !important;
+  margin: -14px 0 0 -14px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-top: 3px solid rgba(255, 255, 255, .95) !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  box-sizing: border-box !important;
+  pointer-events: none !important;
+  display: block !important;
+  z-index: 5 !important;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .85)) !important;
+  /* NOT !important — animated by deflectHit() (src/91-combat-feedback.js) */
+  transform: translate(0px, 0px);
+  opacity: 1;
+}
+
+/* §B1 item 4: 조준점 예고 — "무적 대상 위에서 흐린 회색, 중심 점 없음."
+   The grey is written from JS (ringGradient's colour override), because `.crs-self`'s
+   background-image is a JS-owned property. The missing centre dot has to come from HERE:
+   `.crs-self-dot { display: block !important }` above is user-origin, so an inline
+   display:none on the dot would silently lose to it. */
+.crs-selfbox.crs-invul .crs-self-dot {
+  display: none !important;
+}

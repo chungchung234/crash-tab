@@ -18,8 +18,8 @@
    *   decal cap        40                               → 12      (src/31-decal.js)
    *   text split       descendants 200 / tokens 80      → 120 / 40
    *   clone compare    400 descendants                  → 150
-   *   enemy selection  1500 ms (ships as 1500, not 900) → 2500 ms
-   *   concurrent enemies  up to 5                       → 2
+   *   enemy selection  900 ms (SPEC-combat §B3 — was 1500) → 2500 ms
+   *   concurrent enemies  up to 7 (§B3 — was 5)         → 2
    *   particles        40 live (ships as 40, not 60)    → 30
    *   crack strands    ×1.0                             → ×0.7
    *   canvas DPR       max 2                            → max 1.5                                        */
@@ -27,7 +27,7 @@
   const PERF_TEXT_DESCENDANTS = 120, TEXT_DESCENDANTS = 200;
   const PERF_TEXT_TOKENS = 40, TEXT_TOKENS = 80;
   const PERF_CLONE_CAP = 150;
-  const PERF_SELECT_MS = 2500, SELECT_MS = 1500;
+  const PERF_SELECT_MS = 2500, SELECT_MS = 900;   // SPEC-combat §B3: 선정 간격 1500 → 900 ms
   const PERF_MAX_HOSTILES = 2;
   const PERF_PARTICLE_CAP = 30, PARTICLE_CAP = 40;
   const PERF_CRACK_MUL = 0.7;

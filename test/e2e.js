@@ -4176,6 +4176,13 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.combat 8: stats() mirrors kills / score / hostiles', !!killed && s8.kills === 1 && s8.kills === s8.pKills && s8.score === s8.pScore && s8.score >= killed.score && s8.hostiles === 0, s8);
 
   // ---- (9) KO ----------------------------------------------------------------------------------------------
+  /* `noInvuln` (SPEC-combat §B, feat/hostiles-only): §B makes every non-hostile element invulnerable in a
+   * combat mode. This test is about the KO overlay, the restart and the physics loop surviving a KO with
+   * orbs in flight — and it builds its preconditions by breaking ORDINARY page elements (#small-card, so the
+   * restart has something to put back; #big-card with a rocket, so there is debris to watch settle) while
+   * combat happens to be on. The rule is turned off by name for the duration and back on at the end, the
+   * same escape hatch the combat block uses; §B's own behaviour is asserted in that block. */
+  await api.debug(page, { noInvuln: true });
   await api.restore(page);
   await sleep(60);
   const pendBase9 = await api.pending(page);   // restore() + armCombat(): exactly the grace and the 생존 clock
@@ -4233,6 +4240,7 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.smashAt(page, bc9b.cx, bc9b.cy);
   const settled9 = await poll(async () => { const st = await api.stats(page); return st.pieceCount > 0 && st.pieces.some((p) => p.resting) ? st : null; }, 3000, 60);
   await api.setWeapon(page, 'hammer');
+  await api.debug(page, { noInvuln: false });   // §B back on for everything after the KO test
   check('A.ko 9: a KO with two orbs in flight neither throws nor freezes the physics loop (lastError null, animating cleared by the restart, debris still falls and rests)', twoOrbs.t1 === 'shooter' && twoOrbs.t2 === 'shooter' && twoOrbs.orbs >= 2 && ko9b === true && s9b.animating === false && s9b.lastError === null && !!settled9, { orbs: twoOrbs, ko: ko9b, afterRestart: { animating: s9b.animating, lastError: s9b.lastError }, settled: !!settled9 });
 
   // =============================================================================================
@@ -4636,7 +4644,16 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   // noFalloff was inherited from suite A's injection while this block shared that page; every exact-damage
   // assertion below is written against the flat, unreduced numbers, so the block now sets it for itself.
   // (§10.6's pierce section still turns falloff back ON locally to measure the real formula.)
-  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true });
+  /* `noInvuln` (SPEC-combat §B, feat/hostiles-only): §B makes every NON-hostile element invulnerable in a
+   * combat mode — a hit on one deflects, costs its round and takes no HP. Everything in THIS block below was
+   * written against v1.2/v1.4 behaviour and is about something else entirely (the repair beam §7.7/§7.8, the
+   * destruction-ratio stat §7.9, boss stages §7.11, the traceless Escape §7.12, stacking depth and pierce
+   * §10.6, the §8 screenshot), yet each one wears down ORDINARY page elements while enemies are live in order
+   * to build its own precondition. Rather than delete or weaken those assertions, they ask for the new rule to
+   * be off by name — the same escape hatch they already use for noAttacks / noRepair / noFalloff. It is
+   * re-set after every page.evaluate(contentJs) below, because a reactivation builds a fresh debug object.
+   * §B's own behaviour is asserted at the END of this block ("적만 피해"), with the rule explicitly ON. */
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true });
   await page.evaluate(() => window.scrollTo(0, 0));
   await api.restore(page);
   await sleep(80);
@@ -4936,7 +4953,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   check('A.v2 7.12: Escape with avatar/lock/repair all live → inactive, zero [data-crs] nodes, zero timers, zero animation frames', inactive12v2 === true && nodes12v2 === 0 && pend12v2 === 0 && raf12v2 === 0, { inactive12v2, nodes12v2, pend12v2, raf12v2 });
   const rOn12v2 = await page.evaluate(contentJs);
   check('A.v2 7.12: content.js reactivates cleanly afterwards', rOn12v2 === 'on', rOn12v2);
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
 
@@ -4985,7 +5002,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   // §9.4 — debris auto-despawn (SPEC-combat-v2 §9)
   // =======================================================================================
   await setCombatMode('rampage');
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
 
@@ -5024,7 +5041,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   const off943 = await page.evaluate(contentJs);
   const on943 = await page.evaluate(contentJs);
   check('A.v2 9.4.3: toggled off/on after setting crsDebrisLifeMs = 0 in storage so loadPrefs() re-reads it', off943 === 'off' && on943 === 'on', { off943, on943 });
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
   await api.setWeapon(page, 'hammer');
@@ -5063,7 +5080,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await page.evaluate(() => { window.__crsStore.crsDebrisLifeMs = 6000; });
   await page.evaluate(contentJs);
   await page.evaluate(contentJs);
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
 
@@ -5179,7 +5196,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   check('A.v2 9.4.6: Escape while debris fade-out animations are in flight still leaves zero [data-crs] nodes, timers and animation frames', inactive946 === true && nodes946 === 0 && pend946 === 0 && raf946 === 0, { fadingSeenBefore: fadingSeen946, inactive946, nodes946, pend946, raf946 });
   const rOn946 = await page.evaluate(contentJs);
   check('A.v2 9.4.6: content.js reactivates cleanly afterwards', rOn946 === 'on', rOn946);
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
 
@@ -5433,7 +5450,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   //     white at 70 % and barely reads; the imminent stage blinks on a 0.2 s cycle and may be caught dark;
   //   * the repair beam only lives 1.5 s (§3.1), so it is started inside that window, not before it.
   await setCombatMode('survival');
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -5482,7 +5499,12 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   });
   await page.screenshot({ path: path.join(OUT, 'combat.png') });
   info(`screenshot test/out/combat.png (${JSON.stringify(shotNodes)})`);
-  check('A.v2 §8: combat.png frame carries the drone + its health ring, the lock-on brackets, a live repair beam, the destruction-ratio meter and the mode control all at once', shotNodes.avatar === true && shotNodes.ring === true && shotNodes.ringOnAvatar === true && shotNodes.lock === true && shotNodes.repair === true && shotNodes.meter === true && /%/.test(shotNodes.meterText || '') && shotNodes.modeControl === true, shotNodes);
+  /* CHANGED (SPEC-combat §B4, feat/hostiles-only): the meter still has to be THERE and still has to be
+   * carrying a live readout — that is what this frame is proving — but in a combat mode it no longer reads
+   * a destruction percentage. §B4 replaces it with kill progress, `처치 N` + `적 K`, so the old /%/ probe
+   * would now be asserting the absence of the very change §B4 asks for. The readout check is kept, aimed at
+   * what the meter says today; the rampage ratio meter (where the % lives on) is untouched by §B4. */
+  check('A.v2 §8: combat.png frame carries the drone + its health ring, the lock-on brackets, a live repair beam, the kill-progress meter (§B4) and the mode control all at once', shotNodes.avatar === true && shotNodes.ring === true && shotNodes.ringOnAvatar === true && shotNodes.lock === true && shotNodes.repair === true && shotNodes.meter === true && /\d/.test(shotNodes.meterText || '') && shotNodes.modeControl === true, shotNodes);
   check('A.v2 §8 / readability §7: the same frame also keeps the aim line and the enlarged ammo + health panels on screen', shotNodes.aimline === true && shotNodes.ammo === true && shotNodes.health === true, shotNodes);
   await api.restore(page);
   await sleep(80);
@@ -5600,6 +5622,218 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
     { tierTuneA, tierTuneS, spdA, spdS, ratio: spdA != null && spdS ? spdA / spdS : null });
   await api.restore(page);
   await sleep(80);
+
+  // =======================================================================================
+  // SPEC-combat §B — 전투 중에는 적만 부서진다 (feat/hostiles-only)
+  //   §F "적만 피해": 전투 모드에서 비적대 요소를 때리면 체력이 변하지 않고 조각도 없다.
+  //   `.crs-deflect` 와 `무적` 이 뜨고 탄약은 1발 준다. 폭탄을 섞인 군집에 터뜨리면 적만 피해를 받는다.
+  //   불이 무적 요소 위로 번져 적에게 닿으면 적의 체력이 준다.
+  //   (§F 의 마지막 한 줄 — "무적 요소를 밀어 적에게 박으면" — 은 §E 변위 시스템이 이 빌드에 아직
+  //    없으므로 단언하지 않는다. 걸릴 자리는 collisionHit() (src/73-hit-resolution.js) 에 있다.)
+  // The whole section runs with debug.noInvuln explicitly OFF — the rule under test is the real one.
+  // =======================================================================================
+  console.log('--- combat: SPEC-combat §B — only the enemy breaks (deflect / fire spread / enemy supply / meter) ---');
+  const ignite = (sel, st) => page.evaluate((q, n) => {
+    const d = window.__crashScreen.debug;
+    return typeof d.ignite === 'function' ? d.ignite(document.querySelector(q), n) : 'missing:debug.ignite';
+  }, sel, st);
+  const burningOf = (id) => page.evaluate((q) => {
+    const d = window.__crashScreen.debug;
+    if (typeof d.burning !== 'function') return 'missing:debug.burning';
+    return (d.burning() || []).find((b) => b.id === q) || null;
+  }, id);
+  const aimMark = () => page.evaluate(() => {
+    const box = document.querySelector('.crs-selfbox');
+    if (!box) return null;
+    const dot = box.querySelector('.crs-self-dot'), ring = box.querySelector('.crs-self');
+    return {
+      invul: box.classList.contains('crs-invul'),
+      dot: dot ? getComputedStyle(dot).display : null,
+      grad: ring ? (ring.style.backgroundImage || '') : '',
+    };
+  });
+
+  await setCombatMode('survival');
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true, infiniteAmmo: false });
+  await api.restore(page);
+  await sleep(100);
+  await api.setWeapon(page, 'hammer');
+  const srcB = await api.rect(page, '#fire-src');       // 200 × 80 — under every hostile floor, never an enemy
+  const enemyB = await api.rectNoScroll(page, '#fire-enemy');
+  const farB = await api.rectNoScroll(page, '#fire-far');
+  check('A.§B fixture: the fire lab is on screen with a 10 px gap src→enemy (inside §F2 adjacency) and an 80 px gap enemy→far (outside it)',
+    near(enemyB.left - srcB.right, 10, 2) && near(farB.left - enemyB.right, 80, 2) && srcB.width > 0 && enemyB.width > 0,
+    { gapNear: enemyB.left - srcB.right, gapFar: farB.left - enemyB.right });
+
+  // ---- (B1) a non-hostile element takes no damage and makes no pieces ----
+  const hpSrcB0 = await api.hpOf(page, '#fire-src');
+  const statsB0 = await api.stats(page);
+  for (let i = 0; i < 5; i++) { await api.smashAt(page, srcB.cx, srcB.cy); await sleep(40); }
+  const hpSrcB1 = await api.hpOf(page, '#fire-src');
+  const statsB1 = await api.stats(page);
+  check('A.§B 1 (§F): 전투 모드에서 비적대 요소를 5번 때려도 체력이 변하지 않고 (hp === max) 부서지지 않는다',
+    hpSrcB1.hp === hpSrcB0.hp && hpSrcB1.hp === hpSrcB1.max && (await api.broken(page, '#fire-src')) === false,
+    { before: hpSrcB0, after: hpSrcB1 });
+  check('A.§B 1 (§F): …그리고 조각도 없다 — stats().debris / broken / damageDealt 가 하나도 움직이지 않는다',
+    statsB1.debris === statsB0.debris && statsB1.broken === statsB0.broken && statsB1.damageDealt === statsB0.damageDealt,
+    { before: { debris: statsB0.debris, broken: statsB0.broken, dmg: statsB0.damageDealt }, after: { debris: statsB1.debris, broken: statsB1.broken, dmg: statsB1.damageDealt } });
+
+  // ---- (B2) §B1: 튕김 표시 · `무적` · 탄약 소모 ----
+  await api.setWeapon(page, 'pistol');
+  await sleep(60);
+  const ammoB0 = (await api.ammo(page)).mag;
+  await api.smashAt(page, srcB.cx, srcB.cy);
+  const deflectB = await poll(async () => (await api.count(page, '.crs-deflect')) >= 1, 400, 20);
+  const textsB = await api.dmgTexts(page);
+  const ammoB1 = (await api.ammo(page)).mag;
+  check('A.§B 2 (§F / §B1): 무적 요소를 때리면 `.crs-deflect` 튕김 표시가 뜬다',
+    deflectB === true, { deflect: await api.count(page, '.crs-deflect') });
+  check('A.§B 2 (§F / §B1): 피해 숫자 대신 `무적` 이 뜨고, 피해 숫자(-n)는 뜨지 않는다',
+    textsB.includes('무적') && !textsB.some((t) => /^-\d/.test(t)), textsB);
+  check('A.§B 2 (§F / §B1): 탄약은 1발 준다 — 빗맞힌 대가가 있어야 조준에 의미가 생긴다',
+    ammoB0 != null && ammoB1 === ammoB0 - 1, { before: ammoB0, after: ammoB1 });
+  const deflectGoneB = await poll(async () => (await api.count(page, '.crs-deflect')) === 0, 1200, 60);
+  check('A.§B 2 (§B1): 튕김 표시는 180 ms 짜리라 곧 사라진다 (흔적 없음)', deflectGoneB === true, await api.count(page, '.crs-deflect'));
+
+  // ---- (B3) §B1 item 4: 조준점 예고 — 무적 대상 위에서 흐린 회색, 중심 점 없음 ----
+  // The drawn crosshair is roadmap step 4; the aim-side marker this build owns is the player ring
+  // (the cursor itself in arcade). See placeSelf()/aimInvulnerable() in src/91-combat-feedback.js.
+  const enemyTierB = await force('#fire-enemy', 'forceAttack');
+  await debugCall('setAvatarPos', 120, 120);   // park the drone away from the lab so its own orb is not in the way
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(100));
+  await page.mouse.move(srcB.cx, srcB.cy);
+  await sleep(140);
+  const aimWallB = await aimMark();
+  await page.mouse.move(enemyB.cx, enemyB.cy);
+  await sleep(140);
+  const aimEnemyB = await aimMark();
+  check('A.§B 3 (§B1): #fire-enemy 가 적으로 선정된다 (T1 shooter, 54 000 px²)', enemyTierB === 'shooter', enemyTierB);
+  check('A.§B 3 (§B1): 조준점이 미리 알려준다 — 무적 대상 위에서 흐린 회색(.crs-invul)이고 중심 점이 없다',
+    !!aimWallB && aimWallB.invul === true && aimWallB.dot === 'none' && /168,\s*176,\s*190/.test(aimWallB.grad), aimWallB);
+  check('A.§B 3 (§B1): 적 위에서는 평소대로 — .crs-invul 이 빠지고 중심 점이 돌아온다',
+    !!aimEnemyB && aimEnemyB.invul === false && aimEnemyB.dot !== 'none' && !/168,\s*176,\s*190/.test(aimEnemyB.grad), aimEnemyB);
+
+  // ---- (B4) §F: 폭탄을 섞인 군집에 터뜨리면 적만 피해를 받는다 ----
+  const hpEnemyB0 = await api.hpOf(page, '#fire-enemy');
+  const hpSrcB2 = await api.hpOf(page, '#fire-src');
+  const hpFarB0 = await api.hpOf(page, '#fire-far');
+  await api.setWeapon(page, 'bomb');
+  await sleep(60);
+  await api.smashAt(page, enemyB.cx, enemyB.cy);
+  await sleep(400);   // the blast staggers its targets by edgeDist / 4 ms
+  const hpEnemyB1 = await api.hpOf(page, '#fire-enemy');
+  const hpSrcB3 = await api.hpOf(page, '#fire-src');
+  const hpFarB1 = await api.hpOf(page, '#fire-far');
+  check('A.§B 4 (§F): 폭탄을 섞인 군집(적 1 + 무적 2)에 터뜨리면 적만 피해를 받는다',
+    hpEnemyB1.hp < hpEnemyB0.hp && hpSrcB3.hp === hpSrcB2.hp && hpFarB1.hp === hpFarB0.hp,
+    { enemy: [hpEnemyB0.hp, hpEnemyB1.hp], src: [hpSrcB2.hp, hpSrcB3.hp], far: [hpFarB0.hp, hpFarB1.hp] });
+  await api.setWeapon(page, 'hammer');
+
+  // ---- (B5) §B2: 불은 무적 요소에도 붙고 번지며, 적에게 닿으면 그때부터 실제 피해가 들어간다 ----
+  await api.restore(page);
+  await sleep(100);
+  await api.rect(page, '#fire-src');
+  const enemyTierB5 = await force('#fire-enemy', 'forceAttack');
+  await debugCall('setAvatarPos', 120, 120);
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(100));
+  const hpEnemyB5a = await api.hpOf(page, '#fire-enemy');
+  const hpSrcB5a = await api.hpOf(page, '#fire-src');
+  const litB5 = await ignite('#fire-src', 60);   // §F2: stacks ≥ 45 is what spreads
+  const srcBurningB5 = await burningOf('fire-src');
+  check('A.§B 5 (§B2): 불은 무적 요소에도 붙는다 — #fire-src(비적대)가 60 스택으로 탄다',
+    litB5 === 60 && !!srcBurningB5 && srcBurningB5.hostile === false && srcBurningB5.stacks >= 45, { litB5, srcBurningB5, tier: enemyTierB5 });
+  const spreadB5 = await poll(() => burningOf('fire-enemy'), 2600, 100);
+  check('A.§B 5 (§F / §B2): 불이 무적 요소 위로 번져 적에게 닿는다 — 10 px 떨어진 #fire-enemy 에 옮겨붙는다',
+    !!spreadB5 && spreadB5.hostile === true && spreadB5.stacks > 0, spreadB5);
+  const enemyBurntB5 = await poll(async () => { const h = await api.hpOf(page, '#fire-enemy'); return h.hp < hpEnemyB5a.hp ? h : null; }, 2600, 100);
+  check('A.§B 5 (§F / §B2): 불길이 적에게 도달하면 그때부터 실제 피해가 들어간다 — 적의 체력이 준다',
+    !!enemyBurntB5, { before: hpEnemyB5a, after: enemyBurntB5 || (await api.hpOf(page, '#fire-enemy')) });
+  const hpSrcB5b = await api.hpOf(page, '#fire-src');
+  check('A.§B 5 (§B2): 무적 요소 자신은 체력이 줄지 않는다 — 타기만 한다',
+    hpSrcB5b.hp === hpSrcB5a.hp && hpSrcB5b.hp === hpSrcB5b.max, { before: hpSrcB5a, after: hpSrcB5b });
+  const farBurningB5 = await burningOf('fire-far');
+  check('A.§B 5 (§F2): 80 px 떨어진 #fire-far 에는 안 번진다 — 거리가 아니라 인접이어야 한다',
+    farBurningB5 === null, farBurningB5);
+  // 흔적 없음: restore() 가 연소 원장과 불 입자를 모두 비운다
+  await api.restore(page);
+  await sleep(120);
+  const burningAfterRestoreB5 = await page.evaluate(() => (window.__crashScreen.debug.burning() || []).length);
+  check('A.§B 5 (§B2): restore() 가 연소 원장을 비운다 — 복구 뒤 타는 요소 0개, .crs-fire 0개',
+    burningAfterRestoreB5 === 0 && (await api.count(page, '.crs-fire')) === 0, { burning: burningAfterRestoreB5, fire: await api.count(page, '.crs-fire') });
+
+  // ---- (B6) §B3: 적이 떨어지지 않게 한다 ----
+  const tuneB6 = await debugCall('hostileTuning');
+  check('A.§B 6 (§B3): 동시 적 수 5, 60초 후 7 (기존 3 / 5) — maxHostiles() 자체를 두 시점에 물어본 값',
+    !!tuneB6 && tuneB6.maxAt0 === 5 && tuneB6.maxAt60s === 7, tuneB6);
+  check('A.§B 6 (§B3): 선정 간격 900 ms (기존 1500) 이고 처치 후 보충까지 600 ms 다',
+    !!tuneB6 && tuneB6.selectMs === 900 && tuneB6.refillMs === 600, tuneB6);
+  check('A.§B 6 (§B3): 후보 고갈 시 최소 면적 40 000 → 20 000 px²',
+    !!tuneB6 && tuneB6.minArea === 40000 && tuneB6.minAreaLow === 20000, tuneB6);
+  // 처치 직후 보충: selectTick 은 900 ms 주기이므로, 600 ms 보충이 없으면 이 창 안에 다시 채워질 수
+  // 없다 — 틱의 위상이 운 좋게 맞는 경우를 빼면. 그래서 위의 refillMs 단언과 짝으로 읽는다.
+  /* The depth lab is the one place on the fixture with more than three eligible T1 elements in a single
+   * screenful (six 260 × 170 ≈ 44 200 px² cards sharing a rect, plus the 900 × 700 tank pair below them), so
+   * it is where "the old cap of 3 is really gone" can be shown rather than argued. */
+  await api.rect(page, '#depth-front');
+  await api.debug(page, { noAttacks: false });
+  await api.restore(page);
+  await sleep(100);
+  const grewB6 = await poll(async () => { const n = (await api.stats(page)).hostiles; return n >= 4 ? n : null; }, 8000, 150);
+  check('A.§B 6 (§B3): 전투가 비지 않는다 — 900 ms 선정으로 동시 적이 예전 상한 3을 넘어 4기 이상까지 늘어난다',
+    grewB6 >= 4, { hostiles: grewB6, max: (await debugCall('hostileTuning')).max });
+  /* 처치 직후 보충. HONEST LIMIT, stated rather than hidden: the 0.6 s refill and the 900 ms selection tick
+   * are both running, and the loop that detects the kill (it polls stats().kills) itself takes long enough
+   * to absorb the refill delay — so this cannot attribute the replacement to one or the other by timing.
+   * What it does assert is the thing §B3 is actually for: after a kill the roster is back at full strength
+   * rather than left short. The 600 ms figure itself is asserted above, read off REFILL_MS through
+   * debug.hostileTuning(); the observed latency is printed below for a human to sanity-check. */
+  /* Which enemy to kill has to be unambiguous: the depth-lab cards all share one rect, so an aura's centre
+   * does not necessarily RESOLVE to its own hostile (the topmost layer answers for the point). #depth-tank-front
+   * is the one large element on the fixture with nothing above it, so forceAttack makes it the enemy and a
+   * click at its centre is certain to land on it. debug.pickAt confirms that rather than assuming it. */
+  await api.rect(page, '#depth-tank-front');
+  await sleep(200);
+  const tankTierB6 = await force('#depth-tank-front', 'forceAttack');
+  const auraB6 = await page.evaluate(() => {
+    const a = window.__crashScreen;
+    const el = document.querySelector('#depth-tank-front');
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const hit = a.debug.pickAt(cx, cy);
+    return (hit && hit.hostile) ? { cx, cy, id: hit.id } : null;
+  });
+  const beforeKillB6 = (await api.stats(page)).hostiles;
+  const killsB6a = (await api.stats(page)).kills;
+  await api.setWeapon(page, 'rocket');
+  let killedB6 = false;
+  for (let i = 0; i < 10 && auraB6 && !killedB6; i++) {
+    await api.smashAt(page, auraB6.cx, auraB6.cy);
+    killedB6 = await poll(async () => (await api.stats(page)).kills > killsB6a, 700, 40);
+  }
+  info(`A.§B 6: kill probe — tier ${tankTierB6}, aura ${JSON.stringify(auraB6)}, hostiles before the kill ${beforeKillB6}`);
+  const killedAtB6 = Date.now();
+  const backB6 = await poll(async () => ((await api.stats(page)).hostiles >= beforeKillB6 ? (await api.stats(page)).hostiles : null), 1500, 50);
+  info(`A.§B 6: the replacement enemy was live ${Date.now() - killedAtB6} ms after the kill (§B3 says 0.6 s; the plain selection tick is 900 ms)`);
+  check('A.§B 6 (§B3): 적이 하나 죽어도 전장이 비지 않는다 — 처치 뒤 동시 적 수가 곧바로 원래대로 돌아온다',
+    killedB6 === true && backB6 >= beforeKillB6, { beforeKillB6, backB6, killedB6, ms: Date.now() - killedAtB6 });
+  await api.setWeapon(page, 'hammer');
+  await api.debug(page, { noAttacks: true });
+  await sleep(50);
+
+  // ---- (B7) §B4: 전투 모드의 미터는 파괴율이 아니라 처치 진행도다 ----
+  await api.debug(page, { noAttacks: true });
+  await api.restore(page);
+  await sleep(120);
+  await setCombatMode('survival');
+  await sleep(120);
+  const meterB7 = await api.hudQ(page, '.crs-progress');
+  check('A.§B 7 (§B4): 전투 모드 미터가 파괴율 대신 처치 진행도를 쓴다 — `처치 N · 적 K`, %가 없다',
+    !!meterB7 && meterB7.visible === true && /처치\s*\d+/.test(meterB7.text) && /적\s*\d+/.test(meterB7.text) && !/%/.test(meterB7.text) && !/파괴율/.test(meterB7.text), meterB7);
+  await setCombatMode('rampage');
+  await sleep(150);
+  const meterB7r = await api.hudQ(page, '.crs-progress');
+  check('A.§B 7 (§B4 / §F 모드): 램페이지의 미터 정의는 건드리지 않았다 — 그대로 숨어 있다',
+    !meterB7r || meterB7r.visible === false, meterB7r);
 
   // ---- tidy up: back to the block's baseline mode/weapon/debug flags before the evidence tally ----
   await setCombatMode('rampage');

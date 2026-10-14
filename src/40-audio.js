@@ -124,5 +124,9 @@
       else if (kind === 'whiff') { noiseSweep(t, 0.09, 'highpass', 900, 7000, 0.45 * gm); }
       else if (kind === 'hurtbig') { tone(t, 'sine', 90, 40, 0.25, 1.15 * gm, 0.28); noiseBurst(t, 0.08, { type: 'lowpass', freq: 420, Q: 0.9 }, 0.6 * gm, 0.09); }
       else if (kind === 'laser') { noiseSweep(t, 0.4, 'bandpass', 3000, 600, 0.5 * gm); tone(t, 'sawtooth', 220, 180, 0.4, 0.15 * gm, 0.4); }
+      /* SPEC-combat §B1: the shot that bounced. A bare triangle at 2.2 kHz for 60 ms — no noise burst, no
+       * thump, no glass: nothing it shares with 'gun' / 'hammer' / 'sniper', so "that did nothing" is told
+       * apart from "that hit" by ear alone, which is the whole point of the cue. */
+      else if (kind === 'deflect') { tone(t, 'triangle', 2200, 2050, 0.06, 0.3 * gm, 0.07); }
     } catch (e) { /* ignore */ }
   }
