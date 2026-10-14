@@ -22,5 +22,7 @@
   { "key": "reduceMotion", "type": "enum", "default": "auto", "options": ["auto", "on", "off"], "labelKey": "setReduceMotion", "group": "accessibility" },
   { "key": "highContrastMarkers", "type": "bool", "default": false, "labelKey": "setHighContrastMarkers", "group": "accessibility" },
   { "key": "keyboardAim", "type": "bool", "default": false, "labelKey": "setKeyboardAim", "group": "accessibility" },
-  { "key": "perfMode", "type": "enum", "default": "auto", "options": ["auto", "quality", "performance"], "labelKey": "setPerfMode", "group": "advanced" }
+  { "key": "perfMode", "type": "enum", "default": "auto", "options": ["auto", "quality", "performance"], "labelKey": "setPerfMode", "group": "advanced" },
+  { "key": "unlockAll", "type": "bool", "default": true, "labelKey": "setUnlockAll", "group": "advanced" },
+  { "key": "recordReplay", "type": "bool", "default": true, "labelKey": "setRecordReplay", "group": "advanced" }
 ]

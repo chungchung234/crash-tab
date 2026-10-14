@@ -219,8 +219,23 @@ function startServer() {
 // `msgs` = parsed _locales/<lang>/messages.json ({} → content.js falls back to its hard-coded Korean strings)
 const chromeShim = (msgs) => `(() => {
   const store = {};
+  const localStore = {};
+  const sessionStore = {};
   const messages = [];
   const MSGS = ${JSON.stringify(msgs || {})};
+  // one storage-area implementation, three backing objects (sync / local / session)
+  const area = (backing) => ({
+    get: (keys) => {
+      const out = {};
+      const list = keys == null ? Object.keys(backing) : (Array.isArray(keys) ? keys : (typeof keys === 'string' ? [keys] : Object.keys(keys)));
+      for (const k of list) if (k in backing) out[k] = backing[k];
+      if (keys && typeof keys === 'object' && !Array.isArray(keys)) for (const k of Object.keys(keys)) if (!(k in out)) out[k] = keys[k];
+      return Promise.resolve(out);
+    },
+    set: (obj) => { Object.assign(backing, obj); return Promise.resolve(); },
+    // SPEC-settings §1.3: the one-time migration drops the old flat keys via chrome.storage.sync.remove().
+    remove: (keys) => { for (const k of (Array.isArray(keys) ? keys : [keys])) delete backing[k]; return Promise.resolve(); },
+  });
   const shim = {
     runtime: {
       id: 'test',
@@ -234,24 +249,23 @@ const chromeShim = (msgs) => `(() => {
       getURL: (p) => 'chrome-extension://crashscreentest/' + String(p == null ? '' : p).replace(/^\\//, ''),
     },
     storage: {
-      sync: {
-        get: (keys) => {
-          const out = {};
-          const list = keys == null ? Object.keys(store) : (Array.isArray(keys) ? keys : (typeof keys === 'string' ? [keys] : Object.keys(keys)));
-          for (const k of list) if (k in store) out[k] = store[k];
-          if (keys && typeof keys === 'object' && !Array.isArray(keys)) for (const k of Object.keys(keys)) if (!(k in out)) out[k] = keys[k];
-          return Promise.resolve(out);
-        },
-        set: (obj) => { Object.assign(store, obj); return Promise.resolve(); },
-        // SPEC-settings §1.3: the one-time migration drops the old flat keys via chrome.storage.sync.remove().
-        remove: (keys) => { for (const k of (Array.isArray(keys) ? keys : [keys])) delete store[k]; return Promise.resolve(); },
-      },
+      sync: area(store),
+      /* SPEC-product §3/§4/§5 (10단계): "local" holds crsProgress / crsStats.challenges / crsReplays and
+       * "session" is where the share capture is parked. Both were ABSENT from this shim until now, which
+       * meant every chrome.storage.local call in the product threw inside its own safe() and was swallowed —
+       * the product behaved identically, but nothing stored could ever be asserted. They get their own
+       * backing objects (window.__crsLocal / __crsSession) so "__crsStore" keeps meaning exactly what it
+       * meant before: the SYNC area, and nothing else. */
+      local: area(localStore),
+      session: area(sessionStore),
       onChanged: { addListener() {}, removeListener() {} },
     },
     i18n: { getMessage: (k) => (MSGS[k] && MSGS[k].message) || '' },
   };
   window.__crsMessages = messages;
   window.__crsStore = store;
+  window.__crsLocal = localStore;
+  window.__crsSession = sessionStore;
   try { Object.defineProperty(window, 'chrome', { value: shim, configurable: true, writable: true }); }
   catch (e) { window.chrome = shim; }
   return 'shim';
@@ -5045,9 +5059,13 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await page.evaluate(() => { try { window.dispatchEvent(new Event('focus')); } catch (e) { /* ignore */ } });
   await page.mouse.move(VIEWPORT.width / 2, VIEWPORT.height / 2);
   const t10 = Date.now();
-  await api.debug(page, { noAttacks: false });
+  /* SPEC-product §4: the boss scheduler is live wherever noAttacks is off, and it promotes the biggest
+   enemy on the page to maxHp x3. Nothing in this section is about bosses, and a tripled health bar on
+   the element it wears down is noise in what it measures — so the promotion is switched off by name
+   for exactly this window and switched back on after it. */
+  await api.debug(page, { noAttacks: false, noBoss: true });
   const sel = await poll(async () => { const s = await api.stats(page); return s.hostiles >= 1 ? { hostiles: s.hostiles, ms: Date.now() - t10 } : null; }, 8000, 100);
-  await api.debug(page, { noAttacks: true });
+  await api.debug(page, { noAttacks: true, noBoss: false });
   const auraCount = await api.count(page, '.crs-hostile');
   check('A.combat 10: with noAttacks off the selection tick marks ≥ 1 hostile within 8 s (5 s grace) and draws its aura', !!sel && auraCount >= 1, { sel, auraCount, stats: await api.stats(page).then((s) => ({ hostiles: s.hostiles, paused: s.paused, combat: s.combat })) });
   info(`selection tick: ${sel ? `${sel.hostiles} hostile(s) after ${sel.ms} ms` : 'none within 8 s'}`);
@@ -5093,11 +5111,11 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await holdAt(page, ap, 2000, sampleNodes);
   await api.setWeapon(page, 'sniper');
   const sn14 = await page.evaluate((p) => { const a = window.__crashScreen; let n = 0; for (let i = 0; i < 10; i++) if (a.smashAt(p.x, p.y)) n++; return n; }, ap);
-  await api.debug(page, { noAttacks: false });
+  await api.debug(page, { noAttacks: false, noBoss: true });   // SPEC-product §4: see the note above — this section is not about bosses
   const forced14 = [await api.forceAttack(page, '#arena'), await api.forceAttack(page, '#boss')];
   const t14 = Date.now();
   while (Date.now() - t14 < 4000) { await sampleNodes(); await sleep(150); }
-  await api.debug(page, { noAttacks: true, infiniteAmmo: false });
+  await api.debug(page, { noAttacks: true, infiniteAmmo: false, noBoss: false });
   const s14 = await api.stats(page);
   const now14 = await api.count(page, '[data-crs]');
   info(`stress 14: sniper shots ${sn14}/10, forced ${JSON.stringify(forced14)}, hostiles ${s14.hostiles}, orbs ${s14.orbs}, player hp ${(await api.player(page)).hp}, peak [data-crs] ${peak14}`);
@@ -6846,6 +6864,669 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
     { samples: snapSeries14.length, distinct: snapSeen14, framesPerSize: snapSeries14.length / Math.max(1, snapSeen14.length) });
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
   await sleep(1700);
+
+  // =======================================================================================
+  // SPEC-product (10단계) §3 챌린지 · §4 보스전과 무기 해금 · §5 인스펙터·공유·리플레이
+  // 전부 이 블록 함수의 끝에 덧붙인다 (CLAUDE.md 의 공유 파일 규칙).
+  // i18n 셰임은 빈 문자열을 돌려주므로 제품은 하드코딩된 한국어 폴백을 쓴다 — 아래의 텍스트 단언이
+  // 한국어인 이유다.
+  // =======================================================================================
+  console.log('--- combat: SPEC-product §3 챌린지 / §4 보스·해금 / §5 인스펙터·공유·리플레이 ---');
+  const P = (fn, ...a) => page.evaluate(fn, ...a);
+  const chalState = () => P(() => window.__crashScreen.challenge.state());
+
+  await api.restore(page);
+  await setCombatMode('rampage');
+  await api.setWeapon(page, 'hammer');
+  await page.evaluate(() => { window.scrollTo(0, 0); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+  await sleep(120);
+
+  // ---- §3.1 세 모드, 그리고 시작이 restore() 를 먼저 부른다는 것 ----
+  const chalModes = await P(() => window.__crashScreen.challenge.modes());
+  check('A.v3 §3: api.challenge.modes() === [timeAttack, targetRush, survival]',
+    Array.isArray(chalModes) && chalModes.join(',') === 'timeAttack,targetRush,survival', chalModes);
+
+  const scP1 = await api.rect(page, '#small-card');
+  await clickUntilBroken(page, '#small-card', scP1.cx, scP1.cy, 4);
+  const brokenBeforeChal = (await api.stats(page)).broken;
+  const restoresBefore = (await chalState()).restores;
+  const startedTA = await P(() => window.__crashScreen.challenge.start('timeAttack'));
+  await sleep(150);
+  const stAfterStart = await api.stats(page);
+  const chalAfterStart = await chalState();
+  check('A.v3 §3.1: challenge.start() 가 먼저 restore() 를 부른다 — 부서져 있던 요소가 돌아오고(broken 0) 복구 횟수가 하나 는다',
+    startedTA === 'timeAttack' && brokenBeforeChal >= 1 && stAfterStart.broken === 0 && chalAfterStart.restores === restoresBefore + 1 && chalAfterStart.running === true,
+    { brokenBeforeChal, afterBroken: stAfterStart.broken, restores: [restoresBefore, chalAfterStart.restores], running: chalAfterStart.running });
+  const chalRow = await api.hudQ(page, '.crs-chal');
+  check('A.v3 §3.1: HUD 에 진행 행과 막대가 보이고 남은 시간을 말한다',
+    !!chalRow && chalRow.visible && /남은 시간/.test(chalRow.text) && Math.abs((chalRow.left + chalRow.width / 2) - chalRow.vw / 2) <= 24, chalRow);
+  check('A.v3 §3.1: stats() 가 실행 중인 챌린지를 말한다', stAfterStart.challenge === 'timeAttack', stAfterStart.challenge);
+
+  // ---- §3.2 타임어택: 60초가 지나면 스스로 끝나고 결과를 띄우고 기록을 남긴다 ----
+  await P(() => { window.__crashScreen.challenge.stop(); });
+  await setTimeScale(page, 0.05);                       // 60 s → 3 s of wall clock
+  await P(() => window.__crashScreen.challenge.start('timeAttack'));
+  await sleep(200);
+  const taRunning = (await chalState()).running;
+  const taEnded = await poll(async () => { const s = await chalState(); return (!s.running && s.result) ? s : null; }, 9000, 120);
+  await setTimeScale(page, 1);
+  const taOverlay = await api.hudQ(page, '.crs-result');
+  check('A.v3 §3.2 타임어택: 60초(배율 0.05 → 3초) 뒤 시간 종료로 스스로 끝난다',
+    taRunning === true && !!taEnded && taEnded.result.mode === 'timeAttack' && taEnded.result.reason === 'time', { taRunning, result: taEnded && taEnded.result });
+  check('A.v3 §3.2 타임어택: 결과 오버레이가 모드·점수·처치·소요와 다시/닫기 버튼을 보인다',
+    !!taOverlay && taOverlay.visible && /타임어택/.test(taOverlay.text) && /점수/.test(taOverlay.text) && /처치/.test(taOverlay.text)
+    && /소요/.test(taOverlay.text) && /다시/.test(taOverlay.text) && /닫기/.test(taOverlay.text), taOverlay);
+  const taRec = (await chalState()).records;
+  const taStore = await P(() => (window.__crsLocal && window.__crsLocal.crsStats && window.__crsLocal.crsStats.challenges) || null);
+  check('A.v3 §3.2: 기록이 crsStats.challenges[timeAttack] 에 남는다 (api 와 storage.local 양쪽)',
+    !!taRec.timeAttack && taRec.timeAttack.plays >= 1 && !!taStore && !!taStore.timeAttack && taStore.timeAttack.plays >= 1, { taRec, taStore });
+
+  await page.keyboard.press('Escape');
+  await sleep(150);
+  const overlayGone = await api.hudQ(page, '.crs-result');
+  const stillOn = await api.active(page);
+  check('A.v3 §3.2: 결과 오버레이에서 Esc 는 오버레이만 닫는다 (확장은 계속 켜져 있다)',
+    overlayGone === null && stillOn === true, { overlayGone, stillOn });
+
+  await setTimeScale(page, 0.05);
+  await P(() => window.__crashScreen.challenge.start('timeAttack'));
+  const ended2 = await poll(async () => { const s = await chalState(); return (!s.running && s.resultOpen) ? s : null; }, 9000, 120);
+  await page.keyboard.press('Enter');
+  await sleep(250);
+  const afterEnter = await chalState();
+  await P(() => { window.__crashScreen.challenge.stop(); });
+  await setTimeScale(page, 1);
+  await sleep(120);
+  check('A.v3 §3.2: 결과 오버레이에서 Enter 는 같은 모드로 다시 시작한다',
+    !!ended2 && afterEnter.running === true && afterEnter.mode === 'timeAttack' && afterEnter.resultOpen === false, { ended2: !!ended2, afterEnter });
+
+  // ---- §3.3 목표 돌파: 40개를 부수면 끝난다 ----
+  await api.restore(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await api.setWeapon(page, 'sniper');
+  await api.debug(page, { infiniteAmmo: true });
+  await P(() => window.__crashScreen.challenge.start('targetRush'));
+  await sleep(120);
+  const rushLabel = await api.hudQ(page, '.crs-chal');
+  let rushEnd = null;
+  for (let pass = 0; pass < 10 && !rushEnd; pass++) {
+    await P(() => {
+      const a = window.__crashScreen;
+      const els = Array.prototype.slice.call(document.body.querySelectorAll('*'));
+      for (let round = 0; round < 2; round++) {
+        for (const el of els) {
+          if (!a.challenge.state().running) return;
+          if (el.closest('[data-crs]')) continue;
+          if (el.hasAttribute('data-crs-broken')) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width < 24 || r.height < 14) continue;
+          if (r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.top >= innerHeight) continue;
+          if (r.width * r.height > 0.7 * innerWidth * innerHeight) continue;
+          a.smashAt(r.left + r.width / 2, r.top + r.height / 2);
+        }
+      }
+    });
+    const s = await chalState();
+    if (!s.running && s.result) { rushEnd = s; break; }
+    await page.evaluate(() => window.scrollBy(0, Math.round(innerHeight * 0.75)));
+    await sleep(90);
+  }
+  await api.debug(page, { infiniteAmmo: false });
+  check('A.v3 §3.3 목표 돌파: 진행 행이 목표 수를 센다', !!rushLabel && rushLabel.visible && /목표 돌파/.test(rushLabel.text) && /\/\s*40/.test(rushLabel.text.replace(/\s+/g, ' ')), rushLabel);
+  check('A.v3 §3.3 목표 돌파: 40개를 부수면 스스로 끝나고(targets) 결과와 기록을 남긴다',
+    !!rushEnd && rushEnd.result.mode === 'targetRush' && rushEnd.result.reason === 'targets' && rushEnd.result.broken >= 40
+    && !!rushEnd.records.targetRush && rushEnd.records.targetRush.plays >= 1,
+    { ran: !!rushEnd, result: rushEnd && rushEnd.result, state: rushEnd ? null : await chalState() });
+  await page.keyboard.press('Escape');
+  await sleep(120);
+
+  // ---- §3.4 생존: 전투가 강제되고 난이도가 가팔라지며 KO 로 끝난다 ----
+  await api.restore(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await P(() => window.__crashScreen.challenge.start('survival'));
+  await sleep(250);
+  const survState = await chalState();
+  const survMode = (await api.stats(page)).mode;
+  check('A.v3 §3.4 생존: 시작하면 전투가 강제된다 (모드가 램페이지가 아니다)',
+    survState.running === true && survMode !== 'rampage', { running: survState.running, survMode });
+  check('A.v3 §3.4 생존: 난이도 램프가 공격 간격 배수로 살아 있다 (1에서 시작해 0.4까지)',
+    survState.intervalMul <= 1 && survState.intervalMul > 0.85, survState.intervalMul);
+  const rampLate = await P(() => {
+    const a = window.__crashScreen;
+    const before = a.challenge.state().intervalMul;
+    return { before, mode: a.stats().mode };
+  });
+  await P(() => { window.__crashScreen.debug.setPlayerHp(0); });
+  const koEnd = await poll(async () => { const s = await chalState(); return (!s.running && s.result) ? s : null; }, 4000, 100);
+  check('A.v3 §3.4 생존: KO 로 끝나고 결과와 기록을 남긴다',
+    !!koEnd && koEnd.result.mode === 'survival' && koEnd.result.reason === 'ko' && !!koEnd.records.survival && koEnd.records.survival.plays >= 1,
+    { result: koEnd && koEnd.result, rampLate });
+  await page.keyboard.press('Escape');
+  await sleep(120);
+  await P(() => { const a = window.__crashScreen; a.challenge.stop(); a.restore(); });
+  await setCombatMode('rampage');
+  await sleep(150);
+
+  // ---- §3 C 키 순환 ----
+  await page.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+  const cyc = [];
+  for (let i = 0; i < 4; i++) { await page.keyboard.press('c'); await sleep(200); cyc.push((await chalState()).mode); }
+  check('A.v3 §3: C 키가 챌린지를 순환한다 (타임어택 → 목표 돌파 → 생존 → 끔)',
+    cyc.join(',') === 'timeAttack,targetRush,survival,', cyc);
+  await P(() => { const a = window.__crashScreen; a.challenge.stop(); a.restore(); });
+  await setCombatMode('rampage');
+  await sleep(150);
+
+  // =====================================================================================
+  // §4 보스전
+  // =====================================================================================
+  await setCombatMode('survival');
+  await sleep(200);
+  await api.rect(page, '#boss');
+  await P(() => { window.__crashScreen.debug.setPlayerHp(100); });
+  await force('#boss', 'forceAttack');
+  await sleep(150);
+  const hpAsHostile = await api.hpOf(page, '#boss');
+  const promoted = await debugCall('bossPromote');
+  await sleep(120);
+  const hpAsBoss = await api.hpOf(page, '#boss');
+  check('A.v3 §4.1 승격: 가장 큰 자격 요소가 보스가 되고 maxHp 가 ×3 이 된다',
+    !!promoted && promoted.live === true && promoted.phase === 1 && hpAsBoss.max === Math.round(hpAsHostile.max * 3),
+    { hpAsHostile, hpAsBoss, promoted });
+  const bossBar = await api.hudQ(page, '.crs-bossbar');
+  check('A.v3 §4.1: 상단 중앙에 고정 체력 바가 뜨고 👑 와 체력을 보인다',
+    !!bossBar && bossBar.visible && /👑/.test(bossBar.text) && /보스/.test(bossBar.text)
+    && Math.abs((bossBar.left + bossBar.width / 2) - bossBar.vw / 2) <= 24 && bossBar.top < 120, bossBar);
+  const bossAura = await P(() => {
+    const n = document.querySelector('.crs-hostile.crs-boss');
+    if (!n) return null;
+    const cs = getComputedStyle(n);
+    return { label: (n.textContent || '').trim(), shadow: cs.boxShadow || '' };
+  });
+  check('A.v3 §4.1: 보스 오라가 이중 테두리와 👑 라벨을 갖는다',
+    !!bossAura && /👑/.test(bossAura.label) && (bossAura.shadow.match(/rgb/g) || []).length >= 3, bossAura);
+
+  /* debug.bossWeaken() drives THIS boss's remaining HP. debug.forceBoss(ratio) is deliberately not used
+     here: it picks the page's biggest T3 element (which is not #boss) and turns on `bossMode`, under which
+     every T3 hostile is a boss — the three readings would then be of three different elements. */
+  const phases = [];
+  for (const r of [0.8, 0.5, 0.2]) {
+    await debugCall('bossWeaken', r);
+    await sleep(90);
+    phases.push(await debugCall('bossInfo'));
+  }
+  check('A.v3 §4.2: 보스는 66% / 33% 에서 3단계로 바뀐다',
+    phases.map((p) => p && p.phase).join(',') === '1,2,3', phases.map((p) => p && { phase: p.phase, hp: p.hp, max: p.max }));
+  const lastPhase = phases[2];
+  check('A.v3 §4.2: 마지막 단계에서 공격 간격이 절반이 된다',
+    !!lastPhase && lastPhase.baseIntervalMs > 0 && Math.abs(lastPhase.intervalMs - lastPhase.baseIntervalMs / 2) < 1,
+    lastPhase && { intervalMs: lastPhase.intervalMs, baseIntervalMs: lastPhase.baseIntervalMs });
+
+  // ---- §4.3 처치 보상: 점수 ×3 · 1초 슬로모션 · 추가 파편 · 15초 재승격 예약 ----
+  await debugCall('bossWeaken', 0.08);
+  await sleep(90);
+  const bossMaxKill = (await api.hpOf(page, '#boss')).max;
+  const scoreBeforeKill = (await api.player(page)).score;
+  const fragsBefore = await api.count(page, '.crs-frag');
+  await api.setWeapon(page, 'sniper');
+  await api.debug(page, { infiniteAmmo: true });
+  const bossRectKill = await api.rect(page, '#boss');
+  const bossKilled = await poll(async () => {
+    await P((p) => window.__crashScreen.smashAt(p.x, p.y), { x: bossRectKill.cx, y: bossRectKill.cy });
+    return (await api.broken(page, '#boss')) ? true : null;
+  }, 4000, 60);
+  const stAfterKill = await api.stats(page);
+  const scoreAfterKill = (await api.player(page)).score;
+  const fragsAfter = await api.count(page, '.crs-frag');
+  const bossAfterKill = await debugCall('bossInfo');
+  await api.debug(page, { infiniteAmmo: false });
+  check('A.v3 §4.3 처치 보상: 점수가 maxHp 의 3배 이상 들어온다 (×3)',
+    bossKilled === true && (scoreAfterKill - scoreBeforeKill) >= 2.9 * bossMaxKill,
+    { bossMaxKill, gained: scoreAfterKill - scoreBeforeKill, expected: 3 * bossMaxKill });
+  check('A.v3 §4.3 처치 보상: 1초 슬로모션이 걸리고 추가 파편이 나온다',
+    stAfterKill.slowmo === true && fragsAfter > fragsBefore && bossAfterKill.frags > 0,
+    { slowmo: stAfterKill.slowmo, frags: [fragsBefore, fragsAfter], reported: bossAfterKill.frags });
+  check('A.v3 §4.3 처치 보상: 다음 보스는 15초 뒤로 예약된다',
+    bossAfterKill.live === false && bossAfterKill.respawnInMs > 13000 && bossAfterKill.respawnInMs <= 15000, bossAfterKill);
+  const slowOver = await poll(async () => ((await api.stats(page)).slowmo === false ? true : null), 2500, 100);
+  check('A.v3 §4.3: 슬로모션은 1초 뒤 저절로 풀린다', slowOver === true, slowOver);
+
+  // ---- §4.1 승격 스케줄러 + §4.4 15초 뒤 새 보스 (배율 0.05 로 15초를 750 ms 로 줄여 관측한다) ----
+  /* 0.1, not 0.05: the 15 s wait becomes 1.5 s of wall clock, which is long enough to observe and short
+     enough that the player does not spend two product minutes under fire while we watch. The boss scheduler
+     stops while the player is KO'd (bossEligible()), which is correct behaviour and not what is under test
+     here — so every poll below tops the health bar back up. */
+  await withScale(page, 0.1, async () => {
+    await api.debug(page, { noAttacks: false });
+    await api.restore(page);
+    /* MEASUREMENT, not product: enemies are live at ten times their usual rate here, and a KO correctly
+       stops the boss scheduler (bossEligible()) — which once lost this assertion with `ko: true` in its
+       own diagnostics. Topping up once per poll is not enough: a poll round trip is a product second at
+       this scale and a burst can cross 100 HP inside one. The health is pinned EVERY FRAME instead, on
+       the harness's unwrapped rAF so the heartbeat never lands in the frame ledger the §7 traceless
+       assertions read. debug.setPlayerHp() cannot undo a KO, so this has to prevent one, not repair it. */
+    const keepAlive = (on) => P((v) => {
+      window.__crsKeepAlive = v;
+      if (!v) return true;
+      const raf = window.__crsRawRaf || window.requestAnimationFrame;
+      const beat = () => {
+        if (!window.__crsKeepAlive) return;
+        try { window.__crashScreen.debug.setPlayerHp(100); } catch (e) { /* page went away */ }
+        raf(beat);
+      };
+      raf(beat);
+      return true;
+    }, on);
+    const alive = () => P(() => { const a = window.__crashScreen; a.debug.setPlayerHp(100); return a.stats().boss; });
+    await P(() => { window.__crashScreen.debug.setPlayerHp(100); });
+    await keepAlive(true);
+    const autoBoss = await poll(alive, 9000, 120);
+    check('A.v3 §4.1 승격: 전투가 돌아가면 스케줄러가 스스로 보스를 세운다 (debug.bossPromote 없이)',
+      !!autoBoss && autoBoss.phase >= 1 && autoBoss.max > 0, autoBoss);
+    const weak = await debugCall('bossWeaken', 0.02);
+    await api.setWeapon(page, 'sniper');
+    await api.debug(page, { infiniteAmmo: true });
+    /* The scheduler may crown an element that only partly intersects the viewport, so the shot goes at the
+       centre of the VISIBLE part of its rect — aiming at the geometric centre of a tall section hanging
+       below the fold is aiming at nothing, which is a measurement bug, not a product one. */
+    const died = await poll(async () => P(() => {
+      const a = window.__crashScreen;
+      a.debug.setPlayerHp(100);
+      const info = a.debug.bossInfo();
+      if (!info || info.live === false) return true;
+      const r = info.rect;
+      const x = (Math.max(0, r.left) + Math.min(innerWidth, r.left + r.width)) / 2;
+      const y = (Math.max(0, r.top) + Math.min(innerHeight, r.top + r.height)) / 2;
+      a.smashAt(x, y);
+      return a.debug.bossInfo().live === false ? true : null;
+    }), 6000, 80);
+    const justAfter = await debugCall('bossInfo');
+    const newBoss = await poll(alive, 9000, 100);
+    const diag = await P(() => {
+      const a = window.__crashScreen, s = a.stats();
+      return { ko: s.ko, alive: a.player().alive, hostiles: s.hostiles, mode: s.mode, paused: s.paused, boss: s.boss, bossInfo: a.debug.bossInfo() };
+    });
+    await keepAlive(false);
+    await api.debug(page, { infiniteAmmo: false, noAttacks: true });
+    check('A.v3 §4.4: 보스를 처치하면 그 자리에서 바로 승격하지 않고 15초를 기다린다',
+      died === true && !!justAfter && justAfter.live === false && justAfter.respawnInMs > 100 && justAfter.respawnInMs <= 1600,
+      { died, justAfter, weak: weak && { hp: weak.hp, max: weak.max }, diag });
+    check('A.v3 §4.4: 그 15초가 지나면 새 보스가 선다', !!newBoss && newBoss.phase >= 1, { newBoss, diag });
+  });
+  await api.restore(page);
+  await setCombatMode('rampage');
+  await api.setWeapon(page, 'hammer');
+  await sleep(150);
+
+  // =====================================================================================
+  // §4 무기 해금
+  // =====================================================================================
+  const unlockNeed = { smg: 5000, axe: 15000, katana: 30000, sniper: 60000, bomb: 100000, rocket: 180000, flame: 300000, collapse: 500000 };
+  const unlock0 = await debugCall('unlockInfo');
+  check('A.v3 §4.5 해금: 기본 설정(unlockAll: true)에서는 아무것도 잠겨 있지 않다',
+    unlock0.gate === false && unlock0.locked.length === 0, unlock0);
+  await api.call(page, 'setSetting', 'unlockAll', false);
+  await P(() => window.__crashScreen.debug.setProgress(0));
+  await sleep(80);
+  const unlock1 = await debugCall('unlockInfo');
+  check('A.v3 §4.5 해금: 켜면 여덟 자루가 누적 피해로 잠긴다 (기관총 5k · 도끼 15k · 카타나 30k · 저격총 60k · 폭탄 100k · 로켓 180k · 화염 300k · 붕괴 500k)',
+    unlock1.gate === true
+    && unlock1.list.every((e) => e.need === unlockNeed[e.id])
+    && unlock1.locked.slice().sort().join(',') === Object.keys(unlockNeed).sort().join(','), unlock1);
+  const pickLocked = await api.setWeapon(page, 'sniper');
+  const weaponNow = await api.weapon(page);
+  check('A.v3 §4.5 해금: 잠긴 무기는 고를 수 없다 (해금은 슬롯 가용성이지 수치가 아니다)',
+    pickLocked === false && weaponNow !== 'sniper', { pickLocked, weaponNow });
+  const dmgOfSniper = (await api.weapons(page)).concat(await P(() => window.__crashScreen.arsenal())).filter((w) => w.id === 'sniper').map((w) => w.damage);
+  check('A.v3 §4.5 해금: 잠겨 있어도 무기 수치는 하나도 바뀌지 않는다', dmgOfSniper.length >= 1 && dmgOfSniper.every((d) => d === SPEC_DMG.sniper), dmgOfSniper);
+  const lockedSlot = await P(() => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const b = host && host.shadowRoot ? host.shadowRoot.querySelector('button[data-weapon="sniper"]') : null;
+    if (!b) return null;
+    return { locked: b.classList.contains('locked'), opacity: parseFloat(getComputedStyle(b).opacity), text: (b.textContent || '').replace(/\s+/g, ' ').trim() };
+  });
+  check('A.v3 §4.5 해금: 잠긴 슬롯은 흐리게 🔒 와 남은 수치를 보인다',
+    !!lockedSlot && lockedSlot.locked === true && lockedSlot.opacity < 0.6 && /🔒/.test(lockedSlot.text) && /60000/.test(lockedSlot.text), lockedSlot);
+  await P(() => window.__crashScreen.debug.setProgress(70000));
+  await sleep(80);
+  const unlock2 = await debugCall('unlockInfo');
+  const pickOpened = await api.setWeapon(page, 'sniper');
+  check('A.v3 §4.5 해금: 누적 피해가 문턱을 넘으면 열린다',
+    unlock2.unlocked.indexOf('sniper') >= 0 && unlock2.locked.indexOf('sniper') < 0 && pickOpened === 'sniper', { unlock2, pickOpened });
+  await api.setWeapon(page, 'hammer');
+  await P(() => window.__crashScreen.debug.setProgress(0));
+  await sleep(60);
+  const totalBefore = (await debugCall('unlockInfo')).totalDamage;
+  const bcU = await api.rect(page, '#big-card');
+  await P((p) => { const a = window.__crashScreen; for (let i = 0; i < 3; i++) a.smashAt(p.x, p.y); }, { x: bcU.cx, y: bcU.cy });
+  await sleep(120);
+  const totalAfter = (await debugCall('unlockInfo')).totalDamage;
+  check('A.v3 §4.5 해금: 실제로 입힌 피해가 누적된다', totalAfter > totalBefore, { totalBefore, totalAfter });
+  const progressStore = await poll(async () => P(() => (window.__crsLocal && window.__crsLocal.crsProgress) || null), 4000, 150);
+  check('A.v3 §4.5 해금: 누적 피해가 crsProgress 로 저장된다',
+    !!progressStore && progressStore.version === 1 && progressStore.totalDamage > 0 && Array.isArray(progressStore.unlocked), progressStore);
+  await api.call(page, 'setSetting', 'unlockAll', true);
+  await sleep(80);
+  const unlock3 = await debugCall('unlockInfo');
+  check('A.v3 §4.5 해금: 다시 끄면 즉시 전부 풀린다', unlock3.gate === false && unlock3.locked.length === 0, unlock3);
+  await api.restore(page);
+  await sleep(100);
+
+  // =====================================================================================
+  // §5 인스펙터
+  // =====================================================================================
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const insCard = await api.rect(page, '#small-card');
+  const styleBeforeIns = await P(() => document.getElementById('small-card').getAttribute('style'));
+  await page.mouse.move(insCard.cx, insCard.cy);
+  await sleep(120);
+  await page.keyboard.press('i');
+  await sleep(150);
+  await page.mouse.move(insCard.cx + 2, insCard.cy + 2);
+  await sleep(180);
+  const stIns = await api.stats(page);
+  const insPanel = await P(() => {
+    const n = document.querySelector('.crs-inspect');
+    if (!n) return null;
+    const cs = getComputedStyle(n);
+    return { visible: cs.display !== 'none', text: (n.textContent || '').replace(/\s+/g, ' ').trim() };
+  });
+  const insBox = await P(() => {
+    const b = document.querySelector('.crs-target');
+    if (!b) return null;
+    const tb = b.querySelector('.crs-tb');
+    return { cls: b.classList.contains('crs-inspect-box'), border: tb ? getComputedStyle(tb).borderTopColor : null };
+  });
+  check('A.v3 §5.1 인스펙터: I 로 켜지고 호버 박스가 파래진다',
+    stIns.inspecting === true && !!insBox && insBox.cls === true && /88,\s*166,\s*255/.test(insBox.border || ''), { inspecting: stIns.inspecting, insBox });
+  check('A.v3 §5.1 인스펙터: 패널이 명세가 나열한 항목을 전부 보인다 (선택자·박스·글꼴·색·대비·쌓임·역할·이름·자식·체력)',
+    !!insPanel && insPanel.visible && ['선택자', '박스', '글꼴', '색', '대비', '쌓임', '역할', '이름', '자식', '체력'].every((k) => insPanel.text.includes(k)), insPanel);
+
+  const selRound = await P(() => {
+    const a = window.__crashScreen;
+    const out = [];
+    for (const id of ['small-card', 'big-card', 'long-para', 'test-btn', 'stack-2']) {
+      const el = document.getElementById(id);
+      if (!el) { out.push({ id, ok: false, why: 'missing' }); continue; }
+      el.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const r = el.getBoundingClientRect();
+      const d = a.inspect.at(r.left + r.width / 2, r.top + r.height / 2);
+      let hits = -1, same = false;
+      if (d) { try { hits = document.querySelectorAll(d.selector).length; same = document.querySelector(d.selector) !== null; } catch (e) { hits = -1; } }
+      out.push({ id, sel: d && d.selector, selectorOk: d && d.selectorOk, hits, same, tag: d && d.tag });
+    }
+    return out;
+  });
+  check('A.v3 §5.1 인스펙터: 고유 선택자가 그 요소로 되돌아온다 — querySelector(sel) === el, 그리고 일치가 정확히 하나',
+    selRound.length === 5 && selRound.every((r) => r.selectorOk === true && r.hits === 1), selRound);
+
+  const contrastProbe = await P(() => {
+    const a = window.__crashScreen;
+    const box = document.createElement('div');
+    box.id = 'crs-contrast-probe';
+    const s = box.style;
+    s.setProperty('position', 'fixed'); s.setProperty('left', '60px'); s.setProperty('top', '320px');
+    s.setProperty('width', '240px'); s.setProperty('height', '90px');
+    s.setProperty('background-color', 'rgb(255, 255, 255)');
+    s.setProperty('color', 'rgb(0, 0, 0)');
+    s.setProperty('font-size', '16px'); s.setProperty('font-weight', '400');
+    s.setProperty('z-index', '2147483000');
+    box.textContent = '대비 측정용 상자';
+    document.body.appendChild(box);
+    const r = box.getBoundingClientRect();
+    const black = a.inspect.at(r.left + r.width / 2, r.top + r.height / 2);
+    box.style.setProperty('color', 'rgb(119, 119, 119)');
+    const grey = a.inspect.at(r.left + r.width / 2, r.top + r.height / 2);
+    box.style.setProperty('font-size', '26px');
+    const greyLarge = a.inspect.at(r.left + r.width / 2, r.top + r.height / 2);
+    box.remove();
+    return { black, grey, greyLarge };
+  });
+  // 손계산 (WCAG 2.x 상대 휘도): 검정 위 흰색 = 21.0000, rgb(119,119,119) 위 흰색 = 4.4781
+  check('A.v3 §5.1 인스펙터: 대비비가 손계산과 ±0.05 — 흰 바탕 검정 글씨 21.00 (AAA), #777 글씨 4.48',
+    !!contrastProbe.black && Math.abs(contrastProbe.black.contrast - 21.0) <= 0.05 && contrastProbe.black.wcag === 'AAA'
+    && !!contrastProbe.grey && Math.abs(contrastProbe.grey.contrast - 4.4781) <= 0.05, contrastProbe);
+  check('A.v3 §5.1 인스펙터: WCAG 판정이 큰 글씨 기준을 따로 쓴다 (4.48 은 본문에서 미달, 26px 에서 AA)',
+    !!contrastProbe.grey && contrastProbe.grey.wcag === '미달' && !!contrastProbe.greyLarge && contrastProbe.greyLarge.wcag === 'AA',
+    { normal: contrastProbe.grey && contrastProbe.grey.wcag, large: contrastProbe.greyLarge && contrastProbe.greyLarge.wcag });
+
+  const noBreak = await P((pt) => {
+    const a = window.__crashScreen;
+    const el = document.getElementById('small-card');
+    const snap = () => { const s = a.stats(); return { broken: s.broken, cracks: s.cracks, damage: s.damageDealt, pieces: s.pieceCount, attr: el.hasAttribute('data-crs-broken'), style: el.getAttribute('style') }; };
+    const before = snap();
+    for (let i = 0; i < 25; i++) a.smashAt(pt.x, pt.y);
+    a.slash(pt.x - 40, pt.y, pt.x + 40, pt.y);
+    return { before, after: snap() };
+  }, { x: insCard.cx, y: insCard.cy });
+  for (let i = 0; i < 5; i++) { await page.mouse.click(insCard.cx, insCard.cy); await sleep(40); }
+  const afterClicks = await api.stats(page);
+  const copyInfo = await P(() => window.__crashScreen.inspect.state());
+  const styleAfterIns = await P(() => document.getElementById('small-card').getAttribute('style'));
+  check('A.v3 §5.1 인스펙터: 아무것도 부수지 않고 페이지에 쓰지 않는다 (클릭 5회 · smashAt 25회 · slash 1회)',
+    noBreak.after.broken === 0 && noBreak.after.attr === false && noBreak.after.cracks === noBreak.before.cracks
+    && noBreak.after.damage === noBreak.before.damage && noBreak.after.pieces === noBreak.before.pieces
+    && afterClicks.broken === 0 && afterClicks.damageDealt === noBreak.before.damage
+    && styleAfterIns === styleBeforeIns, { noBreak, afterClicks: { broken: afterClicks.broken, damage: afterClicks.damageDealt }, style: [styleBeforeIns, styleAfterIns] });
+  check('A.v3 §5.1 인스펙터: 클릭하면 선택자를 복사한다',
+    copyInfo.copies >= 5 && !!copyInfo.copied && copyInfo.copied === copyInfo.selector, copyInfo);
+
+  await page.keyboard.press('Escape');
+  const inactiveIns = await poll(async () => !(await api.active(page)), 2000, 25);
+  const nodesIns = await api.count(page, '[data-crs]');
+  const pendIns = await api.pending(page);
+  await settleRaf(page);
+  const rafIns = await api.pendingRaf(page);
+  const styleEscIns = await P(() => document.getElementById('small-card').getAttribute('style'));
+  check('A.v3 §5 무흔적: 인스펙터가 켜진 채 Escape → 비활성 · [data-crs] 0개 · 타이머 0 · 프레임 0 · 인라인 스타일 원래 값',
+    inactiveIns === true && nodesIns === 0 && pendIns === 0 && rafIns === 0 && styleEscIns === styleBeforeIns,
+    { inactiveIns, nodesIns, pendIns, rafIns, style: [styleBeforeIns, styleEscIns] });
+  const reOnIns = await page.evaluate(contentJs);
+  check('A.v3 §5 무흔적: 그 뒤 content.js 가 깨끗하게 재활성화된다', reOnIns === 'on', reOnIns);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noPartial: true });
+  await api.restore(page);
+  await sleep(120);
+  const insAfterReactivate = (await api.stats(page)).inspecting;
+  check('A.v3 §5.1 인스펙터: 재활성화하면 꺼진 상태로 돌아온다', insAfterReactivate === false, insAfterReactivate);
+
+  // =====================================================================================
+  // §5 결과 공유 — 권한을 늘리지 않는다
+  // =====================================================================================
+  const shareFail = await P(async () => {
+    const a = window.__crashScreen;
+    a.share();
+    await new Promise((r) => setTimeout(r, 80));
+    return a.debug.shareInfo();
+  });
+  const shareToast = await api.hudQ(page, '.crs-toast');
+  check('A.v3 §5.2 공유: 캡처가 실패하면(제한된 페이지) 토스트로 알린다',
+    !!shareFail.last && shareFail.last.ok === false && !!shareToast && shareToast.visible && /캡처할 수 없/.test(shareToast.text),
+    { shareFail, shareToast });
+  const shareOk = await P(async () => {
+    const a = window.__crashScreen;
+    const seen = [];
+    const real = chrome.runtime.sendMessage;
+    chrome.runtime.sendMessage = (m) => { seen.push(m); return Promise.resolve({ ok: true }); };
+    a.share();
+    await new Promise((r) => setTimeout(r, 80));
+    chrome.runtime.sendMessage = real;
+    return { info: a.debug.shareInfo(), seen };
+  });
+  check('A.v3 §5.2 공유: 백그라운드에 captureVisibleTab 을 메시지로 요청하고 캡션에 모드·점수·처치·조각·피해·시각을 싣는다',
+    shareOk.info.last.ok === true && shareOk.seen.length === 1 && shareOk.seen[0].type === 'crash:share'
+    && ['title', 'origin', 'mode', 'score', 'kills', 'pieces', 'damage', 'at'].every((k) => k in shareOk.seen[0].caption), shareOk);
+  const maniPerm = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+  check('A.v3 §8 완료 기준: manifest.json 의 권한이 하나도 늘지 않았다 — [activeTab, scripting, storage], host_permissions 없음',
+    JSON.stringify(maniPerm.permissions) === JSON.stringify(['activeTab', 'scripting', 'storage'])
+    && maniPerm.host_permissions === undefined && maniPerm.optional_permissions === undefined && maniPerm.optional_host_permissions === undefined,
+    { permissions: maniPerm.permissions, host: maniPerm.host_permissions });
+
+  // =====================================================================================
+  // §5 리플레이
+  // =====================================================================================
+  await api.restore(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await api.setWeapon(page, 'hammer');
+  await sleep(100);
+  const repCard = await api.rect(page, '#small-card');
+  const rec5 = await P((pt) => {
+    const a = window.__crashScreen;
+    a.replay.reset();
+    for (let i = 0; i < 5; i++) a.smashAt(pt.x, pt.y);
+    return { exported: a.replay.export(), broken: a.stats().broken, state: a.replay.state() };
+  }, { x: repCard.cx, y: repCard.cy });
+  check('A.v3 §5.3 리플레이: 5회 타격이 { t, op, args } 로 기록되고 상한이 2000이다',
+    rec5.exported.v === 1 && rec5.exported.ops.length === 5
+    && rec5.exported.ops.every((o) => typeof o.t === 'number' && o.op === 'smash' && Array.isArray(o.args) && o.args.length === 2)
+    && rec5.state.max === 2000 && rec5.broken >= 1, { ops: rec5.exported.ops.length, state: rec5.state, broken: rec5.broken });
+
+  const played = await P(async (obj) => {
+    const a = window.__crashScreen;
+    a.restore();
+    const beforeBroken = a.stats().broken;
+    const beforeEl = document.getElementById('small-card').hasAttribute('data-crs-broken');
+    const ok = await a.replay.play(obj, { speed: 6 });
+    return { ok, beforeBroken, beforeEl, afterBroken: a.stats().broken, afterEl: document.getElementById('small-card').hasAttribute('data-crs-broken'), state: a.replay.state() };
+  }, rec5.exported);
+  check('A.v3 §5.3 리플레이: 내보내고 복구한 뒤 재생하면 같은 요소가 다시 부서진다',
+    played.ok === true && played.beforeBroken === 0 && played.beforeEl === false && played.afterEl === true && played.afterBroken >= 1, played);
+
+  const duringPlay = await P((obj) => new Promise((resolve) => {
+    const a = window.__crashScreen;
+    a.restore();
+    a.setWeapon('hammer');
+    const slow = { v: 1, startedAt: 0, viewport: obj.viewport, ops: obj.ops.map((o, i) => ({ t: i * 400, op: o.op, args: o.args })) };
+    a.replay.play(slow, { speed: 1 });
+    setTimeout(() => {
+      const before = a.weapon;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', code: 'Digit2', bubbles: true, cancelable: true }));
+      const host = document.querySelector('crs-hud, .crs-hud-host');
+      const badge = host && host.shadowRoot ? host.shadowRoot.querySelector('.crs-replay') : null;
+      const vis = badge ? getComputedStyle(badge).display !== 'none' : false;
+      setTimeout(() => resolve({ before, after: a.weapon, badge: vis, badgeText: badge ? badge.textContent.trim() : null, playing: a.replay.state().playing, statsReplaying: a.stats().replaying }), 80);
+    }, 220);
+  }), rec5.exported);
+  check('A.v3 §5.3 리플레이: 재생 중에는 입력을 무시하고 HUD 에 배지를 띄운다',
+    duringPlay.playing === true && duringPlay.statsReplaying === true && duringPlay.badge === true
+    && /리플레이/.test(duringPlay.badgeText || '') && duringPlay.before === duringPlay.after, duringPlay);
+  await poll(async () => ((await api.stats(page)).replaying === false ? true : null), 5000, 120);
+
+  const scaledPlay = await P((obj) => new Promise((resolve) => {
+    const a = window.__crashScreen;
+    a.restore();
+    const small = { v: 1, startedAt: 0, viewport: { w: Math.round(obj.viewport.w * 0.8), h: Math.round(obj.viewport.h * 0.8) }, ops: obj.ops.slice(0, 3).map((o, i) => ({ t: i * 300, op: o.op, args: o.args })) };
+    const pr = a.replay.play(small, { speed: 1 });
+    setTimeout(() => {
+      const host = document.querySelector('crs-hud, .crs-hud-host');
+      const t = host && host.shadowRoot ? host.shadowRoot.querySelector('.crs-toast') : null;
+      const toast = t ? { text: (t.textContent || '').trim(), visible: getComputedStyle(t).display !== 'none' } : null;
+      pr.then((ok) => resolve({ ok, toast, state: a.replay.state() }));
+    }, 140);
+  }), rec5.exported);
+  check('A.v3 §5.3 리플레이: 뷰포트가 5% 이상 다르면 좌표를 보정하고 경고한다',
+    scaledPlay.ok === true && scaledPlay.state.scaled === true && !!scaledPlay.toast && scaledPlay.toast.visible && /뷰포트/.test(scaledPlay.toast.text), scaledPlay);
+
+  const imports = await P(() => {
+    const a = window.__crashScreen;
+    const good = a.replay.export();
+    return {
+      good: a.replay.import(good),
+      notObject: a.replay.import(null),
+      noVersion: a.replay.import({ viewport: { w: 100, h: 100 }, ops: [] }),
+      badViewport: a.replay.import({ v: 1, viewport: { w: 0, h: 100 }, ops: [] }),
+      badOp: a.replay.import({ v: 1, viewport: { w: 100, h: 100 }, ops: [{ t: 0, op: 'eval', args: [] }] }),
+      backwards: a.replay.import({ v: 1, viewport: { w: 100, h: 100 }, ops: [{ t: 10, op: 'restore', args: [] }, { t: 1, op: 'restore', args: [] }] }),
+      badWeapon: a.replay.import({ v: 1, viewport: { w: 100, h: 100 }, ops: [{ t: 0, op: 'weapon', args: ['railgun'] }] }),
+      badArity: a.replay.import({ v: 1, viewport: { w: 100, h: 100 }, ops: [{ t: 0, op: 'smash', args: [1] }] }),
+      tooMany: a.replay.import({ v: 1, viewport: { w: 100, h: 100 }, ops: new Array(2001).fill(0).map((_, i) => ({ t: i, op: 'restore', args: [] })) }),
+      overMb: a.replay.import({ v: 1, viewport: { w: 100, h: 100 }, ops: [{ t: 0, op: 'weapon', args: ['x'.repeat(1200000)] }] })
+    };
+  });
+  check('A.v3 §5.3 리플레이: 가져오기가 엄격하게 검증한다 (1MB 상한 · 버전 · 뷰포트 · 연산 · 시간 순서 · 무기 id · 인자 수 · 2000개 상한)',
+    imports.good === true && Object.keys(imports).filter((k) => k !== 'good').every((k) => imports[k] === false), imports);
+
+  await P(async () => {
+    const a = window.__crashScreen;
+    for (let i = 0; i < 12; i++) {
+      a.replay.save({ v: 1, startedAt: i, viewport: { w: 1280, h: 900 }, ops: [{ t: 0, op: 'restore', args: [] }] });
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  });
+  const replayStore = await poll(async () => P(() => (window.__crsLocal && window.__crsLocal.crsReplays) || null), 4000, 120);
+  check('A.v3 §5.3 리플레이: crsReplays 는 최대 10개이고 오래된 것부터 빠진다 (FIFO)',
+    Array.isArray(replayStore) && replayStore.length === 10 && replayStore[0].startedAt === 2 && replayStore[9].startedAt === 11,
+    replayStore && replayStore.map((r) => r.startedAt));
+
+  const recOff = await P(() => {
+    const a = window.__crashScreen;
+    a.setSetting('recordReplay', false);
+    a.replay.reset();
+    a.smashAt(40, 40);
+    const off = a.replay.state();
+    a.setSetting('recordReplay', true);
+    a.replay.reset();
+    a.smashAt(40, 40);
+    const on = a.replay.state();
+    return { off, on };
+  });
+  check('A.v3 §5.3 리플레이: recordReplay 가 꺼져 있으면 아무것도 기록하지 않는다',
+    recOff.off.count === 0 && recOff.off.recording === false && recOff.on.count === 1 && recOff.on.recording === true, recOff);
+
+  // ---- §7 무흔적: 리플레이 재생 중과 보스전 중의 Escape ----
+  const styleRepBefore = await P(() => document.getElementById('big-card').getAttribute('style'));
+  await P((obj) => {
+    const a = window.__crashScreen;
+    a.restore();
+    const slow = { v: 1, startedAt: 0, viewport: obj.viewport, ops: obj.ops.map((o, i) => ({ t: i * 500, op: o.op, args: o.args })) };
+    a.replay.play(slow, { speed: 1 });
+  }, rec5.exported);
+  await sleep(220);
+  const playingBeforeEsc = (await api.stats(page)).replaying;
+  await page.keyboard.press('Escape');
+  const inactiveRep = await poll(async () => !(await api.active(page)), 2000, 25);
+  const nodesRep = await api.count(page, '[data-crs]');
+  const pendRep = await api.pending(page);
+  await settleRaf(page);
+  const rafRep = await api.pendingRaf(page);
+  const styleRepAfter = await P(() => document.getElementById('big-card').getAttribute('style'));
+  check('A.v3 §5 무흔적: 리플레이 재생 중 Escape → 비활성 · [data-crs] 0개 · 타이머 0 · 프레임 0 · 인라인 스타일 원래 값',
+    playingBeforeEsc === true && inactiveRep === true && nodesRep === 0 && pendRep === 0 && rafRep === 0 && styleRepAfter === styleRepBefore,
+    { playingBeforeEsc, inactiveRep, nodesRep, pendRep, rafRep, style: [styleRepBefore, styleRepAfter] });
+  const reOnRep = await page.evaluate(contentJs);
+  check('A.v3 §5 무흔적: 그 뒤 content.js 가 깨끗하게 재활성화된다 (리플레이)', reOnRep === 'on', reOnRep);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noPartial: true });
+  await api.restore(page);
+  await sleep(120);
+
+  // the challenge starts FIRST: challenge.start() runs restore(), which would otherwise take the boss with it
+  await P(() => { const a = window.__crashScreen; a.challenge.start('survival'); });
+  await sleep(250);
+  await api.rect(page, '#boss');
+  await P(() => { window.__crashScreen.debug.setPlayerHp(100); });
+  await force('#boss', 'forceAttack');
+  await debugCall('bossPromote');
+  await sleep(200);
+  const liveBeforeBossEsc = { boss: (await api.stats(page)).boss, chal: (await chalState()).running, bar: await api.hudQ(page, '.crs-bossbar') };
+  check('A.v3 §7: Escape 직전에 보스 바와 챌린지가 모두 살아 있다',
+    !!liveBeforeBossEsc.boss && liveBeforeBossEsc.chal === true && !!liveBeforeBossEsc.bar && liveBeforeBossEsc.bar.visible,
+    { boss: liveBeforeBossEsc.boss, chal: liveBeforeBossEsc.chal });
+  const styleBossBefore = await P(() => document.getElementById('boss').getAttribute('style'));
+  await page.keyboard.press('Escape');
+  const inactiveBoss = await poll(async () => !(await api.active(page)), 2000, 25);
+  const nodesBoss = await api.count(page, '[data-crs]');
+  const pendBoss = await api.pending(page);
+  await settleRaf(page);
+  const rafBoss = await api.pendingRaf(page);
+  const styleBossAfter = await P(() => document.getElementById('boss').getAttribute('style'));
+  check('A.v3 §7 무흔적: 보스전과 챌린지가 돌아가는 중 Escape → 비활성 · [data-crs] 0개 · 타이머 0 · 프레임 0 · 인라인 스타일 원래 값',
+    inactiveBoss === true && nodesBoss === 0 && pendBoss === 0 && rafBoss === 0 && styleBossAfter === styleBossBefore,
+    { inactiveBoss, nodesBoss, pendBoss, rafBoss, style: [styleBossBefore, styleBossAfter] });
+  const reOnBoss = await page.evaluate(contentJs);
+  check('A.v3 §7 무흔적: 그 뒤 content.js 가 깨끗하게 재활성화된다 (보스·챌린지)', reOnBoss === 'on', reOnBoss);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noPartial: true });
+  await P(() => { const a = window.__crashScreen; a.challenge.stop(); });
+  await api.restore(page);
+  await sleep(120);
 
   await combatTeardown(ctx);
 }
@@ -8802,7 +9483,11 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
    * screenful (six 260 × 170 ≈ 44 200 px² cards sharing a rect, plus the 900 × 700 tank pair below them), so
    * it is where "the old cap of 3 is really gone" can be shown rather than argued. */
   await api.rect(page, '#depth-front');
-  await api.debug(page, { noAttacks: false });
+  /* SPEC-product §4: the boss scheduler is live wherever noAttacks is off, and it promotes the biggest
+   enemy on the page to maxHp x3. Nothing in this section is about bosses, and a tripled health bar on
+   the element it wears down is noise in what it measures — so the promotion is switched off by name
+   for exactly this window and switched back on after it. */
+  await api.debug(page, { noAttacks: false, noBoss: true });
   await api.restore(page);
   await sleep(100);
   const grewB6 = await poll(async () => { const n = (await api.stats(page)).hostiles; return n >= 4 ? n : null; }, 8000, 150);
@@ -8844,7 +9529,7 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   check('A.§B 6 (§B3): 적이 하나 죽어도 전장이 비지 않는다 — 처치 뒤 동시 적 수가 곧바로 원래대로 돌아온다',
     killedB6 === true && backB6 >= beforeKillB6, { beforeKillB6, backB6, killedB6, ms: Date.now() - killedAtB6 });
   await api.setWeapon(page, 'hammer');
-  await api.debug(page, { noAttacks: true });
+  await api.debug(page, { noAttacks: true, noBoss: false });
   await sleep(50);
 
   // ---- (B7) §B4: 전투 모드의 미터는 파괴율이 아니라 처치 진행도다 ----
@@ -11107,7 +11792,8 @@ function prepareExtensionCopy() {
   const dst = path.join(OUT, 'ext');
   fs.rmSync(dst, { recursive: true, force: true });
   fs.mkdirSync(dst, { recursive: true });
-  for (const name of ['manifest.json', 'background.js', 'content.js', 'content.css', 'icons', '_locales']) {
+  // SPEC-product §5: `share` joins the copy — the share page is part of the real extension's wiring now.
+  for (const name of ['manifest.json', 'background.js', 'content.js', 'content.css', 'icons', '_locales', 'share']) {
     const src = path.join(ROOT, name);
     if (fs.existsSync(src)) fs.cpSync(src, path.join(dst, name), { recursive: true });
   }
@@ -11210,6 +11896,94 @@ async function suiteC(puppeteer, origin) {
     check('C.blocked: badge flashes "✕"', flash === '✕', flash);
     const cleared = await poll(async () => ((await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), tabId)) === '' ? 'cleared' : null), 2500, 50);
     check('C.blocked: "✕" badge cleared within ~1.5 s', cleared === 'cleared', cleared);
+    /* ---- SPEC-product §5 결과 공유, in the REAL extension -------------------------------------------
+     * The content-script half is asserted in the `combat` block (the message, the caption, the failure
+     * toast). This is the other half: chrome.tabs.captureVisibleTab really running on the activeTab grant,
+     * the PNG landing in chrome.storage.session, and share/share.html compositing the caption band onto it.
+     * §8's "새 권한이 하나도 늘지 않았을 것" is asserted against the SHIPPED manifest, not this copy — the
+     * harness adds host_permissions to its throwaway copy (see prepareExtensionCopy). */
+    const shareHooked = await worker.evaluate(() => typeof self.__crashScreenCaptureForShare === 'function');
+    check('C.share: background.js exposes the §5 capture path', shareHooked === true, shareHooked);
+    const shareBlocked = await worker.evaluate(async (id) => self.__crashScreenCaptureForShare({ tab: { id, windowId: 1, url: 'chrome://extensions' } }, null), tabId);
+    check('C.share: 제한된 페이지는 캡처하지 않고 { ok: false } 로 거절한다 (콘텐츠 스크립트가 토스트로 알린다)',
+      !!shareBlocked && shareBlocked.ok === false && shareBlocked.reason === 'blocked', shareBlocked);
+    /* `activeTab` is granted by the USER's toolbar click, and the harness drives the toggle programmatically —
+     * so a capture asked for here is refused by Chrome itself. That refusal is worth asserting rather than
+     * working around: it is direct evidence that this extension carries NEITHER `<all_urls>` NOR a host
+     * permission wide enough to screenshot a page behind the user's back (§8). The copy under test even has
+     * host_permissions for 127.0.0.1 added by prepareExtensionCopy, and it still cannot capture. */
+    const shareCap = { title: '화면부수기 테스트', origin: '127.0.0.1', mode: 'rampage', score: 1234, kills: 7, pieces: 42, damage: 999, at: Date.now() };
+    const shareRes = await worker.evaluate(async (id, cap) => {
+      const tab = await chrome.tabs.get(id);
+      return self.__crashScreenCaptureForShare({ tab }, cap);
+    }, tabId, shareCap);
+    const shareStored = await worker.evaluate(async () => {
+      const r = await chrome.storage.session.get(['crsShare']);
+      return r && r.crsShare ? { has: true } : null;
+    });
+    check('C.share: 툴바를 누르지 않은 캡처는 크롬이 거절한다 — activeTab 외의 넓은 권한을 들고 있지 않다는 직접 증거다 (사본은 127.0.0.1 host_permissions 까지 갖고도 못 찍는다)',
+      !!shareRes && shareRes.ok === false && /activeTab|all_urls/.test(String(shareRes.reason || '')), shareRes);
+    check('C.share: 캡처가 실패하면 storage.session 에 아무것도 남기지 않고 탭도 열지 않는다',
+      shareStored === null, shareStored);
+
+    /* The share PAGE is exercised on its own: the worker writes a capture of a KNOWN size into
+     * chrome.storage.session (the same key and shape captureForShare writes) and share/share.html is opened
+     * directly. That covers everything the page owns — reading session storage, compositing the caption band,
+     * and its i18n — without needing a grant the harness cannot produce. */
+    const shareSeed = await worker.evaluate(async (cap) => {
+      const c = new OffscreenCanvas(200, 120);
+      const g = c.getContext('2d');
+      g.fillStyle = '#4a7bd0';
+      g.fillRect(0, 0, 200, 120);
+      const buf = await (await c.convertToBlob({ type: 'image/png' })).arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      const dataUrl = 'data:image/png;base64,' + btoa(bin);
+      await chrome.storage.session.set({ crsShare: { dataUrl, caption: cap, at: Date.now() } });
+      return { url: chrome.runtime.getURL('share/share.html'), w: 200, h: 120 };
+    }, shareCap);
+    const sharePage = await browser.newPage();
+    const shareLog = hookPage(sharePage);
+    await sharePage.goto(shareSeed.url, { waitUntil: 'load' });
+    // share.js reveals `#frame` only once the composite is on the canvas, so that is the signal to read it
+    const drawn = await poll(() => sharePage.evaluate(() => {
+      const c = document.getElementById('shot');
+      const empty = document.getElementById('empty');
+      if (!c || document.getElementById('frame').hidden) return null;
+      const g = c.getContext('2d');
+      if (!g) return null;
+      const band = g.getImageData(10, c.height - 20, 1, 1).data;
+      const shot = g.getImageData(10, 10, 1, 1).data;
+      return {
+        w: c.width, h: c.height, emptyShown: !empty.hidden,
+        title: (document.getElementById('title').textContent || '').trim(),
+        save: (document.getElementById('save').textContent || '').trim(),
+        copy: (document.getElementById('copy').textContent || '').trim(),
+        band: [band[0], band[1], band[2], band[3]], shot: [shot[0], shot[1], shot[2], shot[3]]
+      };
+    }), 8000, 120);
+    check('C.share: share.html 이 storage.session 의 캡처를 읽어 그 위에 캡션 띠를 캔버스로 합성한다 (200×120 캡처 → 200×228, 띠는 불투명하고 그림은 그대로다)',
+      !!drawn && drawn.emptyShown === false && drawn.w === shareSeed.w && drawn.h === shareSeed.h + 108
+      && drawn.band[3] === 255 && drawn.shot[2] > drawn.shot[0], drawn);
+    check('C.share: share.html 의 제목과 버튼이 i18n 라벨을 쓴다 (메시지 키가 그대로 찍히지 않는다)',
+      !!drawn && drawn.title.length > 0 && drawn.save.length > 0 && drawn.copy.length > 0
+      && drawn.title !== 'shareTitle' && drawn.save !== 'shareSave' && drawn.copy !== 'shareCopy', drawn);
+    check('C.share: share.html 에 콘솔·페이지 오류가 없다',
+      shareLog.pageErrors.length === 0 && shareLog.consoleErrors.length === 0,
+      { pageErrors: shareLog.pageErrors, consoleErrors: shareLog.consoleErrors });
+    const shareEmpty = await worker.evaluate(() => chrome.storage.session.remove(['crsShare']).then(() => true));
+    await sharePage.reload({ waitUntil: 'load' });
+    const emptyState = await poll(() => sharePage.evaluate(() => {
+      const empty = document.getElementById('empty');
+      const frame = document.getElementById('frame');
+      return empty && !empty.hidden ? { text: (empty.textContent || '').trim(), frameHidden: !!frame.hidden, save: document.getElementById('save').disabled, copy: document.getElementById('copy').disabled } : null;
+    }), 4000, 100);
+    check('C.share: 저장된 캡처가 없으면 안내만 보이고 버튼이 꺼진다',
+      shareEmpty === true && !!emptyState && emptyState.frameHidden === true && emptyState.save === true && emptyState.copy === true && emptyState.text.length > 0,
+      emptyState);
+    await sharePage.close();
+
     const ping = await worker.evaluate(() => new Promise((res) => {
       try { chrome.runtime.sendMessage({ type: 'crash:ping' }, (r) => res(r)); } catch (e) { res(String(e)); }
     }));
@@ -11292,13 +12066,16 @@ async function suiteC(puppeteer, origin) {
   /* Re-measured after SPEC-arsenal §C/§D landed. `depth` took the whole 상호작용 무기 section (물리가
    * 본질인 단언들이라 전부 거기로 갔다) and went 28 s → 42 s, `rules` took the 나팔 · 견인 단언들, and
    * `ammo` took the 무기 표 · 예능 밴드. Order is measured cost, longest first. */
+  /* Re-measured after SPEC-product (10단계) landed. §3 챌린지 · §4 보스와 해금 · §5 인스펙터·공유·리플레이
+   * all went into `combat`, which grew 35 → 56 s and therefore moves ahead of `depth` in the queue. `ammo`
+   * is untouched at ~107 s and is still the lane the wall clock is made of. */
   const A_BLOCKS = [
-    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~107 s — §E 가 들어오며 92 → 107 s. 가장 긴 레인이고 벽시계가 곧 이 값이다
+    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~107 s — 가장 긴 레인이고 벽시계가 곧 이 값이다
     ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],       // ~76 s
     ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~60 s
+    ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],           // ~56 s — 10단계가 35 → 56 s 로 올렸다
     ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~42 s
     ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],     // ~38 s
-    ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],           // ~35 s
     ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],   // ~7 s
   ];
   for (const [name, fn] of A_BLOCKS) {

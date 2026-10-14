@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>crash-tab</title>
+  <link rel="stylesheet" href="share.css">
+</head>
+<body>
+  <main class="wrap">
+    <h1 id="title" class="title"></h1>
+    <p id="empty" class="empty" hidden></p>
+    <div id="frame" class="frame" hidden>
+      <canvas id="shot" class="shot" width="1" height="1"></canvas>
+    </div>
+    <div class="row">
+      <button id="save" type="button" class="btn"></button>
+      <button id="copy" type="button" class="btn"></button>
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+    </div>
+    <p class="note" id="note"></p>
+  </main>
+  <script src="share.js"></script>
+</body>
+</html>

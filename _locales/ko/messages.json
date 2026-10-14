@@ -514,5 +514,177 @@
   "presetCombo": {
     "message": "연계",
     "description": "SPEC-arsenal E: loadout preset for the soak then freeze then smash chain"
+  },
+  "labelChallenge": {
+    "message": "챌린지",
+    "description": "SPEC-product 3: challenge mode label"
+  },
+  "chalTimeAttack": {
+    "message": "타임어택",
+    "description": "SPEC-product 3: 60 second score run"
+  },
+  "chalTargetRush": {
+    "message": "목표 돌파",
+    "description": "SPEC-product 3: destroy 40 elements as fast as possible"
+  },
+  "chalSurvivalRun": {
+    "message": "생존",
+    "description": "SPEC-product 3: forced combat until KO"
+  },
+  "chalResult": {
+    "message": "챌린지 결과",
+    "description": "SPEC-product 3: result overlay title"
+  },
+  "chalNewBest": {
+    "message": "최고 기록 갱신!",
+    "description": "SPEC-product 3: the run beat the stored record"
+  },
+  "chalRetry": {
+    "message": "다시",
+    "description": "SPEC-product 3: result overlay restart button"
+  },
+  "chalClose": {
+    "message": "닫기",
+    "description": "SPEC-product 3: result overlay close button"
+  },
+  "chalRemain": {
+    "message": "남은 시간",
+    "description": "SPEC-product 3: time attack progress row"
+  },
+  "chalTargets": {
+    "message": "목표",
+    "description": "SPEC-product 3: target rush progress row"
+  },
+  "chalElapsed": {
+    "message": "소요",
+    "description": "SPEC-product 3: how long the run took"
+  },
+  "chalStopped": {
+    "message": "챌린지를 멈췄어요",
+    "description": "SPEC-product 3: toast when a run is cancelled"
+  },
+  "labelBoss": {
+    "message": "보스",
+    "description": "SPEC-product 4: boss health bar label"
+  },
+  "bossArrived": {
+    "message": "👑 보스 등장!",
+    "description": "SPEC-product 4: an element was promoted to boss"
+  },
+  "bossDown": {
+    "message": "👑 보스 격파!",
+    "description": "SPEC-product 4: the boss was destroyed"
+  },
+  "toastLocked": {
+    "message": "아직 잠긴 무기예요",
+    "description": "SPEC-product 4: weapon unlock gate refused the swap"
+  },
+  "toastUnlocked": {
+    "message": "무기 해금!",
+    "description": "SPEC-product 4: cumulative damage crossed an unlock threshold"
+  },
+  "setUnlockAll": {
+    "message": "모든 무기 잠금 해제",
+    "description": "SPEC-product 4: settings-schema label — true (default) means nothing is ever locked"
+  },
+  "setRecordReplay": {
+    "message": "리플레이 기록",
+    "description": "SPEC-product 5: settings-schema label for the replay recorder"
+  },
+  "inspectOn": {
+    "message": "🔍 인스펙터 — 클릭하면 선택자를 복사해요 (I로 끄기)",
+    "description": "SPEC-product 5: inspector mode turned on"
+  },
+  "inspectOff": {
+    "message": "인스펙터 모드 꺼짐",
+    "description": "SPEC-product 5: inspector mode turned off"
+  },
+  "inspectCopied": {
+    "message": "선택자 복사됨",
+    "description": "SPEC-product 5: the unique selector went to the clipboard"
+  },
+  "inspectSelector": {
+    "message": "선택자",
+    "description": "SPEC-product 5: inspector panel row"
+  },
+  "inspectBox": {
+    "message": "박스",
+    "description": "SPEC-product 5: inspector panel row — width x height"
+  },
+  "inspectFont": {
+    "message": "글꼴",
+    "description": "SPEC-product 5: inspector panel row"
+  },
+  "inspectColors": {
+    "message": "색",
+    "description": "SPEC-product 5: inspector panel row — foreground / background"
+  },
+  "inspectContrast": {
+    "message": "대비",
+    "description": "SPEC-product 5: inspector panel row — contrast ratio and WCAG verdict"
+  },
+  "inspectStacking": {
+    "message": "쌓임",
+    "description": "SPEC-product 5: inspector panel row — z-index / position / display"
+  },
+  "inspectRole": {
+    "message": "역할",
+    "description": "SPEC-product 5: inspector panel row — accessibility role"
+  },
+  "inspectName": {
+    "message": "이름",
+    "description": "SPEC-product 5: inspector panel row — accessible name"
+  },
+  "inspectChildren": {
+    "message": "자식",
+    "description": "SPEC-product 5: inspector panel row — direct child count"
+  },
+  "inspectFail": {
+    "message": "미달",
+    "description": "SPEC-product 5: the contrast ratio meets no WCAG level"
+  },
+  "shareFailed": {
+    "message": "이 페이지는 캡처할 수 없어요",
+    "description": "SPEC-product 5: captureVisibleTab refused (restricted page)"
+  },
+  "shareOpened": {
+    "message": "공유 이미지를 열었어요",
+    "description": "SPEC-product 5: the share page was opened in a new tab"
+  },
+  "shareTitle": {
+    "message": "화면부수기 결과",
+    "description": "SPEC-product 5: share page title and caption band heading"
+  },
+  "shareSave": {
+    "message": "저장",
+    "description": "SPEC-product 5: share page save button"
+  },
+  "shareCopy": {
+    "message": "클립보드 복사",
+    "description": "SPEC-product 5: share page clipboard button"
+  },
+  "shareCopied": {
+    "message": "복사했어요",
+    "description": "SPEC-product 5: share page clipboard confirmation"
+  },
+  "shareNone": {
+    "message": "공유할 이미지가 없어요",
+    "description": "SPEC-product 5: share page opened with no stored capture"
+  },
+  "replayBadge": {
+    "message": "▶ 리플레이 재생 중",
+    "description": "SPEC-product 5: HUD badge shown while a replay plays back"
+  },
+  "replayScaled": {
+    "message": "뷰포트가 달라 좌표를 보정했어요",
+    "description": "SPEC-product 5: the recording viewport differs by 5% or more"
+  },
+  "replayDone": {
+    "message": "리플레이 재생 끝",
+    "description": "SPEC-product 5: playback reached the last operation"
+  },
+  "replayBad": {
+    "message": "리플레이 파일이 올바르지 않아요",
+    "description": "SPEC-product 5: strict import validation refused the object"
   }
 }

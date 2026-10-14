@@ -23,7 +23,11 @@
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= hostileFloor ? 'shooter' : null)); }
   /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0).
    * SPEC-combat §A1: arcade stretches every interval by ×1.35 — the hand that dodges is the hand that aims. */
-  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul(); }
+  /* SPEC-product §4: a boss in its THIRD stage attacks twice as often ("마지막엔 간격이 절반"), and
+   * SPEC-product §3's 생존 challenge ramps every enemy's interval down as the run goes on
+   * (chalIntervalMul(), src/97-challenge.js — 1 whenever no challenge is running). Both are multipliers on
+   * the one interval every scheduler already reads, so nothing else had to learn about either. */
+  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul() * bossIntervalMul(rec) * chalIntervalMul(); }
   function resetPlayer() {
     const p = state.player;
     p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
@@ -62,10 +66,14 @@
     if (area < Math.min(hostileFloor, archMinArea(el)) || area > 0.7 * vw * vh) return null;
     return area;
   }
+  /* SPEC-product §4: the boss scheduler keeps its handles beside the other combat timers rather than in a
+   * module of its own, so clearTimers() / pauseCombat() reach them exactly like every other one. */
+  state.bossTimer = 0; state.bossRespawnAt = 0; state.bossNodes = null; state.slowmoUntil = 0;
   function armCombat() {
     untrack(state.combatTimer); state.combatTimer = 0;
     untrack(state.clockTimer); state.clockTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
+    armBossTick();   // SPEC-product §4
     state.graceUntil = now() + scaleMs(GRACE_MS);   // SPEC-test-speed §3: "전투 유예" is a deadline, not a later()
     state.combatTimer = later(selectTick, GRACE_MS);
     state.clockTimer = later(clockTick, 1000);
@@ -223,19 +231,24 @@
     dropAimLine(rec, true);   // the hostile itself is going — its line cannot linger
     try { if (rec.pulse) { rec.pulse.cancel(); state.anims.delete(rec.pulse); } } catch (e) { /* ignore */ }
     try { rec.aura.remove(); } catch (e) { /* ignore */ }
+    if (rec.boss) bossBarSync();   // SPEC-product §4: the bar never outlives the boss it belongs to
     updatePlayerHud();
   }
   function hostileKilled(el, max) {
     const rec = state.hostiles.get(el);
     if (!rec) return;
     const clutch = rec.phase !== 'idle';   // mid-telegraph / wind-up / track / lock / fire → ×1.5 (A10)
+    const wasBoss = isBoss(rec);           // SPEC-product §4: read BEFORE releaseHostile() drops the record
     const r = rectOf(el);
     releaseHostile(el);
     const p = state.player;
-    p.score += clutch ? Math.round(max * 1.5) : max;
+    /* SPEC-product §4: "처치 시 점수 ×3". The ×3 is applied to whatever the kill was already worth, so a
+     * clutch kill on a boss still pays its ×1.5 on top rather than being quietly replaced by the ×3. */
+    p.score += Math.round((clutch ? max * 1.5 : max) * (wasBoss ? 3 : 1));
     p.kills++;
     if (r) { const v = intersectRect(r, { left: 0, top: 0, right: viewW(), bottom: viewH() }); spawnDmg(v.left + v.width / 2, v.top + v.height / 2, 0, true, { text: msg('killLabel'), color: '#7ee787' }); }
     sfx('kill');
+    if (wasBoss) bossKilled(r);   // SPEC-product §4: 1 s slow motion, extra fragments, a new boss in 15 s
     scheduleRefill();   // SPEC-combat §B3
     updatePlayerHud(); scheduleHud();
   }
@@ -253,6 +266,7 @@
      * an enemy frozen mid-lunge. */
     clearArchetypes();
     hostileFloor = HOSTILE_AREA;
+    bossBarSync();   // SPEC-product §4: every boss just went with them
   }
   /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
    * reports exactly that. v1.4 §4: T3 everywhere draws a lock instead of the laser, §10.2 silences the back
@@ -547,6 +561,7 @@
     untrack(state.regenTimer); state.regenTimer = 0;
     untrack(state.depthTimer); state.depthTimer = 0;
     untrack(state.ratioTimer); state.ratioTimer = 0;
+    untrack(state.bossTimer); state.bossTimer = 0;   // SPEC-product §4
     for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; untrack(rec.repairTimer); rec.repairTimer = 0; clearPhase(rec); }
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
     clearLocks(); clearRepairs();   // v1.4 §2 / §3
@@ -561,6 +576,7 @@
     untrack(state.clockTimer); state.clockTimer = later(clockTick, 1000);
     for (const rec of state.hostiles.values()) { scheduleAttack(rec, Math.max(1000, attackInterval(rec))); scheduleRepair(rec); }
     armDepthTick(); armRatioTick();   // v1.4 §10.1 / §3.2
+    armBossTick();                    // SPEC-product §4
     if (modeHasAvatar()) ensureAvatar();
     if (state.player.hp < state.player.max) startRegen();
   }
@@ -668,8 +684,12 @@
     const area = hostileArea(el);
     const rec = state.hostiles.get(el) || (area != null ? markHostile(el, area) : null);
     if (!rec) return null;
-    rec.boss = true;
     state.bossMode = true;
+    /* SPEC-product §4: forceBoss() has to produce a REAL boss — ×3 max HP, the crown, the double border and
+     * the bar — not just the flag the v1.4 attack ladder reads. bossPromote() is the one place that does all
+     * of it; it sets rec.boss itself and is a no-op on an element that is already the boss. */
+    bossPromote(rec);
+    rec.boss = true;
     if (ratio != null && isFinite(ratio) && ratio >= 0 && ratio <= 1) {
       const h = hpOf(el);
       // floor, so the caller's "drive it to 30 %" loop sees a value that is already AT or BELOW the threshold
@@ -688,6 +708,193 @@
     state.bossMode = true;   // nothing eligible on screen: every T3 hostile still fights as a boss
     for (const r of state.hostiles.values()) if (r.tier === 'laser') r.boss = true;
     return true;
+  };
+  /* ═════════════════════════════════════════════════════════════════════════════════════════════════
+   * SPEC-product §4 보스전 — 승격 · 체력 바 · 3단계 · 처치 보상 · 15초 뒤 재승격
+   *
+   * v1.4 already shipped the READING half of this (isBoss / bossPhase / the three-stage attack ladder in
+   * hostileAttack(), and debug.forceBoss to reach it). What §4 adds is everything around it: the automatic
+   * PROMOTION, the ×3 max HP, the fixed bar at the top of the screen, the crown and the double border, the
+   * kill reward, and the 15-second wait before a new boss is crowned.
+   *
+   * AMBIGUITY, reading chosen (reported). §4 says "전투 중 가장 큰 자격 요소를 보스로 승격" without saying
+   * where that element comes from. Read as: the biggest of the enemies ALREADY IN THE FIGHT. The selection
+   * ladder (selectOne(), §B3) is the one place that decides what is "자격" — area floors, archetype floors,
+   * viewport, skip rules — and running a second, different scan here would mean two answers to one question.
+   * It also means a boss is always something the player can already see attacking them. When no enemy is
+   * live the tick simply waits; selectTick() puts one up within 900 ms.
+   *
+   * The scheduler is gated by bossEligible(), which is selectEligible()'s list plus `debug.noBoss` — so a
+   * suite that runs with `noAttacks: true` (every combat block does) sees no promotion at all, exactly as it
+   * sees no selection. ═════════════════════════════════════════════════════════════════════════════════ */
+  const BOSS_HP_MUL = 3;              // §4 "maxHp ×3"
+  const BOSS_RESPAWN_MS = 15000;      // §4 "15초 뒤 새 보스"
+  const BOSS_SCAN_MS = 1000;          // how often the scheduler looks for something to crown
+  const BOSS_SLOWMO_MS = 1000;        // §4 "1초 슬로모션"
+  const BOSS_SLOWMO_RATE = 0.25;      // how much of real time the integrator advances while it lasts
+  const BOSS_PHASE3_MUL = 0.5;        // §4 "마지막엔 간격이 절반"
+  debug.noBoss = false;               // the escape hatch, named like noAttacks / noRepair / noInvuln
+  function bossIntervalMul(rec) { return (isBoss(rec) && bossPhase(rec) >= 3) ? BOSS_PHASE3_MUL : 1; }
+  function bossRec() {
+    for (const rec of state.hostiles.values()) if (isBoss(rec)) return rec;
+    return null;
+  }
+  function bossAlive() { const rec = bossRec(); return !!(rec && rec.el && rec.el.isConnected); }
+  function bossEligible() {
+    const p = state.player;
+    if (!state.active || !state.combat || state.paused) return false;
+    if (!modeHasProjectiles() || debug.noBoss || debug.noAttacks) return false;
+    if (state.ko || !p.alive) return false;
+    if (state.bossRespawnAt && now() < state.bossRespawnAt) return false;   // §4: the 15 s wait
+    return true;
+  }
+  /* §4 "maxHp ×3". Same shape as applyDepthHp() (src/87-depth.js): the ratio is preserved, the scaling is
+   * recorded so it can never be applied twice, and nothing else in the HP pipeline had to change. */
+  function applyBossHp(el) {
+    const rec = state.hp.get(el) || hpOf(el);
+    if (!rec || rec.bossScaled) return;
+    const ratio = rec.max > 0 ? clamp(rec.hp / rec.max, 0, 1) : 1;
+    rec.max = Math.round(rec.max * BOSS_HP_MUL);
+    rec.hp = Math.max(1, Math.round(rec.max * ratio));
+    rec.bossScaled = true;
+  }
+  /* §4 "이중 테두리와 👑". The border is content.css (`.crs-hostile.crs-boss`); the crown is composed into
+   * the aura label, which src/87-depth.js rebuilds from parts — so it is added by WRAPPING that one
+   * composer rather than by appending to a string somebody else owns. */
+  const setHostileLabelBoss = setHostileLabel;
+  setHostileLabel = function (rec) {
+    setHostileLabelBoss(rec);
+    if (!rec || !rec.label || !isBoss(rec)) return;
+    try { rec.label.textContent = '👑 ' + rec.label.textContent; } catch (e) { /* ignore */ }
+  };
+  function bossPromote(rec) {
+    if (!rec || !rec.el || !rec.el.isConnected || rec.boss) return null;
+    rec.boss = true;
+    applyBossHp(rec.el);
+    try { rec.aura.classList.add('crs-boss'); } catch (e) { /* ignore */ }
+    setHostileLabel(rec);
+    setAuraPulse(rec, 900);
+    bossBarSync();
+    refreshHover(); scheduleHud(); updatePlayerHud();
+    toast(msg('bossArrived'));
+    sfx('rumble', { gain: 0.8 });
+    return rec;
+  }
+  /* The biggest enemy currently in the fight — see the reading above. */
+  function bossCandidate() {
+    let best = null, bestArea = 0;
+    for (const rec of state.hostiles.values()) {
+      const el = rec.el;
+      if (!el || !el.isConnected) continue;
+      try { if (el.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+      const r = rectOf(el);
+      if (!r || r.width < 1 || r.height < 1) continue;
+      const a = r.width * r.height;
+      if (a > bestArea) { bestArea = a; best = rec; }
+    }
+    return best;
+  }
+  function bossTick() {
+    state.bossTimer = 0;
+    if (!state.active || !state.combat || state.paused) return;
+    if (!bossAlive() && bossEligible()) { const rec = bossCandidate(); if (rec) bossPromote(rec); }
+    bossBarSync();
+    state.bossTimer = later(bossTick, BOSS_SCAN_MS);
+  }
+  function armBossTick() {
+    if (state.bossTimer || !state.active || !state.combat || !modeHasProjectiles()) return;
+    state.bossTimer = later(bossTick, BOSS_SCAN_MS);
+  }
+  /* §4 "처치 시 점수 ×3 (hostileKilled), 1초 슬로모션, 추가 파편. 15초 뒤 새 보스."
+   * INTERPRETATION (reported): "추가 파편" is read as fragments thrown ON TOP of whatever the weapon's own
+   * break already produced — the element has already been broken by the time this runs, so adding pieces to
+   * it is not available any more; three extra particle bursts at the kill point are. */
+  function bossKilled(r) {
+    state.bossRespawnAt = now() + scaleMs(BOSS_RESPAWN_MS);
+    state.slowmoUntil = now() + scaleMs(BOSS_SLOWMO_MS);
+    const cx = r ? clamp(r.left + r.width / 2, 0, viewW()) : viewW() / 2;
+    const cy = r ? clamp(r.top + r.height / 2, 0, viewH()) : viewH() / 2;
+    let frags = 0;
+    for (const kind of ['dust', 'spark', 'smoke']) { try { frags += fracParticles(kind, cx, cy) || 0; } catch (e) { /* ignore */ } }
+    state.bossFrags = frags;
+    try { shake('bomb', { amp: 12, dur: 420 }); } catch (e) { /* ignore */ }
+    try { flash(cx, cy, 'bomb', { size: 220, dur: 320 }); } catch (e) { /* ignore */ }
+    toast(msg('bossDown'));
+    bossBarSync();
+    kick();
+    untrack(state.bossTimer); state.bossTimer = 0;
+    state.bossTimer = later(bossTick, BOSS_RESPAWN_MS + 50);
+  }
+  /* §4 "상단 중앙에 고정 체력 바". The nodes live in the HUD shadow root (src/45-hud.js) beside the KO
+   * curtain and the ratio meter, so they go away with the HUD and leave nothing on the page. */
+  let bossBarOn = false;
+  function bossBarSync() {
+    const n = state.bossNodes;
+    if (!n || !n.box) { bossBarOn = false; return; }
+    const rec = state.active ? bossRec() : null;
+    if (!rec && !bossBarOn) return;   // updateHud() runs once a frame: say nothing when there is nothing to say
+    bossBarOn = !!rec;
+    try {
+      if (!rec) {
+        n.box.classList.remove('on');
+        if (hudEls.host) hudEls.host.classList.remove('crs-boss-on');
+        if (hudEls.fallback) n.box.style.display = 'none';
+        return;
+      }
+      if (hudEls.host) hudEls.host.classList.add('crs-boss-on');
+      const h = state.hp.get(rec.el) || hpOf(rec.el);
+      const ratio = h && h.max > 0 ? clamp(h.hp / h.max, 0, 1) : 1;
+      n.box.classList.add('on');
+      if (hudEls.fallback) n.box.style.display = 'block';
+      n.label.textContent = '👑 ' + msg('labelBoss') + ' · ' + tagOf(rec.el).toUpperCase() + ' · ' + Math.max(0, Math.round(h.hp)) + '/' + h.max;
+      n.fill.style.width = (ratio * 100).toFixed(1) + '%';
+      n.box.setAttribute('data-phase', String(bossPhase(rec)));
+    } catch (e) { /* ignore */ }
+  }
+  /* §4 "1초 슬로모션". The integrator reads ONE number, `state.lastT`; pulling it toward the current frame
+   * time is a time dilation for every body on the loop at once (pieces, orbs, displaced elements, the drone)
+   * with no second clock and nothing to unwind afterwards. */
+  const tickFrameBoss = tickFrame;
+  tickFrame = function (t) {
+    const slow = state.slowmoUntil > t;
+    if (slow && state.lastT) state.lastT = t - (t - state.lastT) * BOSS_SLOWMO_RATE;
+    else if (!slow && state.slowmoUntil) state.slowmoUntil = 0;
+    const busy = tickFrameBoss(t);
+    return slow ? true : busy;
+  };
+  debug.bossInfo = () => {
+    const rec = bossRec();
+    if (!rec) return { live: false, respawnInMs: state.bossRespawnAt ? Math.max(0, Math.round(state.bossRespawnAt - now())) : 0, frags: state.bossFrags || 0, slowmo: state.slowmoUntil > now() };
+    const h = state.hp.get(rec.el) || hpOf(rec.el);
+    const r = rectOf(rec.el) || { left: 0, top: 0, width: 0, height: 0 };
+    return {
+      live: true, tag: tagOf(rec.el).toUpperCase(), tier: rec.tier, phase: bossPhase(rec),
+      id: rec.el.id || null, rect: { left: r.left, top: r.top, width: r.width, height: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 },
+      hp: Math.max(0, Math.round(h.hp)), max: h.max, scaled: !!h.bossScaled,
+      intervalMs: attackInterval(rec), baseIntervalMs: attackInterval(rec) / bossIntervalMul(rec),
+      respawnInMs: state.bossRespawnAt ? Math.max(0, Math.round(state.bossRespawnAt - now())) : 0,
+      frags: state.bossFrags || 0, slowmo: state.slowmoUntil > now()
+    };
+  };
+  /* The scheduler is normally gated by bossEligible() (noAttacks off, a live enemy, no 15 s wait in
+   * progress). This runs ONE promotion pass with that gate lifted, which is what a test of "승격" means. */
+  debug.bossPromote = () => {
+    const rec = bossCandidate();
+    if (!rec) return null;
+    return bossPromote(rec) ? debug.bossInfo() : null;
+  };
+  debug.bossRespawnNow = () => { state.bossRespawnAt = 0; untrack(state.bossTimer); state.bossTimer = 0; bossTick(); return debug.bossInfo(); };
+  /* Drives the LIVE boss's remaining HP to a fraction of its max — the counterpart of forceBoss(ratio) for a
+   * boss the scheduler crowned on its own, whose element the caller has no name for. */
+  debug.bossWeaken = (ratio) => {
+    const rec = bossRec();
+    if (!rec) return null;
+    const r = Number(ratio);
+    if (!isFinite(r) || r < 0 || r > 1) return debug.bossInfo();
+    const h = state.hp.get(rec.el) || hpOf(rec.el);
+    h.hp = Math.max(1, Math.floor(h.max * r));
+    refreshHover(); scheduleHud(); bossBarSync();
+    return debug.bossInfo();
   };
   debug.setAvatarPos = (x, y) => {
     x = +x; y = +y;

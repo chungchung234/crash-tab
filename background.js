@@ -84,6 +84,42 @@ async function toggleOnTab(tab) {
   }
 }
 
+/* ---- SPEC-product §5 결과 공유 -------------------------------------------------------------------
+ * `chrome.tabs.*` does not exist in a content script, so the content script asks for the capture by
+ * message and this worker performs it. captureVisibleTab() runs on the SAME activeTab grant the toolbar
+ * click already gave us — no permission is added for this, which is §8's completion criterion.
+ *
+ * The PNG goes into chrome.storage.session (the `storage` permission the extension already holds; session
+ * storage is trusted-contexts-only by default, so a web page can never read the screenshot back) and
+ * share/share.html is opened to composite the caption band onto it. A restricted page — the web store, a
+ * chrome:// tab, a PDF viewer — makes captureVisibleTab reject; that rejection is reported back as
+ * { ok: false } and the content script turns it into a toast. */
+const SHARE_KEY = 'crsShare';
+
+async function captureForShare(sender, caption) {
+  const tab = sender && sender.tab;
+  if (!tab || tab.id == null) return { ok: false, reason: 'no-tab' };
+  if (tab.url !== undefined && !isInjectable(tab.url)) return { ok: false, reason: 'blocked' };
+  let dataUrl = null;
+  try {
+    dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  } catch (err) {
+    return { ok: false, reason: String((err && err.message) || err).slice(0, 160) };
+  }
+  if (typeof dataUrl !== 'string' || dataUrl.length < 32) return { ok: false, reason: 'empty' };
+  try {
+    await chrome.storage.session.set({ [SHARE_KEY]: { dataUrl, caption: caption || null, at: Date.now() } });
+  } catch (err) {
+    return { ok: false, reason: 'storage' };
+  }
+  try {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('share/share.html') });
+  } catch (err) {
+    return { ok: false, reason: 'open' };
+  }
+  return { ok: true };
+}
+
 /* ---- listeners: registered synchronously at top level ---- */
 try {
   chrome.action.onClicked.addListener((tab) => {
@@ -103,6 +139,13 @@ try {
         const tabId = sender && sender.tab && sender.tab.id;
         if (tabId != null) setBadge(tabId, msg.active ? 'ON' : '', BADGE_COLOR);
         return false;
+      }
+      // SPEC-product §5: the capture is asynchronous, so the channel is held open with `return true`
+      if (msg.type === 'crash:share') {
+        captureForShare(sender, msg.caption)
+          .then((r) => { try { sendResponse(r); } catch (e) { /* channel gone */ } })
+          .catch(() => { try { sendResponse({ ok: false, reason: 'error' }); } catch (e) { /* ignore */ } });
+        return true;
       }
     } catch (e) { /* ignore */ }
     return false;
@@ -134,3 +177,4 @@ try {
 /* exposed for tests */
 self.__crashScreenToggle = toggleOnTab;
 self.__crashScreenIsInjectable = isInjectable;
+self.__crashScreenCaptureForShare = captureForShare;

@@ -514,5 +514,177 @@
   "presetCombo": {
     "message": "Combo",
     "description": "SPEC-arsenal E: loadout preset for the soak then freeze then smash chain"
+  },
+  "labelChallenge": {
+    "message": "Challenge",
+    "description": "SPEC-product 3: challenge mode label"
+  },
+  "chalTimeAttack": {
+    "message": "Time Attack",
+    "description": "SPEC-product 3: 60 second score run"
+  },
+  "chalTargetRush": {
+    "message": "Target Rush",
+    "description": "SPEC-product 3: destroy 40 elements as fast as possible"
+  },
+  "chalSurvivalRun": {
+    "message": "Survival Run",
+    "description": "SPEC-product 3: forced combat until KO"
+  },
+  "chalResult": {
+    "message": "Challenge Result",
+    "description": "SPEC-product 3: result overlay title"
+  },
+  "chalNewBest": {
+    "message": "New best!",
+    "description": "SPEC-product 3: the run beat the stored record"
+  },
+  "chalRetry": {
+    "message": "Retry",
+    "description": "SPEC-product 3: result overlay restart button"
+  },
+  "chalClose": {
+    "message": "Close",
+    "description": "SPEC-product 3: result overlay close button"
+  },
+  "chalRemain": {
+    "message": "Time left",
+    "description": "SPEC-product 3: time attack progress row"
+  },
+  "chalTargets": {
+    "message": "Targets",
+    "description": "SPEC-product 3: target rush progress row"
+  },
+  "chalElapsed": {
+    "message": "Elapsed",
+    "description": "SPEC-product 3: how long the run took"
+  },
+  "chalStopped": {
+    "message": "Challenge stopped",
+    "description": "SPEC-product 3: toast when a run is cancelled"
+  },
+  "labelBoss": {
+    "message": "Boss",
+    "description": "SPEC-product 4: boss health bar label"
+  },
+  "bossArrived": {
+    "message": "👑 A boss appears!",
+    "description": "SPEC-product 4: an element was promoted to boss"
+  },
+  "bossDown": {
+    "message": "👑 Boss down!",
+    "description": "SPEC-product 4: the boss was destroyed"
+  },
+  "toastLocked": {
+    "message": "That weapon is still locked",
+    "description": "SPEC-product 4: weapon unlock gate refused the swap"
+  },
+  "toastUnlocked": {
+    "message": "Weapon unlocked!",
+    "description": "SPEC-product 4: cumulative damage crossed an unlock threshold"
+  },
+  "setUnlockAll": {
+    "message": "Unlock every weapon",
+    "description": "SPEC-product 4: settings-schema label — true (default) means nothing is ever locked"
+  },
+  "setRecordReplay": {
+    "message": "Record replays",
+    "description": "SPEC-product 5: settings-schema label for the replay recorder"
+  },
+  "inspectOn": {
+    "message": "🔍 Inspector — click to copy the selector (I to turn it off)",
+    "description": "SPEC-product 5: inspector mode turned on"
+  },
+  "inspectOff": {
+    "message": "Inspector off",
+    "description": "SPEC-product 5: inspector mode turned off"
+  },
+  "inspectCopied": {
+    "message": "Selector copied",
+    "description": "SPEC-product 5: the unique selector went to the clipboard"
+  },
+  "inspectSelector": {
+    "message": "Selector",
+    "description": "SPEC-product 5: inspector panel row"
+  },
+  "inspectBox": {
+    "message": "Box",
+    "description": "SPEC-product 5: inspector panel row — width x height"
+  },
+  "inspectFont": {
+    "message": "Font",
+    "description": "SPEC-product 5: inspector panel row"
+  },
+  "inspectColors": {
+    "message": "Colours",
+    "description": "SPEC-product 5: inspector panel row — foreground / background"
+  },
+  "inspectContrast": {
+    "message": "Contrast",
+    "description": "SPEC-product 5: inspector panel row — contrast ratio and WCAG verdict"
+  },
+  "inspectStacking": {
+    "message": "Stacking",
+    "description": "SPEC-product 5: inspector panel row — z-index / position / display"
+  },
+  "inspectRole": {
+    "message": "Role",
+    "description": "SPEC-product 5: inspector panel row — accessibility role"
+  },
+  "inspectName": {
+    "message": "Name",
+    "description": "SPEC-product 5: inspector panel row — accessible name"
+  },
+  "inspectChildren": {
+    "message": "Children",
+    "description": "SPEC-product 5: inspector panel row — direct child count"
+  },
+  "inspectFail": {
+    "message": "Fail",
+    "description": "SPEC-product 5: the contrast ratio meets no WCAG level"
+  },
+  "shareFailed": {
+    "message": "This page cannot be captured",
+    "description": "SPEC-product 5: captureVisibleTab refused (restricted page)"
+  },
+  "shareOpened": {
+    "message": "Opened the share image",
+    "description": "SPEC-product 5: the share page was opened in a new tab"
+  },
+  "shareTitle": {
+    "message": "Crash Tab result",
+    "description": "SPEC-product 5: share page title and caption band heading"
+  },
+  "shareSave": {
+    "message": "Save",
+    "description": "SPEC-product 5: share page save button"
+  },
+  "shareCopy": {
+    "message": "Copy to clipboard",
+    "description": "SPEC-product 5: share page clipboard button"
+  },
+  "shareCopied": {
+    "message": "Copied",
+    "description": "SPEC-product 5: share page clipboard confirmation"
+  },
+  "shareNone": {
+    "message": "Nothing to share",
+    "description": "SPEC-product 5: share page opened with no stored capture"
+  },
+  "replayBadge": {
+    "message": "▶ Replaying",
+    "description": "SPEC-product 5: HUD badge shown while a replay plays back"
+  },
+  "replayScaled": {
+    "message": "Viewport differs — coordinates were corrected",
+    "description": "SPEC-product 5: the recording viewport differs by 5% or more"
+  },
+  "replayDone": {
+    "message": "Replay finished",
+    "description": "SPEC-product 5: playback reached the last operation"
+  },
+  "replayBad": {
+    "message": "That replay file is not valid",
+    "description": "SPEC-product 5: strict import validation refused the object"
   }
 }
