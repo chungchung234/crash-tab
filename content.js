@@ -200,8 +200,8 @@
     // v1.5 (§3.3): the two extra stats in the weapon-button tooltip
     statCrit: '치명', statSwap: '교체',
     // ── v1.4: the three modes, the lock-on, the repair meter, the depth tags and the control card ──
-    modeRampage: '램페이지', modeQuickdraw: '퀵드로우', modeSurvival: '서바이벌',
-    modeRampageDesc: '적 없이 부수기', modeQuickdrawDesc: '먼저 쏘아 끊기', modeSurvivalDesc: '피하며 버티기',
+    modeRampage: '램페이지', modeArcade: '아케이드', modeSurvival: '서바이벌',
+    modeRampageDesc: '적 없이 부수기', modeArcadeDesc: '커서로 피하며 쏘기', modeSurvivalDesc: '드론으로 피하며 쏘기',
     lockBlocked: '차단!', labelRatio: '파괴율', labelDominating: '제압!',
     hintCovered: '가려짐', hintPierce: '관통 가능', hintEnemyBehind: '뒤에 적',
     helpMove: '이동', helpDash: '대시', helpAim: '마우스로 조준',
@@ -249,7 +249,7 @@
     // v1.3: player marker / aim lines / near-miss / hitstop (§3)
     self: null, aimlines: [], nearMisses: 0, nearShown: [], hitstopUntil: 0, lowVig: null, hpRatio: 1,
     player: { x: 0, y: 0, hp: 100, max: 100, score: 0, kills: 0, alive: true, startedAt: 0, pausedAt: 0, pausedTotal: 0, lastDamageAt: 0, lastRegenAt: 0, inWindow: true, lastHitFrom: null },
-    // ── v1.4 §0.5: three modes (rampage · quickdraw · survival) replace the combat boolean ──
+    // ── SPEC-combat §A: three modes (rampage · arcade · survival) replace the combat boolean ──
     mode: 'rampage', lastCombatMode: 'survival',
     // §1 drone avatar (survival only): keys held, physics, dash window, afterimages
     avatar: null, keys: { up: false, down: false, left: false, right: false },
@@ -266,9 +266,9 @@
     // §10 depth tiers, §4 boss stages, §3.2 ratio freshness
     depthTimer: 0, bossMode: false, ratioDirty: true, ratioAt: 0, ratioBrokenN: -1
   };
-  /* §0.5: every v1.2/v1.3 call site reads `state.combat` as "are enemies live?". It stays exactly that, derived
+  /* §A: every v1.2/v1.3 call site reads `state.combat` as "are enemies live?". It stays exactly that, derived
    * from the mode, so none of that code had to change. The setter keeps the legacy boolean writable: true picks
-   * the last combat mode the player actually used (survival unless they chose quickdraw), false is rampage. */
+   * the last combat mode the player actually used (survival until they pick otherwise), false is rampage. */
   Object.defineProperty(state, 'combat', {
     configurable: true,
     enumerable: false,
@@ -341,7 +341,7 @@
   /* schema file is absent (build.js then only warns): the unresolved form   */
   /* is Object.freeze([].concat()) — a frozen empty schema.                  */
   /* ===================================================================== */
-  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","quickdraw","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
+  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
   const SETTING_GROUPS = ['general', 'combat', 'accessibility', 'advanced'];
   /* chrome.storage.sync keys are namespaced `crs.<key>` so they can never collide with the v1 flat keys
    * (crsWeapon, crsMuted, …) that §1.2 migrates away from. Only big things go to `local` — the one that
@@ -415,8 +415,10 @@
    * `crsLoadout` (an array) and `crsSeenCombatHelp` (local, per machine) have no schema type and stay put. */
   const LEGACY_READ = {
     mode: (res) => {
-      if (MODES.indexOf(res.crsMode) !== -1) return res.crsMode;
-      if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'quickdraw' : 'rampage';
+      // SPEC-combat §A: the retired v1.4 id still has to be READ off disk, so it comes through migrateModeId()
+      const m = migrateModeId(res.crsMode);
+      if (MODES.indexOf(m) !== -1) return m;
+      if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'arcade' : 'rampage';
       return undefined;
     },
     defaultWeapon: (res) => {
@@ -2882,9 +2884,9 @@
     title.addEventListener('pointerup', endDrag);
     title.addEventListener('pointercancel', endDrag);
 
-    // ── v1.4 §0.5: the three-way mode control replaces the single 전투 ON/OFF button ──
+    // ── SPEC-combat §A: the three-way mode control replaces the single 전투 ON/OFF button ──
     /* The old button is kept alive but taken out of the row, so every v1.3 line that still writes to it keeps
-     * working untouched while the player sees one segmented control listing rampage · quickdraw · survival. */
+     * working untouched while the player sees one segmented control listing rampage · arcade · survival. */
     const modes = doc.createElement('div'); modes.className = 'modes';
     const mlabel = doc.createElement('span'); mlabel.className = 'mlabel'; mlabel.textContent = msg('labelCombat');
     modes.append(mlabel);
@@ -2982,7 +2984,7 @@
       updateModeHud();   // ── v1.4 §0.5 ──
     } catch (e) { /* ignore */ }
   }
-  // ── v1.4 §0.5: which of the three is pressed, and the one-line description under them ──
+  // ── SPEC-combat §A: which of the three is pressed, and the one-line description under them ──
   function updateModeHud() {
     if (!hudEls.modeBtns) return;
     try {
@@ -3441,10 +3443,10 @@
   function pickTarget(x, y, cache, opts) {
     const env = { vw: viewW(), vh: viewH(), op: cache || new Map() };
     /* v1.4 §2.2 aim assist: a click inside a closing lock frame is a click on THAT enemy, not on a child of it.
-     * Only for a frame that is actually drawn ON the enemy (quickdraw, lk.onEnemy). In survival the frame rides
-     * the DRONE and then freezes wherever the drone was, so the same rule would teleport damage to an enemy the
-     * player never aimed at — §2.2's wording ("자식 요소가 아니라 그 적대 요소") presumes the frame sits on the
-     * enemy, and §2.3 gives survival shoot-or-dodge instead of this assist. */
+     * Only for a frame actually drawn ON the enemy (lk.onEnemy) — otherwise the frame rides the PLAYER and then
+     * freezes wherever they were, so the same rule would teleport damage to an enemy they never aimed at.
+     * SPEC-combat §A2 anchors EVERY frame on the player, so lk.onEnemy is now always false and this branch is
+     * unreachable; it is left standing because §D is still to redo targeting on top of it. */
     if (!(opts && opts.noLock) && state.locks.length) {
       const lk = lockAt(x, y);
       if (lk && lk.onEnemy && lk.rec && lk.rec.el && lk.rec.el.isConnected) {
@@ -5913,21 +5915,31 @@
   }
 
 // ── 86-modes.js ──
-// ── v1.4 §0.5: the three modes (rampage · quickdraw · survival) and everything that switches between them ──
-  /* v1.3 shipped ONE boolean, `combat`. v1.4 splits it on the axis the player actually feels — how the mouse is
-   * shared between aiming and dodging:
+// ── §A: the three modes (rampage · arcade · survival) and everything that switches between them ──
+  /* v1.3 shipped ONE boolean, `combat`. v1.4 split it three ways, and SPEC-combat §A now RETIRES the Virtua-Cop
+   * mode outright ("버추어 캅 개념은 빼줘. 커서가 캐릭터 / wasd로 조종하는 캐릭터 두 개만"). What is left is one
+   * axis — what the player is driving — and the two combat modes differ in CONTROL ONLY:
    *
-   *   rampage    mouse only                      no enemies at all; v1.2's pure demolition tool
-   *   quickdraw  one mouse (the cursor IS you)   enemies only ever lock on; you shoot the lock before it closes
-   *   survival   mouse aims, WASD flies a drone  orbs, slams and locks — and now dodging is a real input
+   *   rampage   mouse only                      no enemies at all; v1.2's pure demolition tool
+   *   arcade    the CURSOR is the character     one mouse aims AND dodges
+   *   survival  mouse aims, WASD flies a drone  the drone is the character, dodging is its own input
+   *
+   * §A1: failure conditions and enemy behaviour are IDENTICAL across arcade and survival — 100 HP, KO at 0,
+   * enemies attack and repair. Arcade pays for doing two jobs with one hand with a handicap on the enemy side:
+   * attack interval ×1.35 and projectile speed ×0.8. Without it the original complaint ("피하면 조준이 풀린다")
+   * comes straight back.
    *
    * `state.combat` survives as a derived getter (20-state.js), so the whole v1.2/v1.3 combat body still reads
    * "are enemies live?" from one place and needed no edit. The per-mode differences are asked here, by name. */
 
   debug.difficulty = 'normal';   // 'easy' ×1.5 | 'normal' ×1 | 'hard' ×0.7 repair interval (§3.1)
-  const MODES = ['rampage', 'quickdraw', 'survival'];
-  const MODE_NAME = { rampage: 'modeRampage', quickdraw: 'modeQuickdraw', survival: 'modeSurvival' };
-  const MODE_DESC = { rampage: 'modeRampageDesc', quickdraw: 'modeQuickdrawDesc', survival: 'modeSurvivalDesc' };
+  const MODES = ['rampage', 'arcade', 'survival'];
+  const MODE_NAME = { rampage: 'modeRampage', arcade: 'modeArcade', survival: 'modeSurvival' };
+  const MODE_DESC = { rampage: 'modeRampageDesc', arcade: 'modeArcadeDesc', survival: 'modeSurvivalDesc' };
+  /* §A1 the arcade handicap. These two numbers ARE the mode difference — everything else is identical. */
+  const ARCADE_ATTACK_MUL = 1.35;      // enemies attack 35 % less often
+  const ARCADE_PROJECTILE_MUL = 0.8;   // and what they throw flies at 80 % speed
+  const ORB_SPEED = 520;               // px/s, the survival baseline (v1.2 §5); arcade scales it
 
   /* §1.2 drone avatar */
   const AV_R = 17;                   // 34 px body
@@ -5938,16 +5950,22 @@
   const AV_MARGIN = 20;              // viewport inset the drone is clamped to
   const AV_HIT_R = 18;               // enemy hit radius against the drone
   const DASH_PX = 180, DASH_MS = 160, DASH_CD = 1500, DASH_IFRAME = 220, DASH_GHOSTS = 3;
-  /* §2 Virtua-Cop lock-on */
+  /* §A2 the lock-on — an ATTACK now, not a mode. The frame always sits on the player (cursor or drone). */
   const LOCK_MS = 3000;              // full lock; §10.2 shortens a `front` enemy to 2400
   const LOCK_MS_FRONT = 2400;
-  const LOCK_P1 = 1 / 3;             // warn → close  (1.0 s of 3.0 s)
-  const LOCK_P2 = 11 / 15;           // close → imminent (2.2 s of 3.0 s)
-  const LOCK_FOLLOW = 1 / 3;         // survival: the frame stops following the drone at 1.0 s
+  const LOCK_P1 = 1 / 3;             // 추적 → 고정  (1.0 s of 3.0 s)
+  const LOCK_P2 = 11 / 15;           // 고정 → 임박  (2.2 s of 3.0 s)
+  const LOCK_FOLLOW = 1 / 3;         // the frame stops following the player at 1.0 s — that freeze IS the dodge window
+  /* SPEC-combat §A2 names the stage boundaries (1.0 s / 2.2 s) and the BEEPS (0 s / 1.2 s / 2.4 s) as two
+   * separate lists, and they do not line up. Reading chosen: they really are separate — the brackets change
+   * at 1.0/2.2 and a three-beep countdown runs underneath at 0/1.2/2.4, which puts the last warning a steady
+   * 0.6 s before the shot. (The alternative — beeps welded to the stage changes, as v1.4 shipped them — would
+   * make the "0초·1.2초·2.4초" sentence say nothing the previous one had not already said.) */
+  const LOCK_BEEPS = [0, 0.4, 0.8];  // fractions of the lock duration: 0 s / 1.2 s / 2.4 s of 3.0 s
   const LOCK_GAP0 = 70, LOCK_GAP1 = 24, LOCK_GAP2 = 4;   // bracket size / thickness (20 / 3 px) are in content.css
-  const LOCK_MAX = 3;                // at most three concurrent locks (§2.2)
+  const LOCK_MAX = 3;                // at most three concurrent locks (§A2)
   const LOCK_RECOVER_MS = 1500;      // a broken lock cannot re-arm for this long
-  const LOCK_HIT_R = 56;             // survival: how far from the frozen centre still counts as a hit
+  const LOCK_HIT_R = 56;             // how far from the frozen centre still counts as a hit
   /* §3 repairing enemies + the destruction-ratio meter */
   const REPAIR_MS = { shooter: 6000, charger: 5000, laser: 4000, boss: 2500 };
   const REPAIR_BEAM_MS = 1500, REPAIR_RANGE = 600, REPAIR_PIECE_MS = 600;
@@ -5963,14 +5981,21 @@
   const DEPTH_ATTACK = { front: 0.7, mid: 1, back: 0 };     // 0 = this tier never attacks
   const DEPTH_REPAIR = { front: 0, mid: 1, back: 0.6 };     // 0 = this tier never repairs
 
-  /* ---- what exists in which mode (§0.5 / §6) ---- */
+  /* ---- what exists in which mode (§A / §A1) ----
+   * Only ONE of these separates arcade from survival — the avatar. §A1 is explicit that everything else about
+   * the fight (health, KO, enemy attacks, projectiles, repair, the meter) is the same in both; what differs is
+   * how the player moves, and the two handicap numbers below that pay for it. */
   function modeHasEnemies() { return state.mode !== 'rampage'; }
   function modeHasAvatar() { return state.mode === 'survival'; }
-  function modeHasHealth() { return state.mode === 'survival'; }     // health HUD, KO, the drone health ring
-  function modeHasProjectiles() { return state.mode === 'survival'; }   // §4: orbs and slams are survival-only
+  function modeHasHealth() { return state.mode !== 'rampage'; }        // §A1: 체력 100, 0이면 KO — in BOTH combat modes
+  function modeHasProjectiles() { return state.mode !== 'rampage'; }   // §A1: 적의 행동은 동일하다
   function modeHasRepair() { return state.mode !== 'rampage'; }
   function modeHasRatio() { return state.mode !== 'rampage'; }
-  function modeLockOnEnemy() { return state.mode === 'quickdraw'; }   // the frame sits on the enemy, not the drone
+  /* §A1 the arcade handicap: the enemy side is slowed down, the player side is untouched. Asked for by name at
+   * the two places it can be felt — when the next attack is scheduled, and when a projectile is launched. */
+  function modeAttackMul() { return state.mode === 'arcade' ? ARCADE_ATTACK_MUL : 1; }
+  function modeProjectileMul() { return state.mode === 'arcade' ? ARCADE_PROJECTILE_MUL : 1; }
+  function orbSpeed() { return ORB_SPEED * modeProjectileMul(); }
   /* §3.1 scales the repair interval by difficulty. There is no difficulty setting in this build yet, so the
    * knob lives on `debug` where it is reachable and documented rather than being silently dead. */
   function difficultyMul() { return DIFF_MUL[debug.difficulty] || 1; }
@@ -6000,7 +6025,7 @@
 
   /* The single entry point. Everything that only exists in some modes is torn down / stood up from here, so a
    * mode switch can never leave another mode's machinery running (a lock frame in rampage, a drone in
-   * quickdraw, a health bar where there is no health).
+   * arcade, a health bar where there is no health).
    * Named setPlayMode, not setMode: `setMode` is taken by the v1 WEAPON alias in 99-api.js, and two function
    * declarations of one name in this IIFE would silently leave only the last one. */
   function setPlayMode(id, opts) {
@@ -6035,9 +6060,9 @@
     return state.mode;
   }
   function cycleMode() { return setPlayMode(MODES[(MODES.indexOf(state.mode) + 1) % MODES.length]); }
-  /* Legacy boolean (api.setCombat / the v1.3 e2e): true means the mode the player last fought in — survival
-   * unless they explicitly chose quickdraw — and false is rampage. The STORED crsCombat migrates differently
-   * (§0.5: true → quickdraw), because a stored pref comes from someone who only ever used the cursor. */
+  /* Legacy boolean (api.setCombat / the v1.3 e2e): true means the mode the player last fought in (survival
+   * until they pick otherwise), false is rampage. A STORED crsCombat migrates differently — §A sends it to
+   * ARCADE, because that pref came from someone who only ever played with the cursor. */
   function setCombat(v, opts) {
     setPlayMode(v ? (state.lastCombatMode || 'survival') : 'rampage', opts);
     return state.combat;
@@ -6045,11 +6070,16 @@
   function persistMode() {
     safe(() => chrome.storage.sync.set({ crsMode: state.mode, crsCombat: state.mode !== 'rampage' }));
   }
-  /* loadPrefs (99-api.js) hands us whatever was stored; crsMode wins, a legacy crsCombat boolean migrates. */
+  /* loadPrefs (99-api.js) hands us whatever was stored; crsMode wins, then the two §A migrations.
+   * MODE_ALIASES is the one place the retired mode id is still SPOKEN: the string is gone from the product,
+   * but it is still sitting in the sync storage of everyone who ran v1.4, so it still has to be READ. */
+  const MODE_ALIASES = { quickdraw: 'arcade' };   // §A: 구 `quickdraw` 저장값 → `arcade`
+  function migrateModeId(id) { return (typeof id === 'string' && MODE_ALIASES[id]) || id; }
   function modeFromPrefs(res) {
     if (!res) return null;
-    if (MODES.includes(res.crsMode)) return res.crsMode;
-    if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'quickdraw' : 'rampage';
+    const m = migrateModeId(res.crsMode);
+    if (MODES.includes(m)) return m;
+    if (typeof res.crsCombat === 'boolean') return res.crsCombat ? 'arcade' : 'rampage';   // §A: crsCombat:true → arcade
     return null;
   }
 
@@ -6486,8 +6516,9 @@
   /* SPEC-settings §2.2: performance mode holds the page to two live enemies whatever the clock says. */
   function maxHostiles() { const n = combatElapsed() >= 60000 ? 5 : 3; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
-  /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0). */
-  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1); }
+  /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0).
+   * SPEC-combat §A1: arcade stretches every interval by ×1.35 — the hand that dodges is the hand that aims. */
+  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul(); }
   function resetPlayer() {
     const p = state.player;
     p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
@@ -6662,8 +6693,8 @@
     clearLocks(); clearRepairs();   // v1.4 §2 / §3
   }
   /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
-   * reports exactly that. v1.4 §4: quickdraw enemies only ever lock on, T3 everywhere is a lock instead of the
-   * laser, and §10.2 silences the back rank entirely. */
+   * reports exactly that. v1.4 §4: T3 everywhere draws a lock instead of the laser, §10.2 silences the back
+   * rank entirely, and §A1 gives arcade and survival the same repertoire — only the timing differs. */
   function hostileAttack(rec, forced) {
     if (!state.active || !state.combat || state.hostiles.get(rec.el) !== rec || state.paused || state.ko) return false;
     const el = rec.el;
@@ -6694,13 +6725,14 @@
       if (Math.random() < 0.6) { attackShooter(rec, r, forced); return 'shooter'; }
       return startLock(rec, forced) ? 'lock' : false;
     }
-    // §4: orbs and slams are survival-only; everything else (and every T3) draws a lock instead
+    // §A1: both combat modes get the same repertoire; only rampage has none. Every T3 draws a lock (§4).
     if (!modeHasProjectiles() || rec.tier === 'laser') return startLock(rec, forced) ? 'lock' : false;
     if (rec.tier === 'shooter') attackShooter(rec, r, forced);
     else attackCharger(rec, r);
     return rec.tier;
   }
-  /* T1 shooter: wind-up 250 ms at the element centre (forced: none), then an orb toward the player at 520 px/s. */
+  /* T1 shooter: wind-up 250 ms at the element centre (forced: none), then an orb toward the player at
+   * orbSpeed() px/s — 520 in survival, ×0.8 in arcade (§A1). */
   function attackShooter(rec, r, forced) {
     spawnOrb(rec, r.left + r.width / 2, r.top + r.height / 2, forced ? 0 : 250);
     scheduleAttack(rec, attackInterval(rec));
@@ -6723,8 +6755,11 @@
   function launchOrb(o) {
     const p = state.player;
     const dx = p.x - o.x, dy = p.y - o.y, L = Math.hypot(dx, dy) || 1;
-    o.vx = dx / L * 520; o.vy = dy / L * 520; o.launched = true; o.launchAt = now();
-    o.flightMs = Math.max(1, L / 520 * 1000);   // the arrival ring shrinks over exactly this long (§3.3)
+    /* §A1: the speed is read HERE, at launch, not baked into the orb at spawn — so a mode switch mid-wind-up
+     * launches at the new mode's speed rather than at the one the enemy was aiming with. */
+    const sp = orbSpeed();
+    o.vx = dx / L * sp; o.vy = dy / L * sp; o.launched = true; o.launchAt = now();
+    o.flightMs = Math.max(1, L / sp * 1000);   // the arrival ring shrinks over exactly this long (§3.3)
     o.node.style.transform = 'translate(0px, 0px)';
     if (o.rec && o.rec.phase === 'windup') o.rec.phase = 'idle';
     dropAimLine(o.rec);   // the line goes with the shot
@@ -6852,7 +6887,7 @@
     updatePlayerHud();
   }
   function showKo() {
-    if (!modeHasHealth()) return;   // v1.4 §0.5: quickdraw and rampage have no health, so no KO
+    if (!modeHasHealth()) return;   // §A1: both combat modes KO at 0; rampage has no health at all
     const p = state.player;
     p.alive = false; state.ko = true;
     resetChord(); scopeOff(); stopHold(); cancelSlash();
@@ -6938,6 +6973,21 @@
     if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; placeSelf(); }
     return { x: state.player.x, y: state.player.y };
   };
+  /* SPEC-combat §A1 / §F: the two numbers that ARE the arcade handicap, read off the live code paths rather
+   * than restated — `attackIntervalMs` is what scheduleAttack() would be given for `el` RIGHT NOW (same tier,
+   * same depth tier, same clock), and `orbSpeed` is what launchOrb() would use this frame. Without `el` the
+   * interval is the bare T1 baseline, so the two modes can still be compared with no hostile on the page. */
+  debug.modeTuning = (el) => {
+    const rec = (el && el.nodeType === 1) ? state.hostiles.get(el) : null;
+    return {
+      mode: state.mode,
+      attackMul: modeAttackMul(), projectileMul: modeProjectileMul(),
+      orbSpeed: orbSpeed(),
+      attackIntervalMs: rec ? attackInterval(rec) : TIER_BASE.shooter * modeAttackMul()
+    };
+  };
+  /* The live orbs, velocity included — `speed` is the §A1 projectile speed as actually launched, not a constant. */
+  debug.orbList = () => state.orbs.map((o) => ({ x: o.x, y: o.y, vx: o.vx, vy: o.vy, speed: Math.hypot(o.vx, o.vy), launched: !!o.launched, dmg: o.dmg }));
   /* v1.4: the forced hooks bring a target that has been scrolled away back into view first. The picker only ever
    * chooses on-screen elements, so this is the one place an off-screen element is a legitimate subject, and
    * scrolling to the thing you asked about is what a reader of the hook means. */
@@ -7127,8 +7177,9 @@
     box.append(ring, wedge, arc, dot, tag);
     return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1 };
   }
-  /* v1.4 §0.5: the ring is a HEALTH gauge, so it exists only where health does — survival. In quickdraw the
-   * cursor is the player and there is nothing to drain; in rampage there is no combat at all. */
+  /* SPEC-combat §A1: the ring is a HEALTH gauge, so it exists wherever health does — BOTH combat modes. It is
+   * drawn at state.player.x/y, which is the cursor in arcade and the drone in survival, so "체력 링이 커서를
+   * 두른다 / 드론을 두른다" is one piece of code. Rampage has no combat, hence no ring. */
   function selfShouldShow() { return !!(state.active && modeHasHealth() && !state.ko && root); }
   /* Mount / unmount + repaint. Called from updatePlayerHud(), so every hp change and every combat toggle lands. */
   function syncSelf() {
@@ -7395,7 +7446,7 @@
     const h = hudEls.player;
     if (h) {
       try {
-        const showHp = modeHasHealth();   // v1.4 §0.5: no health bar where there is no health
+        const showHp = modeHasHealth();   // §A1: no health bar where there is no health (rampage only)
         h.classList.toggle('on', showHp);
         if (hudEls.fallback) h.style.display = showHp ? 'block' : 'none';
         hudEls.pFill.style.width = (ratio * 100).toFixed(1) + '%';
@@ -7730,18 +7781,17 @@
   }
 
 // ── 93-lock.js ──
-// ── v1.4 §2: the Virtua Cop lock-on — a frame that closes on a target, and you shoot it open again ──
-  /* The user was explicit: "the aim lock I meant is the Virtua Cop idea". In Virtua Cop a red frame snaps around
-   * the enemy that is drawing on you and closes over a couple of seconds; you shoot THAT ENEMY before the frame
-   * shuts and the shot never happens. So this is not a dodging device, it is an aiming device: the threat and
-   * the target are the same object, and the player only ever has one job — point and shoot.
+// ── §A2: the lock-on — a frame that closes on the PLAYER, and you dodge it or shoot it open ──
+  /* §A2 demotes the lock-on from a MODE to one attack among several. The frame no longer sits on the enemy; it
+   * is drawn over the player — the cursor in arcade, the drone in survival — follows for 1.0 s, then freezes.
+   * That freeze is the dodge window, and it is the same window in both modes:
    *
-   *   quickdraw  the frame sits on the ENEMY and shooting it is the only answer (there is nothing to dodge)
-   *   survival   the frame sits on the DRONE, stops following at 1.0 s, so you may shoot the enemy OR fly out
+   *   피하거나 그 적을 쏴서 끊거나 둘 다 가능하다.
    *
-   * Breaking it needs one point of damage from any weapon, not a kill. We detect that by watching the enemy's
-   * hp in the frame loop rather than by hooking the damage sink, so every weapon — hitscan, hold tick, AoE,
-   * slash, collapse — breaks a lock identically, with no special case anywhere in the weapon code. */
+   * So the answer is never forced. Move out of the frozen frame, or put one point of damage into the enemy that
+   * cast it, or both. Breaking it needs damage, not a kill. We detect that by watching the enemy's hp in the
+   * frame loop rather than by hooking the damage sink, so every weapon — hitscan, hold tick, AoE, slash,
+   * collapse — breaks a lock identically, with no special case anywhere in the weapon code. */
 
   function lockDuration(rec) { return (rec && rec.dtier === 'front') ? LOCK_MS_FRONT : LOCK_MS; }
   function lockPhaseOf(k) { return k < LOCK_P1 ? 'warn' : (k < LOCK_P2 ? 'close' : 'imminent'); }
@@ -7768,13 +7818,10 @@
     node.append(ring, tag);
     return { node, ring, tag, brackets };
   }
-  /* Where the frame is anchored this frame. quickdraw: the enemy rect. survival: the drone, until it freezes. */
+  /* Where the frame is anchored this frame. §A2: always the player — the cursor in arcade, the drone in
+   * survival — until it freezes. The two combat modes differ in what MOVES the player, not in where the frame
+   * goes, so there is one answer here and no mode question. */
   function lockAnchor(lk) {
-    if (lk.onEnemy) {
-      const r = rectOf(lk.rec.el);
-      if (!r) return null;
-      return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height };
-    }
     const p = state.player;
     return { cx: p.x, cy: p.y, w: 0, h: 0 };
   }
@@ -7789,8 +7836,8 @@
     try { lk.ring.style.borderColor = color; } catch (e) { /* ignore */ } 
   }
   /* §10.4: a covered enemy cannot be shot, so its frame is dashed and says so — unless the weapon in hand can
-   * punch through cover, in which case it says THAT instead. The answer holds for the enemy whether the frame is
-   * drawn on it (quickdraw) or on the drone (survival): either way it tells you whether shooting is an option.
+   * punch through cover, in which case it says THAT instead. The frame is drawn on the player, but the question
+   * it answers is about the ENEMY that cast it: can you take the "쏴서 끊는다" half of §A2's offer at all?
    * isCovered() runs a real hit test, so it is sampled a few times a second rather than every frame, and always
    * the moment the weapon changes — which is exactly when the answer can flip. */
   function lockCoverTag(lk, t) {
@@ -7814,12 +7861,15 @@
     if (!rec || !rec.el || !rec.el.isConnected) return null;
     if (rec.lock) return rec.lock;
     if (!forced && now() < (rec.lockReadyAt || 0)) return null;
-    if (state.locks.length >= LOCK_MAX) return null;   // §2.2: three at a time, the oldest ones finish first
+    if (state.locks.length >= LOCK_MAX) return null;   // §A2: three at a time, the oldest ones finish first
     const parts = buildLock();
     // SPEC-test-speed §3: "락온 3단계" — the three phases are fractions of lk.dur, so scaling the duration once
-    // here scales warn/close/imminent together and keeps their RATIOS exactly as §7.5 asserts them.
+    // here scales 추적/고정/임박 together and keeps their RATIOS exactly as §7.5 asserts them.
+    /* `onEnemy` is dead weight kept deliberately: §A2 anchors every frame on the player, so it is always false,
+     * and the §2.2 lock aim-assist in 50-target.js (which reads it) is therefore never taken. Left as an
+     * explicit boolean rather than deleted so that guard keeps reading a real value instead of `undefined`. */
     const lk = Object.assign({ id: ++state.lockSeq, rec, startedAt: now(), dur: scaleMs(forced ? LOCK_MS : lockDuration(rec)), phase: 'warn',
-      onEnemy: modeLockOnEnemy(), frozen: false, cx: 0, cy: 0, w: 0, h: 0, beeped: '', done: false, forced: !!forced, coverAt: 0, tagWeapon: null,
+      onEnemy: false, frozen: false, cx: 0, cy: 0, w: 0, h: 0, beeped: 0, done: false, forced: !!forced, coverAt: 0, tagWeapon: null,
       hp0: hpOf(rec.el).hp, tagText: null, coveredNow: null }, parts);
     const a = lockAnchor(lk);
     if (!a) { try { parts.node.remove(); } catch (e) { /* ignore */ } return null; }
@@ -7831,7 +7881,7 @@
     placeLock(lk, 0);
     lockCoverTag(lk);
     addAimLine(rec);         // v1.3 §3.2 still answers "which one, right now"
-    csfx('lockWarn');
+    csfx('lockWarn');        // §A2 beep 1 of 3 (t = 0); stepLocks() rings the other two off LOCK_BEEPS
     kick();
     return lk;
   }
@@ -7881,40 +7931,27 @@
     later(() => { removeLock(lk, true); if (r && state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }, 320);
     updatePlayerHud(); scheduleHud();
   }
-  /* §2.3 — what failing costs, which is the whole difference between the two combat modes. */
+  /* §A2 — what failing costs. One answer for both combat modes now: the frame froze where the player was, so
+   * either they are still in it and it hurts, or they left and it is a graze. (v1.4 had a second branch here
+   * for the mode with no health, which spent the shot undoing a kill instead; §A retired that mode and §A1
+   * gives both survivors the same 100 HP, so the branch went with it — and so did its screen-edge flash.) */
   function fireLock(lk) {
     if (lk.done) return;
     lk.done = true;
     const rec = lk.rec;
     csfx('lockFire');
-    if (lk.onEnemy) {
-      // quickdraw: no health to lose, so the enemy spends the shot UNDOING one of your kills (§3)
-      edgeFlash();
-      tryRepair(rec, true);
+    const p = state.player;
+    const d = Math.hypot(p.x - lk.cx, p.y - lk.cy);
+    if (d <= LOCK_HIT_R && now() >= state.invulUntil) {
+      damagePlayer(26 + Math.round(Math.sqrt(rec.area || 40000) / 70), { from: { x: lk.cx, y: lk.cy } });
     } else {
-      const p = state.player;
-      const d = Math.hypot(p.x - lk.cx, p.y - lk.cy);
-      if (d <= LOCK_HIT_R && now() >= state.invulUntil) {
-        damagePlayer(26 + Math.round(Math.sqrt(rec.area || 40000) / 70), { from: { x: lk.cx, y: lk.cy } });
-      } else {
-        state.nearMisses++;
-        selfGraze({ x: lk.cx, y: lk.cy });
-        sfx('whiff');
-      }
+      state.nearMisses++;
+      selfGraze({ x: lk.cx, y: lk.cy });
+      sfx('whiff');
     }
     const r = rec;
     removeLock(lk, false);
     if (r) { r.lockReadyAt = now() + scaleMs(LOCK_RECOVER_MS); if (state.hostiles.get(r.el) === r) scheduleAttack(r, attackInterval(r)); }
-  }
-  /* A 150 ms red rim at the edge of the screen: quickdraw has no health bar to flash, so the failure still has
-   * to land somewhere the player is looking. */
-  function edgeFlash() {
-    if (!root) return;
-    const n = mk('div', 'crs-vignette crs-vignette-edge');
-    root.append(n);
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
-    try { const a = trackAnim(n.animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 150, easing: 'ease-out', fill: 'forwards' })); a.addEventListener('finish', kill); } catch (e) { /* ignore */ }
-    later(kill, 400);
   }
   /* The frame loop. Runs from tickFrame(), so it inherits the hitstop and stops with everything else. */
   function stepLocks(t) {
@@ -7924,19 +7961,23 @@
       // the enemy went away (killed, restored, released, scrolled off) — the frame cannot outlive it
       if (!rec || !rec.el || !rec.el.isConnected || state.hostiles.get(rec.el) !== rec) { removeLock(lk, false); continue; }
       try { if (rec.el.hasAttribute('data-crs-broken')) { removeLock(lk, false); continue; } } catch (e) { removeLock(lk, false); continue; }
-      // §2.2 the break condition: ANY damage to this enemy, from any weapon, cancels the shot
+      // §A2 the break condition: ANY damage to this enemy, from any weapon, cancels the shot
       const hp = hpOf(rec.el).hp;
       if (hp < lk.hp0) { breakLock(lk); continue; }
       const k = clamp((t - lk.startedAt) / lk.dur, 0, 1);
       const phase = lockPhaseOf(k);
       if (phase !== lk.phase) {
         lk.phase = phase;
-        if (phase === 'close') csfx('lockClose');
-        else if (phase === 'imminent') { csfx('lockImminent'); try { rec.aura.classList.add('crs-lock-imminent'); } catch (e) { /* ignore */ } }
+        if (phase === 'imminent') { try { rec.aura.classList.add('crs-lock-imminent'); } catch (e) { /* ignore */ } }
       }
-      // survival: the frame follows the drone for the first third, then freezes — that freeze IS the dodge window
-      if (!lk.onEnemy && !lk.frozen && k >= LOCK_FOLLOW) lk.frozen = true;
-      if (lk.onEnemy || !lk.frozen) {
+      /* §A2's rising three-beep countdown, on its OWN clock (0 / 1.2 / 2.4 s of 3.0 s) — see LOCK_BEEPS. */
+      while (lk.beeped + 1 < LOCK_BEEPS.length && k >= LOCK_BEEPS[lk.beeped + 1]) {
+        lk.beeped++;
+        csfx(lk.beeped === 0 ? 'lockWarn' : (lk.beeped === 1 ? 'lockClose' : 'lockImminent'));
+      }
+      // §A2: the frame follows the player for the first third, then freezes — that freeze IS the dodge window
+      if (!lk.frozen && k >= LOCK_FOLLOW) lk.frozen = true;
+      if (!lk.frozen) {
         const a = lockAnchor(lk);
         if (a) { lk.cx = a.cx; lk.cy = a.cy; lk.w = a.w; lk.h = a.h; }
       }
@@ -7947,8 +7988,9 @@
       if (k >= 1) fireLock(lk);
     }
   }
-  /* §2.2 aim assist: a click anywhere inside a closing frame is a click on that enemy, not on whatever child
-   * element happens to be under the pointer. pickTarget() asks this before it returns. */
+  /* The v1.4 §2.2 aim assist's lookup: which closing frame, if any, covers this point. pickTarget() still asks
+   * it, but only acts on a frame with `onEnemy` — and §A2 put every frame on the player, so the assist is now
+   * unreachable by construction (see startLock). Kept as the frame hit-test it has always been. */
   function lockAt(x, y) {
     for (const lk of state.locks) {
       if (lk.done || !lk.rec || !lk.rec.el || !lk.rec.el.isConnected) continue;
@@ -8348,7 +8390,7 @@
   }
   /* ── v1.4 §1.2: WASD / arrows drive the drone, Space dashes ──
    * Claimed ONLY while a drone exists (survival) and never while a form field has focus, so in rampage and
-   * quickdraw — and in any text box anywhere — these keys still belong to the page, exactly as §7.13 requires. */
+   * arcade — and in any text box anywhere — these keys still belong to the page, exactly as §7.13 requires. */
   function moveDirOf(c, k) {
     if (c === 'KeyW' || k === 'w' || k === 'W' || c === 'ArrowUp' || k === 'ArrowUp') return 'up';
     if (c === 'KeyS' || k === 's' || k === 'S' || c === 'ArrowDown' || k === 'ArrowDown') return 'down';
@@ -8455,7 +8497,7 @@
     else if (action === 'reload') reloadNow();
     else if (action === 'restore') restore();
     else if (action === 'mute') setMuted(!state.muted);
-    else if (action === 'combat') cycleMode();   // v1.4 §0.5: H cycles rampage → quickdraw → survival
+    else if (action === 'combat') cycleMode();   // SPEC-combat §A: H cycles rampage → arcade → survival
     else if (action === 'restart') restartFromKo();
     else if (action === 'dash') startDash();
   }
@@ -9034,10 +9076,12 @@
       }
       if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
       if (typeof res.crsMuted === 'boolean') state.muted = res.crsMuted;
-      /* ── v1.4 §0.5 ──
-       * `crsMode` is the real setting now. A stored v1.3 `crsCombat: true` migrates to QUICKDRAW, not survival:
-       * it came from someone who only ever played with the cursor, and quickdraw is the mode that keeps the
-       * cursor as the player. (`crsMode` here is the combat mode; the legacy weapon alias is `crsWeapon`.) */
+      /* ── SPEC-combat §A ──
+       * `crsMode` is the real setting now. Two migrations land in modeFromPrefs(): a stored v1.3
+       * `crsCombat: true` becomes ARCADE (that pref came from someone who only ever played with the cursor,
+       * and arcade is the mode where the cursor IS the player), and a stored v1.4 `crsMode: 'quickdraw'`
+       * becomes arcade for the same reason. (`crsMode` here is the combat mode; the legacy weapon alias is
+       * `crsWeapon`.) */
       if (!state.combatTouched) { const m = modeFromPrefs(res); if (m && m !== state.mode) setPlayMode(m, { silent: true }); }
       // §9.2: crsDebrisLifeMs is the setting; crsDebrisLife is read too so an early build's key still loads
       const dl = (typeof res.crsDebrisLifeMs === 'number') ? res.crsDebrisLifeMs : res.crsDebrisLife;
@@ -9151,7 +9195,7 @@
       // ── v1.5 §4: the live aim cone and what the viewmodel is doing ──
       spreadNow: spreadNow(id), bloomNow: bloomNow(now()), viewmodel: viewmodelPhase(),
       /* ── v1.4 §5 / §10.5 ──
-       * `mode` is the combat mode from here on (rampage | quickdraw | survival). The v1 alias that used to sit
+       * `mode` is the combat mode from here on (rampage | arcade | survival). The v1 alias that used to sit
        * on this key — the weapon id — is still readable as stats().weapon and as api.mode / api.setMode. */
       mode: state.mode, weaponMode: state.weapon,
       locks: state.locks.length, locksBroken: state.locksBroken,

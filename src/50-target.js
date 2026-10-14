@@ -55,10 +55,10 @@
   function pickTarget(x, y, cache, opts) {
     const env = { vw: viewW(), vh: viewH(), op: cache || new Map() };
     /* v1.4 §2.2 aim assist: a click inside a closing lock frame is a click on THAT enemy, not on a child of it.
-     * Only for a frame that is actually drawn ON the enemy (quickdraw, lk.onEnemy). In survival the frame rides
-     * the DRONE and then freezes wherever the drone was, so the same rule would teleport damage to an enemy the
-     * player never aimed at — §2.2's wording ("자식 요소가 아니라 그 적대 요소") presumes the frame sits on the
-     * enemy, and §2.3 gives survival shoot-or-dodge instead of this assist. */
+     * Only for a frame actually drawn ON the enemy (lk.onEnemy) — otherwise the frame rides the PLAYER and then
+     * freezes wherever they were, so the same rule would teleport damage to an enemy they never aimed at.
+     * SPEC-combat §A2 anchors EVERY frame on the player, so lk.onEnemy is now always false and this branch is
+     * unreachable; it is left standing because §D is still to redo targeting on top of it. */
     if (!(opts && opts.noLock) && state.locks.length) {
       const lk = lockAt(x, y);
       if (lk && lk.onEnemy && lk.rec && lk.rec.el && lk.rec.el.isConnected) {

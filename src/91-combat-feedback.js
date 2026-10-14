@@ -97,8 +97,9 @@
     box.append(ring, wedge, arc, dot, tag);
     return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1 };
   }
-  /* v1.4 §0.5: the ring is a HEALTH gauge, so it exists only where health does — survival. In quickdraw the
-   * cursor is the player and there is nothing to drain; in rampage there is no combat at all. */
+  /* SPEC-combat §A1: the ring is a HEALTH gauge, so it exists wherever health does — BOTH combat modes. It is
+   * drawn at state.player.x/y, which is the cursor in arcade and the drone in survival, so "체력 링이 커서를
+   * 두른다 / 드론을 두른다" is one piece of code. Rampage has no combat, hence no ring. */
   function selfShouldShow() { return !!(state.active && modeHasHealth() && !state.ko && root); }
   /* Mount / unmount + repaint. Called from updatePlayerHud(), so every hp change and every combat toggle lands. */
   function syncSelf() {
@@ -365,7 +366,7 @@
     const h = hudEls.player;
     if (h) {
       try {
-        const showHp = modeHasHealth();   // v1.4 §0.5: no health bar where there is no health
+        const showHp = modeHasHealth();   // §A1: no health bar where there is no health (rampage only)
         h.classList.toggle('on', showHp);
         if (hudEls.fallback) h.style.display = showHp ? 'block' : 'none';
         hudEls.pFill.style.width = (ratio * 100).toFixed(1) + '%';

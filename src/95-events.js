@@ -74,7 +74,7 @@
   }
   /* ── v1.4 §1.2: WASD / arrows drive the drone, Space dashes ──
    * Claimed ONLY while a drone exists (survival) and never while a form field has focus, so in rampage and
-   * quickdraw — and in any text box anywhere — these keys still belong to the page, exactly as §7.13 requires. */
+   * arcade — and in any text box anywhere — these keys still belong to the page, exactly as §7.13 requires. */
   function moveDirOf(c, k) {
     if (c === 'KeyW' || k === 'w' || k === 'W' || c === 'ArrowUp' || k === 'ArrowUp') return 'up';
     if (c === 'KeyS' || k === 's' || k === 'S' || c === 'ArrowDown' || k === 'ArrowDown') return 'down';
@@ -181,7 +181,7 @@
     else if (action === 'reload') reloadNow();
     else if (action === 'restore') restore();
     else if (action === 'mute') setMuted(!state.muted);
-    else if (action === 'combat') cycleMode();   // v1.4 §0.5: H cycles rampage → quickdraw → survival
+    else if (action === 'combat') cycleMode();   // SPEC-combat §A: H cycles rampage → arcade → survival
     else if (action === 'restart') restartFromKo();
     else if (action === 'dash') startDash();
   }

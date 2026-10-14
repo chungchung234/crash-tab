@@ -257,9 +257,9 @@
     title.addEventListener('pointerup', endDrag);
     title.addEventListener('pointercancel', endDrag);
 
-    // ── v1.4 §0.5: the three-way mode control replaces the single 전투 ON/OFF button ──
+    // ── SPEC-combat §A: the three-way mode control replaces the single 전투 ON/OFF button ──
     /* The old button is kept alive but taken out of the row, so every v1.3 line that still writes to it keeps
-     * working untouched while the player sees one segmented control listing rampage · quickdraw · survival. */
+     * working untouched while the player sees one segmented control listing rampage · arcade · survival. */
     const modes = doc.createElement('div'); modes.className = 'modes';
     const mlabel = doc.createElement('span'); mlabel.className = 'mlabel'; mlabel.textContent = msg('labelCombat');
     modes.append(mlabel);
@@ -357,7 +357,7 @@
       updateModeHud();   // ── v1.4 §0.5 ──
     } catch (e) { /* ignore */ }
   }
-  // ── v1.4 §0.5: which of the three is pressed, and the one-line description under them ──
+  // ── SPEC-combat §A: which of the three is pressed, and the one-line description under them ──
   function updateModeHud() {
     if (!hudEls.modeBtns) return;
     try {

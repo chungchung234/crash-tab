@@ -10,8 +10,9 @@
   /* SPEC-settings §2.2: performance mode holds the page to two live enemies whatever the clock says. */
   function maxHostiles() { const n = combatElapsed() >= 60000 ? 5 : 3; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
   function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
-  /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0). */
-  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1); }
+  /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0).
+   * SPEC-combat §A1: arcade stretches every interval by ×1.35 — the hand that dodges is the hand that aims. */
+  function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul(); }
   function resetPlayer() {
     const p = state.player;
     p.hp = p.max; p.score = 0; p.kills = 0; p.alive = true; p.startedAt = now(); p.pausedAt = state.paused ? now() : 0; p.pausedTotal = 0; p.lastDamageAt = 0; p.lastRegenAt = 0; p.lastHitFrom = null;
@@ -186,8 +187,8 @@
     clearLocks(); clearRepairs();   // v1.4 §2 / §3
   }
   /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
-   * reports exactly that. v1.4 §4: quickdraw enemies only ever lock on, T3 everywhere is a lock instead of the
-   * laser, and §10.2 silences the back rank entirely. */
+   * reports exactly that. v1.4 §4: T3 everywhere draws a lock instead of the laser, §10.2 silences the back
+   * rank entirely, and §A1 gives arcade and survival the same repertoire — only the timing differs. */
   function hostileAttack(rec, forced) {
     if (!state.active || !state.combat || state.hostiles.get(rec.el) !== rec || state.paused || state.ko) return false;
     const el = rec.el;
@@ -218,13 +219,14 @@
       if (Math.random() < 0.6) { attackShooter(rec, r, forced); return 'shooter'; }
       return startLock(rec, forced) ? 'lock' : false;
     }
-    // §4: orbs and slams are survival-only; everything else (and every T3) draws a lock instead
+    // §A1: both combat modes get the same repertoire; only rampage has none. Every T3 draws a lock (§4).
     if (!modeHasProjectiles() || rec.tier === 'laser') return startLock(rec, forced) ? 'lock' : false;
     if (rec.tier === 'shooter') attackShooter(rec, r, forced);
     else attackCharger(rec, r);
     return rec.tier;
   }
-  /* T1 shooter: wind-up 250 ms at the element centre (forced: none), then an orb toward the player at 520 px/s. */
+  /* T1 shooter: wind-up 250 ms at the element centre (forced: none), then an orb toward the player at
+   * orbSpeed() px/s — 520 in survival, ×0.8 in arcade (§A1). */
   function attackShooter(rec, r, forced) {
     spawnOrb(rec, r.left + r.width / 2, r.top + r.height / 2, forced ? 0 : 250);
     scheduleAttack(rec, attackInterval(rec));
@@ -247,8 +249,11 @@
   function launchOrb(o) {
     const p = state.player;
     const dx = p.x - o.x, dy = p.y - o.y, L = Math.hypot(dx, dy) || 1;
-    o.vx = dx / L * 520; o.vy = dy / L * 520; o.launched = true; o.launchAt = now();
-    o.flightMs = Math.max(1, L / 520 * 1000);   // the arrival ring shrinks over exactly this long (§3.3)
+    /* §A1: the speed is read HERE, at launch, not baked into the orb at spawn — so a mode switch mid-wind-up
+     * launches at the new mode's speed rather than at the one the enemy was aiming with. */
+    const sp = orbSpeed();
+    o.vx = dx / L * sp; o.vy = dy / L * sp; o.launched = true; o.launchAt = now();
+    o.flightMs = Math.max(1, L / sp * 1000);   // the arrival ring shrinks over exactly this long (§3.3)
     o.node.style.transform = 'translate(0px, 0px)';
     if (o.rec && o.rec.phase === 'windup') o.rec.phase = 'idle';
     dropAimLine(o.rec);   // the line goes with the shot
@@ -376,7 +381,7 @@
     updatePlayerHud();
   }
   function showKo() {
-    if (!modeHasHealth()) return;   // v1.4 §0.5: quickdraw and rampage have no health, so no KO
+    if (!modeHasHealth()) return;   // §A1: both combat modes KO at 0; rampage has no health at all
     const p = state.player;
     p.alive = false; state.ko = true;
     resetChord(); scopeOff(); stopHold(); cancelSlash();
@@ -462,6 +467,21 @@
     if (isFinite(x) && isFinite(y)) { state.player.x = x; state.player.y = y; state.player.inWindow = true; placeSelf(); }
     return { x: state.player.x, y: state.player.y };
   };
+  /* SPEC-combat §A1 / §F: the two numbers that ARE the arcade handicap, read off the live code paths rather
+   * than restated — `attackIntervalMs` is what scheduleAttack() would be given for `el` RIGHT NOW (same tier,
+   * same depth tier, same clock), and `orbSpeed` is what launchOrb() would use this frame. Without `el` the
+   * interval is the bare T1 baseline, so the two modes can still be compared with no hostile on the page. */
+  debug.modeTuning = (el) => {
+    const rec = (el && el.nodeType === 1) ? state.hostiles.get(el) : null;
+    return {
+      mode: state.mode,
+      attackMul: modeAttackMul(), projectileMul: modeProjectileMul(),
+      orbSpeed: orbSpeed(),
+      attackIntervalMs: rec ? attackInterval(rec) : TIER_BASE.shooter * modeAttackMul()
+    };
+  };
+  /* The live orbs, velocity included — `speed` is the §A1 projectile speed as actually launched, not a constant. */
+  debug.orbList = () => state.orbs.map((o) => ({ x: o.x, y: o.y, vx: o.vx, vy: o.vy, speed: Math.hypot(o.vx, o.vy), launched: !!o.launched, dmg: o.dmg }));
   /* v1.4: the forced hooks bring a target that has been scrolled away back into view first. The picker only ever
    * chooses on-screen elements, so this is the one place an off-screen element is a legitimate subject, and
    * scrolling to the thing you asked about is what a reader of the hook means. */

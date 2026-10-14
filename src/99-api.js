@@ -133,10 +133,12 @@
       }
       if (res.crsPower !== undefined) safe(() => chrome.storage.sync.remove('crsPower'));   // v1.3 §1: never read, dropped on sight
       if (typeof res.crsMuted === 'boolean') state.muted = res.crsMuted;
-      /* ── v1.4 §0.5 ──
-       * `crsMode` is the real setting now. A stored v1.3 `crsCombat: true` migrates to QUICKDRAW, not survival:
-       * it came from someone who only ever played with the cursor, and quickdraw is the mode that keeps the
-       * cursor as the player. (`crsMode` here is the combat mode; the legacy weapon alias is `crsWeapon`.) */
+      /* ── SPEC-combat §A ──
+       * `crsMode` is the real setting now. Two migrations land in modeFromPrefs(): a stored v1.3
+       * `crsCombat: true` becomes ARCADE (that pref came from someone who only ever played with the cursor,
+       * and arcade is the mode where the cursor IS the player), and a stored v1.4 `crsMode: 'quickdraw'`
+       * becomes arcade for the same reason. (`crsMode` here is the combat mode; the legacy weapon alias is
+       * `crsWeapon`.) */
       if (!state.combatTouched) { const m = modeFromPrefs(res); if (m && m !== state.mode) setPlayMode(m, { silent: true }); }
       // §9.2: crsDebrisLifeMs is the setting; crsDebrisLife is read too so an early build's key still loads
       const dl = (typeof res.crsDebrisLifeMs === 'number') ? res.crsDebrisLifeMs : res.crsDebrisLife;
@@ -250,7 +252,7 @@
       // ── v1.5 §4: the live aim cone and what the viewmodel is doing ──
       spreadNow: spreadNow(id), bloomNow: bloomNow(now()), viewmodel: viewmodelPhase(),
       /* ── v1.4 §5 / §10.5 ──
-       * `mode` is the combat mode from here on (rampage | quickdraw | survival). The v1 alias that used to sit
+       * `mode` is the combat mode from here on (rampage | arcade | survival). The v1 alias that used to sit
        * on this key — the weapon id — is still readable as stats().weapon and as api.mode / api.setMode. */
       mode: state.mode, weaponMode: state.weapon,
       locks: state.locks.length, locksBroken: state.locksBroken,
