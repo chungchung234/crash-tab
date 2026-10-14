@@ -7,9 +7,20 @@
     if (!p.startedAt) return 0;
     return Math.max(0, (state.paused ? p.pausedAt : now()) - p.startedAt - p.pausedTotal);
   }
-  /* SPEC-settings §2.2: performance mode holds the page to two live enemies whatever the clock says. */
-  function maxHostiles() { const n = combatElapsed() >= 60000 ? 5 : 3; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
-  function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
+  /* ── SPEC-combat §B3: 적이 떨어지지 않게 한다 ──────────────────────────────────────────
+   * 동시 적 수 3 (60초 후 5) → **5 (60초 후 7)**. 선정 간격 1500 → **900 ms** (src/22-perf.js).
+   * 처치 후 다음 틱을 기다리지 않고 **0.6초 뒤 즉시 1기** 보충 (scheduleRefill, 아래).
+   * 후보가 고갈되면 최소 면적 40 000 → 20 000 px².
+   * Now that only the enemy is destructible (§B), an empty page is not "a quiet moment" any more — it is
+   * nothing to shoot at. SPEC-settings §2.2 still holds performance mode to two live enemies. */
+  function maxHostilesAt(ms) { const n = ms >= 60000 ? 7 : 5; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
+  function maxHostiles() { return maxHostilesAt(combatElapsed()); }
+  /* §B3's relaxed floor. hostileArea() and tierFor() read the SAME live value — a relaxed pick that tierFor()
+   * then refused ('shooter' needs ≥ 40 000) would silently select nothing at all. selectOne() is the only
+   * writer, and it puts it back on the next line, so the loosened floor can never leak into forceAttack(). */
+  const HOSTILE_AREA = 40000, HOSTILE_AREA_LOW = 20000;
+  let hostileFloor = HOSTILE_AREA;
+  function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= hostileFloor ? 'shooter' : null)); }
   /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0).
    * SPEC-combat §A1: arcade stretches every interval by ×1.35 — the hand that dodges is the hand that aims. */
   function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul(); }
@@ -44,7 +55,7 @@
     if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null;
     const m = scopeMag();
     const area = (r.width / m) * (r.height / m);
-    if (area < 40000 || area > 0.7 * vw * vh) return null;
+    if (area < hostileFloor || area > 0.7 * vw * vh) return null;
     return area;
   }
   function armCombat() {
@@ -69,19 +80,46 @@
   function selectTick() {
     state.combatTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
-    state.combatTimer = later(selectTick, selectIntervalMs());   // SPEC-settings §2.2: 1500 ms, 2500 ms in performance mode
+    state.combatTimer = later(selectTick, selectIntervalMs());   // §B3: 900 ms, 2500 ms in performance mode (SPEC-settings §2.2)
     updatePlayerHud();
+    if (!selectEligible()) return;
+    selectOne();
+  }
+  /* Every reason NOT to put another enemy on the page right now. Shared by the 900 ms tick and §B3's
+   * post-kill refill, so the two can never disagree about when the fight is allowed to grow. */
+  function selectEligible() {
     const p = state.player;
-    if (state.ko || !p.alive || debug.noAttacks || state.scoped || !p.inWindow) return;
-    try { if (doc.visibilityState === 'hidden') return; } catch (e) { /* ignore */ }
-    if (state.hostiles.size >= maxHostiles()) return;
-    const cands = walkCandidates(p.x, p.y, { limit: 0.7 * viewW() * viewH(), minArea: 40000, descendCollected: true, skip: hostileSkip });
-    if (!cands.length) return;
+    if (!state.active || !state.combat || state.paused) return false;
+    if (state.ko || !p.alive || debug.noAttacks || state.scoped || !p.inWindow) return false;
+    try { if (doc.visibilityState === 'hidden') return false; } catch (e) { /* ignore */ }
+    return state.hostiles.size < maxHostiles();
+  }
+  function hostileWalk(x, y, minArea) {
+    return walkCandidates(x, y, { limit: 0.7 * viewW() * viewH(), minArea, descendCollected: true, skip: hostileSkip });
+  }
+  /* One weighted pick (by sqrt(area), as v1.2). §B3: if nothing clears the 40 000 px² floor — a page of small
+   * boxes, or one whose big elements are all hostile already — the floor drops to 20 000 for THIS pick only. */
+  function selectOne() {
+    const p = state.player;
+    let floor = HOSTILE_AREA;
+    let cands = hostileWalk(p.x, p.y, floor);
+    if (!cands.length) { floor = HOSTILE_AREA_LOW; cands = hostileWalk(p.x, p.y, floor); }
+    if (!cands.length) return false;
     let total = 0;
-    for (const c of cands) { c.w = Math.sqrt(c.area); total += c.w; }   // weighted by sqrt(area)
+    for (const c of cands) { c.w = Math.sqrt(c.area); total += c.w; }
     let r = Math.random() * total, pick = cands[cands.length - 1];
     for (const c of cands) { r -= c.w; if (r <= 0) { pick = c; break; } }
-    markHostile(pick.el, pick.area);
+    hostileFloor = floor;
+    const rec = markHostile(pick.el, pick.area);
+    hostileFloor = HOSTILE_AREA;
+    return !!rec;
+  }
+  /* §B3: 처치 후 0.6초 뒤 즉시 1기. The 900 ms tick alone leaves a hole right after the kill — the one
+   * moment the player is looking for the next target. Tracked by later(), so restore() cancels it. */
+  const REFILL_MS = 600;
+  function scheduleRefill() {
+    if (!state.active || !state.combat) return;
+    later(() => { if (selectEligible()) selectOne(); }, REFILL_MS);
   }
   function placeAura(rec) {
     const r = rectOf(rec.el); if (!r) return;
@@ -179,12 +217,19 @@
     p.kills++;
     if (r) { const v = intersectRect(r, { left: 0, top: 0, right: viewW(), bottom: viewH() }); spawnDmg(v.left + v.width / 2, v.top + v.height / 2, 0, true, { text: msg('killLabel'), color: '#7ee787' }); }
     sfx('kill');
+    scheduleRefill();   // SPEC-combat §B3
     updatePlayerHud(); scheduleHud();
   }
   function clearCombatNodes() {
     for (const el of Array.from(state.hostiles.keys())) releaseHostile(el);
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
     clearLocks(); clearRepairs();   // v1.4 §2 / §3
+    /* ── SPEC-combat §B ──
+     * restore() and deactivate() both come through here, which is why the two things §B put on the page
+     * clean up from here rather than from a class sweep: the deflect marks (§B1) and everything still
+     * burning (§B2). hostileFloor goes back to the strict value with them (§B3). */
+    clearDeflects(); clearBurning();
+    hostileFloor = HOSTILE_AREA;
   }
   /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
    * reports exactly that. v1.4 §4: T3 everywhere draws a lock instead of the laser, §10.2 silences the back
@@ -480,6 +525,15 @@
       attackIntervalMs: rec ? attackInterval(rec) : TIER_BASE.shooter * modeAttackMul()
     };
   };
+  /* SPEC-combat §B3 / §F: the four numbers that decide whether the fight runs dry, read off the LIVE code
+   * paths rather than restated — maxHostilesAt() is the real ladder asked at two points on the clock, selectMs
+   * is what selectTick() would arm right now (performance mode included), and the two floors are the ones
+   * selectOne() and hostileArea() actually compare against. Same shape as debug.modeTuning above. */
+  debug.hostileTuning = () => ({
+    live: state.hostiles.size, max: maxHostiles(), maxAt0: maxHostilesAt(0), maxAt60s: maxHostilesAt(60000),
+    selectMs: selectIntervalMs(), refillMs: REFILL_MS, minArea: HOSTILE_AREA, minAreaLow: HOSTILE_AREA_LOW,
+    elapsedMs: Math.round(combatElapsed())
+  });
   /* The live orbs, velocity included — `speed` is the §A1 projectile speed as actually launched, not a constant. */
   debug.orbList = () => state.orbs.map((o) => ({ x: o.x, y: o.y, vx: o.vx, vy: o.vy, speed: Math.hypot(o.vx, o.vy), launched: !!o.launched, dmg: o.dmg }));
   /* v1.4: the forced hooks bring a target that has been scrolled away back into view first. The picker only ever

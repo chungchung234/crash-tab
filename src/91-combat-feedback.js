@@ -69,9 +69,11 @@
    * itself is `.crs-self` — a conic-gradient disc with its middle punched out by a radial-gradient mask, so the
    * painted arc runs clockwise from 12 o'clock for exactly hp/max of the circle. CSSOM only; no SVG. */
   function selfColor(ratio) { return fillColor(ratio); }
-  function ringGradient(ratio) {
+  /* `force` (SPEC-combat §B1) paints the gauge in one flat colour instead of the health palette — the dim grey
+   * the aim point wears over an invulnerable target. */
+  function ringGradient(ratio, force) {
     const deg = clamp(ratio, 0, 1) * 360;
-    const c = selfColor(ratio);
+    const c = force || selfColor(ratio);
     return 'conic-gradient(from 0deg, ' + c + ' 0deg, ' + c + ' ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) 360deg)';
   }
   /* A 60°-wide (or `span`-wide) coloured window centred on `deg`, used for the damage wedge and the graze arc. */
@@ -95,7 +97,7 @@
     const tag = mk('span', 'crs-self-tag');
     tag.textContent = msg('dodgeLabel');
     box.append(ring, wedge, arc, dot, tag);
-    return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1 };
+    return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1, invul: false };
   }
   /* SPEC-combat §A1: the ring is a HEALTH gauge, so it exists wherever health does — BOTH combat modes. It is
    * drawn at state.player.x/y, which is the cursor in arcade and the drone in survival, so "체력 링이 커서를
@@ -107,9 +109,15 @@
     let s = state.self;
     if (!s || !s.box.isConnected) { s = buildSelf(); state.self = s; try { root.append(s.box); } catch (e) { /* ignore */ } }
     const ratio = clamp(state.player.hp / state.player.max, 0, 1);
-    if (Math.abs(ratio - s.ratio) > 0.0005) { s.ratio = ratio; s.ring.style.backgroundImage = ringGradient(ratio); }
+    if (Math.abs(ratio - s.ratio) > 0.0005) paintSelfRing(s, ratio);
     setSelfLowPulse(s, ratio < 0.3);
     placeSelf();
+  }
+  /* The gauge is written from JS on every hp change, so content.css may never put `!important` on
+   * `.crs-self { background-image }` — a USER-origin !important there would freeze the ring at full health. */
+  function paintSelfRing(s, ratio) {
+    s.ratio = ratio;
+    s.ring.style.backgroundImage = s.invul ? ringGradient(ratio, SELF_INVUL_COLOR) : ringGradient(ratio);
   }
   function setSelfLowPulse(s, on) {
     if (on === s.lowOn && (!on || (s.pulse && s.pulse.playState === 'running'))) return;
@@ -118,11 +126,40 @@
     if (!on || reducedMotion()) return;
     try { s.pulse = trackAnim(s.ring.animate([{ opacity: 1 }, { opacity: 0.4 }, { opacity: 1 }], { duration: 1200, iterations: Infinity })); } catch (e) { s.pulse = null; }
   }
+  /* ── SPEC-combat §B1 item 4: 조준점이 미리 알려준다 ────────────────────────────────────
+   * "무적 대상 위에서 흐린 회색, 중심 점 없음."
+   *
+   * AMBIGUITY, reading chosen. The drawn 조준점 of SPEC-crosshair §A does not exist yet (roadmap step 4 —
+   * today the aim point still IS the operating-system cursor image, which content.js cannot restyle). The
+   * one aim-side marker this build owns is the player marker: a 44 px ring with a centre dot, drawn at
+   * state.player.x/y — i.e. ON THE CURSOR in arcade, where §A says "커서가 곧 캐릭터". So the two things
+   * §B1 asks for are applied to it: the gauge goes flat dim grey and the centre dot is taken away, both
+   * driven by what the POINTER is over (state.hoverEl), in both combat modes. In survival the ring rides
+   * the drone rather than the cursor, so there the warning reads as "what you are aiming at is immune"
+   * next to the drone instead of under the crosshair — the information is the same and it is the same one
+   * line of code; step 4 moves it onto the real crosshair.
+   *
+   * The dot is hidden by a CLASS, never by an inline style: `.crs-self-dot { display: block !important }`
+   * is USER-origin, and an inline `display:none` would lose to it (CLAUDE.md, the USER-origin trap). */
+  const SELF_INVUL_COLOR = 'rgba(168, 176, 190, .72)';
+  function aimInvulnerable() {
+    if (!modeHasEnemies() || debug.noInvuln) return false;
+    const el = state.hoverEl;
+    return !!(el && !hostileUnit(el));
+  }
+  function syncSelfInvul(s) {
+    const dim = aimInvulnerable();
+    if (dim === s.invul) return;
+    s.invul = dim;
+    try { s.box.classList.toggle('crs-invul', dim); } catch (e) { /* ignore */ }
+    paintSelfRing(s, clamp(state.player.hp / state.player.max, 0, 1));
+  }
   /* The ring rides the pointer from the frames that already exist — scheduleHover()'s one-shot RAF on every
    * pointermove, and tickFrame() while anything else is live. It never owns a loop of its own. */
   function placeSelf() {
     const s = state.self;
     if (!s || !s.box.isConnected) return;
+    syncSelfInvul(s);
     const p = state.player;
     s.box.style.left = px(p.x);
     s.box.style.top = px(p.y);
@@ -172,6 +209,67 @@
       cancelAnimsOf(s.tag);
       trackAnim(s.tag.animate([{ opacity: 0.7 }, { opacity: 0.7, offset: 0.7 }, { opacity: 0 }], { duration: 500, easing: 'ease-out', fill: 'forwards' }));
     } catch (e) { /* ignore */ }
+  }
+
+  /* ── SPEC-combat §B1: 무적 요소를 때렸을 때 — 조용히 아무 일도 없으면 안 된다 ────────────
+   * 다섯 가지 전부가 여기(또는 바로 옆)에 있다:
+   *   1. 튕김 표시   `div.crs-deflect[data-crs]` — 흰 원호가 법선 방향으로 튕기며 180 ms 에 사라진다
+   *   2. 금속성 핑   sfx('deflect') — 삼각파 2.2 kHz / 60 ms (src/40-audio.js). 명중음과 섞이지 않는다
+   *   3. `무적`      피해 숫자 대신, 11 px · 55 % 불투명도 · 350 ms (spawnDmg 의 opacity/dur)
+   *   4. 조준점 예고 aimInvulnerable() / syncSelfInvul() 위
+   *   5. 탄약 소모   action() 과 holdStep() 이 fire() 보다 먼저 spend() 한다 — 여기서 할 일이 없다.
+   *                 빗맞힌 대가가 있어야 조준에 의미가 생긴다는 §B1 의 요구가 이미 만족된다.
+   *
+   * A hold weapon ticks every 40–60 ms; the mark and the ping are throttled to one per element per
+   * HOLD_WINDOW (150 ms), exactly like the damage number and the hit tint they stand in for. */
+  const DEFLECT_MS = 180, DEFLECT_PUSH = 13, DEFLECT_CAP = 24;
+  const deflectNodes = [];
+  const deflectAt = new WeakMap();
+  /* The outward normal of the rect edge nearest the impact — which way the arc bounces off. */
+  function deflectNormal(el, ix, iy) {
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return { x: 0, y: -1 };
+    const dl = Math.abs(ix - r.left), dr = Math.abs(r.right - ix), dt = Math.abs(iy - r.top), db = Math.abs(r.bottom - iy);
+    const m = Math.min(dl, dr, dt, db);
+    if (m === dt) return { x: 0, y: -1 };
+    if (m === db) return { x: 0, y: 1 };
+    if (m === dl) return { x: -1, y: 0 };
+    return { x: 1, y: 0 };
+  }
+  function dropDeflect(n) {
+    const i = deflectNodes.indexOf(n);
+    if (i >= 0) deflectNodes.splice(i, 1);
+    try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ }
+  }
+  function clearDeflects() { for (const n of deflectNodes.slice()) dropDeflect(n); }
+  function deflectHit(el, ix, iy, opts) {
+    const t = now();
+    if (opts && opts.hold) { if (t - (deflectAt.get(el) || 0) < HOLD_WINDOW) return; }
+    deflectAt.set(el, t);
+    sfx('deflect');
+    const p = dmgPos(el, ix, iy, opts || {});
+    spawnDmg(p.x, p.y, 0, false, { text: msg('invulLabel'), color: '#dfe6f0', size: 11, opacity: 0.55, dur: 350 });
+    if (!root) return;
+    const nm = deflectNormal(el, ix, iy);
+    const n = mk('div', 'crs-deflect');
+    n.style.left = px(ix); n.style.top = px(iy);
+    // the arc's open side faces the normal: border-top points up (−90°) before any rotation
+    const base = ' rotate(' + (Math.atan2(nm.y, nm.x) / DEG + 90).toFixed(1) + 'deg)';
+    n.style.transform = 'translate(0px, 0px)' + base;
+    root.append(n);
+    deflectNodes.push(n);
+    while (deflectNodes.length > DEFLECT_CAP) dropDeflect(deflectNodes[0]);
+    const kill = () => dropDeflect(n);
+    try {
+      /* SPEC-settings §3.1: reduced motion keeps the MARK (the information) and drops the bounce. */
+      const kf = reducedMotion()
+        ? [{ opacity: 1 }, { opacity: 1, offset: 0.4 }, { opacity: 0 }]
+        : [{ transform: 'translate(0px, 0px)' + base + ' scale(.55)', opacity: 1 },
+           { transform: 'translate(' + px(nm.x * DEFLECT_PUSH) + ', ' + px(nm.y * DEFLECT_PUSH) + ')' + base + ' scale(1.15)', opacity: 0 }];
+      const a = trackAnim(n.animate(kf, { duration: DEFLECT_MS, easing: 'ease-out', fill: 'forwards' }));
+      a.addEventListener('finish', kill);
+    } catch (e) { /* ignore */ }
+    later(kill, 600);
   }
 
   /* ===================================================================== */
@@ -379,6 +477,7 @@
     }
     state.hpRatio = ratio;
     syncSelf();
+    updateRatioHud();   // SPEC-combat §B4: in a combat mode the meter IS kills/enemies — both move through here
     lowVignette(ratio);
   }
 

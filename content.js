@@ -212,7 +212,9 @@
     toastKeyboardAim: '키보드 조준: 방향키로 이동 · Space 발사 · Enter 조준경 · Tab 다음 대상',
     a11yWeapon: '무기', a11yReloadStart: '재장전 시작', a11yReloadDone: '재장전 완료',
     a11yMode: '모드', a11yKo: '패배', a11yRepair: '복구',
-    a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료'
+    a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료',
+    // ── SPEC-combat §B1: the word a deflected hit prints instead of a damage number ──
+    invulLabel: '무적'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));
@@ -687,8 +689,8 @@
    *   decal cap        40                               → 12      (src/31-decal.js)
    *   text split       descendants 200 / tokens 80      → 120 / 40
    *   clone compare    400 descendants                  → 150
-   *   enemy selection  1500 ms (ships as 1500, not 900) → 2500 ms
-   *   concurrent enemies  up to 5                       → 2
+   *   enemy selection  900 ms (SPEC-combat §B3 — was 1500) → 2500 ms
+   *   concurrent enemies  up to 7 (§B3 — was 5)         → 2
    *   particles        40 live (ships as 40, not 60)    → 30
    *   crack strands    ×1.0                             → ×0.7
    *   canvas DPR       max 2                            → max 1.5                                        */
@@ -696,7 +698,7 @@
   const PERF_TEXT_DESCENDANTS = 120, TEXT_DESCENDANTS = 200;
   const PERF_TEXT_TOKENS = 40, TEXT_TOKENS = 80;
   const PERF_CLONE_CAP = 150;
-  const PERF_SELECT_MS = 2500, SELECT_MS = 1500;
+  const PERF_SELECT_MS = 2500, SELECT_MS = 900;   // SPEC-combat §B3: 선정 간격 1500 → 900 ms
   const PERF_MAX_HOSTILES = 2;
   const PERF_PARTICLE_CAP = 30, PARTICLE_CAP = 40;
   const PERF_CRACK_MUL = 0.7;
@@ -1830,6 +1832,10 @@
       else if (kind === 'whiff') { noiseSweep(t, 0.09, 'highpass', 900, 7000, 0.45 * gm); }
       else if (kind === 'hurtbig') { tone(t, 'sine', 90, 40, 0.25, 1.15 * gm, 0.28); noiseBurst(t, 0.08, { type: 'lowpass', freq: 420, Q: 0.9 }, 0.6 * gm, 0.09); }
       else if (kind === 'laser') { noiseSweep(t, 0.4, 'bandpass', 3000, 600, 0.5 * gm); tone(t, 'sawtooth', 220, 180, 0.4, 0.15 * gm, 0.4); }
+      /* SPEC-combat §B1: the shot that bounced. A bare triangle at 2.2 kHz for 60 ms — no noise burst, no
+       * thump, no glass: nothing it shares with 'gun' / 'hammer' / 'sniper', so "that did nothing" is told
+       * apart from "that hit" by ear alone, which is the whole point of the cue. */
+      else if (kind === 'deflect') { tone(t, 'triangle', 2200, 2050, 0.06, 0.3 * gm, 0.07); }
     } catch (e) { /* ignore */ }
   }
 
@@ -2948,6 +2954,24 @@
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
     } catch (e) { /* ignore */ }
+  }
+  /* ── SPEC-combat §B4: 미터의 의미 ──────────────────────────────────────────────────────
+   * 전투 모드에서는 파괴율 대신 **처치 진행도**: `처치 N` + `적 K`.
+   * 막대는 `처치 / (처치 + 살아있는 적 + 복구된 수)` — 적이 복구하면 왼쪽으로 빠진다.
+   * 램페이지에서는 기존 파괴율 미터를 쓴다.
+   *
+   * CONFLICT, reading chosen. §B4's last sentence and §F's mode paragraph ("램페이지에 적·락온·복구·
+   * **미터**·체력 HUD 가 전부 없다", the acceptance test for step 3.2, asserted today by A.v2 7.13) cannot
+   * both be read as "rampage SHOWS a meter". Taken as: rampage's meter DEFINITION is unchanged — it is
+   * still the destruction ratio, still hidden, exactly as it ships — and §B4 changes what the meter
+   * SAYS where there is one, i.e. in the two combat modes. The 'ratio' branch below is therefore
+   * unreachable today on purpose; it is the one line step 4 flips if rampage is ever given the bar.
+   * Nothing is deleted and no existing assertion is broken by the reading. */
+  function meterKind() { return modeHasEnemies() ? 'kills' : 'ratio'; }
+  function killProgress() {
+    const p = state.player;
+    const total = p.kills + state.hostiles.size + state.repaired;
+    return total > 0 ? clamp(p.kills / total, 0, 1) : 0;
   }
   function weaponLabel(W) {
     if (W.id === 'smg') return W.damage + msg('unitPerShot');
@@ -4766,10 +4790,14 @@
   /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, cap 40 --- */
   function dmgText(n, dmg, crit, tag) { n.textContent = (tag ? tag + ' ' : '') + '-' + dmg + (crit ? '!' : ''); }
   /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) }
-   * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page. */
+   * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page.
+   * opts.opacity / opts.dur (SPEC-combat §B1): the `무적` of a deflected hit is drawn at 11 px, 55 % opacity
+   * and lives 350 ms — a word that says "nothing happened" must not shout as loud as a damage number. */
   function spawnDmg(x, y, dmg, crit, opts) {
     if (!root) return null;
     opts = opts || {};
+    const op = opts.opacity != null ? clamp(+opts.opacity, 0, 1) : 1;
+    const dur = opts.dur > 0 ? opts.dur : 650;
     const n = mk('div', 'crs-dmg');
     if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag);
     n.style.left = px(x); n.style.top = px(y);
@@ -4787,11 +4815,11 @@
        * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
        * centring transform the node already carries is left exactly where it is. */
       const kf = reducedMotion()
-        ? [{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0 }]
+        ? [{ opacity: op }, { opacity: op, offset: 0.35 }, { opacity: 0 }]
         : (crit
-          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: 1, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
-          : [{ transform: base + 'translateY(0px)', opacity: 1 }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
-      const a = trackAnim(n.animate(kf, { duration: 650, easing: 'ease-out', fill: 'forwards' }));
+          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: op, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: op * 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
+          : [{ transform: base + 'translateY(0px)', opacity: op }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
+      const a = trackAnim(n.animate(kf, { duration: dur, easing: 'ease-out', fill: 'forwards' }));
       a.addEventListener('finish', kill);
     } catch (e) { /* ignore */ }
     later(kill, 1500);
@@ -4893,12 +4921,52 @@
     if (w && rec && w.sum > 0) hudLastHit(el, w.sum, rec.hp, rec.max, w.crit);
   }
 
+  /* ── SPEC-combat §B: 전투 중에는 적만 부서진다 ──────────────────────────────────────────
+   * rampage keeps v1.2's "everything on the page is destructible". arcade and survival make every
+   * NON-hostile element invulnerable: the shot still costs its round (action() / holdStep() spend
+   * before fire() ever runs), it simply takes no HP and makes no pieces, and §B1's deflect says so in
+   * the same frame. Without this there is no reason to fight the enemy at all — anything under the
+   * cursor is worth the same swing.
+   *
+   * §B2 is the other half of the rule and deliberately NOT expressed here: invulnerability applies to
+   * DAMAGE ONLY. Fire (src/76-weapon-fire.js), and wet / frozen / displacement when those exist, still
+   * attach to an invulnerable element and still carry damage into any enemy they reach — which is what
+   * turns "무적" from a wall into an indirect attack.
+   *
+   * `debug.noInvuln` turns the rule off. It exists for the suites that were written against v1.2/v1.4
+   * behaviour and are about something else entirely (stacking depth, pierce layers, debris lifetime,
+   * the repair beam) while enemies happen to be live — same escape hatch as debug.noAttacks /
+   * debug.noRepair, and nothing in the product reads it. */
+  debug.noInvuln = false;
+  function hostileUnit(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (state.hostiles.has(el)) return true;
+    /* v1.2 §5: a hostile fights as a UNIT. pickTarget() already promotes a click on a descendant up to
+     * the hostile itself, but an AoE ring sample, a pierce layer and a burn tick can each land on a
+     * child directly — they are the enemy too. */
+    for (const h of state.hostiles.keys()) { try { if (h.contains(el)) return true; } catch (e) { /* ignore */ } }
+    return false;
+  }
+  function damageable(el) { return !modeHasEnemies() || debug.noInvuln || hostileUnit(el); }
+
+  /* ── SPEC-combat §B2 / §E: 변위 충돌 피해가 걸릴 자리 ──────────────────────────────────
+   * §E (변위 시스템, 로드맵 3.5) is NOT in this build. When it arrives, its AABB collision step must
+   * route damage through HERE instead of calling applyHit() itself: §B2 says displacement applies to
+   * EVERY element while the collision damage only lands on hostiles, and the gate above is already the
+   * single place that answers that question. The number is §E3's own — clamp(round(상대속도/14), 1, 60).
+   * Nothing calls this yet and there is deliberately no assertion for it; it is the seam, written down
+   * next to the rule it belongs to rather than rediscovered later. */
+  function collisionHit(el, relSpeed, ix, iy) {
+    return applyHit(el, clamp(Math.round(relSpeed / 14), 1, 60), 'hammer', ix, iy, { aoe: true, toward: { x: ix, y: iy } });
+  }
+
   /* applyHit — the single damage sink. opts: { crit, hold, win, aoe, slash, toward, pieces, textSplit, splitLine,
    * burnt, radius }. Returns 'broken' | 'damaged' | 'none'. */
   function applyHit(el, dmg, kind, ix, iy, opts) {
     opts = opts || {};
     if (!el) return 'none';
     try { if (el.hasAttribute('data-crs-broken')) return 'none'; } catch (e) { return 'none'; }   // broken meanwhile (staggered AoE, hold tick, collapse chain)
+    if (!damageable(el)) { deflectHit(el, ix, iy, opts); return 'none'; }   // SPEC-combat §B / §B1
     const rec = hpOf(el);
     rec.hp -= dmg;
     state.damageDealt += dmg;
@@ -5343,8 +5411,129 @@
     if (!h || n % 4 === 0) { scorchDab(x, y, 24, 0.08); state.scorch++; }   // the glass blackens over time; no crack (A3/A9)
     if (!h) sfx('puff', { crit });
     if (el) applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win, burnt: true });
+    /* SPEC-combat §B2: in a combat mode the flame LEAVES something behind — see the burning block below
+     * for why the ignition is scoped to the combat modes and not (yet) switched on in rampage. */
+    if (el && modeHasEnemies()) igniteEl(el, BURN_FLAME_STACKS);
     return el;
   }
+
+  /* ══ SPEC-combat §B2: 상태 효과는 그대로 퍼진다 ═══════════════════════════════════════════
+   * 무적은 **피해에만** 적용된다. 불은 무적 요소에도 붙고 그 위로 번진다. 체력이 줄지 않으니 타기만
+   * 하지만, 불길이 **적에게 도달하면** 그때부터 실제 피해가 들어간다 — 불을 길처럼 깔아 적을 태우는
+   * 플레이가 성립하고, 무적이 플레이를 좁히는 대신 간접 공격 수단을 만든다.
+   *
+   * SCOPE — this is the SEED of SPEC-destruction §F (연소 시스템, 로드맵 6단계), not that system.
+   * What is here is the minimum §B2 actually claims, with §F's own names and numbers so step 6 extends
+   * rather than replaces: stacks 0–100, 지속 피해 초당 2 + stacks × 0.14 at 250 ms, 자연 감소 초당 6,
+   * 동시 연소 상한 20 (성능 모드 10), 확산 700 ms · stacks ≥ 45 · 24 px 인접 · 최대 2개 · ×0.35.
+   * What is NOT here, and is step 6's: §F3's flame overlay / scorch ramp / smoke / crackle loop, §F4's
+   * ash debris and the wet · frozen interaction table (neither state exists in this build — the water
+   * pistol and the freeze gun are roadmap step 8), §F5's per-weapon ignition table, §F6's 화염탄.
+   *
+   * TWO READINGS CHOSEN, both because §B2 is about combat and step 6 owns the general case:
+   *   · ignition is wired to the flamethrower ONLY, and only while modeHasEnemies(). Turning §F5's full
+   *     table on everywhere would re-balance rampage's flamethrower (a DoT on top of its unreduced 15
+   *     per tick — §F6 drops that to 8 in the same breath), and that trade is step 6's to make, not §B's.
+   *   · fire does not spread into an element's own ancestors or descendants. They are always "맞닿은"
+   *     by rect, so without this a single tick on a card would climb its whole wrapper chain in 700 ms.
+   *     §F2 says 인접 — "번진다", not "번져 올라간다" — so it spreads sideways.
+   *
+   * No page element is given an inline style by any of this (CLAUDE.md: 흔적을 남기지 않는다). The fire is
+   * drawn with the existing `.crs-fire` particles, which restore() already sweeps, and the ledger below is
+   * emptied by clearBurning() from clearCombatNodes(). */
+  const BURN_TICK_MS = 250;                              // §F1: 250 ms 마다 1/4씩
+  const BURN_DOT_BASE = 2, BURN_DOT_PER_STACK = 0.14;    // §F1: 지속 피해 초당 2 + stacks × 0.14
+  const BURN_DECAY = 6;                                  // §F1: 자연 감소 초당 6
+  const BURN_MAX = 100, BURN_MIN = 1;                    // §F1: stacks 0~100
+  const BURN_CAP = 20, BURN_CAP_PERF = 10;               // §F1: 동시 연소 상한 20 (성능 모드 10)
+  const BURN_SPREAD_MS = 700;                            // §F2: 700ms 마다 번질 곳을 찾는다
+  const BURN_SPREAD_MIN = 45;                            // §F2: stacks >= 45 일 때만
+  const BURN_SPREAD_GAP = 24;                            // §F2: rect 가 24px 이내로 맞닿거나 겹칠 것
+  const BURN_SPREAD_MAX = 2, BURN_SPREAD_MUL = 0.35;     // §F2: 최대 2개, stacks × 0.35, 원래 쪽은 줄지 않는다
+  const BURN_FLAME_STACKS = 9;                           // §F5: 화염방사기 틱당 9
+  /* A Map, not a WeakMap: every tick walks the whole set, so it has to be enumerable (§F1). */
+  const burning = new Map();
+  let burnTimer = 0;
+  function burnCap() { return perfOn() ? BURN_CAP_PERF : BURN_CAP; }
+  function burnAlive(el) {
+    if (!el || el.nodeType !== 1 || !el.isConnected || isOurs(el)) return false;
+    try { return !el.hasAttribute('data-crs-broken'); } catch (e) { return false; }
+  }
+  function igniteEl(el, stacks) {
+    if (!state.active || !burnAlive(el) || !(stacks > 0)) return null;
+    let rec = burning.get(el);
+    if (!rec) {
+      if (burning.size >= burnCap()) return null;
+      rec = { stacks: 0, spreadAt: now() };
+      burning.set(el, rec);
+    }
+    rec.stacks = clamp(rec.stacks + stacks, 0, BURN_MAX);
+    armBurn();
+    return rec;
+  }
+  function armBurn() {
+    if (burnTimer || !burning.size || !state.active) return;
+    burnTimer = later(burnStep, BURN_TICK_MS);
+  }
+  function clearBurning() { untrack(burnTimer); burnTimer = 0; burning.clear(); }
+  /* Gap between two rects — 0 when they touch or overlap. §F2 wants ADJACENCY, not distance between
+   * centres: fire that jumps a gap is teleportation, not fire. */
+  function rectGap(a, b) {
+    const dx = Math.max(a.left - b.right, b.left - a.right, 0);
+    const dy = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
+    return Math.hypot(dx, dy);
+  }
+  /* §F2: the three sparks that make the jump visible. Drawn with the flame particles already in use. */
+  function spreadSparks(a, b) {
+    const x = (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2;
+    const y = (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2;
+    if (isFinite(x) && isFinite(y) && !reducedMotion()) spawnFire(x, y, 3);
+  }
+  function burnSpread(el, rec, r) {
+    if (burning.size >= burnCap()) return;
+    /* descendCollected: a collected container is still walked INTO. Without it the walk stops at the first
+     * box under the limit — a section, say — and the cards inside it, which are the things that are actually
+     * 맞닿은, are never candidates at all. (§F2 names the 300 ms memo; walkCandidates keys it on these very
+     * options, so this stays a separate, correctly-cached signature.) */
+    const cands = walkCandidates(r.left + r.width / 2, r.top + r.height / 2, { limit: 0.7 * viewW() * viewH(), minArea: 1200, descendCollected: true });
+    let n = 0;
+    for (const c of cands) {
+      if (n >= BURN_SPREAD_MAX || burning.size >= burnCap()) break;
+      const o = c.el;
+      if (o === el || burning.has(o) || !burnAlive(o)) continue;
+      try { if (o.contains(el) || el.contains(o)) continue; } catch (e) { continue; }   // reading chosen: sideways only
+      if (rectGap(r, c.r) > BURN_SPREAD_GAP) continue;
+      if (igniteEl(o, rec.stacks * BURN_SPREAD_MUL)) { n++; spreadSparks(r, c.r); }
+    }
+  }
+  function burnStep() {
+    burnTimer = 0;
+    if (!state.active) { burning.clear(); return; }
+    const t = now(), dt = BURN_TICK_MS / 1000;
+    for (const [el, rec] of Array.from(burning)) {
+      if (!burnAlive(el)) { burning.delete(el); continue; }
+      const r = rectOf(el);
+      if (r && r.width >= 1 && r.height >= 1) {
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        /* THE §B2 LINE. The element burns whatever it is; only the DAMAGE asks whether it may be hurt.
+         * An invulnerable element just chars, and the moment the fire has reached an enemy it bites —
+         * which is the whole indirect-attack route §B2 is paying for. */
+        if (damageable(el)) {
+          applyHit(el, Math.max(1, Math.round((BURN_DOT_BASE + rec.stacks * BURN_DOT_PER_STACK) * dt)), 'gun', cx, cy, { burnt: true, aoe: true, toward: { x: cx, y: cy } });
+        }
+        if (!reducedMotion() && state.fire.length < particleCap()) spawnFire(cx + rand(-r.width / 3, r.width / 3), cy + rand(-r.height / 3, r.height / 3), 1);
+        if (rec.stacks >= BURN_SPREAD_MIN && t - rec.spreadAt >= BURN_SPREAD_MS) { rec.spreadAt = t; burnSpread(el, rec, r); }
+      }
+      rec.stacks -= BURN_DECAY * dt;
+      if (rec.stacks < BURN_MIN) burning.delete(el);
+    }
+    if (burning.size) { burnTimer = later(burnStep, BURN_TICK_MS); kick(); }
+  }
+  /* §5 debug hooks: what is on fire, how hot, and whether the thing burning is the enemy or a wall. */
+  debug.burning = () => Array.from(burning, ([el, rec]) => ({
+    tag: tagOf(el).toUpperCase(), id: el.id || null, stacks: Math.round(rec.stacks), hostile: hostileUnit(el)
+  }));
+  debug.ignite = (el, stacks) => { const r = igniteEl(el, stacks == null ? 60 : +stacks); return r ? Math.round(r.stacks) : null; };
   /* One BFS for collapse AND the hostile picker (v1.2 A7). opts: { limit: max area to COLLECT, minArea,
    * descendCollected: keep walking into collected elements (hostile: nested cards), skip(el) }. Same visited
    * cap 2000 / out cap 60 / viewport-intersection and visibility rules as the v1 collapseCandidates. */
@@ -6513,9 +6702,20 @@
     if (!p.startedAt) return 0;
     return Math.max(0, (state.paused ? p.pausedAt : now()) - p.startedAt - p.pausedTotal);
   }
-  /* SPEC-settings §2.2: performance mode holds the page to two live enemies whatever the clock says. */
-  function maxHostiles() { const n = combatElapsed() >= 60000 ? 5 : 3; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
-  function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= 40000 ? 'shooter' : null)); }
+  /* ── SPEC-combat §B3: 적이 떨어지지 않게 한다 ──────────────────────────────────────────
+   * 동시 적 수 3 (60초 후 5) → **5 (60초 후 7)**. 선정 간격 1500 → **900 ms** (src/22-perf.js).
+   * 처치 후 다음 틱을 기다리지 않고 **0.6초 뒤 즉시 1기** 보충 (scheduleRefill, 아래).
+   * 후보가 고갈되면 최소 면적 40 000 → 20 000 px².
+   * Now that only the enemy is destructible (§B), an empty page is not "a quiet moment" any more — it is
+   * nothing to shoot at. SPEC-settings §2.2 still holds performance mode to two live enemies. */
+  function maxHostilesAt(ms) { const n = ms >= 60000 ? 7 : 5; return perfOn() ? Math.min(n, PERF_MAX_HOSTILES) : n; }
+  function maxHostiles() { return maxHostilesAt(combatElapsed()); }
+  /* §B3's relaxed floor. hostileArea() and tierFor() read the SAME live value — a relaxed pick that tierFor()
+   * then refused ('shooter' needs ≥ 40 000) would silently select nothing at all. selectOne() is the only
+   * writer, and it puts it back on the next line, so the loosened floor can never leak into forceAttack(). */
+  const HOSTILE_AREA = 40000, HOSTILE_AREA_LOW = 20000;
+  let hostileFloor = HOSTILE_AREA;
+  function tierFor(area) { return area > 400000 ? 'laser' : (area >= 150000 ? 'charger' : (area >= hostileFloor ? 'shooter' : null)); }
   /* v1.4 §10.2: a `front` enemy attacks 30 % more often; a `back` enemy never attacks at all (mul 0).
    * SPEC-combat §A1: arcade stretches every interval by ×1.35 — the hand that dodges is the hand that aims. */
   function attackInterval(rec) { return TIER_BASE[rec.tier] * Math.max(0.5, 1 - combatElapsed() / 120000) * (depthAttackMul(rec) || 1) * modeAttackMul(); }
@@ -6550,7 +6750,7 @@
     if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null;
     const m = scopeMag();
     const area = (r.width / m) * (r.height / m);
-    if (area < 40000 || area > 0.7 * vw * vh) return null;
+    if (area < hostileFloor || area > 0.7 * vw * vh) return null;
     return area;
   }
   function armCombat() {
@@ -6575,19 +6775,46 @@
   function selectTick() {
     state.combatTimer = 0;
     if (!state.active || !state.combat || state.paused) return;
-    state.combatTimer = later(selectTick, selectIntervalMs());   // SPEC-settings §2.2: 1500 ms, 2500 ms in performance mode
+    state.combatTimer = later(selectTick, selectIntervalMs());   // §B3: 900 ms, 2500 ms in performance mode (SPEC-settings §2.2)
     updatePlayerHud();
+    if (!selectEligible()) return;
+    selectOne();
+  }
+  /* Every reason NOT to put another enemy on the page right now. Shared by the 900 ms tick and §B3's
+   * post-kill refill, so the two can never disagree about when the fight is allowed to grow. */
+  function selectEligible() {
     const p = state.player;
-    if (state.ko || !p.alive || debug.noAttacks || state.scoped || !p.inWindow) return;
-    try { if (doc.visibilityState === 'hidden') return; } catch (e) { /* ignore */ }
-    if (state.hostiles.size >= maxHostiles()) return;
-    const cands = walkCandidates(p.x, p.y, { limit: 0.7 * viewW() * viewH(), minArea: 40000, descendCollected: true, skip: hostileSkip });
-    if (!cands.length) return;
+    if (!state.active || !state.combat || state.paused) return false;
+    if (state.ko || !p.alive || debug.noAttacks || state.scoped || !p.inWindow) return false;
+    try { if (doc.visibilityState === 'hidden') return false; } catch (e) { /* ignore */ }
+    return state.hostiles.size < maxHostiles();
+  }
+  function hostileWalk(x, y, minArea) {
+    return walkCandidates(x, y, { limit: 0.7 * viewW() * viewH(), minArea, descendCollected: true, skip: hostileSkip });
+  }
+  /* One weighted pick (by sqrt(area), as v1.2). §B3: if nothing clears the 40 000 px² floor — a page of small
+   * boxes, or one whose big elements are all hostile already — the floor drops to 20 000 for THIS pick only. */
+  function selectOne() {
+    const p = state.player;
+    let floor = HOSTILE_AREA;
+    let cands = hostileWalk(p.x, p.y, floor);
+    if (!cands.length) { floor = HOSTILE_AREA_LOW; cands = hostileWalk(p.x, p.y, floor); }
+    if (!cands.length) return false;
     let total = 0;
-    for (const c of cands) { c.w = Math.sqrt(c.area); total += c.w; }   // weighted by sqrt(area)
+    for (const c of cands) { c.w = Math.sqrt(c.area); total += c.w; }
     let r = Math.random() * total, pick = cands[cands.length - 1];
     for (const c of cands) { r -= c.w; if (r <= 0) { pick = c; break; } }
-    markHostile(pick.el, pick.area);
+    hostileFloor = floor;
+    const rec = markHostile(pick.el, pick.area);
+    hostileFloor = HOSTILE_AREA;
+    return !!rec;
+  }
+  /* §B3: 처치 후 0.6초 뒤 즉시 1기. The 900 ms tick alone leaves a hole right after the kill — the one
+   * moment the player is looking for the next target. Tracked by later(), so restore() cancels it. */
+  const REFILL_MS = 600;
+  function scheduleRefill() {
+    if (!state.active || !state.combat) return;
+    later(() => { if (selectEligible()) selectOne(); }, REFILL_MS);
   }
   function placeAura(rec) {
     const r = rectOf(rec.el); if (!r) return;
@@ -6685,12 +6912,19 @@
     p.kills++;
     if (r) { const v = intersectRect(r, { left: 0, top: 0, right: viewW(), bottom: viewH() }); spawnDmg(v.left + v.width / 2, v.top + v.height / 2, 0, true, { text: msg('killLabel'), color: '#7ee787' }); }
     sfx('kill');
+    scheduleRefill();   // SPEC-combat §B3
     updatePlayerHud(); scheduleHud();
   }
   function clearCombatNodes() {
     for (const el of Array.from(state.hostiles.keys())) releaseHostile(el);
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
     clearLocks(); clearRepairs();   // v1.4 §2 / §3
+    /* ── SPEC-combat §B ──
+     * restore() and deactivate() both come through here, which is why the two things §B put on the page
+     * clean up from here rather than from a class sweep: the deflect marks (§B1) and everything still
+     * burning (§B2). hostileFloor goes back to the strict value with them (§B3). */
+    clearDeflects(); clearBurning();
+    hostileFloor = HOSTILE_AREA;
   }
   /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
    * reports exactly that. v1.4 §4: T3 everywhere draws a lock instead of the laser, §10.2 silences the back
@@ -6986,6 +7220,15 @@
       attackIntervalMs: rec ? attackInterval(rec) : TIER_BASE.shooter * modeAttackMul()
     };
   };
+  /* SPEC-combat §B3 / §F: the four numbers that decide whether the fight runs dry, read off the LIVE code
+   * paths rather than restated — maxHostilesAt() is the real ladder asked at two points on the clock, selectMs
+   * is what selectTick() would arm right now (performance mode included), and the two floors are the ones
+   * selectOne() and hostileArea() actually compare against. Same shape as debug.modeTuning above. */
+  debug.hostileTuning = () => ({
+    live: state.hostiles.size, max: maxHostiles(), maxAt0: maxHostilesAt(0), maxAt60s: maxHostilesAt(60000),
+    selectMs: selectIntervalMs(), refillMs: REFILL_MS, minArea: HOSTILE_AREA, minAreaLow: HOSTILE_AREA_LOW,
+    elapsedMs: Math.round(combatElapsed())
+  });
   /* The live orbs, velocity included — `speed` is the §A1 projectile speed as actually launched, not a constant. */
   debug.orbList = () => state.orbs.map((o) => ({ x: o.x, y: o.y, vx: o.vx, vy: o.vy, speed: Math.hypot(o.vx, o.vy), launched: !!o.launched, dmg: o.dmg }));
   /* v1.4: the forced hooks bring a target that has been scrolled away back into view first. The picker only ever
@@ -7149,9 +7392,11 @@
    * itself is `.crs-self` — a conic-gradient disc with its middle punched out by a radial-gradient mask, so the
    * painted arc runs clockwise from 12 o'clock for exactly hp/max of the circle. CSSOM only; no SVG. */
   function selfColor(ratio) { return fillColor(ratio); }
-  function ringGradient(ratio) {
+  /* `force` (SPEC-combat §B1) paints the gauge in one flat colour instead of the health palette — the dim grey
+   * the aim point wears over an invulnerable target. */
+  function ringGradient(ratio, force) {
     const deg = clamp(ratio, 0, 1) * 360;
-    const c = selfColor(ratio);
+    const c = force || selfColor(ratio);
     return 'conic-gradient(from 0deg, ' + c + ' 0deg, ' + c + ' ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) 360deg)';
   }
   /* A 60°-wide (or `span`-wide) coloured window centred on `deg`, used for the damage wedge and the graze arc. */
@@ -7175,7 +7420,7 @@
     const tag = mk('span', 'crs-self-tag');
     tag.textContent = msg('dodgeLabel');
     box.append(ring, wedge, arc, dot, tag);
-    return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1 };
+    return { box, ring, wedge, arc, dot, tag, pulse: null, lowOn: false, ratio: -1, invul: false };
   }
   /* SPEC-combat §A1: the ring is a HEALTH gauge, so it exists wherever health does — BOTH combat modes. It is
    * drawn at state.player.x/y, which is the cursor in arcade and the drone in survival, so "체력 링이 커서를
@@ -7187,9 +7432,15 @@
     let s = state.self;
     if (!s || !s.box.isConnected) { s = buildSelf(); state.self = s; try { root.append(s.box); } catch (e) { /* ignore */ } }
     const ratio = clamp(state.player.hp / state.player.max, 0, 1);
-    if (Math.abs(ratio - s.ratio) > 0.0005) { s.ratio = ratio; s.ring.style.backgroundImage = ringGradient(ratio); }
+    if (Math.abs(ratio - s.ratio) > 0.0005) paintSelfRing(s, ratio);
     setSelfLowPulse(s, ratio < 0.3);
     placeSelf();
+  }
+  /* The gauge is written from JS on every hp change, so content.css may never put `!important` on
+   * `.crs-self { background-image }` — a USER-origin !important there would freeze the ring at full health. */
+  function paintSelfRing(s, ratio) {
+    s.ratio = ratio;
+    s.ring.style.backgroundImage = s.invul ? ringGradient(ratio, SELF_INVUL_COLOR) : ringGradient(ratio);
   }
   function setSelfLowPulse(s, on) {
     if (on === s.lowOn && (!on || (s.pulse && s.pulse.playState === 'running'))) return;
@@ -7198,11 +7449,40 @@
     if (!on || reducedMotion()) return;
     try { s.pulse = trackAnim(s.ring.animate([{ opacity: 1 }, { opacity: 0.4 }, { opacity: 1 }], { duration: 1200, iterations: Infinity })); } catch (e) { s.pulse = null; }
   }
+  /* ── SPEC-combat §B1 item 4: 조준점이 미리 알려준다 ────────────────────────────────────
+   * "무적 대상 위에서 흐린 회색, 중심 점 없음."
+   *
+   * AMBIGUITY, reading chosen. The drawn 조준점 of SPEC-crosshair §A does not exist yet (roadmap step 4 —
+   * today the aim point still IS the operating-system cursor image, which content.js cannot restyle). The
+   * one aim-side marker this build owns is the player marker: a 44 px ring with a centre dot, drawn at
+   * state.player.x/y — i.e. ON THE CURSOR in arcade, where §A says "커서가 곧 캐릭터". So the two things
+   * §B1 asks for are applied to it: the gauge goes flat dim grey and the centre dot is taken away, both
+   * driven by what the POINTER is over (state.hoverEl), in both combat modes. In survival the ring rides
+   * the drone rather than the cursor, so there the warning reads as "what you are aiming at is immune"
+   * next to the drone instead of under the crosshair — the information is the same and it is the same one
+   * line of code; step 4 moves it onto the real crosshair.
+   *
+   * The dot is hidden by a CLASS, never by an inline style: `.crs-self-dot { display: block !important }`
+   * is USER-origin, and an inline `display:none` would lose to it (CLAUDE.md, the USER-origin trap). */
+  const SELF_INVUL_COLOR = 'rgba(168, 176, 190, .72)';
+  function aimInvulnerable() {
+    if (!modeHasEnemies() || debug.noInvuln) return false;
+    const el = state.hoverEl;
+    return !!(el && !hostileUnit(el));
+  }
+  function syncSelfInvul(s) {
+    const dim = aimInvulnerable();
+    if (dim === s.invul) return;
+    s.invul = dim;
+    try { s.box.classList.toggle('crs-invul', dim); } catch (e) { /* ignore */ }
+    paintSelfRing(s, clamp(state.player.hp / state.player.max, 0, 1));
+  }
   /* The ring rides the pointer from the frames that already exist — scheduleHover()'s one-shot RAF on every
    * pointermove, and tickFrame() while anything else is live. It never owns a loop of its own. */
   function placeSelf() {
     const s = state.self;
     if (!s || !s.box.isConnected) return;
+    syncSelfInvul(s);
     const p = state.player;
     s.box.style.left = px(p.x);
     s.box.style.top = px(p.y);
@@ -7252,6 +7532,67 @@
       cancelAnimsOf(s.tag);
       trackAnim(s.tag.animate([{ opacity: 0.7 }, { opacity: 0.7, offset: 0.7 }, { opacity: 0 }], { duration: 500, easing: 'ease-out', fill: 'forwards' }));
     } catch (e) { /* ignore */ }
+  }
+
+  /* ── SPEC-combat §B1: 무적 요소를 때렸을 때 — 조용히 아무 일도 없으면 안 된다 ────────────
+   * 다섯 가지 전부가 여기(또는 바로 옆)에 있다:
+   *   1. 튕김 표시   `div.crs-deflect[data-crs]` — 흰 원호가 법선 방향으로 튕기며 180 ms 에 사라진다
+   *   2. 금속성 핑   sfx('deflect') — 삼각파 2.2 kHz / 60 ms (src/40-audio.js). 명중음과 섞이지 않는다
+   *   3. `무적`      피해 숫자 대신, 11 px · 55 % 불투명도 · 350 ms (spawnDmg 의 opacity/dur)
+   *   4. 조준점 예고 aimInvulnerable() / syncSelfInvul() 위
+   *   5. 탄약 소모   action() 과 holdStep() 이 fire() 보다 먼저 spend() 한다 — 여기서 할 일이 없다.
+   *                 빗맞힌 대가가 있어야 조준에 의미가 생긴다는 §B1 의 요구가 이미 만족된다.
+   *
+   * A hold weapon ticks every 40–60 ms; the mark and the ping are throttled to one per element per
+   * HOLD_WINDOW (150 ms), exactly like the damage number and the hit tint they stand in for. */
+  const DEFLECT_MS = 180, DEFLECT_PUSH = 13, DEFLECT_CAP = 24;
+  const deflectNodes = [];
+  const deflectAt = new WeakMap();
+  /* The outward normal of the rect edge nearest the impact — which way the arc bounces off. */
+  function deflectNormal(el, ix, iy) {
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return { x: 0, y: -1 };
+    const dl = Math.abs(ix - r.left), dr = Math.abs(r.right - ix), dt = Math.abs(iy - r.top), db = Math.abs(r.bottom - iy);
+    const m = Math.min(dl, dr, dt, db);
+    if (m === dt) return { x: 0, y: -1 };
+    if (m === db) return { x: 0, y: 1 };
+    if (m === dl) return { x: -1, y: 0 };
+    return { x: 1, y: 0 };
+  }
+  function dropDeflect(n) {
+    const i = deflectNodes.indexOf(n);
+    if (i >= 0) deflectNodes.splice(i, 1);
+    try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ }
+  }
+  function clearDeflects() { for (const n of deflectNodes.slice()) dropDeflect(n); }
+  function deflectHit(el, ix, iy, opts) {
+    const t = now();
+    if (opts && opts.hold) { if (t - (deflectAt.get(el) || 0) < HOLD_WINDOW) return; }
+    deflectAt.set(el, t);
+    sfx('deflect');
+    const p = dmgPos(el, ix, iy, opts || {});
+    spawnDmg(p.x, p.y, 0, false, { text: msg('invulLabel'), color: '#dfe6f0', size: 11, opacity: 0.55, dur: 350 });
+    if (!root) return;
+    const nm = deflectNormal(el, ix, iy);
+    const n = mk('div', 'crs-deflect');
+    n.style.left = px(ix); n.style.top = px(iy);
+    // the arc's open side faces the normal: border-top points up (−90°) before any rotation
+    const base = ' rotate(' + (Math.atan2(nm.y, nm.x) / DEG + 90).toFixed(1) + 'deg)';
+    n.style.transform = 'translate(0px, 0px)' + base;
+    root.append(n);
+    deflectNodes.push(n);
+    while (deflectNodes.length > DEFLECT_CAP) dropDeflect(deflectNodes[0]);
+    const kill = () => dropDeflect(n);
+    try {
+      /* SPEC-settings §3.1: reduced motion keeps the MARK (the information) and drops the bounce. */
+      const kf = reducedMotion()
+        ? [{ opacity: 1 }, { opacity: 1, offset: 0.4 }, { opacity: 0 }]
+        : [{ transform: 'translate(0px, 0px)' + base + ' scale(.55)', opacity: 1 },
+           { transform: 'translate(' + px(nm.x * DEFLECT_PUSH) + ', ' + px(nm.y * DEFLECT_PUSH) + ')' + base + ' scale(1.15)', opacity: 0 }];
+      const a = trackAnim(n.animate(kf, { duration: DEFLECT_MS, easing: 'ease-out', fill: 'forwards' }));
+      a.addEventListener('finish', kill);
+    } catch (e) { /* ignore */ }
+    later(kill, 600);
   }
 
   /* ===================================================================== */
@@ -7459,6 +7800,7 @@
     }
     state.hpRatio = ratio;
     syncSelf();
+    updateRatioHud();   // SPEC-combat §B4: in a combat mode the meter IS kills/enemies — both move through here
     lowVignette(ratio);
   }
 
@@ -8255,6 +8597,14 @@
       n.box.classList.toggle('on', on);
       if (hudEls.fallback) n.box.style.display = on ? 'block' : 'none';
       if (!on) return;
+      // ── SPEC-combat §B4: the meter means KILLS where there are enemies (see meterKind(), src/45-hud.js) ──
+      if (meterKind() === 'kills') {
+        const k = killProgress();
+        n.label.textContent = msg('labelKills') + ' ' + state.player.kills + ' · ' + msg('labelEnemies') + ' ' + state.hostiles.size;
+        n.fill.style.width = (k * 100).toFixed(1) + '%';
+        n.fill.style.background = k >= RATIO_DOMINATE ? '#ffd166' : '#7ee787';
+        return;
+      }
       const pct = Math.round(state.ratio * 100);
       n.label.textContent = msg('labelRatio') + ' ' + pct + '%' + (state.ratio >= RATIO_DOMINATE ? ' · ' + msg('labelDominating') : '');
       n.fill.style.width = (state.ratio * 100).toFixed(1) + '%';
@@ -8267,7 +8617,8 @@
     const before = state.ratio;
     state.ratio = destroyRatio();
     state.ratioDirty = false; state.ratioAt = now(); state.ratioBrokenN = state.broken.length;
-    if (drop && state.ratioNodes && state.ratio < before - 0.002 && !reducedMotion()) {
+    // §B4: the leftward drop animates the RATIO bar; a kills bar is not showing that number at all
+    if (drop && meterKind() === 'ratio' && state.ratioNodes && state.ratio < before - 0.002 && !reducedMotion()) {
       try { trackAnim(state.ratioNodes.fill.animate([{ width: (before * 100).toFixed(1) + '%' }, { width: (state.ratio * 100).toFixed(1) + '%' }], { duration: RATIO_DROP_MS, easing: 'ease-out' })); } catch (e) { /* ignore */ }
     }
     updateRatioHud();

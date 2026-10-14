@@ -97,7 +97,9 @@
     toastKeyboardAim: '키보드 조준: 방향키로 이동 · Space 발사 · Enter 조준경 · Tab 다음 대상',
     a11yWeapon: '무기', a11yReloadStart: '재장전 시작', a11yReloadDone: '재장전 완료',
     a11yMode: '모드', a11yKo: '패배', a11yRepair: '복구',
-    a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료'
+    a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료',
+    // ── SPEC-combat §B1: the word a deflected hit prints instead of a damage number ──
+    invulLabel: '무적'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));

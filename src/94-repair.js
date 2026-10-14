@@ -238,6 +238,14 @@
       n.box.classList.toggle('on', on);
       if (hudEls.fallback) n.box.style.display = on ? 'block' : 'none';
       if (!on) return;
+      // ── SPEC-combat §B4: the meter means KILLS where there are enemies (see meterKind(), src/45-hud.js) ──
+      if (meterKind() === 'kills') {
+        const k = killProgress();
+        n.label.textContent = msg('labelKills') + ' ' + state.player.kills + ' · ' + msg('labelEnemies') + ' ' + state.hostiles.size;
+        n.fill.style.width = (k * 100).toFixed(1) + '%';
+        n.fill.style.background = k >= RATIO_DOMINATE ? '#ffd166' : '#7ee787';
+        return;
+      }
       const pct = Math.round(state.ratio * 100);
       n.label.textContent = msg('labelRatio') + ' ' + pct + '%' + (state.ratio >= RATIO_DOMINATE ? ' · ' + msg('labelDominating') : '');
       n.fill.style.width = (state.ratio * 100).toFixed(1) + '%';
@@ -250,7 +258,8 @@
     const before = state.ratio;
     state.ratio = destroyRatio();
     state.ratioDirty = false; state.ratioAt = now(); state.ratioBrokenN = state.broken.length;
-    if (drop && state.ratioNodes && state.ratio < before - 0.002 && !reducedMotion()) {
+    // §B4: the leftward drop animates the RATIO bar; a kills bar is not showing that number at all
+    if (drop && meterKind() === 'ratio' && state.ratioNodes && state.ratio < before - 0.002 && !reducedMotion()) {
       try { trackAnim(state.ratioNodes.fill.animate([{ width: (before * 100).toFixed(1) + '%' }, { width: (state.ratio * 100).toFixed(1) + '%' }], { duration: RATIO_DROP_MS, easing: 'ease-out' })); } catch (e) { /* ignore */ }
     }
     updateRatioHud();
