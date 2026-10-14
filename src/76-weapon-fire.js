@@ -282,6 +282,59 @@
     return el;
   }
 
+  /* ══ SPEC-arsenal §B2 레이저 커터 — the sustained beam ════════════════════════════════════════════
+   * 틱당 11 / 50ms (초당 220). No magazine: the resource is HEAT, and the heat ledger, the beam drawing and
+   * the cut line all live in src/78-altfire.js — this is only the tick. The cut line is what makes the
+   * weapon itself: "다른 무기는 어디를 맞히는가지만 레이저는 어디를 따라 지나가는가다." */
+  function fireLaser(x, y, c) {
+    state.shots++;
+    const h = (c && c.hold && c.h) || null;
+    const W = WEAPONS.laser;
+    const fp = shotPoint(x, y, 'laser');
+    x = fp.x; y = fp.y;
+    noteShot('laser');
+    lzBeamOn(x, y);                 // §B2: the beam is divs, rotated and stretched — never a canvas
+    lzCutPoint(x, y);               // §B2: 충돌 지점의 궤적을 기록해(최대 60점) 절단선을 그린다
+    if (interceptOrb(x, y)) return null;   // this is also the one entry point into the pierce (§B2 관통 무제한)
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    lzSeverAt(el, x, y);                   // the element the beam just LEFT is the one whose crossing is complete
+    if (!el) return null;
+    /* §B2 "누적 절단선이 요소를 가로지르면 그 궤적을 따라 나뉜다." Checked BEFORE the damage tick: a sever is
+     * the cut finishing its job, not a coincidence of the element running out of hit points at that moment. */
+    if (lzTrySever(el, x, y)) return null;
+    let crit = false, win = null;
+    if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('laser');
+    const dmg = rollDamage(W.damage, crit, falloffMul('laser', x, y));
+    if (!h || h.tick % 6 === 1) sfx('laserLoop', { gain: 0.5 });
+    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    return el;
+  }
+  /* ══ SPEC-arsenal §B3 미니건 — 예열이 끝난 뒤의 연사 ══════════════════════════════════════════════
+   * 26 / 60ms = 433 a second, and 14 px of bloom a shot buys it. The 0.8 s 예열 and the 0.6 s 공회전 유예
+   * are in the hold chain (src/78-altfire.js); by the time this runs the barrels are already up to speed. */
+  function fireMinigun(x, y, c) {
+    state.shots++;
+    const h = (c && c.hold && c.h) || null;
+    const n = h ? h.tick : 1;
+    x += rand(-7, 7); y += rand(-7, 7);
+    const sp = shotPoint(x, y, 'minigun');
+    x = sp.x; y = sp.y;
+    noteShot('minigun');
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    let dmg = 0, crit = false, win = null;
+    if (el) {
+      if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('minigun');
+      dmg = rollDamage(WEAPONS.minigun.damage, crit, falloffMul('minigun', x, y));
+    }
+    if (!h || n % 2 === 1) sfx('gun', { gain: 0.72, pitch: 0.86, crit: !h && crit });
+    flash(x, y, 'gun', { size: 38, dur: 110 });
+    if (!h || n % 3 === 0) { shake('gun', { amp: 1.6 }); spawnChips(x, y, randInt(1, 3)); }
+    drawCrack(x, y, 'smg', { ink: 0.3 });
+    if (el) applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    return el;
+  }
+
   /* One BFS for collapse AND the hostile picker (v1.2 A7). opts: { limit: max area to COLLECT, minArea,
    * descendCollected: keep walking into collected elements (hostile: nested cards), skip(el) }. Same visited
    * cap 2000 / out cap 60 / viewport-intersection and visibility rules as the v1 collapseCandidates. */

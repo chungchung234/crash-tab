@@ -4,6 +4,8 @@
   WEAPONS.katana.fire = fireStab; WEAPONS.bomb.fire = fireBomb; WEAPONS.rocket.fire = fireRocket; WEAPONS.flame.fire = fireFlame;
   WEAPONS.sniper.fire = fireSniper;
   WEAPONS.collapse.fire = (x, y) => { state.shots++; doCollapse(x, y); return null; };
+  // ── SPEC-arsenal §B: the two weapons the arsenal grew by ──
+  WEAPONS.laser.fire = fireLaser; WEAPONS.minigun.fire = fireMinigun;
 
   /* --- actions (A3 ordering + v1.2 A5 gates): mount → cooldown → swap delay → spend → counters/combo/swing → fire → HUD --- */
   function action(id, x, y, run) {

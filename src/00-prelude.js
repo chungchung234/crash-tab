@@ -18,7 +18,11 @@
    * `mag` = magazine size (null = ∞ / melee), `reloadMs` (null for melee); the slot KEY is no longer a table
    * field: it comes from the loadout order (v1.2 A6). `fire(x, y, ctx)` entries are attached in section 12.
    * WEAPON_IDS is the canonical SET (validation / persistence); `state.loadout` is the ORDER. */
-  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'];
+  /* SPEC-arsenal §B1: WEAPON_IDS is the ARSENAL now — every weapon that exists (12 since 레이저 커터 and
+   * 미니건 landed). `state.loadout` is a chosen SUBSET of it, at most 10 long, and that subset is what the
+   * number keys / Q / E / the HUD grid speak. Nothing else about the id set changed. */
+  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse', 'laser', 'minigun'];
+  const LOADOUT_MAX = 10;            // §B1: 숫자키 10칸
   const WEAPONS = {
     hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     pistol:   { id: 'pistol',   emoji: '🔫', name: 'weaponPistol',   kind: 'gun',      damage: 25,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: 12, reloadMs: 900 },
@@ -29,15 +33,37 @@
     bomb:     { id: 'bomb',     emoji: '💣', name: 'weaponBomb',     kind: 'bomb',     damage: 190, cooldownMs: 700,  radius: 240, hold: false, input: 'click', rings: [60, 130, 210], maxTargets: 10, mag: 3, reloadMs: 1800 },
     rocket:   { id: 'rocket',   emoji: '🚀', name: 'weaponRocket',   kind: 'bomb',     damage: 260, cooldownMs: 1200, radius: 360, hold: false, input: 'click', rings: [70, 150, 230, 320], maxTargets: 14, mag: 2, reloadMs: 1500 },
     flame:    { id: 'flame',    emoji: '🔥', name: 'weaponFlame',    kind: 'gun',      damage: 15,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 50, mag: 100, reloadMs: 2500 },
-    collapse: { id: 'collapse', emoji: '🌪️', name: 'weaponCollapse', kind: 'collapse', damage: Infinity, cooldownMs: 2000, radius: Infinity, hold: false, input: 'click', mag: 1, reloadMs: 5000 }
+    collapse: { id: 'collapse', emoji: '🌪️', name: 'weaponCollapse', kind: 'collapse', damage: Infinity, cooldownMs: 2000, radius: Infinity, hold: false, input: 'click', mag: 1, reloadMs: 5000 },
+    /* ── SPEC-arsenal §B2 레이저 커터 ───────────────────────────────────────────────────────────────
+     * No magazine at all: `heat` 0–100 is the resource (heatPerTick / heatPulse / overheatMs / coolDelayMs
+     * / coolPerSec below), so `mag` stays null and the ammo panel becomes a heat gauge (src/45-hud.js).
+     * `pierce` is the PIERCE_ALL sentinel (999 — src/71 declares the constant, which has not been
+     * evaluated yet at this point in the bundle, so the number is written out here) and `pierceFalloff`
+     * is §B2's ×0.75 per layer, read by applyPierce() in src/73-hit-resolution.js.
+     * The §3.1 stat block is inline rather than in WEAPON_STATS for the same reason the destruction
+     * profile is attached in src/78-altfire.js: src/71 and src/66 are not this workstream's files, and
+     * `Object.assign(W, undefined)` leaves what is written here alone. */
+    laser:    { id: 'laser',    emoji: '🔆', name: 'weaponLaser',   kind: 'gun',      damage: 11,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 50, mag: null, reloadMs: null,
+                heat: true, heatPerTick: 2.2, heatPulse: 25, heatMax: 100, overheatMs: 2500, coolDelayMs: 400, coolPerSec: 28, pulseDamage: 90,
+                swapMs: 320, recoil: 0.2, bloom: 0, critChance: 0.07, knockback: 0.4, moveSpeed: 0.88, falloff: 0, pierce: 999, pierceFalloff: 0.75 },
+    /* ── SPEC-arsenal §B3 미니건 ────────────────────────────────────────────────────────────────────
+     * 26 damage every 60 ms = 433/s, the number §B3's table publishes. `spinUpMs` is the 0.8 s 예열 before
+     * the first round and `idleGraceMs` the 0.6 s 공회전 유예 that lets a re-press skip it. */
+    minigun:  { id: 'minigun',  emoji: '⚙️', name: 'weaponMinigun', kind: 'gun',      damage: 26,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 60, mag: 200, reloadMs: 4000,
+                spinUpMs: 800, idleGraceMs: 600, fixedRounds: 20,
+                swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 }
   };
   /* Loadout presets (v1.2 §4): permutations of WEAPON_IDS mapped onto keys 1 2 3 4 5 6 7 8 9 0. */
+  /* SPEC-arsenal §B1: "프리셋이 서로 다른 10개 조합이 되어 실제 선택이 생긴다." The arsenal holds 12 and a
+   * loadout holds 10, so each preset now LEAVES TWO OUT — and no two presets leave out the same pair, which
+   * is what makes the choice real rather than a reshuffle. `default` keeps the exact v1.2 order (it is the
+   * ten weapons that existed before this step), so an upgrade changes nothing for someone who never looked. */
   const PRESETS = {
-    default:   ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'],
-    assault:   ['smg', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'katana', 'collapse'],
-    sniper:    ['sniper', 'pistol', 'hammer', 'katana', 'axe', 'smg', 'bomb', 'rocket', 'flame', 'collapse'],
-    explosive: ['rocket', 'bomb', 'flame', 'collapse', 'smg', 'pistol', 'sniper', 'hammer', 'axe', 'katana'],
-    melee:     ['hammer', 'axe', 'katana', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']
+    default:   ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'],                 // 빠짐: 레이저 · 미니건
+    assault:   ['smg', 'minigun', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'collapse'],                // 빠짐: 카타나 · 레이저
+    sniper:    ['sniper', 'pistol', 'laser', 'katana', 'hammer', 'axe', 'smg', 'bomb', 'rocket', 'collapse'],                 // 빠짐: 화염방사기 · 미니건
+    explosive: ['rocket', 'bomb', 'flame', 'collapse', 'laser', 'minigun', 'smg', 'pistol', 'hammer', 'axe'],                 // 빠짐: 저격총 · 카타나
+    melee:     ['hammer', 'axe', 'katana', 'laser', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']                // 빠짐: 기관총 · 미니건
   };
   const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee' };
   const HOLD_WINDOW = 150;           // ms: hold-weapon damage aggregation / fx throttle window (A4, A5)

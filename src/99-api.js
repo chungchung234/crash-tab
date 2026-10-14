@@ -273,6 +273,20 @@
     };
   }
   /* api.weapons(): entries in CURRENT loadout order with slot 1–10 / key "1"…"9","0" (v1.2 A1 / A6). */
+  /* §B1: api.weapons() stays the LOADOUT in slot order — it is what the HUD and the hotkeys are built on.
+   * arsenalList() below answers the other question ("what exists at all?") without a slot or a key, because
+   * a weapon outside the loadout has neither. */
+  function arsenalWeaponList() {
+    return WEAPON_IDS.map((id) => {
+      const W = WEAPONS[id];
+      const slot = state.loadout.indexOf(id) + 1;
+      return { id, slot: slot || null, key: slot ? slotKey(slot) : null, inLoadout: slot > 0, emoji: W.emoji, name: msg(W.name),
+        kind: W.kind, damage: W.damage, cooldownMs: W.cooldownMs, radius: W.radius, hold: W.hold, input: W.input,
+        mag: W.mag == null ? null : W.mag, reloadMs: W.reloadMs == null ? null : W.reloadMs,
+        swapMs: swapMsOf(id), moveSpeed: W.moveSpeed == null ? 1 : W.moveSpeed, pierce: W.pierce || 0,
+        heat: !!W.heat, spinUpMs: W.spinUpMs || 0 };
+    });
+  }
   function weaponList() {
     return state.loadout.map((id, i) => {
       const W = WEAPONS[id];
@@ -308,6 +322,9 @@
     setWeapon: (id) => setWeapon(id), setMode, weapons: weaponList, hpOf: hpOfPublic, smashAt, slash: slashSegment, stats,
     // v1.2
     ammo: ammoInfo, reload: reloadNow,
+    /* SPEC-arsenal §B1: 무기고(arsenal) ≠ 로드아웃(loadout). The arsenal is every weapon that exists; the
+     * loadout is the ordered subset (1–10) the number keys, Q / E and the HUD grid speak. */
+    arsenal: arsenalWeaponList, arsenalIds: () => WEAPON_IDS.slice(), loadoutMax: () => LOADOUT_MAX,
     loadout: () => state.loadout.slice(), setLoadout: (ids) => setLoadout(ids), applyPreset,
     scope: (on) => { if (on) scopeOn(); else scopeOff(); return state.scoped; },
     player: playerInfo, setCombat: (v) => setCombat(v),

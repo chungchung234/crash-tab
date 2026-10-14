@@ -430,5 +430,29 @@
   "setHostileMarker": {
     "message": "적대 요소 표식",
     "description": "SPEC-crosshair B4: hostile aura — quiet / always / off"
+  },
+  "weaponLaser": {
+    "message": "레이저 커터",
+    "description": "SPEC-arsenal B2: laser cutter weapon (hold to beam, short press to pulse)"
+  },
+  "weaponMinigun": {
+    "message": "미니건",
+    "description": "SPEC-arsenal B3: minigun weapon (0.8 s spin-up, hold to fire)"
+  },
+  "labelOverheat": {
+    "message": "과열",
+    "description": "SPEC-arsenal B2: heat gauge readout while the laser is forced to cool"
+  },
+  "toastOverheat": {
+    "message": "과열 — 식히는 중",
+    "description": "SPEC-arsenal B2: toast shown when the laser cutter overheats"
+  },
+  "hudHintCharge": {
+    "message": "길게 눌러 모으고 떼면 나가요",
+    "description": "SPEC-arsenal A1: HUD hint for the unified charge grammar"
+  },
+  "hudHintBurst": {
+    "message": "짧게 누르면 다른 공격이 나가요",
+    "description": "SPEC-arsenal A2: HUD hint for the sustained-fire weapons"
   }
 }

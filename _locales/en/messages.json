@@ -430,5 +430,29 @@
   "setHostileMarker": {
     "message": "Hostile marker",
     "description": "SPEC-crosshair B4: hostile aura — quiet / always / off"
+  },
+  "weaponLaser": {
+    "message": "Laser cutter",
+    "description": "SPEC-arsenal B2: laser cutter weapon (hold to beam, short press to pulse)"
+  },
+  "weaponMinigun": {
+    "message": "Minigun",
+    "description": "SPEC-arsenal B3: minigun weapon (0.8 s spin-up, hold to fire)"
+  },
+  "labelOverheat": {
+    "message": "Overheat",
+    "description": "SPEC-arsenal B2: heat gauge readout while the laser is forced to cool"
+  },
+  "toastOverheat": {
+    "message": "Overheated — cooling",
+    "description": "SPEC-arsenal B2: toast shown when the laser cutter overheats"
+  },
+  "hudHintCharge": {
+    "message": "Hold to charge, release to fire",
+    "description": "SPEC-arsenal A1: HUD hint for the unified charge grammar"
+  },
+  "hudHintBurst": {
+    "message": "A short press fires a different attack",
+    "description": "SPEC-arsenal A2: HUD hint for the sustained-fire weapons"
   }
 }

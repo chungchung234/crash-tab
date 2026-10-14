@@ -55,6 +55,13 @@
     '.crs-ammo .abig.dim{color:rgba(255,255,255,.4)}',
     '.crs-ammo .abig.swap{font-size:20px;font-weight:700;color:rgba(255,255,255,.72)}',
     '.crs-ammo .adim{font-size:16px;color:rgba(255,255,255,.55)}',
+    /* SPEC-arsenal §B2: the heat gauge takes the magazine pips' place when the laser cutter is in hand.
+     * Same width, same corner, same reading distance — it answers the same question the pips answer. */
+    '.crs-ammo .aheat{position:relative;width:180px;height:10px;background:rgba(255,255,255,.18);border-radius:5px;margin:0 0 6px auto;overflow:hidden;display:none}',
+    '.crs-ammo .aheat.on{display:block}',
+    '.crs-ammo .aheatfill{height:100%;width:0;background:#ff4d9d;border-radius:5px}',
+    '.crs-ammo .aheat.over .aheatfill{background:#e5484d}',
+    '.crs-ammo .aheatlabel{position:absolute;right:6px;top:-2px;font-size:9px;font-weight:700;line-height:14px;color:rgba(255,255,255,.9);text-shadow:0 1px 2px rgba(0,0,0,.9)}',
     '.crs-ammo .abar{width:180px;height:8px;background:rgba(255,255,255,.22);border-radius:4px;margin:6px 0 0 auto;overflow:hidden;display:none}',
     '.crs-ammo .abar.on{display:block}',
     '.crs-ammo .afill{height:100%;width:0;background:#ffb224;border-radius:4px}',
@@ -227,7 +234,14 @@
     hudEls.aBar = doc.createElement('div'); hudEls.aBar.className = 'abar';
     hudEls.aFill = doc.createElement('div'); hudEls.aFill.className = 'afill';
     hudEls.aBar.append(hudEls.aFill);
-    ammo.append(hudEls.aPips, aline, hudEls.aBar);
+    /* SPEC-arsenal §B2: "탄약 패널이 열 게이지로 바뀐다." The heat bar is a SIBLING of the magazine pips
+     * rather than a second panel — the player looks at one place for "can I shoot?" whichever weapon is in
+     * hand. Only one of the two is ever displayed (altHeatHud(), src/78-altfire.js). */
+    hudEls.aHeat = doc.createElement('div'); hudEls.aHeat.className = 'aheat';
+    hudEls.aHeatFill = doc.createElement('div'); hudEls.aHeatFill.className = 'aheatfill';
+    hudEls.aHeatLabel = doc.createElement('span'); hudEls.aHeatLabel.className = 'aheatlabel';
+    hudEls.aHeat.append(hudEls.aHeatFill, hudEls.aHeatLabel);
+    ammo.append(hudEls.aPips, hudEls.aHeat, aline, hudEls.aBar);
     hudEls.ammo = ammo;
     const player = mk('div', 'crs-player'); player.classList.add('crs-plate');
     hudEls.pHp = doc.createElement('span'); hudEls.pHp.className = 'php crs-num';
@@ -370,8 +384,8 @@
     return total > 0 ? clamp(p.kills / total, 0, 1) : 0;
   }
   function weaponLabel(W) {
-    if (W.id === 'smg') return W.damage + msg('unitPerShot');
-    if (W.id === 'flame') return W.damage + msg('unitPerTick');
+    if (W.id === 'smg' || W.id === 'minigun') return W.damage + msg('unitPerShot');   // SPEC-arsenal §B3
+    if (W.id === 'flame' || W.id === 'laser') return W.damage + msg('unitPerTick');   // SPEC-arsenal §B2: 틱당 11
     if (W.id === 'collapse') return '∞';
     return String(W.damage);
   }
@@ -386,7 +400,14 @@
       hudEls.sound.title = (state.muted ? msg('btnMute') : msg('btnSound')) + ' (M)';
       hudEls.sound.setAttribute('aria-pressed', state.muted ? 'true' : 'false');
       const W = WEAPONS[state.weapon];
-      hudEls.hint.textContent = state.hintCollapse ? msg('hudHintCollapse') : (W.hold ? msg('hudHintHold') : (W.input === 'drag' ? msg('hudHintDrag') : (W.scope ? msg('hudHintScope') : msg('hudHint'))));
+      /* SPEC-arsenal §A1: the hint is the one place the grammar is spelled out. A weapon that SUSTAINS on a
+       * long press says so by pointing at the short one; everything else says "모으고 떼면 나간다". The old
+       * per-weapon lines stay underneath for the two weapons whose press means something extra (the katana's
+       * drag, the sniper's scope chord). */
+      hudEls.hint.textContent = state.hintCollapse ? msg('hudHintCollapse')
+        : (W.hold ? msg('hudHintHold') + ' · ' + msg('hudHintBurst')
+          : (W.input === 'drag' ? msg('hudHintDrag') + ' · ' + msg('hudHintCharge')
+            : (W.scope ? msg('hudHintScope') : msg('hudHint') + ' · ' + msg('hudHintCharge'))));
       hudEls.pieces.textContent = msg('hudPieces') + ' ' + debrisCount();
       hudEls.cracks.textContent = '· ' + msg('hudCracks') + ' ' + state.cracks;
       hudEls.damage.textContent = '· ' + msg('hudDamage') + ' ' + state.damageDealt;
@@ -420,11 +441,20 @@
     if (state.hudRaf || !state.active) return;
     state.hudRaf = raf(() => { state.hudRaf = 0; updateHud(); updateAmmoHud(); });
   }
-  /* Grid order follows the loadout (v1.2 A6): the existing button nodes are re-appended; badge + title rewritten. */
+  /* Grid order follows the loadout (v1.2 A6): the existing button nodes are re-appended; badge + title rewritten.
+   * SPEC-arsenal §B1: the grid is the LOADOUT, not the arsenal. A button for a weapon that is not in the
+   * loadout is DETACHED (not merely hidden) — the grid must read as exactly the ten things the number keys
+   * can reach, and a hidden-but-present button would still be found by a DOM query, focusable by a screen
+   * reader and counted by anything asking "how many weapons can I pick?". The node itself is kept in
+   * hudEls.weaponBtns, so a loadout change re-attaches it with no rebuild. */
   function reorderHud() {
     const grid = hudEls.grid;
     if (!grid || !hudEls.weaponBtns) return;
     try {
+      for (const id of WEAPON_IDS) {
+        const b = hudEls.weaponBtns[id];
+        if (b && b.parentNode && state.loadout.indexOf(id) < 0) b.parentNode.removeChild(b);
+      }
       state.loadout.forEach((id, i) => {
         const b = hudEls.weaponBtns[id]; if (!b) return;
         const W = WEAPONS[id], key = slotKey(i + 1);
