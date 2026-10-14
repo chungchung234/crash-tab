@@ -5170,19 +5170,34 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
         if (!supports944(lower, upper)) continue;
         const gap = lower.top - upper.bottom;
         if (gap < -1 || gap > CONTACT944) continue;   // actually touching, not merely somewhere above
-        // …and `lower` must be its ONLY support. A chip can come to rest across two neighbours; retiring
-        // one of them leaves the other holding it up, and the piece correctly does not move — which the
-        // assertion below would read as "re-falling is broken". Demand a pair where the eviction really
-        // does remove the last thing underneath.
-        if (boxes.some((o) => o !== lower && o !== upper && o.resting && supports944(o, upper))) continue;
+        // …and whatever else is under `upper` has to be far enough below that losing `lower` still drops it.
+        // A chip can come to rest across two neighbours: retiring one leaves the other holding it at the
+        // same height, the piece correctly does not move, and the assertion below would read that as
+        // "re-falling is broken". Requiring `lower` to be the ONLY support fixes that but asks the pile for
+        // a shape it does not always produce — the search then fails instead. Requiring every other support
+        // to sit at least MIN_DROP below `lower` is both: the fall is guaranteed and the pile is free to be
+        // a pile. (y grows downward, so "below" is a LARGER top.)
+        const MIN_DROP944 = 4;
+        if (boxes.some((o) => o !== lower && o !== upper && o.resting && supports944(o, upper) && o.top < lower.top + MIN_DROP944)) continue;
         return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
       }
     }
     return null;
   };
-  let pairInfo944 = null;
-  for (let i = 0; i < 4 && !pairInfo944; i++) { pairInfo944 = findPair944(await pieceBoxes944()); if (!pairInfo944) await sleep(250); }
-  check('A.v2 9.4.4: found a vertically-stacked resting pair among the #stack debris to test re-falling', !!pairInfo944, pairInfo944 || { boxes: (await pieceBoxes944() || []).length });
+  /* The pile's shape is physics, not a fixture, so a run can settle without a qualifying pair in it. When
+   * that happens, add chips and let them settle rather than giving up — a bigger pile has more stacking. */
+  let pairInfo944 = null, extra944 = 0;
+  const MORE944 = ['#small-card', '#long-para', '#demo-img'];
+  for (let round = 0; round < 4 && !pairInfo944; round++) {
+    for (let i = 0; i < 4 && !pairInfo944; i++) { pairInfo944 = findPair944(await pieceBoxes944()); if (!pairInfo944) await sleep(250); }
+    if (pairInfo944 || round >= MORE944.length) break;
+    const sel = MORE944[round];
+    const r = await api.rect(page, sel);
+    for (let k = 0; k < 20 && !(await api.broken(page, sel)); k++) { await api.smashAt(page, r.cx, r.cy); await sleep(30); }
+    extra944++;
+    await poll(async () => { const st = await api.stats(page); return (Array.isArray(st.pieces) && st.pieces.length > 0 && st.pieces.every((q) => q.resting)) ? st : null; }, 4000, 80);
+  }
+  check('A.v2 9.4.4: found a vertically-stacked resting pair among the #stack debris to test re-falling', !!pairInfo944, pairInfo944 || { boxes: (await pieceBoxes944() || []).length, extra944 });
   if (pairInfo944) {
     const expired944 = await page.evaluate((pid) => window.__crashScreen.debug.expirePiece(pid), pairInfo944.lower);
     const rose944 = await poll(async () => {
