@@ -5170,19 +5170,34 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
         if (!supports944(lower, upper)) continue;
         const gap = lower.top - upper.bottom;
         if (gap < -1 || gap > CONTACT944) continue;   // actually touching, not merely somewhere above
-        // …and `lower` must be its ONLY support. A chip can come to rest across two neighbours; retiring
-        // one of them leaves the other holding it up, and the piece correctly does not move — which the
-        // assertion below would read as "re-falling is broken". Demand a pair where the eviction really
-        // does remove the last thing underneath.
-        if (boxes.some((o) => o !== lower && o !== upper && o.resting && supports944(o, upper))) continue;
+        // …and whatever else is under `upper` has to be far enough below that losing `lower` still drops it.
+        // A chip can come to rest across two neighbours: retiring one leaves the other holding it at the
+        // same height, the piece correctly does not move, and the assertion below would read that as
+        // "re-falling is broken". Requiring `lower` to be the ONLY support fixes that but asks the pile for
+        // a shape it does not always produce — the search then fails instead. Requiring every other support
+        // to sit at least MIN_DROP below `lower` is both: the fall is guaranteed and the pile is free to be
+        // a pile. (y grows downward, so "below" is a LARGER top.)
+        const MIN_DROP944 = 4;
+        if (boxes.some((o) => o !== lower && o !== upper && o.resting && supports944(o, upper) && o.top < lower.top + MIN_DROP944)) continue;
         return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
       }
     }
     return null;
   };
-  let pairInfo944 = null;
-  for (let i = 0; i < 4 && !pairInfo944; i++) { pairInfo944 = findPair944(await pieceBoxes944()); if (!pairInfo944) await sleep(250); }
-  check('A.v2 9.4.4: found a vertically-stacked resting pair among the #stack debris to test re-falling', !!pairInfo944, pairInfo944 || { boxes: (await pieceBoxes944() || []).length });
+  /* The pile's shape is physics, not a fixture, so a run can settle without a qualifying pair in it. When
+   * that happens, add chips and let them settle rather than giving up — a bigger pile has more stacking. */
+  let pairInfo944 = null, extra944 = 0;
+  const MORE944 = ['#small-card', '#long-para', '#demo-img'];
+  for (let round = 0; round < 4 && !pairInfo944; round++) {
+    for (let i = 0; i < 4 && !pairInfo944; i++) { pairInfo944 = findPair944(await pieceBoxes944()); if (!pairInfo944) await sleep(250); }
+    if (pairInfo944 || round >= MORE944.length) break;
+    const sel = MORE944[round];
+    const r = await api.rect(page, sel);
+    for (let k = 0; k < 20 && !(await api.broken(page, sel)); k++) { await api.smashAt(page, r.cx, r.cy); await sleep(30); }
+    extra944++;
+    await poll(async () => { const st = await api.stats(page); return (Array.isArray(st.pieces) && st.pieces.length > 0 && st.pieces.every((q) => q.resting)) ? st : null; }, 4000, 80);
+  }
+  check('A.v2 9.4.4: found a vertically-stacked resting pair among the #stack debris to test re-falling', !!pairInfo944, pairInfo944 || { boxes: (await pieceBoxes944() || []).length, extra944 });
   if (pairInfo944) {
     const expired944 = await page.evaluate((pid) => window.__crashScreen.debug.expirePiece(pid), pairInfo944.lower);
     const rose944 = await poll(async () => {
@@ -5870,6 +5885,205 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   const meterB7r = await api.hudQ(page, '.crs-progress');
   check('A.§B 7 (§B4 / §F 모드): 램페이지의 미터 정의는 건드리지 않았다 — 그대로 숨어 있다',
     !meterB7r || meterB7r.visible === false, meterB7r);
+
+
+  // =======================================================================================
+  // SPEC-combat §D1 — 적만 포커싱 (feat/enemy-focus)
+  //   §F "포커싱": 전투 모드에서 비적대 요소 위에 `.crs-target` 이 생기지 않고 체력 바도 없다.
+  //   `pickTarget` 이 null 을 돌려준다. 적 rect 에서 30px 떨어진 빈 곳을 쏘면 보정되어 그 적이
+  //   피해를 받고, 70px 에서는 안 된다. 아케이드는 50px 에서도 보정된다.
+  // debug.noInvuln is explicitly OFF: §D1 is the AIM-side twin of §B's damageable() gate and shares its
+  // escape hatch, so the rule under test is the real one. noAttacks stays ON so selectEligible() refuses to
+  // add anyone — #fire-enemy, forced by hand, is then the ONLY hostile and every probe point below can be
+  // quoted against its rect. (api.restore() releases hostiles — clearCombatNodes() — so the forceAttack
+  // always comes AFTER it, as in §B above.)
+  // =======================================================================================
+  console.log('--- combat: SPEC-combat §D1 — only the enemy is focusable (bracket / aim point / 조준 보정 / 적 탐색 중) ---');
+  // The hover box, read together with what the targeting query says at the same point, in ONE round trip:
+  // "no bracket" and "pickTarget said null" are the same fact seen from two sides, and reading them apart
+  // lets the mouse position age out between the two.
+  const focusAt = (x, y) => page.evaluate((px, py) => {
+    const a = window.__crashScreen, d = a.debug;
+    const box = document.querySelector('.crs-target');
+    const cs = box ? getComputedStyle(box) : null;
+    const bar = box ? box.querySelector('.crs-target-bar') : null;
+    const r = box ? box.getBoundingClientRect() : null;
+    return {
+      pick: (d && typeof d.pickAt === 'function') ? d.pickAt(px, py) : 'missing:pickAt',
+      display: cs ? cs.display : null,
+      barVisible: !!(bar && cs && cs.display !== 'none' && getComputedStyle(bar).display !== 'none'),
+      label: box ? (box.textContent || '').trim() : null,
+      rect: r ? { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) } : null,
+      hostiles: a.stats().hostiles,
+    };
+  }, x, y);
+  const scanMark = () => page.evaluate(() => {
+    const host = document.querySelector('crs-hud, .crs-hud-host');
+    const box = host && host.shadowRoot ? host.shadowRoot.querySelector('.crs-progress') : null;
+    const scan = box ? box.querySelector('.rscan') : null;
+    if (!box || !scan) return null;
+    const cs = getComputedStyle(scan);
+    const anims = (scan.getAnimations ? scan.getAnimations() : []).map((a) => {
+      const t = a.effect && a.effect.getTiming ? a.effect.getTiming() : {};
+      return { dur: typeof t.duration === 'number' ? t.duration : null, forever: t.iterations === Infinity };
+    });
+    return { cls: box.classList.contains('scan'), text: (scan.textContent || '').trim(), display: cs.display, anims, hostiles: window.__crashScreen.stats().hostiles };
+  });
+
+  await setCombatMode('survival');
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true, infiniteAmmo: true });
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'pistol');
+  const srcD = await api.rect(page, '#fire-src');          // 200 × 80 — under every hostile floor, never an enemy
+  const enemyD = await api.rectNoScroll(page, '#fire-enemy');
+  const tierD = await force('#fire-enemy', 'forceAttack');
+  await debugCall('setAvatarPos', 120, 120);               // park the drone clear of the lab
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(100));
+  await sleep(140);
+  const assistD = await debugCall('aimAssist');
+  const hostilesD = (await api.stats(page)).hostiles;
+  check('A.§D1 fixture: #fire-enemy 가 유일한 적이고, 서바이벌의 조준 보정 창은 40 px 이다 (debug.aimAssist 로 읽음)',
+    tierD === 'shooter' && hostilesD === 1 && !!assistD && assistD.on === true && assistD.px === 40 && assistD.mode === 'survival',
+    { tierD, hostilesD, assistD });
+  // probe points, all on the enemy's vertical centre line and all in empty #fire-lab space to its right
+  // (#fire-enemy's right edge → #fire-far's left edge is an 80 px gap, so 30 / 50 / 70 all land on nothing)
+  const pxEnemyD = { x: enemyD.cx, y: enemyD.cy };
+  const px30D = { x: enemyD.right + 30, y: enemyD.cy };
+  const px50D = { x: enemyD.right + 50, y: enemyD.cy };
+  const px70D = { x: enemyD.right + 70, y: enemyD.cy };
+
+  // ---- (D1) §F: 비적대 요소 위에는 괄호도 체력 바도 없고, pickTarget 이 null 을 돌려준다 ----
+  await page.mouse.move(srcD.cx, srcD.cy);
+  await sleep(150);
+  const wallD = await focusAt(srcD.cx, srcD.cy);
+  check('A.§D1 1 (§F): 전투 모드에서 비적대 요소(#fire-src) 위에 `.crs-target` 이 생기지 않고 체력 바도 없다 — 마우스를 따라다니던 상자가 사라졌다',
+    !!wallD && wallD.display === 'none' && wallD.barVisible === false, wallD);
+  check('A.§D1 1 (§F): …같은 지점에서 pickTarget 이 null 을 돌려준다 (debug.pickAt — 보정 창 40 px 밖, 적까지 110 px)',
+    !!wallD && wallD.pick === null, wallD);
+
+  // ---- (D2) 적 위에서는 그대로다 — 사라진 것은 "적이 아닌 것" 위의 상자뿐이다 ----
+  await page.mouse.move(pxEnemyD.x, pxEnemyD.y);
+  await sleep(150);
+  const onEnemyD = await focusAt(pxEnemyD.x, pxEnemyD.y);
+  check('A.§D1 2 (§D1): 적 위에서는 괄호와 체력 바가 그대로 뜨고 pickTarget 이 그 적을 돌려준다',
+    !!onEnemyD && onEnemyD.display !== 'none' && onEnemyD.barVisible === true
+    && !!onEnemyD.pick && onEnemyD.pick.hostile === true && onEnemyD.pick.id === 'fire-enemy', onEnemyD);
+
+  // ---- (D3) §D1: 조준점은 적 위에서만 붉고 활성 — 빈 곳에서도 흐린 회색에 중심 점이 없다 ----
+  // (§B3 above already asserts the 무적 요소 위 half; this is the half §D1 adds — "그 외" now includes
+  //  the empty page, which before §D1 left the aim point looking live over nothing at all.)
+  await page.mouse.move(px70D.x, px70D.y);
+  await sleep(150);
+  const aimEmptyD = await aimMark();
+  check('A.§D1 3 (§D1): 조준점이 빈 곳에서도 흐린 회색(.crs-invul)이고 중심 점이 없다 — 쏠 수 있는 것은 적뿐이라는 말을 한 가지 색으로 한다',
+    !!aimEmptyD && aimEmptyD.invul === true && aimEmptyD.dot === 'none' && /168,\s*176,\s*190/.test(aimEmptyD.grad), aimEmptyD);
+  await page.mouse.move(pxEnemyD.x, pxEnemyD.y);
+  await sleep(150);
+  const aimOnEnemyD = await aimMark();
+  check('A.§D1 3 (§D1): 적 위로 돌아오면 다시 붉고 활성이다 — .crs-invul 이 빠지고 중심 점이 돌아온다',
+    !!aimOnEnemyD && aimOnEnemyD.invul === false && aimOnEnemyD.dot !== 'none' && !/168,\s*176,\s*190/.test(aimOnEnemyD.grad), aimOnEnemyD);
+
+  // ---- (D4) §F: 적 rect 에서 30 px 떨어진 빈 곳 → 보정되어 그 적이 피해를 받는다 ----
+  await page.mouse.move(px30D.x, px30D.y);
+  await sleep(150);
+  const near30D = await focusAt(px30D.x, px30D.y);
+  const hp30aD = await api.hpOf(page, '#fire-enemy');
+  await api.smashAt(page, px30D.x, px30D.y);
+  await sleep(140);
+  const hp30bD = await api.hpOf(page, '#fire-enemy');
+  check('A.§D1 4 (§F): 적 rect 에서 30 px 떨어진 빈 곳을 쏘면 보정되어 그 적이 피해를 받는다',
+    hp30bD.hp === hp30aD.hp - DMG14('pistol'), { before: hp30aD, after: hp30bD, dmg: DMG14('pistol'), near30D });
+  check('A.§D1 4 (§D1): 보정이 보인다 — 괄호가 커서가 아니라 그 적 위에 뜬다 (±2 px)',
+    !!near30D && near30D.display !== 'none' && !!near30D.rect
+    && near(near30D.rect.left, enemyD.left, 2) && near(near30D.rect.top, enemyD.top, 2)
+    && near(near30D.rect.width, enemyD.width, 2) && near(near30D.rect.height, enemyD.height, 2),
+    { box: near30D && near30D.rect, enemy: { left: enemyD.left, top: enemyD.top, width: enemyD.width, height: enemyD.height } });
+
+  // ---- (D5) §F: 70 px 에서는 보정되지 않는다 ----
+  const far70D = await focusAt(px70D.x, px70D.y);
+  const hp70aD = await api.hpOf(page, '#fire-enemy');
+  await api.smashAt(page, px70D.x, px70D.y);
+  await sleep(140);
+  const hp70bD = await api.hpOf(page, '#fire-enemy');
+  check('A.§D1 5 (§F): 70 px 에서는 보정되지 않는다 — pickTarget 이 null 이고 적의 체력이 그대로다',
+    far70D && far70D.pick === null && hp70bD.hp === hp70aD.hp, { far70D, before: hp70aD, after: hp70bD });
+
+  // ---- (D6) §F: 서바이벌 40 px / 아케이드 60 px — 50 px 이 두 모드를 갈라놓는다 ----
+  const far50D = await focusAt(px50D.x, px50D.y);
+  const hp50aD = await api.hpOf(page, '#fire-enemy');
+  await api.smashAt(page, px50D.x, px50D.y);
+  await sleep(140);
+  const hp50bD = await api.hpOf(page, '#fire-enemy');
+  check('A.§D1 6 (§F): 서바이벌의 창은 40 px 이라 50 px 은 보정되지 않는다',
+    far50D && far50D.pick === null && hp50bD.hp === hp50aD.hp, { far50D, before: hp50aD, after: hp50bD });
+  // h cycles rampage → arcade → survival, so getting to arcade passes through rampage and
+  // clearCombatNodes() releases every hostile on the way. Re-force the same element afterwards.
+  const arcadeOnD = await setCombatMode('arcade');
+  await sleep(120);
+  const tierD6 = await force('#fire-enemy', 'forceAttack');
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(100));
+  await sleep(140);
+  const assistArcadeD = await debugCall('aimAssist');
+  const arc50D = await focusAt(px50D.x, px50D.y);
+  const hpArc50aD = await api.hpOf(page, '#fire-enemy');
+  await api.smashAt(page, px50D.x, px50D.y);
+  await sleep(140);
+  const hpArc50bD = await api.hpOf(page, '#fire-enemy');
+  check('A.§D1 6 (§F): 아케이드는 50 px 에서도 보정된다 — 한 손으로 조준과 회피를 겸하므로 창이 60 px 로 넓다',
+    arcadeOnD === true && tierD6 === 'shooter' && !!assistArcadeD && assistArcadeD.px === 60
+    && !!arc50D.pick && arc50D.pick.id === 'fire-enemy' && hpArc50bD.hp === hpArc50aD.hp - DMG14('pistol'),
+    { arcadeOnD, tierD6, assistArcadeD, arc50D, before: hpArc50aD, after: hpArc50bD });
+  const arc70D = await focusAt(px70D.x, px70D.y);
+  check('A.§D1 6 (§F): 아케이드에서도 70 px 은 창 밖이다 — 보정은 넓어졌을 뿐 무한하지 않다',
+    arc70D && arc70D.pick === null, arc70D);
+
+  // ---- (D7) §D1: 램페이지는 지금 그대로 ----
+  await setCombatMode('rampage');
+  await sleep(160);
+  await page.mouse.move(srcD.cx, srcD.cy);
+  await sleep(150);
+  const rampageD = await focusAt(srcD.cx, srcD.cy);
+  check('A.§D1 7 (§D1): 램페이지는 건드리지 않았다 — 비적대 요소 위에 괄호와 체력 바가 여전히 뜨고 pickTarget 이 그 요소를 돌려준다',
+    !!rampageD && rampageD.display !== 'none' && rampageD.barVisible === true
+    && !!rampageD.pick && rampageD.pick.id === 'fire-src' && rampageD.pick.hostile === false, rampageD);
+
+  // ---- (D8) §D1: 적이 없을 때 미터 옆에서 `적 탐색 중…` 이 1.5 초 주기로 맥동한다 ----
+  await setCombatMode('survival');
+  await api.debug(page, { noAttacks: true });
+  await api.restore(page);   // releases every hostile; noAttacks keeps the selector from adding more
+  await sleep(150);
+  const scanOnD = await poll(async () => { const q = await scanMark(); return q && q.cls ? q : null; }, 4000, 100);
+  check('A.§D1 8 (§D1): 적이 하나도 없으면 미터 옆에 `적 탐색 중…` 이 나타난다',
+    !!scanOnD && scanOnD.hostiles === 0 && scanOnD.text === '적 탐색 중…' && scanOnD.display !== 'none', scanOnD || await scanMark());
+  check('A.§D1 8 (§D1): …그리고 1.5 초 주기로 맥동한다 — 무한 반복하는 1500 ms 애니메이션이 실제로 돌고 있다',
+    !!scanOnD && scanOnD.anims.some((a) => a.dur === 1500 && a.forever === true), scanOnD && scanOnD.anims);
+  await api.rect(page, '#fire-src');   // scroll the lab back into view: forceAttack refuses an off-screen element
+  const tierD8 = await force('#fire-enemy', 'forceAttack');
+  const scanOffD = await poll(async () => { const q = await scanMark(); return q && !q.cls ? q : null; }, 4000, 100);
+  check('A.§D1 8 (§D1): 적이 생기면 `적 탐색 중…` 이 사라진다 — 멈춘 게 아니라 애니메이션 자체가 없다',
+    tierD8 === 'shooter' && !!scanOffD && scanOffD.hostiles >= 1 && scanOffD.display === 'none' && scanOffD.anims.length === 0,
+    { tierD8, scanOffD: scanOffD || await scanMark() });
+
+  // ---- (D9) §D1: 깊이 힌트는 유지한다 — 가려진 적을 찾는 단서다 ----
+  // The bracket is now drawn on enemies only, so the `뒤에 적 N` hint moves with it: it is read off the
+  // enemy you ARE focusing, and still counts the hostiles hiding behind that one. Two stacked depth-lab
+  // cards (same rect, z6 over z5) are the fixture that makes "behind" unambiguous.
+  await api.restore(page);
+  await sleep(120);
+  const depthPtD = await scrollToDepthLab();
+  const tierFrontD = await force('#depth-front', 'forceAttack');
+  const tierMidD = await force('#depth-mid', 'forceAttack');
+  await debugCall('setAvatarPos', 120, 120);
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(100));
+  await sleep(160);
+  await page.mouse.move(depthPtD.cx, depthPtD.cy);
+  const hintD = await poll(async () => { const q = await focusAt(depthPtD.cx, depthPtD.cy); return q && q.display !== 'none' && /뒤에 적/.test(q.label || '') ? q : null; }, 2500, 80);
+  check('A.§D1 9 (§D1): 깊이 힌트는 그대로다 — 앞 적을 포커싱한 괄호가 `뒤에 적 N` 을 계속 말한다',
+    tierFrontD === 'shooter' && tierMidD === 'shooter' && !!hintD && /뒤에 적\s*\d+/.test(hintD.label),
+    { tierFrontD, tierMidD, hintD: hintD || await focusAt(depthPtD.cx, depthPtD.cy) });
+  await api.restore(page);
+  await sleep(100);
 
   // ---- tidy up: back to the block's baseline mode/weapon/debug flags before the evidence tally ----
   await setCombatMode('rampage');

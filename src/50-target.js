@@ -51,8 +51,10 @@
     return null;
   }
   /* opts.noLock (v1.4): skip the lock-frame aim assist below. isCovered() asks that, because it needs the raw
-   * answer "what would a click here really hit?" — with the assist on, a locked enemy would always look clear. */
-  function pickTarget(x, y, cache, opts) {
+   * answer "what would a click here really hit?" — with the assist on, a locked enemy would always look clear.
+   * SPEC-combat §D1 rides on the SAME flag (see pickTarget() below): a caller that wants the raw page answer
+   * wants it whole, enemy-only focusing included. */
+  function pickPhysical(x, y, cache, opts) {
     const env = { vw: viewW(), vh: viewH(), op: cache || new Map() };
     /* v1.4 §2.2 aim assist: a click inside a closing lock frame is a click on THAT enemy, not on a child of it.
      * Only for a frame actually drawn ON the enemy (lk.onEnemy) — otherwise the frame rides the PLAYER and then
@@ -99,6 +101,61 @@
     if (!r || r.width * r.height > 0.8 * vw * vh * mag2) return null;
     if (el.hasAttribute('data-crs-broken')) return null;
     return el;
+  }
+
+  /* ── SPEC-combat §D1: 적만 포커싱 ────────────────────────────────────────────────────────
+   * 사용자: "전투 모드일 땐 적만 포커싱 가능하게 해줘 정신 없어". The box that followed the mouse across
+   * every paragraph and button of the page was the direct cause — in a combat mode nothing but an enemy
+   * can be damaged (§B), so nothing but an enemy should be bracketed either. This is the AIM-side twin of
+   * §B's damageable(): the two gates answer the same question (is this thing part of the fight?) and are
+   * turned off by the same named escape hatch, debug.noInvuln. A suite that is allowed to wear down
+   * ordinary page elements while enemies are live must also be allowed to AIM at them, or it could never
+   * build its own precondition.
+   *
+   * 조준 보정 (§D1): with the cursor off every enemy, an enemy rect within 40 px (arcade 60 px — one hand
+   * is aiming AND dodging there) becomes the target. The bracket appears on THAT enemy, which is what makes
+   * the correction visible rather than magic.
+   *
+   * AMBIGUITY, reading chosen — §D1 says "pickTarget 은 적대 요소 또는 null 만 돌려준다", and §B/§F say a
+   * shot on a non-hostile element still deflects (`.crs-deflect` + `무적`, 탄약 1발). Both cannot hold for
+   * ONE return value: a null hands the weapon nothing to deflect off. Read as two questions asked of one
+   * function:
+   *   opts.focus  — "what may the player aim at?"  → §D1: the hostile, or null. refreshHover() and
+   *                 debug.pickAt() ask this, and it is what the bracket, the health bar and the §B1 aim
+   *                 point are driven by. This is the sentence §D1 is actually about.
+   *   (default)   — "what did this shot land on?"  → the assisted hostile when there is one, otherwise the
+   *                 element really under the point, so §B's deflect still has something to bounce off.
+   * The player-visible rules of §D1 are all on the focus side; keeping the impact side physical changes
+   * nothing a player sees and leaves §B intact.
+   * opts.noLock callers (decals, isCovered(), schedulePierce(), blastThroughCover()) opt out of both: they
+   * are asking about the PAGE, not about the fight. */
+  const AIM_ASSIST_PX = 40;          // survival — mouse aims, WASD dodges
+  const AIM_ASSIST_PX_ARCADE = 60;   // arcade — the cursor is the character, so the window is wider
+  function aimAssistPx() { return state.mode === 'arcade' ? AIM_ASSIST_PX_ARCADE : AIM_ASSIST_PX; }
+  /* The §D1 rule is live exactly where §B's invulnerability is, and dies with it. */
+  function enemyFocusOn() { return modeHasEnemies() && !debug.noInvuln; }
+  /* Nearest live hostile whose rect is within `maxPx` of (x, y), measured edge-to-edge (0 inside the rect). */
+  function nearestHostileWithin(x, y, maxPx) {
+    if (!(maxPx > 0) || !state.hostiles.size) return null;
+    let best = null, bestD = Infinity;
+    for (const rec of state.hostiles.values()) {
+      const el = rec && rec.el;
+      if (!el || el.nodeType !== 1 || !el.isConnected) continue;
+      try { if (el.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+      const r = rectOf(el);
+      if (!r || r.width <= 0 || r.height <= 0) continue;
+      const d = edgeDist(r, x, y);
+      if (d <= maxPx && d < bestD) { bestD = d; best = el; }
+    }
+    return best;
+  }
+  function pickTarget(x, y, cache, opts) {
+    const raw = pickPhysical(x, y, cache, opts);
+    if ((opts && opts.noLock) || !enemyFocusOn()) return raw;   // rampage / raw page query / §B escape hatch
+    if (raw && hostileUnit(raw)) return raw;
+    const near = nearestHostileWithin(x, y, aimAssistPx());     // §D1 조준 보정
+    if (near) return near;
+    return (opts && opts.focus) ? null : raw;                   // §D1 focus answer vs. §B impact answer
   }
   /* Size-based OWN max HP (v1.1 A1 / SPEC-combat §C2 `ownHp`): base = 20 + 0.35·sqrt(area); media ×1.2,
    * controls ×1, text-ish ×0.6 capped at 60 (a hammer always one-shots text), containers ×1; clamp [10, 400].
@@ -276,7 +333,8 @@
   function refreshHover() {
     if (!state.active) return;
     if (state.overHud || state.hoverX < 0) { showTarget(null); return; }
-    showTarget(pickTarget(state.hoverX, state.hoverY));
+    // SPEC-combat §D1: the hover bracket is the FOCUS answer — an enemy, or nothing at all
+    showTarget(pickTarget(state.hoverX, state.hoverY, null, { focus: true }));
   }
   function scheduleHover() {
     if (state.moveRaf) return;
@@ -295,9 +353,11 @@
   /* ── v1.4: what would a click at this point actually hit? ──
    * pickTarget() is where the hostile-unit rule (§5), the §2.2 lock aim assist and the §10 depth/occlusion
    * rules all land, so "the shot went nowhere" has several possible causes that look identical from outside.
-   * This reports the resolved element without firing anything, so a failing assertion can say which rule ran. */
+   * This reports the resolved element without firing anything, so a failing assertion can say which rule ran.
+   * SPEC-combat §D1: it reports the FOCUS answer — the one the bracket and the health bar are drawn from, and
+   * the one §D1's "적대 요소 또는 null" is about. debug.aimAssist() below says how wide the correction is. */
   debug.pickAt = (x, y) => {
-    const el = pickTarget(+x, +y);
+    const el = pickTarget(+x, +y, null, { focus: true });
     if (!el) return null;
     const r = rectOf(el) || { left: 0, top: 0, width: 0, height: 0 };
     let cls = '';
@@ -311,3 +371,6 @@
       rect: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
     };
   };
+  /* SPEC-combat §D1: the aim-correction window actually in force, and whether enemy-only focusing is live at
+   * all (rampage and debug.noInvuln both switch it off). Read rather than assumed, like debug.hostileTuning(). */
+  debug.aimAssist = () => ({ px: enemyFocusOn() ? aimAssistPx() : 0, on: enemyFocusOn(), mode: state.mode });

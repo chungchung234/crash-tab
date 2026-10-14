@@ -88,6 +88,14 @@
     '.crs-progress .rlabel{display:block;font-size:13px;font-weight:700;text-align:center;margin-bottom:4px;white-space:nowrap}',
     '.crs-progress .rbar{width:220px;height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}',
     '.crs-progress .rfill{height:100%;width:0;background:#e5484d;border-radius:5px}',
+    /* SPEC-combat §D1: `적 탐색 중…` beside the meter, pulsing on a 1.5 s cycle while no enemy is live.
+     * Absolutely positioned off the meter's right edge so it reads as "next to it" without moving the bar
+     * a pixel. `.scan` is toggled by syncEnemyScan(); with the class off the span is display:none, so the
+     * animation is not merely paused but never constructed (nothing for a traceless Escape to clean up). */
+    '.crs-progress .rscan{display:none;position:absolute;left:100%;bottom:0;margin-left:10px;font-size:12px;font-weight:700;color:#ffd166;white-space:nowrap}',
+    '.crs-progress.scan .rscan{display:inline-block;animation:crs-scan 1500ms ease-in-out infinite}',
+    '@keyframes crs-scan{0%{opacity:1}50%{opacity:.25}100%{opacity:1}}',
+    '@media (prefers-reduced-motion:reduce){.crs-progress.scan .rscan{animation:none;opacity:.8}}',
     '.crs-player .pdash{display:none;width:10px;height:10px;margin-left:8px;border-radius:50%;vertical-align:-1px;background:rgba(255,255,255,.22);box-shadow:0 0 0 1px rgba(255,255,255,.35) inset}',
     '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}'
   ].join('\n');
@@ -282,9 +290,12 @@
     const rbar = doc.createElement('div'); rbar.className = 'rbar';
     const rfill = doc.createElement('div'); rfill.className = 'rfill';
     rbar.append(rfill);
-    prog.append(rlabel, rbar);
+    // SPEC-combat §D1: 적이 하나도 없을 때 미터 옆에서 맥동하는 `적 탐색 중…`
+    const rscan = doc.createElement('span'); rscan.className = 'rscan';
+    rscan.textContent = msg('scanningEnemies');
+    prog.append(rlabel, rbar, rscan);
     mountPoint.append(prog);
-    state.ratioNodes = { box: prog, label: rlabel, fill: rfill };
+    state.ratioNodes = { box: prog, label: rlabel, fill: rfill, scan: rscan };
 
     // ── v1.4 §1.2: one dash-cooldown dot on the health panel ──
     hudEls.dashDot = doc.createElement('span'); hudEls.dashDot.className = 'pdash';
@@ -317,6 +328,8 @@
           const rb = state.ratioNodes.fill.parentNode;
           if (rb) { rb.style.width = '220px'; rb.style.height = '10px'; rb.style.background = 'rgba(255,255,255,.2)'; rb.style.borderRadius = '5px'; rb.style.overflow = 'hidden'; }
           state.ratioNodes.fill.style.height = '100%'; state.ratioNodes.fill.style.background = '#e5484d';
+          // §D1: the scan tag has no stylesheet to hide it here either — syncEnemyScan() drives `display` directly
+          if (state.ratioNodes.scan) { const sc = state.ratioNodes.scan.style; sc.display = 'none'; sc.marginLeft = '10px'; sc.fontSize = '12px'; sc.fontWeight = '700'; sc.color = '#ffd166'; sc.whiteSpace = 'nowrap'; }
         }
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
@@ -335,6 +348,22 @@
    * unreachable today on purpose; it is the one line step 4 flips if rampage is ever given the bar.
    * Nothing is deleted and no existing assertion is broken by the reading. */
   function meterKind() { return modeHasEnemies() ? 'kills' : 'ratio'; }
+  /* ── SPEC-combat §D1: 적이 없을 때 ────────────────────────────────────────────────────────
+   * "미터 옆에 `적 탐색 중…` 을 1.5초 주기로 맥동시킨다." With §D1 in force the bracket no longer follows
+   * the mouse, so a combat mode between rosters would otherwise look identical to a broken one — nothing
+   * highlights, nothing is shootable, and the HUD says nothing about why. This is the line that says why.
+   * Driven from updateRatioHud() (src/94-repair.js), the one place every kill, spawn, repair, mode switch
+   * and 2 s meter tick already passes through. The pulse itself is a CSS animation on a class, so it stops
+   * existing — rather than merely pausing — the moment the class or the HUD goes. */
+  function syncEnemyScan() {
+    const n = state.ratioNodes;
+    if (!n || !n.box) return;
+    const on = !!(state.active && modeHasEnemies() && !state.hostiles.size);
+    try {
+      n.box.classList.toggle('scan', on);
+      if (hudEls.fallback && n.scan) n.scan.style.display = on ? 'inline-block' : 'none';
+    } catch (e) { /* ignore */ }
+  }
   function killProgress() {
     const p = state.player;
     const total = p.kills + state.hostiles.size + state.repaired;
