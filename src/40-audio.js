@@ -2,7 +2,7 @@
   /* 5. Sound (Web Audio, synthesized)                                      */
   /*    v1.3 adds alert / whiff / hurtbig — the three cues of §3.2, §3.4, §3.5 */
   /* ===================================================================== */
-  const audio = { ctx: null, master: null, noise: null, boomAt: [], loop: null };   // boomAt: start times of recent boom voices (A24 cap 2); loop: flame noise (v1.1)
+  const audio = { ctx: null, master: null, noise: null, boomAt: [], loop: null, burn: null };   // boomAt: start times of recent boom voices (A24 cap 2); loop: flame noise (v1.1); burn: the ONE §F3 crackle loop
   function ensureAudio() {
     if (audio.ctx) { try { if (audio.ctx.state === 'suspended') safe(() => audio.ctx.resume()); } catch (e) { /* ignore */ } return; }
     try {
@@ -68,6 +68,50 @@
     try { l.src.stop(); } catch (e) { /* ignore */ }
     try { l.src.disconnect(); l.g.disconnect(); } catch (e) { /* ignore */ }
   }
+  /* ── SPEC-destruction §F3: the burn loop ──────────────────────────────────────────────────────────
+   * "타닥거리는 저역 노이즈 루프 **하나**. 볼륨이 연소 요소 수에 비례한다. 요소마다 소리를 내면 귀가
+   * 아프다." So there is exactly ONE node chain for every fire on the page, however many there are, and
+   * burnAudioSync() (src/77-burn.js) only ever moves its gain. A crackle — not the flamethrower's hiss —
+   * so it is a lowpass at 320 Hz with a slow wobble on the cutoff, which is what makes it tick and pop. */
+  const BURN_GAIN_PER_EL = 0.028, BURN_GAIN_MAX = 0.16;
+  function startBurnLoop() {
+    if (!audio.ctx || audio.burn || state.muted) return;
+    try {
+      const c = audio.ctx;
+      if (c.state === 'suspended') safe(() => c.resume());
+      const src = c.createBufferSource(); src.buffer = audio.noise; src.loop = true;
+      src.playbackRate.value = 0.55;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 320; f.Q.value = 2.4;
+      const lfo = c.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 7;
+      const lfoGain = c.createGain(); lfoGain.gain.value = 180;
+      lfo.connect(lfoGain); lfoGain.connect(f.frequency);
+      const g = c.createGain(); g.gain.value = BURN_GAIN_PER_EL;
+      src.connect(f); f.connect(g); g.connect(audio.master);
+      src.start(); lfo.start();
+      audio.burn = { src, f, g, lfo, lfoGain };
+    } catch (e) { audio.burn = null; }
+  }
+  function setBurnGain(n) {
+    const b = audio.burn;
+    if (!b) return;
+    try { b.g.gain.value = Math.min(BURN_GAIN_MAX, BURN_GAIN_PER_EL * Math.max(0, n)); } catch (e) { /* ignore */ }
+  }
+  function stopBurnLoop() {
+    const b = audio.burn;
+    if (!b) return;
+    audio.burn = null;
+    try { b.src.stop(); b.lfo.stop(); } catch (e) { /* ignore */ }
+    try { b.src.disconnect(); b.f.disconnect(); b.g.disconnect(); b.lfo.disconnect(); b.lfoGain.disconnect(); } catch (e) { /* ignore */ }
+  }
+  /* §G read-back: "오디오 노드는 하나뿐이고 볼륨만 달라진다" is a claim about the GRAPH, so the graph is
+   * what the test reads — how many loop chains exist and what gain the one chain is at. */
+  function burnAudio() {
+    const b = audio.burn;
+    let gain = 0;
+    try { gain = b ? b.g.gain.value : 0; } catch (e) { gain = 0; }
+    return { nodes: b ? 1 : 0, gain: Math.round(gain * 1000) / 1000, ctx: !!audio.ctx };
+  }
+  debug.burnAudio = () => burnAudio();
   function tone(t0, type, f0, f1, dur, g, decay) {
     const c = audio.ctx;
     const o = c.createOscillator(); o.type = type;
@@ -113,6 +157,9 @@
       else if (kind === 'katanaRing') { tone(t, 'triangle', 2600, 2500, 0.14, 0.17 * gm, 0.14); tone(t + 0.008, 'triangle', 3900, 3750, 0.14, 0.12 * gm, 0.14); }
       else if (kind === 'whoosh') { noiseSweep(t, 0.15, 'bandpass', 200, 1200, 0.6 * gm); }                            // rocket travel
       else if (kind === 'puff') { noiseBurst(t, 0.09, { type: 'lowpass', freq: 900, Q: 0.8 }, 0.3 * gm, 0.09); if (crit) tinks(1, 0, 0.06 * gm); }      // single flame tick
+      /* SPEC-destruction §F2 / §F3: the short "화악" of fire taking hold somewhere new — a rising band of
+       * noise over a quick low swell, so a spread is heard as an EVENT against the steady crackle loop. */
+      else if (kind === 'flare') { noiseSweep(t, 0.17, 'bandpass', 420, 2400, 0.42 * gm); tone(t, 'sine', 160, 90, 0.16, 0.22 * gm, 0.18); }
       else if (kind === 'clack') { tone(t, 'square', 320, 300, 0.03, 0.15, 0.03); }                                   // cooldown reject (A3) / bolt clicks
       else if (kind === 'crit') { tinks(2, 0.012, 0.08 * gm); }   // the ×1.5 sparkle on its own: per-element AoE crits and hold-window crits (A4)
       // v1.2 (A5): tone / noise combos only, no new audio graph

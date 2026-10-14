@@ -403,6 +403,10 @@
     opts = opts || {};
     const mode = opts.mode || WEAPONS[state.weapon].kind;
     if (!el || !el.isConnected || el.hasAttribute('data-crs-broken')) return false;
+    /* SPEC-destruction §F4: "연소 중에 파괴된 요소는 **무엇에 맞아 죽었든** ash 조각 + char 마감으로
+     * 부서진다." destructionOf() already answers `flame` for opts.burnt, so the ledger is asked here —
+     * the one place every break passes through — rather than at each of the ten weapons. */
+    if (!opts.burnt && burnEstablished(el)) opts.burnt = true;
     cancelAnimsOf(el);
     /* SPEC-destruction §C3: an element that had already shed a corner gets its own `clip-path` back BEFORE
      * anything is cloned off it — otherwise every piece would carry the remaining shape as a second clip. */

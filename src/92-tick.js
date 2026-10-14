@@ -111,6 +111,10 @@
      * also follows an element that is being animated, repaired or reflowed — not just one that scrolled.
      * It deliberately does NOT set `busy`: decals alone never keep a frame loop alive. */
     if (decalCount()) { syncDecals(); if (decalBusy()) busy = true; }
+    /* SPEC-destruction §F3: "요소를 따라 움직인다" — the flame strip of every burning element re-reads its
+     * element's rect here, so it rides a scroll, a reflow and §E's displacement instead of being redrawn
+     * four times a second by the burn tick. The burn tick kick()s the loop, so this never owns one. */
+    if (burnCount()) { burnFollow(); busy = true; }
     return busy;
   }
   function onResize() {

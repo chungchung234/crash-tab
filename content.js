@@ -987,9 +987,11 @@
   }
 
   /* Per-WEAPON profile: how big the mark is and how many strands it has (unchanged from v1). */
+  /* SPEC-destruction §E2: the `bomb` profile is GONE. 거미줄 균열은 맞아서 깨진 자국이지 폭발 자국이
+   * 아니다 — a blast now goes through blastMark() below, whose every size is a fraction of the weapon's
+   * real radius, and nothing here is reachable with kind === 'bomb' any more. */
   const CRACK = {
     hammer: { rays: [9, 14], len: [90, 190], rings: [0.3, 0.62], w0: 2.0, w1: 0.6, alpha: 0.55 },
-    bomb: { rays: [14, 22], len: [220, 420], rings: [0.28, 0.55, 0.8], w0: 2.6, w1: 0.7, alpha: 0.55 },
     gun: { rays: [5, 8], len: [22, 60], rings: [0.18, 0.35, 0.6], w0: 1.3, w1: 0.4, alpha: 0.4 },
     smg: { rays: [3, 5], len: [8, 20], rings: [0.3, 0.6], w0: 1.0, w1: 0.35, alpha: 0.4 }   // per smg shot (A6)
   };
@@ -1062,7 +1064,7 @@
     const grow = (pxv, pyv) => { if (pxv < minX) minX = pxv; if (pxv > maxX) maxX = pxv; if (pyv < minY) minY = pyv; if (pyv > maxY) maxY = pyv; };
     for (const r of rays) for (const p of r.pts) grow(p[0], p[1]);
     for (const b of branches) for (const p of b.pts) grow(b.ox + p[0], b.oy + p[1]);
-    const margin = (kind === 'bomb' ? 96 : 20);
+    const margin = 20;
     minX -= margin; minY -= margin; maxX += margin; maxY += margin;
     const bw = Math.ceil(maxX - minX), bh = Math.ceil(maxY - minY);
     const D = decalDpr();
@@ -1076,12 +1078,6 @@
       octx.setTransform(D, 0, 0, D, -minX * D, -minY * D);
     } catch (e) { return null; }
     octx.lineCap = 'round'; octx.lineJoin = 'round';
-    // bomb scorch under the mark
-    if (kind === 'bomb') {
-      const g = octx.createRadialGradient(0, 0, 0, 0, 0, 90);
-      g.addColorStop(0, 'rgba(20,15,10,0.45)'); g.addColorStop(1, 'rgba(20,15,10,0)');
-      octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, 90, 0, Math.PI * 2); octx.fill();
-    }
     // §4 plastic / panel: the material whitens around the impact before it cracks
     if (M.blotch > 0) {
       const r0 = Math.max(12, maxLen * 0.45);
@@ -1171,7 +1167,7 @@
       octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, 7, 0, Math.PI * 2); octx.fill();
       octx.strokeStyle = 'rgba(255,255,255,0.8)'; octx.lineWidth = 0.8; octx.beginPath(); octx.arc(0, 0, 8, 0, Math.PI * 2); octx.stroke();
     } else if (M.core === 'spark') {
-      const r0 = kind === 'bomb' ? 26 : 14;
+      const r0 = 14;
       const g = octx.createRadialGradient(0, 0, 0, 0, 0, r0);
       g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(1, 'rgba(255,255,255,0)');
       octx.fillStyle = g; octx.beginPath(); octx.arc(0, 0, r0, 0, Math.PI * 2); octx.fill();
@@ -1188,8 +1184,13 @@
       octx.fillStyle = ink.ink; octx.fill();
       octx.strokeStyle = ink.light; octx.lineWidth = 1.2; octx.stroke();
     }
+    /* §G read-back: the crack web's longest strand. §E's blast mark caps its own polylines at 0.25R, so
+     * "폭발 자국과 망치 자국이 외곽 폴리라인으로 구분된다" is a comparison of these two numbers. */
+    debug.lastMarkRec = { kind, mat, rays: nRays, maxLen: Math.round(maxLen) };
     return { off, minX, minY, bw, bh, maxLen };
   }
+  debug.lastMarkRec = null;
+  debug.lastMark = () => debug.lastMarkRec;
 
   /* ── which elements one shot marks ──
    * A point weapon marks exactly the element it hit. A blast marks the elements it actually DAMAGED: the
@@ -1200,17 +1201,8 @@
     const ok = W && typeof W.radius === 'number' && isFinite(W.radius) && W.radius > 0 && Array.isArray(W.rings);
     return ok ? W : WEAPONS.bomb;   // collapse's radius is Infinity: fall back to the bomb's 240 px
   }
-  function decalTargetsForBlast(x, y) {
-    const W = blastWeapon();
-    let cands = [];
-    try { cands = aoeCandidates(x, y, W.radius, Math.min(W.maxTargets || 10, DECAL_MAX_TARGETS), W.rings, true); } catch (e) { cands = []; }
-    const out = [];
-    for (const c of cands) { const rec = ensureDecal(c.el); if (rec) out.push(rec); }
-    if (!out.length) { const rec0 = ensureDecal(decalTargetAt(x, y)); if (rec0) out.push(rec0); }
-    return out;
-  }
   function decalTargetsFor(x, y, radius) {
-    if (radius > 0) return decalTargetsForBlast(x, y);
+    if (radius > 0) return blastTargets(x, y, radius, blastWeapon());
     const rec = ensureDecal(decalTargetAt(x, y));
     return rec ? [rec] : [];
   }
@@ -1224,7 +1216,7 @@
     state.cracks++;
     state.crackInk += (opts.ink != null ? opts.ink : 1);
     if (!root) return;
-    const radius = opts.radius != null ? opts.radius : (kind === 'bomb' ? BOMB_RADIUS : 0);
+    const radius = opts.radius != null ? opts.radius : 0;   // §E2: no kind implies a radius any more
     const recs = decalTargetsFor(x, y, radius);
     if (!recs.length) return;
     const tiles = new Map();      // material id -> tile
@@ -1325,21 +1317,154 @@
     };
     later(paint, SLASH_SCAR_MS);
   }
-  /* Scorch dab (flame every 4th tick r 24 / rocket impact r 140, A7 / A9) — burnt into the elements it
-   * touches, never onto the page behind them. */
-  function scorchDab(x, y, r, a) {
-    if (!root) return;
-    const recs = decalTargetsFor(x, y, r > 60 ? r : 0);
-    for (const rec of recs) {
-      try {
-        const c = rec.ctx;
-        const lx = x - rec.left, ly = y - rec.top;
-        const g = c.createRadialGradient(lx, ly, 0, lx, ly, r);
-        g.addColorStop(0, 'rgba(30,20,10,' + a + ')'); g.addColorStop(1, 'rgba(30,20,10,0)');
-        c.fillStyle = g; c.beginPath(); c.arc(lx, ly, r, 0, Math.PI * 2); c.fill();
-      } catch (e) { /* ignore */ }
+  /* ══ SPEC-destruction §E — 폭발 자국 ═══════════════════════════════════════════════════════════
+   * §E1's diagnosis: four numbers that had nothing to do with each other — 실제 반경 240/360, 그을음 90
+   * 고정, 균열 220~420, 링 480 고정. Everything below is a FRACTION OF R, the weapon's own radius, and
+   * the shock ring (src/35-effects.js) and the crosshair's dashed circle (src/51-crosshair.js) are sized
+   * from the same WEAPONS[id].radius — §E5's "세 곳이 같은 상수를 쓴다".
+   *
+   * §E2 also changes WHAT is left behind. 거미줄 균열은 맞아서 깨진 자국이다; 폭발이 남기는 것은
+   * 그을음·검댕·분출 흔적·그을린 테두리다. The five layers below are §E3's, in §E3's order:
+   *   1 그을음 중심 (0.42R, 24각형 ±12% 지터)  2 검댕 흩뿌림 (0.42R~0.85R)  3 분출 줄기 (곧은 선)
+   *   4 중심부 짧은 균열 (상한 0.25R)           5 열 테두리 (0.42R)
+   * Layers 3 and 4 must READ differently: a jet is a straight line of force, a crack is a bent, branching
+   * polyline of brittle failure. That is why the jets are filled tapering triangles and the cracks are the
+   * only polylines in the mark.
+   *
+   * The geometry is generated ONCE in viewport space and then drawn into EACH affected element's decal in
+   * that element's own local frame (§E3, 1단계 모델): one coherent mark, cut along the real boundaries
+   * between things, with nothing left in the gaps between them. */
+  const BLAST_SOOT = 0.42;      // §E3-1 그을음 중심 반지름 / §E3-5 열 테두리
+  const BLAST_SCATTER = 0.85;   // §E3-2 검댕이 날아간 바깥 끝
+  const BLAST_CRACK = 0.25;     // §E3-4 중심부 균열 길이 상한
+  function blastGeometry(x, y, R, k) {
+    const blob = [];
+    for (let i = 0; i < 24; i++) {                      // 1. 완전한 원이면 폭발로 안 보인다
+      const a = (i / 24) * Math.PI * 2, d = BLAST_SOOT * R * rand(0.88, 1.12);
+      blob.push([x + Math.cos(a) * d, y + Math.sin(a) * d]);
     }
+    /* 2. 검댕: 밀도는 반지름에 반비례 — uniform in r (an area-uniform scatter would crowd the rim).
+     * Stratified over [0.42R, 0.85R] so the outermost sample really does reach the layer's edge instead of
+     * landing wherever 60–110 independent draws happen to stop: "바깥으로 날아갔다" is the whole point of
+     * this layer and §G measures exactly that distance. */
+    const soot = [], nSoot = randInt(60, 110);
+    let sootOuter = 0;
+    for (let i = 0; i < nSoot; i++) {
+      const lo = BLAST_SOOT + (BLAST_SCATTER - BLAST_SOOT) * (i / nSoot);
+      const hi = BLAST_SOOT + (BLAST_SCATTER - BLAST_SOOT) * ((i + 1) / nSoot);
+      const a = rand(0, Math.PI * 2), d = rand(lo, hi) * R;
+      soot.push([x + Math.cos(a) * d, y + Math.sin(a) * d, rand(1, 3)]);
+      if (d > sootOuter) sootOuter = d;
+    }
+    // 3. 분출 줄기: 10~16개, 0.15R 에서 0.6R~1.0R 까지. 로켓(intensity 1.5)은 1.1R 까지 닿는 3~5개를 더 얹는다
+    const jets = [];
+    let jetOuter = 0;
+    const addJet = (far) => {
+      const a = rand(0, Math.PI * 2), r0 = 0.15 * R, r1 = far * R;
+      const ux = Math.cos(a), uy = Math.sin(a), nx = -uy, ny = ux, w = 1.5;
+      jets.push([
+        [x + ux * r0 + nx * w, y + uy * r0 + ny * w],
+        [x + ux * r0 - nx * w, y + uy * r0 - ny * w],
+        [x + ux * r1, y + uy * r1]
+      ]);
+      if (r1 > jetOuter) jetOuter = r1;
+    };
+    for (let i = 0, n = randInt(10, 16); i < n; i++) addJet(rand(0.6, 1.0));
+    if (k >= 1.5) for (let i = 0, n = randInt(3, 5); i < n; i++) addJet(rand(1.0, 1.1));
+    // 4. 중심부 짧은 균열: 5~8개만, 길이 상한 0.25R. The only bent polylines in the mark.
+    const cracks = [];
+    let crackMax = 0;
+    for (let i = 0, n = randInt(5, 8); i < n; i++) {
+      const len = rand(0.45, 1) * BLAST_CRACK * R;
+      const ray = makeRay(rand(0, Math.PI * 2), len, 0.9);
+      cracks.push(ray.pts.map((p) => [x + p[0], y + p[1]]));
+      if (ray.len > crackMax) crackMax = ray.len;
+    }
+    return { x, y, R, k, blob, soot, jets, cracks, sootOuter, jetOuter, crackMax };
   }
+  function paintBlast(rec, g) {
+    const c = rec.ctx;
+    if (!c) return;
+    const ox = rec.left, oy = rec.top, k = g.k, R = g.R;
+    const lx = g.x - ox, ly = g.y - oy;
+    try {
+      c.save();
+      c.lineCap = 'round'; c.lineJoin = 'round';
+      // 1. 그을음 중심 — rgba(18,12,8,.55) → 0.75 에서 .18 → 가장자리 0
+      const rad = c.createRadialGradient(lx, ly, 0, lx, ly, BLAST_SOOT * R);
+      rad.addColorStop(0, 'rgba(18,12,8,' + clamp(0.55 * k, 0, 1).toFixed(3) + ')');
+      rad.addColorStop(0.75, 'rgba(18,12,8,' + clamp(0.18 * k, 0, 1).toFixed(3) + ')');
+      rad.addColorStop(1, 'rgba(18,12,8,0)');
+      c.fillStyle = rad;
+      c.beginPath();
+      for (let i = 0; i < g.blob.length; i++) { const p = g.blob[i]; if (i === 0) c.moveTo(p[0] - ox, p[1] - oy); else c.lineTo(p[0] - ox, p[1] - oy); }
+      c.closePath(); c.fill();
+      // 2. 검댕 흩뿌림
+      c.fillStyle = 'rgba(16,11,7,' + clamp(0.5 * k, 0, 1).toFixed(3) + ')';
+      for (const s of g.soot) c.fillRect(s[0] - ox, s[1] - oy, s[2], s[2]);
+      // 3. 분출 줄기 — 뿌리 3px, 끝 0 으로 가늘어지는 곧은 선
+      c.fillStyle = 'rgba(20,14,9,' + clamp(0.42 * k, 0, 1).toFixed(3) + ')';
+      for (const j of g.jets) {
+        c.beginPath();
+        c.moveTo(j[0][0] - ox, j[0][1] - oy);
+        c.lineTo(j[1][0] - ox, j[1][1] - oy);
+        c.lineTo(j[2][0] - ox, j[2][1] - oy);
+        c.closePath(); c.fill();
+      }
+      // 4. 중심부 짧은 균열
+      c.strokeStyle = 'rgba(14,16,20,' + clamp(0.5 * k, 0, 1).toFixed(3) + ')';
+      c.lineWidth = 1.2;
+      c.beginPath();
+      for (const poly of g.cracks) for (let i = 0; i < poly.length; i++) { if (i === 0) c.moveTo(poly[0][0] - ox, poly[0][1] - oy); else c.lineTo(poly[i][0] - ox, poly[i][1] - oy); }
+      c.stroke();
+      // 5. 열 테두리
+      c.strokeStyle = 'rgba(255,228,196,' + clamp(0.18 * k, 0, 1).toFixed(3) + ')';
+      c.lineWidth = 2;
+      c.beginPath(); c.arc(lx, ly, BLAST_SOOT * R, 0, Math.PI * 2); c.stroke();
+      c.restore();
+    } catch (e) { /* ignore */ }
+  }
+  /* §E3: the ONE entry point for every blast mark — 폭탄 · 로켓 · 붕괴, and 화염방사기's own soot, which
+   * §E3 unifies as blastMark(x, y, 24, 0.25) so there is no second scorch routine left in the build. */
+  function blastMark(x, y, R, intensity, opts) {
+    opts = opts || {};
+    /* `count: false` — the flamethrower's 24 px dab. §E3 unifies it onto this path, but a scorch is not a
+     * crack: `stats().cracks` still means "a mark a BLOW drew", which is what A3 and §9 assert on. */
+    if (opts.count !== false) { state.cracks++; state.crackInk += (opts.ink != null ? opts.ink : 1); }
+    if (!root) return null;
+    R = (isFinite(R) && R > 0) ? R : BOMB_RADIUS;
+    const k = (isFinite(intensity) && intensity > 0) ? intensity : 1;
+    const g = blastGeometry(x, y, R, k);
+    debug.lastBlastRec = {
+      x: Math.round(x), y: Math.round(y), R: Math.round(R), intensity: k,
+      soot: Math.round(BLAST_SOOT * R), sootOuter: Math.round(g.sootOuter),
+      jets: g.jets.length, jetOuter: Math.round(g.jetOuter),
+      cracks: g.cracks.length, crackMax: Math.round(g.crackMax), scatter: Math.round(BLAST_SCATTER * R)
+    };
+    const recs = blastTargets(x, y, R, opts.weapon || null);
+    if (!recs.length) return debug.lastBlastRec;
+    for (const rec of recs) paintBlast(rec, g);
+    kick();
+    return debug.lastBlastRec;
+  }
+  /* Which decals one blast paints into. Above 60 px it is the same aoeCandidates() set the weapon resolves,
+   * so the mark and the damage agree; below it (the flamethrower's 24 px dab) it is the single element the
+   * point is over, exactly as a point weapon's mark. */
+  function blastTargets(x, y, R, W) {
+    if (!(R > 60)) { const rec0 = ensureDecal(decalTargetAt(x, y)); return rec0 ? [rec0] : []; }
+    /* The weapon's OWN rings and target cap when there is one, so the mark lands on exactly the elements
+     * aoeHit() damaged; the proportional fallback is for a blast with no weapon behind it (the collapse). */
+    const rings = (W && Array.isArray(W.rings) && W.rings.length) ? W.rings : [0.25 * R, 0.55 * R, 0.9 * R];
+    const maxT = Math.min((W && W.maxTargets) || 10, DECAL_MAX_TARGETS);
+    let cands = [];
+    try { cands = aoeCandidates(x, y, R, maxT, rings, true); } catch (e) { cands = []; }
+    const out = [];
+    for (const c of cands) { const rec = ensureDecal(c.el); if (rec) out.push(rec); }
+    if (!out.length) { const rec0 = ensureDecal(decalTargetAt(x, y)); if (rec0) out.push(rec0); }
+    return out;
+  }
+  debug.lastBlastRec = null;
+  debug.lastBlast = () => debug.lastBlastRec;
 
 // ── 31-decal.js ──
   /* ===================================================================== */
@@ -1691,14 +1816,49 @@
     later(kill, 1000);
     root.append(n);
   }
+  /* SPEC-destruction §E4: "충격파 링이 0 에서 R 까지 260ms 에 걸쳐 퍼진다". The fixed 480 px ring (and the
+   * rocket's fixed 960 px one) are gone: the FINAL radius is written here from the weapon's own radius, so
+   * 조준점의 점선 원 = 링 최종 반지름 = WEAPONS[id].radius (§E5). `.crs-fx-ring`'s width / height carry no
+   * `!important` in content.css for exactly this reason — a USER-origin !important would beat this write and
+   * every blast would silently be 480 px again (CLAUDE.md: USER 오리진 CSS 함정). */
+  const RING_MS = 260;
   function ring(x, y, opts) {
     const n = mk('div', 'crs-fx-ring');
-    if (opts && opts.xl) n.classList.add('crs-fx-ring-xl');   // rocket: 2× ring (A7)
+    const R = (opts && isFinite(opts.r) && opts.r > 0) ? opts.r : BOMB_RADIUS;
     n.style.left = px(x); n.style.top = px(y);
+    n.style.width = px(2 * R); n.style.height = px(2 * R);
+    n.style.animationDuration = Math.round(scaleMs(RING_MS)) + 'ms';
     const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } };
     n.addEventListener('animationend', kill);
     later(kill, 1200);
     root.append(n);
+  }
+  /* One rising puff of smoke. SPEC-destruction §E4 ("60~500ms 중심에서 연기가 피어오른다") and §F3
+   * ("연기가 피어오른다 — 요소당 초당 1.5개") are the same thing seen twice, so they share one node type.
+   * Tracked in `state.fire` so the existing particle cap, the restore() sweep and the §9 "흔적 없음"
+   * assertions all cover it without a second ledger. */
+  function smokePuff(x, y, opts) {
+    if (!root || reducedMotion()) return null;
+    opts = opts || {};
+    const s = opts.size || rand(14, 30);
+    const n = mk('div', 'crs-smoke');
+    n.style.left = px(x - s / 2); n.style.top = px(y - s / 2);
+    n.style.width = px(s); n.style.height = px(s); n.style.borderRadius = '50%';
+    n.style.background = 'radial-gradient(circle, rgba(58,52,48,.5) 0%, rgba(58,52,48,.26) 50%, rgba(58,52,48,0) 72%)';
+    root.append(n);
+    state.fire.push(n);
+    while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(n); if (k >= 0) state.fire.splice(k, 1); };
+    const dur = opts.dur || rand(600, 1000);
+    try {
+      const a = trackAnim(n.animate([
+        { transform: 'translateY(0px) scale(.6)', opacity: 0.55 },
+        { transform: 'translateY(' + px(-rand(34, 72)) + ') scale(1.5)', opacity: 0 }
+      ], { duration: dur, easing: 'ease-out', fill: 'forwards' }));
+      a.addEventListener('finish', kill);
+    } catch (e) { /* ignore */ }
+    later(kill, dur + 400);
+    return n;
   }
   function shake(mode, opts) {
     let a = (opts && opts.amp != null) ? opts.amp : (mode === 'bomb' || mode === 'collapse' ? 12 : (mode === 'gun' ? 2 : 6));
@@ -1727,7 +1887,7 @@
   /* 5. Sound (Web Audio, synthesized)                                      */
   /*    v1.3 adds alert / whiff / hurtbig — the three cues of §3.2, §3.4, §3.5 */
   /* ===================================================================== */
-  const audio = { ctx: null, master: null, noise: null, boomAt: [], loop: null };   // boomAt: start times of recent boom voices (A24 cap 2); loop: flame noise (v1.1)
+  const audio = { ctx: null, master: null, noise: null, boomAt: [], loop: null, burn: null };   // boomAt: start times of recent boom voices (A24 cap 2); loop: flame noise (v1.1); burn: the ONE §F3 crackle loop
   function ensureAudio() {
     if (audio.ctx) { try { if (audio.ctx.state === 'suspended') safe(() => audio.ctx.resume()); } catch (e) { /* ignore */ } return; }
     try {
@@ -1793,6 +1953,50 @@
     try { l.src.stop(); } catch (e) { /* ignore */ }
     try { l.src.disconnect(); l.g.disconnect(); } catch (e) { /* ignore */ }
   }
+  /* ── SPEC-destruction §F3: the burn loop ──────────────────────────────────────────────────────────
+   * "타닥거리는 저역 노이즈 루프 **하나**. 볼륨이 연소 요소 수에 비례한다. 요소마다 소리를 내면 귀가
+   * 아프다." So there is exactly ONE node chain for every fire on the page, however many there are, and
+   * burnAudioSync() (src/77-burn.js) only ever moves its gain. A crackle — not the flamethrower's hiss —
+   * so it is a lowpass at 320 Hz with a slow wobble on the cutoff, which is what makes it tick and pop. */
+  const BURN_GAIN_PER_EL = 0.028, BURN_GAIN_MAX = 0.16;
+  function startBurnLoop() {
+    if (!audio.ctx || audio.burn || state.muted) return;
+    try {
+      const c = audio.ctx;
+      if (c.state === 'suspended') safe(() => c.resume());
+      const src = c.createBufferSource(); src.buffer = audio.noise; src.loop = true;
+      src.playbackRate.value = 0.55;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 320; f.Q.value = 2.4;
+      const lfo = c.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 7;
+      const lfoGain = c.createGain(); lfoGain.gain.value = 180;
+      lfo.connect(lfoGain); lfoGain.connect(f.frequency);
+      const g = c.createGain(); g.gain.value = BURN_GAIN_PER_EL;
+      src.connect(f); f.connect(g); g.connect(audio.master);
+      src.start(); lfo.start();
+      audio.burn = { src, f, g, lfo, lfoGain };
+    } catch (e) { audio.burn = null; }
+  }
+  function setBurnGain(n) {
+    const b = audio.burn;
+    if (!b) return;
+    try { b.g.gain.value = Math.min(BURN_GAIN_MAX, BURN_GAIN_PER_EL * Math.max(0, n)); } catch (e) { /* ignore */ }
+  }
+  function stopBurnLoop() {
+    const b = audio.burn;
+    if (!b) return;
+    audio.burn = null;
+    try { b.src.stop(); b.lfo.stop(); } catch (e) { /* ignore */ }
+    try { b.src.disconnect(); b.f.disconnect(); b.g.disconnect(); b.lfo.disconnect(); b.lfoGain.disconnect(); } catch (e) { /* ignore */ }
+  }
+  /* §G read-back: "오디오 노드는 하나뿐이고 볼륨만 달라진다" is a claim about the GRAPH, so the graph is
+   * what the test reads — how many loop chains exist and what gain the one chain is at. */
+  function burnAudio() {
+    const b = audio.burn;
+    let gain = 0;
+    try { gain = b ? b.g.gain.value : 0; } catch (e) { gain = 0; }
+    return { nodes: b ? 1 : 0, gain: Math.round(gain * 1000) / 1000, ctx: !!audio.ctx };
+  }
+  debug.burnAudio = () => burnAudio();
   function tone(t0, type, f0, f1, dur, g, decay) {
     const c = audio.ctx;
     const o = c.createOscillator(); o.type = type;
@@ -1838,6 +2042,9 @@
       else if (kind === 'katanaRing') { tone(t, 'triangle', 2600, 2500, 0.14, 0.17 * gm, 0.14); tone(t + 0.008, 'triangle', 3900, 3750, 0.14, 0.12 * gm, 0.14); }
       else if (kind === 'whoosh') { noiseSweep(t, 0.15, 'bandpass', 200, 1200, 0.6 * gm); }                            // rocket travel
       else if (kind === 'puff') { noiseBurst(t, 0.09, { type: 'lowpass', freq: 900, Q: 0.8 }, 0.3 * gm, 0.09); if (crit) tinks(1, 0, 0.06 * gm); }      // single flame tick
+      /* SPEC-destruction §F2 / §F3: the short "화악" of fire taking hold somewhere new — a rising band of
+       * noise over a quick low swell, so a spread is heard as an EVENT against the steady crackle loop. */
+      else if (kind === 'flare') { noiseSweep(t, 0.17, 'bandpass', 420, 2400, 0.42 * gm); tone(t, 'sine', 160, 90, 0.16, 0.22 * gm, 0.18); }
       else if (kind === 'clack') { tone(t, 'square', 320, 300, 0.03, 0.15, 0.03); }                                   // cooldown reject (A3) / bolt clicks
       else if (kind === 'crit') { tinks(2, 0.012, 0.08 * gm); }   // the ×1.5 sparkle on its own: per-element AoE crits and hold-window crits (A4)
       // v1.2 (A5): tone / noise combos only, no new audio graph
@@ -5096,7 +5303,12 @@
       /* SPEC-destruction §B/§C add `w`/`h` (the piece's own size, which never changes) and `cx`/`cy` (the
        * centre it was BORN at). A reader comparing "the cell the blast went off in" with a far one, or the
        * average distance of imploding debris, must not be fooled by how far each piece has since flown. */
+      /* evictPieces() decides what an eviction knocks loose in the piece's OWN anchor frame (p.ox/p.oy, no
+       * scroll applied), while l/r/top/bottom above are viewport boxes. For one anchor the two differ by a
+       * constant and relative comparisons agree, but a reader asking "would this eviction wake that piece?"
+       * should ask in the frame the product answers in — so the raw numbers are published too. */
       return { pid: p.pid, resting: !!p.resting, anchor: p.docAnchor ? 'document' : 'viewport', l: b.l, r: b.r, top: b.top, bottom: b.bottom,
+        rawL: p.ox + p.x + p.bb.minX, rawR: p.ox + p.x + p.bb.maxX, rawTop: p.oy + p.y + p.bb.minY, rawBottom: p.oy + p.y + p.bb.maxY,
         w: p.bb.maxX - p.bb.minX, h: p.bb.maxY - p.bb.minY, cx: viewOx(p) + p.cx, cy: viewOy(p) + p.cy, chip: !!p.chip, ash: !!p.ash,
         vx: p.vx, vy: p.vy, vr: p.vr, rot: p.rot };
     });
@@ -6763,6 +6975,10 @@
     opts = opts || {};
     const mode = opts.mode || WEAPONS[state.weapon].kind;
     if (!el || !el.isConnected || el.hasAttribute('data-crs-broken')) return false;
+    /* SPEC-destruction §F4: "연소 중에 파괴된 요소는 **무엇에 맞아 죽었든** ash 조각 + char 마감으로
+     * 부서진다." destructionOf() already answers `flame` for opts.burnt, so the ledger is asked here —
+     * the one place every break passes through — rather than at each of the ten weapons. */
+    if (!opts.burnt && burnEstablished(el)) opts.burnt = true;
     cancelAnimsOf(el);
     /* SPEC-destruction §C3: an element that had already shed a corner gets its own `clip-path` back BEFORE
      * anything is cloned off it — otherwise every piece would carry the remaining shape as a second clip. */
@@ -7571,23 +7787,51 @@
     later(() => { if (fracGetCurve() === cu) fracSetCurve(null); }, 0);
     return hits.length;
   }
+  /* ══ SPEC-destruction §E4 — 순서가 있는 연출 ═══════════════════════════════════════════════════
+   * | 0ms | 흰 섬광(반지름 0.5R, 90ms), 흔들림 시작 · 충격파 링이 0 에서 R 까지 260ms 에 걸쳐 퍼진다
+   * | 0~60ms | 대상들이 차례로 부서진다 (aoeHit 의 edgeDist/4 스태거가 그대로 그 창이다)
+   * | 40ms | blastMark 를 그린다. 섬광이 걷히며 드러난다
+   * | 60~500ms | 중심에서 연기가 피어오른다
+   * Every size is R. `flash`'s `size` is a DIAMETER, so 반지름 0.5R 은 size R 이다. */
+  function blastFx(x, y, R, k, shakeOpts, W) {
+    flash(x, y, 'bomb', { size: R, dur: 90 });
+    ring(x, y, { r: R });
+    shake('bomb', shakeOpts);
+    later(() => { if (state.active) blastMark(x, y, R, k, { ink: 1, weapon: W || null }); }, 40);
+    for (let i = 0, n = reducedMotion() ? 0 : randInt(4, 7); i < n; i++) {
+      later(() => { if (state.active) smokePuff(x + rand(-0.12, 0.12) * R, y + rand(-0.12, 0.12) * R, { size: rand(0.12, 0.26) * R }); }, rand(60, 500));
+    }
+  }
+  /* §F4: 연소 중 요소가 폭발에 휘말리면 반경 ×1.15. The rings scale with it so the candidate sampling stays
+   * proportional; the weapon table itself is never written to — aoeHit() is handed a copy. */
+  function blastWeaponAt(x, y, W) {
+    const R = burnBlastRadius(x, y, W.radius);
+    if (R === W.radius) return W;
+    const k = R / W.radius;
+    return Object.assign({}, W, { radius: R, rings: (W.rings || []).map((r) => r * k) });
+  }
   function fireBomb(x, y) {
     state.shots++;
-    interceptOrbsWithin(x, y, WEAPONS.bomb.radius);   // v1.2 A9: every orb in the blast pops (+5 each) AND the page is hit
+    const W = blastWeaponAt(x, y, WEAPONS.bomb);
+    interceptOrbsWithin(x, y, W.radius);   // v1.2 A9: every orb in the blast pops (+5 each) AND the page is hit
     sfx('bomb');
-    flash(x, y, 'bomb'); ring(x, y); shake('bomb');
-    drawCrack(x, y, 'bomb', { ink: 1 });
-    aoeHit(x, y, WEAPONS.bomb);
+    blastFx(x, y, W.radius, 1, undefined, W);
+    /* §F5 (폭탄 범위 15) BEFORE the damage: aoeHit() destroys its nearest targets synchronously, and
+     * asking aoeCandidates() a second time afterwards would resolve the blast CENTRE to whatever is left
+     * under the point — usually the dead element's own container, which would then catch fire and char
+     * right across the gaps between its children. The fire is laid on the page the blast actually found. */
+    blastIgnite(x, y, W, BURN_BOMB_DIRECT, BURN_BOMB_SPLASH);
+    aoeHit(x, y, W);
     return null;
   }
   function rocketImpact(x, y) {
     if (!state.active) return;
-    interceptOrbsWithin(x, y, WEAPONS.rocket.radius);
+    const W = blastWeaponAt(x, y, WEAPONS.rocket);
+    interceptOrbsWithin(x, y, W.radius);
     sfx('bomb', { gain: 1.3 });
-    flash(x, y, 'bomb'); ring(x, y, { xl: true }); shake('bomb', { amp: 16, dur: 480 });
-    scorchDab(x, y, 140, 0.45);
-    drawCrack(x, y, 'bomb', { lenScale: 1.3, ink: 1 });
-    aoeHit(x, y, WEAPONS.rocket);
+    blastFx(x, y, W.radius, 1.5, { amp: 16, dur: 480 }, W);   // §E3: 로켓은 intensity 1.5
+    blastIgnite(x, y, W, BURN_ROCKET_DIRECT, BURN_ROCKET_SPLASH);   // §F5: 로켓 직격 25 · 범위 12 (see fireBomb for the order)
+    aoeHit(x, y, W);
     scheduleHud(); kick();
   }
   /* Rocket (A7): a bright capsule streaks from bottom-centre to the click point over 150 ms (WAAPI, tracked),
@@ -7632,6 +7876,11 @@
       later(kill, 1000);
     }
   }
+  /* SPEC-destruction §F6: 화염방사기는 틱 피해 15 → 8, 틱당 스택 9. "즉시 화력 최하위, 20초 누적 화력
+   * 최상위" — the damage the trigger does NOW is halved and the work is moved into the burn. The weapon
+   * table keeps its published `damage` (15) because that is what the HUD, the balance readout and
+   * api.weapons() mean by it; this is the per-tick number the flame actually applies. */
+  const FLAME_TICK_DMG = 8;
   function fireFlame(x, y, c) {
     state.shots++;
     const h = (c && c.hold && c.h) || null;
@@ -7644,135 +7893,20 @@
     let crit = false, win = null, dmg = 0;
     if (el) {   // roll before any sound / effect (A4)
       if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('flame');
-      dmg = rollDamage(WEAPONS.flame.damage, crit, falloffMul('flame', x, y));
+      dmg = rollDamage(FLAME_TICK_DMG, crit, falloffMul('flame', x, y));   // §F6: 15 → 8
     }
     spawnFire(x, y, 2);
-    if (!h || n % 4 === 0) { scorchDab(x, y, 24, 0.08); state.scorch++; }   // the glass blackens over time; no crack (A3/A9)
+    // §E3: 화염방사기의 기존 그을음은 blastMark(x, y, 24, 0.25) 로 통일한다 — no second scorch routine in the build
+    if (!h || n % 4 === 0) { blastMark(x, y, 24, 0.25, { count: false }); state.scorch++; }
     if (!h) sfx('puff', { crit });
     if (el) applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win, burnt: true });
-    /* SPEC-combat §B2: in a combat mode the flame LEAVES something behind — see the burning block below
-     * for why the ignition is scoped to the combat modes and not (yet) switched on in rampage. */
-    if (el && modeHasEnemies()) igniteEl(el, BURN_FLAME_STACKS);
+    /* §F5 불을 붙이는 무기: 화염방사기 틱당 9. SPEC-combat §B2 scoped this to the combat modes because
+     * the general case was step 6's to decide; step 6 decided — §F is the system, and fire burns in rampage
+     * too. (§F6 pays for it in the same breath by dropping the tick damage to 8.) */
+    if (el) igniteEl(el, BURN_FLAME_STACKS);
     return el;
   }
 
-  /* ══ SPEC-combat §B2: 상태 효과는 그대로 퍼진다 ═══════════════════════════════════════════
-   * 무적은 **피해에만** 적용된다. 불은 무적 요소에도 붙고 그 위로 번진다. 체력이 줄지 않으니 타기만
-   * 하지만, 불길이 **적에게 도달하면** 그때부터 실제 피해가 들어간다 — 불을 길처럼 깔아 적을 태우는
-   * 플레이가 성립하고, 무적이 플레이를 좁히는 대신 간접 공격 수단을 만든다.
-   *
-   * SCOPE — this is the SEED of SPEC-destruction §F (연소 시스템, 로드맵 6단계), not that system.
-   * What is here is the minimum §B2 actually claims, with §F's own names and numbers so step 6 extends
-   * rather than replaces: stacks 0–100, 지속 피해 초당 2 + stacks × 0.14 at 250 ms, 자연 감소 초당 6,
-   * 동시 연소 상한 20 (성능 모드 10), 확산 700 ms · stacks ≥ 45 · 24 px 인접 · 최대 2개 · ×0.35.
-   * What is NOT here, and is step 6's: §F3's flame overlay / scorch ramp / smoke / crackle loop, §F4's
-   * ash debris and the wet · frozen interaction table (neither state exists in this build — the water
-   * pistol and the freeze gun are roadmap step 8), §F5's per-weapon ignition table, §F6's 화염탄.
-   *
-   * TWO READINGS CHOSEN, both because §B2 is about combat and step 6 owns the general case:
-   *   · ignition is wired to the flamethrower ONLY, and only while modeHasEnemies(). Turning §F5's full
-   *     table on everywhere would re-balance rampage's flamethrower (a DoT on top of its unreduced 15
-   *     per tick — §F6 drops that to 8 in the same breath), and that trade is step 6's to make, not §B's.
-   *   · fire does not spread into an element's own ancestors or descendants. They are always "맞닿은"
-   *     by rect, so without this a single tick on a card would climb its whole wrapper chain in 700 ms.
-   *     §F2 says 인접 — "번진다", not "번져 올라간다" — so it spreads sideways.
-   *
-   * No page element is given an inline style by any of this (CLAUDE.md: 흔적을 남기지 않는다). The fire is
-   * drawn with the existing `.crs-fire` particles, which restore() already sweeps, and the ledger below is
-   * emptied by clearBurning() from clearCombatNodes(). */
-  const BURN_TICK_MS = 250;                              // §F1: 250 ms 마다 1/4씩
-  const BURN_DOT_BASE = 2, BURN_DOT_PER_STACK = 0.14;    // §F1: 지속 피해 초당 2 + stacks × 0.14
-  const BURN_DECAY = 6;                                  // §F1: 자연 감소 초당 6
-  const BURN_MAX = 100, BURN_MIN = 1;                    // §F1: stacks 0~100
-  const BURN_CAP = 20, BURN_CAP_PERF = 10;               // §F1: 동시 연소 상한 20 (성능 모드 10)
-  const BURN_SPREAD_MS = 700;                            // §F2: 700ms 마다 번질 곳을 찾는다
-  const BURN_SPREAD_MIN = 45;                            // §F2: stacks >= 45 일 때만
-  const BURN_SPREAD_GAP = 24;                            // §F2: rect 가 24px 이내로 맞닿거나 겹칠 것
-  const BURN_SPREAD_MAX = 2, BURN_SPREAD_MUL = 0.35;     // §F2: 최대 2개, stacks × 0.35, 원래 쪽은 줄지 않는다
-  const BURN_FLAME_STACKS = 9;                           // §F5: 화염방사기 틱당 9
-  /* A Map, not a WeakMap: every tick walks the whole set, so it has to be enumerable (§F1). */
-  const burning = new Map();
-  let burnTimer = 0;
-  function burnCap() { return perfOn() ? BURN_CAP_PERF : BURN_CAP; }
-  function burnAlive(el) {
-    if (!el || el.nodeType !== 1 || !el.isConnected || isOurs(el)) return false;
-    try { return !el.hasAttribute('data-crs-broken'); } catch (e) { return false; }
-  }
-  function igniteEl(el, stacks) {
-    if (!state.active || !burnAlive(el) || !(stacks > 0)) return null;
-    let rec = burning.get(el);
-    if (!rec) {
-      if (burning.size >= burnCap()) return null;
-      rec = { stacks: 0, spreadAt: now() };
-      burning.set(el, rec);
-    }
-    rec.stacks = clamp(rec.stacks + stacks, 0, BURN_MAX);
-    armBurn();
-    return rec;
-  }
-  function armBurn() {
-    if (burnTimer || !burning.size || !state.active) return;
-    burnTimer = later(burnStep, BURN_TICK_MS);
-  }
-  function clearBurning() { untrack(burnTimer); burnTimer = 0; burning.clear(); }
-  /* Gap between two rects — 0 when they touch or overlap. §F2 wants ADJACENCY, not distance between
-   * centres: fire that jumps a gap is teleportation, not fire. */
-  function rectGap(a, b) {
-    const dx = Math.max(a.left - b.right, b.left - a.right, 0);
-    const dy = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
-    return Math.hypot(dx, dy);
-  }
-  /* §F2: the three sparks that make the jump visible. Drawn with the flame particles already in use. */
-  function spreadSparks(a, b) {
-    const x = (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2;
-    const y = (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2;
-    if (isFinite(x) && isFinite(y) && !reducedMotion()) spawnFire(x, y, 3);
-  }
-  function burnSpread(el, rec, r) {
-    if (burning.size >= burnCap()) return;
-    /* descendCollected: a collected container is still walked INTO. Without it the walk stops at the first
-     * box under the limit — a section, say — and the cards inside it, which are the things that are actually
-     * 맞닿은, are never candidates at all. (§F2 names the 300 ms memo; walkCandidates keys it on these very
-     * options, so this stays a separate, correctly-cached signature.) */
-    const cands = walkCandidates(r.left + r.width / 2, r.top + r.height / 2, { limit: 0.7 * viewW() * viewH(), minArea: 1200, descendCollected: true });
-    let n = 0;
-    for (const c of cands) {
-      if (n >= BURN_SPREAD_MAX || burning.size >= burnCap()) break;
-      const o = c.el;
-      if (o === el || burning.has(o) || !burnAlive(o)) continue;
-      try { if (o.contains(el) || el.contains(o)) continue; } catch (e) { continue; }   // reading chosen: sideways only
-      if (rectGap(r, c.r) > BURN_SPREAD_GAP) continue;
-      if (igniteEl(o, rec.stacks * BURN_SPREAD_MUL)) { n++; spreadSparks(r, c.r); }
-    }
-  }
-  function burnStep() {
-    burnTimer = 0;
-    if (!state.active) { burning.clear(); return; }
-    const t = now(), dt = BURN_TICK_MS / 1000;
-    for (const [el, rec] of Array.from(burning)) {
-      if (!burnAlive(el)) { burning.delete(el); continue; }
-      const r = rectOf(el);
-      if (r && r.width >= 1 && r.height >= 1) {
-        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-        /* THE §B2 LINE. The element burns whatever it is; only the DAMAGE asks whether it may be hurt.
-         * An invulnerable element just chars, and the moment the fire has reached an enemy it bites —
-         * which is the whole indirect-attack route §B2 is paying for. */
-        if (damageable(el)) {
-          applyHit(el, Math.max(1, Math.round((BURN_DOT_BASE + rec.stacks * BURN_DOT_PER_STACK) * dt)), 'gun', cx, cy, { burnt: true, aoe: true, toward: { x: cx, y: cy } });
-        }
-        if (!reducedMotion() && state.fire.length < particleCap()) spawnFire(cx + rand(-r.width / 3, r.width / 3), cy + rand(-r.height / 3, r.height / 3), 1);
-        if (rec.stacks >= BURN_SPREAD_MIN && t - rec.spreadAt >= BURN_SPREAD_MS) { rec.spreadAt = t; burnSpread(el, rec, r); }
-      }
-      rec.stacks -= BURN_DECAY * dt;
-      if (rec.stacks < BURN_MIN) burning.delete(el);
-    }
-    if (burning.size) { burnTimer = later(burnStep, BURN_TICK_MS); kick(); }
-  }
-  /* §5 debug hooks: what is on fire, how hot, and whether the thing burning is the enemy or a wall. */
-  debug.burning = () => Array.from(burning, ([el, rec]) => ({
-    tag: tagOf(el).toUpperCase(), id: el.id || null, stacks: Math.round(rec.stacks), hostile: hostileUnit(el)
-  }));
-  debug.ignite = (el, stacks) => { const r = igniteEl(el, stacks == null ? 60 : +stacks); return r ? Math.round(r.stacks) : null; };
   /* One BFS for collapse AND the hostile picker (v1.2 A7). opts: { limit: max area to COLLECT, minArea,
    * descendCollected: keep walking into collected elements (hostile: nested cards), skip(el) }. Same visited
    * cap 2000 / out cap 60 / viewport-intersection and visibility rules as the v1 collapseCandidates. */
@@ -7816,8 +7950,12 @@
     cancelCollapse();
     sfx('rumble');
     pullOrbsIn(x, y);   // SPEC-combat §D4: 중력탄은 빨아들인다 (src/88-archetypes.js)
-    flash(x, y, 'collapse'); ring(x, y); shake('collapse');
-    drawCrack(x, y, 'bomb');
+    flash(x, y, 'collapse'); ring(x, y, { r: BOMB_RADIUS }); shake('collapse');
+    /* §E2: the collapse used to draw the (now deleted) `bomb` crack web. §A's table gives 붕괴 no mark of
+     * its own ("없음(즉시 파괴)"), but it has always left ONE on the page and `stats().cracks` counts it, so
+     * it keeps a mark and takes the blast one — INTERPRETATION, reported. Its radius is Infinity, so it
+     * borrows the bomb's 240 px exactly as blastWeapon() already did for its decal targets. */
+    blastMark(x, y, BOMB_RADIUS, 0.9, { ink: 1 });
     const cands = collapseCandidates(x, y);
     const textIdx = new Set();
     for (const c of cands) { if (textIdx.size >= 8) break; if (textDominant(c.el)) textIdx.add(c.el); }
@@ -7860,6 +7998,470 @@
     untrack(c.timer); untrack(c.thumpTimer); c.timer = 0; c.thumpTimer = 0;
     state.collapse = null;
   }
+
+// ── 77-burn.js ──
+// ── SPEC-destruction §F: 연소 시스템 — 지속 피해 · 확산 · 모습과 소리 · 상태 연계 · 화염탄 ──
+  /* 사용자: "불 공격은 지속딜과 확산이 포인트인데 없네"
+   *
+   * 3단계 §B2 (SPEC-combat) planted the seed of this system inside src/76-weapon-fire.js: a ledger, a
+   * 250 ms tick, 24 px adjacency spread, and the rule that fire sticks to an INVULNERABLE element and only
+   * bites once it has reached an enemy. All of that is still here, unchanged in its numbers and its names —
+   * the §B2 assertions are a contract. What step 6 adds is everything §F actually asks for:
+   *   §F1 상태        — the record, 지속 피해 초당 2 + stacks × 0.14, 자연 감소 초당 6, 상한 20 (성능 10)
+   *   §F2 확산        — 700 ms · stacks ≥ 45 · 24 px 인접 · 최대 2개 · ×0.35 · 불꽃이 튀는 연출
+   *   §F3 모습과 소리 — 아래 가장자리 불꽃 · 그을림 램프 · 연기 · sepia 틴트 · 루프음 하나
+   *   §F4 연계        — ash 마감 · 폭발 반경 ×1.15 · 복구 봉쇄 · 젖음 / 빙결 표
+   *   §F5 점화 무기   — 화염방사기 9 / 로켓 25·12 / 폭탄 15
+   *   §F6 화염방사기  — 틱 피해 8, 틱당 스택 9, 짧게 누르면 화염탄
+   *
+   * TWO READINGS CHOSEN (both reported):
+   *   · §B2 scoped ignition to the combat modes because the general case was step 6's to settle. It is
+   *     settled: fire burns in rampage too (§F is a weapon system, not a combat rule), and §F6 pays for it
+   *     in the same breath by dropping the flamethrower's tick damage from 15 to 8.
+   *   · fire does not spread into an element's own ancestors or descendants. They are always "맞닿은" by
+   *     rect, so without this one tick on a card would climb its whole wrapper chain in 700 ms. §F2 says
+   *     인접 — "번진다", not "번져 올라간다" — so it spreads sideways.
+   *
+   * NOT REACHABLE YET, and said so rather than faked: §F4's 젖음 · 빙결 table and §F5's 레이저 entry. The
+   * water pistol, the freeze gun and the laser cutter are roadmap steps 7–8 and no weapon in this build
+   * produces those states. The RULES are implemented here against a real per-element status record and are
+   * driven by debug hooks (debug.setWet / setFrozen / douse), so step 8 wires its weapons to them and
+   * changes nothing else. */
+
+  const BURN_TICK_MS = 250;                              // §F1: 250 ms 마다 1/4씩
+  const BURN_DOT_BASE = 2, BURN_DOT_PER_STACK = 0.14;    // §F1: 지속 피해 초당 2 + stacks × 0.14
+  const BURN_DECAY = 6;                                  // §F1: 자연 감소 초당 6
+  const BURN_MAX = 100, BURN_MIN = 1;                    // §F1: stacks 0~100
+  const BURN_CAP = 20, BURN_CAP_PERF = 10;               // §F1: 동시 연소 상한 20 (성능 모드 10)
+  const BURN_SPREAD_MS = 700;                            // §F2: 700ms 마다 번질 곳을 찾는다
+  const BURN_SPREAD_MIN = 45;                            // §F2: stacks >= 45 일 때만
+  const BURN_SPREAD_GAP = 24;                            // §F2: rect 가 24px 이내로 맞닿거나 겹칠 것
+  const BURN_SPREAD_MAX = 2, BURN_SPREAD_MUL = 0.35;     // §F2: 최대 2개, stacks × 0.35, 원래 쪽은 줄지 않는다
+  const BURN_FLAME_STACKS = 9;                           // §F5: 화염방사기 틱당 9
+  const BURN_ROCKET_DIRECT = 25, BURN_ROCKET_SPLASH = 12;   // §F5: 로켓 직격 25 · 범위 12
+  const BURN_BOMB_DIRECT = 15, BURN_BOMB_SPLASH = 15;       // §F5: 폭탄 범위 15
+  const BURN_LASER_STACKS = 4;                           // §F5: 레이저 틱당 4 — the laser cutter is roadmap step 7
+  const BURN_BLAST_MUL = 1.15, BURN_BLAST_SPLASH = 20;   // §F4: 폭발에 휘말리면 반경 ×1.15, 주변에 스택 20
+  const BURN_WET_MUL = 0.3, BURN_WET_OUT = 20;           // §F4: 젖음 → 불, 들어오는 스택 ×0.3 · stacks < 20 에서 즉시 꺼짐
+  const BURN_DRY_MUL = 2;                                // §F4: 불 → 젖음, wet 이 2배 속도로 마름
+  const BURN_WATER_STACKS = 40;                          // §F4: 물총 → 불, 틱당 스택 −40
+  const BURN_FREEZE_RATE = 25;                           // §F4: 빙결 ↔ 불, 각각 초당 25씩 녹이고 끈다
+  const BURN_FROZEN_FULL = 100;                          // §F4: 완전 빙결에는 붙지 않는다
+  const BURN_SMOKE_PER_S = 1.5;                          // §F3: 연기는 요소당 초당 1.5개
+  const BURN_FLAME_BASE = 12, BURN_FLAME_PER_STACK = 0.2;   // §F3: 불꽃 높이 12 + stacks × 0.2 px
+  const BURN_FLICKER_MS = 120;                           // §F3: 0.12초 주기 흔들림
+  /* §F6 화염탄: 반경 110px 불바다가 5초, 초당 14 스택. 연료 12 소모, 쿨다운 1400ms. */
+  const POOL_R = 110, POOL_MS = 5000, POOL_STACKS_PER_S = 14;
+  const FIREBOMB_FUEL = 12, FIREBOMB_CD = 1400, FIREBOMB_FLIGHT = 460, FIREBOMB_PRESS_MS = 180;
+
+  /* A Map, not a WeakMap: every tick walks the whole set, so it has to be enumerable (§F1). */
+  const burning = new Map();
+  /* §F4's other two states. Separate, because a wet or frozen element is usually NOT burning — that is the
+   * whole point of wetting something before the fire arrives. */
+  const chilled = new Map();
+  const pools = [];
+  let burnTimer = 0;
+  let burnSpark = 0;   // §F3 read-back: how many spread flashes have been drawn
+  let burnTicks = 0;   // §F1 read-back: how many 250 ms steps have run (a test must not guess the cadence)
+
+  function burnCap() { return perfOn() ? BURN_CAP_PERF : BURN_CAP; }
+  function burnCount() { return burning.size; }
+  function isBurning(el) { return !!(el && burning.has(el)); }
+  /* §F4's ash rule is about an element that WAS ALREADY BURNING when the blow landed — "연소 중에 파괴된
+   * 요소". A blast lights its targets (§F5) and destroys them in the same event, and if that counted the
+   * bomb and the rocket would never again leave their own §B4 debris (wedge · scorch, shard · ember): every
+   * blast would end in ash. So the fire has to have had a tick of its own first. */
+  function burnEstablished(el) {
+    const rec = el && burning.get(el);
+    return !!rec && rec.ticked === true;
+  }
+  function burnAlive(el) {
+    if (!el || el.nodeType !== 1 || !el.isConnected || isOurs(el)) return false;
+    try { return !el.hasAttribute('data-crs-broken'); } catch (e) { return false; }
+  }
+  function chillOf(el) {
+    let c = chilled.get(el);
+    if (!c) { c = { wet: 0, frozen: 0 }; chilled.set(el, c); }
+    return c;
+  }
+
+  /* ── §F3 the look ────────────────────────────────────────────────────────────────────────────────
+   * Three things are drawn per burning element: a flame strip along its BOTTOM edge that follows it, a
+   * char ramp burnt into its decal, and a sepia tint written as an inline `filter`.
+   * The tint is the only thing this system puts on a PAGE element, so its original value AND priority are
+   * saved before the first write and put back on extinguish (CLAUDE.md: 흔적을 남기지 않는다 — 빈 문자열이
+   * 아니라 원래 값으로). `filter` carries no !important anywhere in content.css for page elements. */
+  function burnTint(el, rec) {
+    if (rec.saved === undefined) {
+      try { rec.saved = el.style.getPropertyValue('filter') || ''; rec.savedPriority = el.style.getPropertyPriority('filter') || ''; }
+      catch (e) { rec.saved = ''; rec.savedPriority = ''; }
+    }
+    const s = clamp(rec.stacks, 0, BURN_MAX);
+    const want = 'sepia(' + (s / 280).toFixed(4) + ') brightness(' + (1 + s / 900).toFixed(4) + ')';
+    if (want === rec.wrote) return;
+    rec.wrote = want;
+    try { el.style.setProperty('filter', want); } catch (e) { /* ignore */ }
+  }
+  function burnUntint(el, rec) {
+    if (rec.saved === undefined) return;
+    try {
+      if (rec.saved) el.style.setProperty('filter', rec.saved, rec.savedPriority);
+      else el.style.removeProperty('filter');
+    } catch (e) { /* ignore */ }
+    rec.saved = undefined; rec.wrote = '';
+  }
+  function burnFlames(el, rec) {
+    if (!root || reducedMotion()) return;
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return;
+    if (!rec.node || !rec.node.isConnected) {
+      const n = mk('div', 'crs-flames');
+      n.style.background = 'linear-gradient(0deg, rgba(255,214,102,.85) 0%, rgba(255,107,53,.6) 45%, rgba(255,107,53,0) 100%)';
+      n.style.transformOrigin = '50% 100%';
+      try { root.append(n); } catch (e) { return; }
+      rec.node = n;
+      try { rec.anim = trackAnim(n.animate([{ transform: 'scaleY(1)' }, { transform: 'scaleY(.62)' }, { transform: 'scaleY(1)' }], { duration: BURN_FLICKER_MS, iterations: Infinity })); } catch (e) { rec.anim = null; }
+    }
+    const h = BURN_FLAME_BASE + clamp(rec.stacks, 0, BURN_MAX) * BURN_FLAME_PER_STACK;
+    const s = rec.node.style;
+    s.left = px(r.left); s.top = px(r.bottom - h); s.width = px(r.width); s.height = px(h);
+  }
+  function burnDropFlames(rec) {
+    if (rec.anim) { try { rec.anim.cancel(); } catch (e) { /* ignore */ } state.anims.delete(rec.anim); rec.anim = null; }
+    if (rec.node) { try { rec.node.remove(); } catch (e) { /* ignore */ } rec.node = null; }
+  }
+  /* §F3 "그을림 데칼이 stacks 에 비례해 짙어진다". Only the DIFFERENCE since the last tick is laid down, the
+   * same way charDecal() ramps the flamethrower's own char (src/66-fracture.js), so a long burn darkens
+   * smoothly instead of saturating on the first tick. */
+  function burnChar(el, rec) {
+    const want = clamp(rec.hottest / BURN_MAX, 0, 1) * 0.7;
+    const prev = rec.char || 0;
+    if (want <= prev + 0.04) return;
+    const dec = ensureDecal(el);
+    if (!dec || !dec.ctx) return;
+    rec.char = want;
+    try {
+      const c = dec.ctx;
+      c.save();
+      c.fillStyle = 'rgba(26,18,12,' + ((want - prev) * 0.55).toFixed(3) + ')';
+      c.fillRect(0, 0, dec.cssW, dec.cssH);
+      c.restore();
+    } catch (e) { /* ignore */ }
+  }
+  /* Every burning element's flame strip re-reads its element's rect. Called from tickFrame() so the strip
+   * rides a scroll, a reflow and a displacement instead of being redrawn four times a second. */
+  function burnFollow() {
+    if (!burning.size) return false;
+    for (const [el, rec] of burning) { if (rec.node) burnFlames(el, rec); }
+    return true;
+  }
+
+  /* ── §F3 the sound ───────────────────────────────────────────────────────────────────────────────
+   * "타닥거리는 저역 노이즈 루프 하나. 볼륨이 연소 요소 수에 비례한다. 요소마다 소리를 내면 귀가 아프다." */
+  function burnAudioSync() {
+    const n = burning.size;
+    if (n > 0 && state.active && !state.muted) { ensureAudio(); startBurnLoop(); setBurnGain(n); }
+    else stopBurnLoop();
+  }
+
+  /* ── §F1 the ledger ──────────────────────────────────────────────────────────────────────────── */
+  /* igniteEl(el, stacks) — the ONE way anything catches fire. Returns the record, or null when the element
+   * cannot take fire at all (gone, broken, ours, over the cap, or §F4's 완전 빙결). */
+  function igniteEl(el, stacks) {
+    if (!state.active || !burnAlive(el) || !(stacks > 0)) return null;
+    const ch = chilled.get(el);
+    if (ch && ch.frozen >= BURN_FROZEN_FULL) return null;        // §F4: 완전 빙결 → 불. 먼저 녹여야 한다
+    let add = stacks;
+    if (ch && ch.wet > 0) add *= BURN_WET_MUL;                   // §F4: 젖음 → 불, 들어오는 스택 ×0.3
+    let rec = burning.get(el);
+    if (!rec) {
+      if (burning.size >= burnCap()) return null;
+      rec = { stacks: 0, hottest: 0, bornAt: now(), ticked: false, lastTickAt: now(), igniter: state.weapon, spreadAt: now(), smokeDebt: 0, char: 0, node: null, anim: null, saved: undefined, savedPriority: '', wrote: '' };
+      burning.set(el, rec);
+    }
+    rec.stacks = clamp(rec.stacks + add, 0, BURN_MAX);
+    /* §F4: 젖은 요소는 `stacks < 20` 에서 즉시 꺼진다 — a damp thing can be scorched, not set alight. */
+    if (ch && ch.wet > 0 && rec.stacks < BURN_WET_OUT) { extinguish(el); return null; }
+    if (rec.stacks > rec.hottest) rec.hottest = rec.stacks;
+    burnTint(el, rec);
+    burnFlames(el, rec);
+    armBurn();
+    return rec;
+  }
+  /* §F4 물총 → 불: 틱당 스택 −40. The water pistol is roadmap step 8; this is the rule it will call. */
+  function douseEl(el, stacks) {
+    const rec = burning.get(el);
+    if (!rec) return null;
+    rec.stacks -= (stacks > 0 ? stacks : BURN_WATER_STACKS);
+    if (rec.stacks < BURN_MIN) { extinguish(el); return 0; }
+    burnTint(el, rec);
+    return Math.round(rec.stacks);
+  }
+  function extinguish(el) {
+    const rec = burning.get(el);
+    if (!rec) return false;
+    burning.delete(el);
+    burnDropFlames(rec);
+    burnUntint(el, rec);
+    burnAudioSync();
+    return true;
+  }
+  function armBurn() {
+    if (burnTimer || !state.active) return;
+    if (!burning.size && !pools.length) return;
+    burnTimer = later(burnStep, BURN_TICK_MS);
+    burnAudioSync();
+  }
+  function clearBurning() {
+    untrack(burnTimer); burnTimer = 0;
+    for (const [el, rec] of Array.from(burning)) { burnDropFlames(rec); burnUntint(el, rec); }
+    burning.clear();
+    chilled.clear();
+    for (const p of pools.splice(0, pools.length)) { try { p.node.remove(); } catch (e) { /* ignore */ } }
+    burnSpark = 0; burnTicks = 0;
+    stopBurnLoop();
+  }
+
+  /* ── §F2 확산 ────────────────────────────────────────────────────────────────────────────────── */
+  /* Gap between two rects — 0 when they touch or overlap. §F2 wants ADJACENCY, not distance between
+   * centres: fire that jumps a gap is teleportation, not fire. The rects are read LIVE, which is why
+   * §F4's "변위 → 불" falls out for free: 밀어서 떼면 방화선이 된다. */
+  function rectGap(a, b) {
+    const dx = Math.max(a.left - b.right, b.left - a.right, 0);
+    const dy = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
+    return Math.hypot(dx, dy);
+  }
+  /* §F2: the three sparks that make the jump visible, plus the short "화악" of §F3. */
+  function spreadSparks(a, b) {
+    burnSpark++;
+    const x = (Math.max(a.left, b.left) + Math.min(a.right, b.right)) / 2;
+    const y = (Math.max(a.top, b.top) + Math.min(a.bottom, b.bottom)) / 2;
+    if (isFinite(x) && isFinite(y) && !reducedMotion()) spawnFire(x, y, 3);
+    sfx('flare', { gain: 0.5 });
+  }
+  function burnSpread(el, rec, r) {
+    if (burning.size >= burnCap()) return;
+    /* descendCollected: a collected container is still walked INTO. Without it the walk stops at the first
+     * box under the limit — a section, say — and the cards inside it, which are the things that are actually
+     * 맞닿은, are never candidates at all. (§F2 names the 300 ms memo; walkCandidates keys it on these very
+     * options, so this stays a separate, correctly-cached signature.) */
+    const cands = walkCandidates(r.left + r.width / 2, r.top + r.height / 2, { limit: 0.7 * viewW() * viewH(), minArea: 1200, descendCollected: true });
+    /* The SAME wrapper filter aoeCandidates() applies (src/73-hit-resolution.js): a candidate that
+     * CONTAINS another candidate is a container, not a neighbour. Without it `descendCollected` hands the
+     * walk both a section and the cards inside it, and the section — which touches everything it wraps —
+     * catches first and then chars right across the gaps between its children. That is the page STRUCTURE
+     * burning, not the page: §F2's 인접 is about things that sit next to each other. (The el.contains /
+     * o.contains guard below only protects the burning element's OWN chain; this one protects everyone
+     * else's.) */
+    const wrap = new Set();
+    for (const a of cands) for (const b of cands) { if (a !== b) { try { if (a.el.contains(b.el)) { wrap.add(a.el); break; } } catch (e) { /* ignore */ } } }
+    let n = 0;
+    for (const c of cands) {
+      if (n >= BURN_SPREAD_MAX || burning.size >= burnCap()) break;
+      const o = c.el;
+      if (o === el || burning.has(o) || !burnAlive(o) || wrap.has(o)) continue;
+      try { if (o.contains(el) || el.contains(o)) continue; } catch (e) { continue; }   // reading chosen: sideways only
+      const or = rectOf(o);                                  // LIVE rect: a displaced element really has moved
+      if (!or || rectGap(r, or) > BURN_SPREAD_GAP) continue;
+      // §F2: 원래 쪽은 줄지 않는다. 불은 나눠 갖는 게 아니라 번진다.
+      if (igniteEl(o, rec.stacks * BURN_SPREAD_MUL)) { n++; spreadSparks(r, or); }
+    }
+  }
+
+  /* ── §F5 / §F4: what a blast does ──────────────────────────────────────────────────────────────── */
+  /* §F4: 연소 중 요소가 폭발에 휘말리면 반경 ×1.15. Asked BEFORE the blast resolves, so the bigger radius is
+   * the one the damage, the ring, the mark and the crosshair's prediction all agree on. */
+  function burnBlastRadius(x, y, R) {
+    if (!burning.size || !(R > 0) || !isFinite(R)) return R;
+    for (const el of burning.keys()) {
+      const r = rectOf(el);
+      if (r && edgeDist(r, x, y) <= R) return R * BURN_BLAST_MUL;
+    }
+    return R;
+  }
+  /* §F5's ignition table for the two blast weapons, and §F4's "그 폭발이 주변에 스택 20을 뿌린다" — a blast
+   * that caught something already burning throws more fire than one that did not. */
+  function blastIgnite(x, y, W, direct, splash) {
+    if (!state.active) return 0;
+    let caught = false;
+    for (const el of burning.keys()) { const r = rectOf(el); if (r && edgeDist(r, x, y) <= W.radius) { caught = true; break; } }
+    const sp = caught ? Math.max(splash, BURN_BLAST_SPLASH) : splash;
+    let cands = [];
+    try { cands = aoeCandidates(x, y, W.radius, W.maxTargets, W.rings, !!W.aoeIgnoresCover); } catch (e) { cands = []; }
+    let n = 0;
+    for (const c of cands) { if (igniteEl(c.el, c.d === 0 ? direct : sp)) n++; }
+    return n;
+  }
+
+  /* ── §F6 화염탄 ───────────────────────────────────────────────────────────────────────────────── */
+  /* "포물선으로 날아가 착탄점에 불바다(반경 110px, 5초, 초당 14 스택)를 만든다. 확산의 시작점을 던져
+   * 놓는 도구다." It is the flamethrower's 보조, i.e. a SHORT PRESS — a press that let go before the
+   * sustained stream really started. INTERPRETATION (reported): roadmap step 7 owns the general 보조 공격
+   * system, so this is wired to the one gesture §F6 names rather than inventing a second input. */
+  function firePoolAt(x, y) {
+    if (!state.active) return null;
+    const p = { x, y, r: POOL_R, until: now() + scaleMs(POOL_MS), node: null };
+    if (root && !reducedMotion()) {
+      const n = mk('div', 'crs-firepool');
+      n.style.left = px(x - POOL_R); n.style.top = px(y - POOL_R);
+      n.style.width = px(2 * POOL_R); n.style.height = px(2 * POOL_R);
+      n.style.borderRadius = '50%';
+      n.style.background = 'radial-gradient(circle, rgba(255,214,102,.5) 0%, rgba(255,107,53,.35) 55%, rgba(255,107,53,0) 78%)';
+      try { root.append(n); } catch (e) { /* ignore */ }
+      p.node = n;
+      try { trackAnim(n.animate([{ opacity: 0.95 }, { opacity: 0.72 }, { opacity: 0.95 }], { duration: 420, iterations: Infinity })); } catch (e) { /* ignore */ }
+    }
+    pools.push(p);
+    armBurn();
+    kick();
+    return p;
+  }
+  function poolStep(dt) {
+    if (!pools.length) return;
+    const t = now(), add = POOL_STACKS_PER_S * dt;
+    for (let i = pools.length - 1; i >= 0; i--) {
+      const p = pools[i];
+      if (t >= p.until || !state.active) {
+        pools.splice(i, 1);
+        if (p.node) { try { cancelAnimsOf(p.node); p.node.remove(); } catch (e) { /* ignore */ } }
+        continue;
+      }
+      let cands = [];
+      try { cands = walkCandidates(p.x, p.y, { limit: 0.7 * viewW() * viewH(), minArea: 1200, descendCollected: true }); } catch (e) { cands = []; }
+      let n = 0;
+      for (const c of cands) {
+        if (n >= 4) break;
+        const r = rectOf(c.el);
+        if (!r || edgeDist(r, p.x, p.y) > p.r) continue;
+        if (igniteEl(c.el, add)) n++;
+      }
+      if (!reducedMotion() && Math.random() < 0.6) spawnFire(p.x + rand(-p.r * 0.7, p.r * 0.7), p.y + rand(-p.r * 0.5, p.r * 0.5), 1);
+    }
+  }
+  /* The thrown shell itself: a parabola, drawn with the same tracked WAAPI / later() pair the rocket uses,
+   * so restore() and deactivate() cancel both the flight and the impact. */
+  function throwFireBomb(x, y) {
+    if (!state.active) return false;
+    if (onCooldown()) { cooldownFeedback(); return false; }
+    if (!spendFuel(FIREBOMB_FUEL)) { sfx('empty'); return false; }
+    state.shots++;
+    sfx('whoosh', { gain: 0.8, pitch: 0.8 });
+    startCooldown('flame', FIREBOMB_CD);
+    const flightMs = reducedMotion() ? 60 : scaleMs(FIREBOMB_FLIGHT);
+    if (!root) { firePoolAt(x, y); return true; }
+    const sx = viewW() / 2, sy = viewH() + 16;
+    const n = mk('div', 'crs-firebomb');
+    n.style.left = px(sx); n.style.top = px(sy); n.style.width = '14px'; n.style.height = '14px';
+    n.style.borderRadius = '50%';
+    n.style.background = 'radial-gradient(circle, #fff 0%, #ffd166 40%, rgba(255,107,53,.85) 100%)';
+    n.style.boxShadow = '0 0 12px 4px rgba(255,107,53,.7)';
+    n.style.transform = 'translate(-50%, -50%)';
+    try { root.append(n); } catch (e) { /* ignore */ }
+    const apex = -Math.max(120, Math.abs(y - sy) * 0.45);   // the arc the shell is thrown on
+    try {
+      trackAnim(n.animate([
+        { transform: 'translate(-50%, -50%) translate(0px, 0px)' },
+        { transform: 'translate(-50%, -50%) translate(' + px((x - sx) / 2) + ', ' + px((y - sy) / 2 + apex) + ')', offset: 0.5 },
+        { transform: 'translate(-50%, -50%) translate(' + px(x - sx) + ', ' + px(y - sy) + ')' }
+      ], { duration: flightMs, easing: 'linear', fill: 'forwards' }));
+    } catch (e) { /* ignore */ }
+    laterRaw(() => {
+      try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ }
+      if (!state.active) return;
+      sfx('flare');
+      flash(x, y, 'hammer', { size: POOL_R, dur: 180 });
+      firePoolAt(x, y);
+      scheduleHud();
+    }, flightMs);
+    return true;
+  }
+  /* §F6 연료 12 소모 — the SHELL's own price, on top of whatever the press itself burned as stream ticks
+   * (spend() charges one per tick, as it does for every hold weapon). It refuses rather than half-firing
+   * when the tank cannot pay for it. */
+  function spendFuel(n) {
+    const W = WEAPONS.flame;
+    if (debug.infiniteAmmo || W.mag == null) return true;
+    const have = state.ammo.flame || 0;
+    if (have < n) return false;
+    state.ammo.flame = Math.max(0, have - n);
+    if (state.ammo.flame <= 0) state.pendingReload = 'flame';
+    updateAmmoHud();
+    return true;
+  }
+
+  /* ── §F1 the tick ────────────────────────────────────────────────────────────────────────────── */
+  function burnStep() {
+    burnTimer = 0;
+    if (!state.active) { clearBurning(); return; }
+    burnTicks++;
+    const t = now(), dt = BURN_TICK_MS / 1000;
+    for (const [el, rec] of Array.from(burning)) {
+      if (!burnAlive(el)) { burning.delete(el); burnDropFlames(rec); burnUntint(el, rec); continue; }
+      const r = rectOf(el);
+      if (r && r.width >= 1 && r.height >= 1) {
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        /* THE §B2 LINE. The element burns whatever it is; only the DAMAGE asks whether it may be hurt.
+         * An invulnerable element just chars, and the moment the fire has reached an enemy it bites —
+         * which is the whole indirect-attack route §B2 is paying for. */
+        if (damageable(el)) {
+          applyHit(el, Math.max(1, Math.round((BURN_DOT_BASE + rec.stacks * BURN_DOT_PER_STACK) * dt)), 'gun', cx, cy, { burnt: true, aoe: true, toward: { x: cx, y: cy } });
+          if (!burning.has(el)) continue;   // the tick finished it off
+        }
+        if (!reducedMotion() && state.fire.length < particleCap()) spawnFire(cx + rand(-r.width / 3, r.width / 3), cy + rand(-r.height / 3, r.height / 3), 1);
+        // §F3: 연기가 피어오른다 — 요소당 초당 1.5개
+        rec.smokeDebt += BURN_SMOKE_PER_S * dt;
+        while (rec.smokeDebt >= 1) { rec.smokeDebt -= 1; smokePuff(cx + rand(-r.width / 4, r.width / 4), r.bottom - 4); }
+        burnFlames(el, rec);
+        burnChar(el, rec);
+        if (rec.stacks >= BURN_SPREAD_MIN && t - rec.spreadAt >= scaleMs(BURN_SPREAD_MS)) { rec.spreadAt = t; burnSpread(el, rec, r); }
+      }
+      // §F4 상호작용 표: 빙결 ↔ 불은 서로 상쇄하고, 불 → 젖음 은 2배 속도로 마른다
+      const ch = chilled.get(el);
+      if (ch) {
+        if (ch.frozen > 0) { const melt = BURN_FREEZE_RATE * dt; ch.frozen = Math.max(0, ch.frozen - melt); rec.stacks -= melt; }
+        if (ch.wet > 0) ch.wet = Math.max(0, ch.wet - BURN_DRY_MUL * BURN_TICK_MS);
+      }
+      rec.stacks -= BURN_DECAY * dt;                      // §F1: 자연 감소 초당 6
+      rec.lastTickAt = t; rec.ticked = true;
+      if (rec.stacks < BURN_MIN) { burning.delete(el); burnDropFlames(rec); burnUntint(el, rec); continue; }
+      burnTint(el, rec);
+    }
+    poolStep(dt);
+    burnAudioSync();
+    /* armBurn(), never a bare later(): igniteEl() can run DURING this tick (a spread, a fire pool) and it
+     * arms the next one itself. Assigning `burnTimer` here would overwrite that handle and leave the first
+     * timer running untracked — two burn chains, double damage and double decay. That is exactly what the
+     * §F1 assertions caught: 100 스택이 1초에 20을 주고 16초가 아니라 8초 만에 꺼졌다. */
+    if (burning.size || pools.length) { armBurn(); kick(); }
+  }
+
+  /* §5 debug hooks: what is on fire, how hot, and whether the thing burning is the enemy or a wall. */
+  debug.burning = () => Array.from(burning, ([el, rec]) => ({
+    tag: tagOf(el).toUpperCase(), id: el.id || null, stacks: Math.round(rec.stacks), hostile: hostileUnit(el), ticked: !!rec.ticked,
+    igniter: rec.igniter, flames: !!(rec.node && rec.node.isConnected), filter: (() => { try { return el.style.getPropertyValue('filter') || ''; } catch (e) { return ''; } })()
+  }));
+  debug.ignite = (el, stacks) => { const r = igniteEl(el, stacks == null ? 60 : +stacks); return r ? Math.round(r.stacks) : null; };
+  debug.douse = (el, stacks) => douseEl(el, stacks == null ? BURN_WATER_STACKS : +stacks);
+  /* Put every fire on the page out at once, the way a bucket of water would — the read-back a test needs to
+   * ask "and when the fire IS out, is there anything left?" without tearing the whole session down. */
+  debug.douseAll = () => { let n = 0; for (const el of Array.from(burning.keys())) { if (extinguish(el)) n++; } return n; };
+  /* §F4's two step-8 states, drivable now so the interaction table is real code rather than a promise. */
+  debug.setWet = (el, ms) => { if (!el) return null; const c = chillOf(el); c.wet = ms == null ? 8000 : +ms; return c.wet; };
+  debug.setFrozen = (el, level) => { if (!el) return null; const c = chillOf(el); c.frozen = clamp(level == null ? BURN_FROZEN_FULL : +level, 0, BURN_FROZEN_FULL); return c.frozen; };
+  debug.chillOf = (el) => { const c = el && chilled.get(el); return c ? { wet: Math.round(c.wet), frozen: Math.round(c.frozen) } : null; };
+  debug.burnStats = () => ({ count: burning.size, cap: burnCap(), pools: pools.length, sparks: burnSpark, ticks: burnTicks, timer: !!burnTimer, audio: burnAudio() });
+  debug.firePools = () => pools.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y), r: p.r, msLeft: Math.max(0, Math.round(p.until - now())) }));
+  debug.firebomb = (x, y) => throwFireBomb(+x, +y);
+  debug.burnConst = () => ({
+    tickMs: BURN_TICK_MS, dotBase: BURN_DOT_BASE, dotPerStack: BURN_DOT_PER_STACK, decay: BURN_DECAY,
+    max: BURN_MAX, cap: BURN_CAP, capPerf: BURN_CAP_PERF, spreadMs: BURN_SPREAD_MS, spreadMin: BURN_SPREAD_MIN,
+    spreadGap: BURN_SPREAD_GAP, spreadMax: BURN_SPREAD_MAX, spreadMul: BURN_SPREAD_MUL,
+    flame: BURN_FLAME_STACKS, rocket: [BURN_ROCKET_DIRECT, BURN_ROCKET_SPLASH], bomb: [BURN_BOMB_DIRECT, BURN_BOMB_SPLASH],
+    laser: BURN_LASER_STACKS, blastMul: BURN_BLAST_MUL, blastSplash: BURN_BLAST_SPLASH,
+    wetMul: BURN_WET_MUL, wetOut: BURN_WET_OUT, water: BURN_WATER_STACKS, freezeRate: BURN_FREEZE_RATE,
+    flameTickDmg: FLAME_TICK_DMG, poolR: POOL_R, poolMs: POOL_MS, poolPerS: POOL_STACKS_PER_S,
+    firebombFuel: FIREBOMB_FUEL, firebombCd: FIREBOMB_CD
+  });
 
 // ── 79-weapon-actions.js ──
 // ── action dispatch: cooldown/swap/ammo gating, smashAt/slashSegment, hold weapons, katana drag, WEAPONS.*.fire wiring ──
@@ -7978,6 +8580,12 @@
     for (const el of Array.from(h.open)) { const w = state.dmgAgg.get(el); if (silent) state.dmgAgg.delete(el); else flushWindow(el, w); }
     try { const b = weaponBtn(h.id); if (b) b.classList.remove('holding'); } catch (e) { /* ignore */ }
     try { if (shield && h.pointerId != null && shield.hasPointerCapture(h.pointerId)) shield.releasePointerCapture(h.pointerId); } catch (e) { /* ignore */ }
+    /* SPEC-destruction §F6: 화염방사기의 보조는 **짧게 누르는 것**이다 — a press let go before the stream
+     * has really started throws a 화염탄 instead of being one wasted tick. INTERPRETATION (reported): the
+     * general 보조 공격 system is roadmap step 7, so this is wired to the one gesture §F6 itself names
+     * ("보조(짧게)") rather than inventing a second input for it. A silent stop — restore(), deactivate(),
+     * a weapon swap — is not a release and throws nothing. */
+    if (!silent && h.id === 'flame' && now() - h.startedAt < FIREBOMB_PRESS_MS) throwFireBomb(state.hoverX, state.hoverY);
     if (!silent) scheduleHud();
   }
 
@@ -11043,6 +11651,10 @@
      * also follows an element that is being animated, repaired or reflowed — not just one that scrolled.
      * It deliberately does NOT set `busy`: decals alone never keep a frame loop alive. */
     if (decalCount()) { syncDecals(); if (decalBusy()) busy = true; }
+    /* SPEC-destruction §F3: "요소를 따라 움직인다" — the flame strip of every burning element re-reads its
+     * element's rect here, so it rides a scroll, a reflow and §E's displacement instead of being redrawn
+     * four times a second by the burn tick. The burn tick kick()s the loop, so this never owns one. */
+    if (burnCount()) { burnFollow(); busy = true; }
     return busy;
   }
   function onResize() {
@@ -11378,6 +11990,8 @@
     if (!root || !state.active || !modeHasRepair() || state.paused) return null;
     if (!forced && debug.noRepair) return null;
     if (!rec || !rec.el || !rec.el.isConnected || state.hostiles.get(rec.el) !== rec) return null;
+    /* SPEC-destruction §F4: "연소 중인 적대 요소는 복구를 하지 못한다. 불로 묶어두는 전술이 생긴다." */
+    if (isBurning(rec.el)) return null;
     const el = repairCandidate(rec);
     if (!el) return null;
     const node = mk('div', 'crs-repair');
@@ -12302,7 +12916,7 @@
     clearMoved();
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce, .crs-lock, .crs-repair, .crs-repair-ghost, .crs-avatar, .crs-avatar-ghost, .crs-help, .crs-frag, .crs-trail'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce, .crs-lock, .crs-repair, .crs-repair-ghost, .crs-avatar, .crs-avatar-ghost, .crs-help, .crs-frag, .crs-trail, .crs-flames, .crs-smoke, .crs-firepool, .crs-firebomb'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -12468,6 +13082,7 @@
     for (const k of Object.keys(hudEls)) delete hudEls[k];
     try { docEl.classList.remove('crs-active', 'crs-swing', 'crs-scoped'); } catch (e) { /* ignore */ }
     stopLoop();
+    stopBurnLoop();   // SPEC-destruction §F3: the one crackle loop never outlives the session either
     if (audio.ctx) { const c = audio.ctx; audio.ctx = null; audio.master = null; audio.noise = null; audio.boomAt = []; safe(() => c.close()); }
     state.active = false; state.hoverEl = null; state.hoverX = -1; state.hoverY = -1; state.overHud = false;
     state.paused = false; state.ko = false; state.scope.rmb = false; state.scope.shiftDown = false; state.scope.shiftWant = false;

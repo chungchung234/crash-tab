@@ -114,6 +114,12 @@
     for (const el of Array.from(h.open)) { const w = state.dmgAgg.get(el); if (silent) state.dmgAgg.delete(el); else flushWindow(el, w); }
     try { const b = weaponBtn(h.id); if (b) b.classList.remove('holding'); } catch (e) { /* ignore */ }
     try { if (shield && h.pointerId != null && shield.hasPointerCapture(h.pointerId)) shield.releasePointerCapture(h.pointerId); } catch (e) { /* ignore */ }
+    /* SPEC-destruction §F6: 화염방사기의 보조는 **짧게 누르는 것**이다 — a press let go before the stream
+     * has really started throws a 화염탄 instead of being one wasted tick. INTERPRETATION (reported): the
+     * general 보조 공격 system is roadmap step 7, so this is wired to the one gesture §F6 itself names
+     * ("보조(짧게)") rather than inventing a second input for it. A silent stop — restore(), deactivate(),
+     * a weapon swap — is not a release and throws nothing. */
+    if (!silent && h.id === 'flame' && now() - h.startedAt < FIREBOMB_PRESS_MS) throwFireBomb(state.hoverX, state.hoverY);
     if (!silent) scheduleHud();
   }
 

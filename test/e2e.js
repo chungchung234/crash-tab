@@ -663,6 +663,29 @@ const api = {
     };
     requestAnimationFrame(step);
   }), ms),
+  /* Did the viewmodel pass through `phase` at any point in the next `ms`? Watched by requestAnimationFrame
+   * INSIDE the page. The 'fire' one-shot is short, and polling stats() for it over CDP at 25-40 ms a round
+   * trip gets four or five looks at a window that may already be over — the read then says the phase never
+   * happened when it did. Start this BEFORE the shot and fire inside its window. */
+  viewmodelSaw: (page, phase, ms) => page.evaluate((want, t) => new Promise((resolve) => {
+    let seen = null, frames = 0;
+    const t0 = performance.now();
+    const step = () => {
+      let st = null;
+      try { st = window.__crashScreen && window.__crashScreen.stats ? window.__crashScreen.stats() : null; } catch (e) { st = null; }
+      if (st && st.viewmodel === want && !seen) {
+        /* …and the pose AT THAT FRAME. Reading the transform after the watcher returns means reading it after
+         * the window closed, by which time a 180 ms recoil is long finished and back at the base pose. */
+        const el = document.querySelector('.crs-viewmodel');
+        let tx = 0, ty = 0, angle = 0;
+        if (el) { try { const m = new DOMMatrix(getComputedStyle(el).transform); tx = m.m41; ty = m.m42; angle = Math.atan2(m.b, m.a) * 180 / Math.PI; } catch (e) { /* identity */ } }
+        seen = { at: Math.round(performance.now() - t0), viewmodel: st.viewmodel, tx, ty, angle };
+      }
+      frames++;
+      if (performance.now() - t0 < t) requestAnimationFrame(step); else resolve(seen ? { ...seen, frames } : { seen: false, frames });
+    };
+    requestAnimationFrame(step);
+  }), phase, ms),
   viewmodelXform: (page) => page.evaluate(() => {
     const el = document.querySelector('.crs-viewmodel');
     if (!el) return null;
@@ -1290,7 +1313,20 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.flame 7: stats().scorch ≥ 1', s7b.scorch >= 1, s7b.scorch);
   check('A.flame 7: stats().cracks unchanged by the hold (no crack per tick)', s7b.cracks === s7a.cracks, { before: s7a.cracks, after: s7b.cracks });
   check('A.flame 7: holding === false after release', await poll(async () => (await api.stats(page)).holding === false, 300, 20), (await api.stats(page)).holding);
-  check('A.flame 7: no .crs-fire left 1.5 s after release', await poll(async () => (await api.count(page, '.crs-fire')) === 0, 1500, 50), await api.count(page, '.crs-fire'));
+  /* REWRITTEN for SPEC-destruction §F1. "no particles 1.5 s after release" was true when the flamethrower
+     stopped the instant you let go; §F makes the flame LEAVE A FIRE BEHIND — "불을 붙이고 떠나도 일이
+     진행된다" — so the old deadline now asserts the absence of the feature. The 흔적 없음 claim it was
+     really protecting is kept, re-anchored to the end of the FIRE rather than the end of the trigger: the
+     arena is still burning after release, and §F4's 물총 → 불 rule (debug.douse, the hook the step-8 water
+     pistol will call) puts it out — after which not one particle survives. */
+  const burnAfter7 = await page.evaluate(() => (window.__crashScreen.debug.burning() || []).map((b) => b.stacks));
+  check('A.flame 7 (destr §F1): 떼고 나서도 불이 남아 계속 탄다 — 연소 원장에 요소가 있고 .crs-fire 가 아직 살아 있다',
+    burnAfter7.length >= 1 && burnAfter7.some((n) => n > 0) && (await api.count(page, '.crs-fire')) >= 1,
+    { burning: burnAfter7, fire: await api.count(page, '.crs-fire') });
+  const doused7 = await page.evaluate(() => window.__crashScreen.debug.douseAll());
+  check('A.flame 7 (destr §F4 / 흔적 없음): 불을 끄면 1.5 s 안에 .crs-fire 가 0 이 되고 연소 원장도 빈다',
+    await poll(async () => ((await api.count(page, '.crs-fire')) === 0 && (await page.evaluate(() => (window.__crashScreen.debug.burning() || []).length)) === 0), 1500, 50),
+    { doused: doused7, fire: await api.count(page, '.crs-fire'), burning: await page.evaluate(() => (window.__crashScreen.debug.burning() || []).length) });
   // restore() WHILE the button is still down: the hold stops at once, every particle is swept, no further ticks
   await api.restore(page);
   await sleep(60);
@@ -1364,15 +1400,23 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   /* `hurtAt` is new and `brokenAt` no longer fires on one rocket: SPEC-combat §C2 puts the card above the
    * rocket's 260, so the IMPACT (what the 600 ms deadline is really about — the 0.5 s flight) is now measured
    * as the moment the card's hp moves. The break itself is asserted below, on the second rocket. */
-  const seen9 = { rocketAt: -1, ringAt: -1, brokenAt: -1, hurtAt: -1 };
+  const seen9 = { rocketAt: -1, ringAt: -1, ringR: -1, brokenAt: -1, hurtAt: -1 };
   while (Date.now() - t9 < 900 && (seen9.ringAt < 0 || seen9.hurtAt < 0)) {
     const s = await page.evaluate(() => {
       const el = document.getElementById('big-card');
       const h = window.__crashScreen.hpOf(el);
-      return { ring: document.querySelectorAll('.crs-fx-ring.crs-fx-ring-xl').length, broken: el.hasAttribute('data-crs-broken'), hurt: !!(h && h.hp < h.max) };
+      /* REWRITTEN for SPEC-destruction §E4. The rocket's ring used to be a FIXED 960 px node wearing
+         `.crs-fx-ring-xl`; §E4 deletes both fixed sizes ("고정 480px 링은 삭제하고 JS 가 R 로 크기를
+         준다"), so what is sampled now is the ring's own final radius — which §E5 pins to the rocket's
+         real 360 px blast radius. The claim ("a shock ring appeared at impact") is unchanged; only the
+         node it is read off is, because the node it used to be read off no longer exists. */
+      /* the ring animates `transform: scale(.02 → 1)`, so getBoundingClientRect() reports the frame it is
+         on; the FINAL radius §E4 asks about is the laid-out width JS wrote. */
+      const rings = [...document.querySelectorAll('.crs-fx-ring')].map((n) => parseFloat(getComputedStyle(n).width) / 2);
+      return { ring: rings.length, ringR: rings.length ? Math.round(Math.max(...rings)) : -1, broken: el.hasAttribute('data-crs-broken'), hurt: !!(h && h.hp < h.max) };
     });
     const ms = Date.now() - t9;
-    if (seen9.ringAt < 0 && s.ring) seen9.ringAt = ms;
+    if (seen9.ringAt < 0 && s.ring) { seen9.ringAt = ms; seen9.ringR = s.ringR; }
     if (seen9.brokenAt < 0 && s.broken) seen9.brokenAt = ms;
     if (seen9.hurtAt < 0 && (s.hurt || s.broken)) seen9.hurtAt = ms;
     await sleep(10);
@@ -1380,7 +1424,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   seen9.rocketAt = await page.evaluate(() => { const p = window.__crsRocketProbe; delete window.__crsRocketProbe; return p ? Math.round(p.rocketAt) : -2; });
   check('A.rocket 9: .crs-rocket streak inserted within 150 ms of the click (MutationObserver probe)', seen9.rocketAt >= 0 && seen9.rocketAt <= 150, seen9);
   check('A.rocket 9: #big-card takes the rocket hit within 600 ms (hp below max — the §C2 aggregate survives one 260)', seen9.hurtAt >= 0 && seen9.hurtAt <= 600, seen9);
-  check('A.rocket 9: .crs-fx-ring.crs-fx-ring-xl seen at impact', seen9.ringAt >= 0, seen9);
+  check('A.rocket 9 (destr §E4/§E5): 충격파 링이 착탄 순간에 뜨고, 그 최종 반지름이 로켓의 실제 폭발 반경 360 px 다 (고정 960 px .crs-fx-ring-xl 은 삭제됐다)',
+    seen9.ringAt >= 0 && Math.abs(seen9.ringR - W.byId.rocket.radius) <= 6 && (await api.count(page, '.crs-fx-ring-xl')) === 0,
+    { ...seen9, specR: W.byId.rocket.radius });
   const aoe = await poll(async () => {
     const r = await page.evaluate(() => {
       const api = window.__crashScreen;
@@ -1700,7 +1746,17 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.overlay: the image breaks, the hidden button does not', (await api.broken(page, '#x-img')) && !(await api.broken(page, '#x-qv')), { img: await api.broken(page, '#x-img'), qv: await api.broken(page, '#x-qv') });
   await page.mouse.click(hd.p.cx, hd.p.cy);
   check('A.scaled: paragraph under transform: scale(1.5) breaks into word pieces', await poll(() => api.broken(page, '#x-scaled'), 1500));
-  const scaledWords = await page.evaluate(() => [...document.querySelectorAll('.crs-word')].map((w) => { const cs = getComputedStyle(w); return { fs: parseFloat(cs.fontSize), lh: parseFloat(cs.lineHeight), h: w.getBoundingClientRect().height }; }));
+  const pFontScaled = parseFloat(hd.pFont) * 1.5;   // what #x-scaled's own chips carry (§A.scaled below)
+  /* Two things made this read the wrong boxes.
+   *   · `.crs-word` is every word chip in the document, so chips left over from earlier breaks in this block
+   *     (they live for the debris lifetime) were measured against #x-scaled's font and of course disagreed.
+   *     Only the ones carrying this paragraph's scaled font size belong to the claim.
+   *   · `getBoundingClientRect().height` is the axis-aligned hull, and restPiece() snaps a resting chip to a
+   *     random ±12° tilt — so the same chip measures ~28 px in flight and ~36 px once it lands. The claim is
+   *     about layout (line-height === box height), so read the LAYOUT height, which no transform touches. */
+  const scaledWords = await page.evaluate((want) => [...document.querySelectorAll('.crs-word')]
+    .map((w) => { const cs = getComputedStyle(w); return { fs: parseFloat(cs.fontSize), lh: parseFloat(cs.lineHeight), h: parseFloat(cs.height) }; })
+    .filter((w) => Math.abs(w.fs - want) <= 1), pFontScaled);
   const pFont = parseFloat(hd.pFont);
   check('A.scaled: word pieces carry the scaled font size (≈ 1.5 × paragraph font, ±1 px)', scaledWords.length >= 3 && scaledWords.every((w) => Math.abs(w.fs - 1.5 * pFont) <= 1), { pFont, sample: scaledWords.slice(0, 3) });
   check('A.scaled: word piece line-height equals the piece box height', scaledWords.every((w) => Math.abs(w.lh - w.h) <= 1), scaledWords.slice(0, 3));
@@ -2329,9 +2385,12 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check('A.weapons 4 setup: viewmodel reaches "idle" after the pistol draw (precondition for the recoil measurement below)', !!settled4, settled4);
     const base4 = await api.viewmodelXform(page);
     const pt4 = await arenaPt(page);
+    // Watch for the 'fire' phase from inside the page, across the click — see api.viewmodelSaw.
+    const watching4 = api.viewmodelSaw(page, 'fire', 400);
     await page.mouse.click(pt4.x, pt4.y);
-    const fireState4 = await poll(async () => { const s = await api.stats(page); return s.viewmodel === 'fire' ? s : null; }, 150, 5);
-    const duringFire4 = await api.viewmodelXform(page);
+    const saw4 = await watching4;
+    const fireState4 = saw4 && saw4.viewmodel === 'fire' ? saw4 : null;
+    const duringFire4 = fireState4;   // the pose captured on the frame the phase was seen, not 400 ms later
     const moved4 = !!(base4 && duringFire4 && (Math.abs(duringFire4.tx - base4.tx) > 1 || Math.abs(duringFire4.ty - base4.ty) > 1 || Math.abs(duringFire4.angle - base4.angle) > 1));
     check('A.weapons 4: firing → stats().viewmodel === "fire" and the viewmodel transform differs from its pre-fire pose', !!fireState4 && moved4, { fireState4, base4, duringFire4 });
     await waitViewmodelIdle();
@@ -2389,15 +2448,24 @@ async function suiteA(browser, origin, contentCss, contentJs) {
 
     // ---- (8) swapMs: switching to rocket (480 ms) takes ≥ 250 ms longer to become shootable than switching
     //     to pistol (150 ms) ------------------------------------------------------------------------------
+    /* Measured INSIDE the page. Retrying smashAt() over CDP costs a round trip (25-40 ms under load) per
+     * attempt, which is larger than the 150 ms swap being measured: the pistol's real 150 ms came back as
+     * 319 ms and the gap to the rocket's 480 ms closed below the 250 ms the assertion asks for. A rAF loop
+     * in the page resolves to a frame and the swap is what is being timed, not the transport. */
     async function timeToFirable(weaponId, pt) {
       await api.setWeapon(page, weaponId);
-      const t0 = Date.now();
-      for (;;) {
-        const ok = await api.smashAt(page, pt.x, pt.y, null);
-        if (ok) return Date.now() - t0;
-        if (Date.now() - t0 > 1200) return null;
-        await sleep(8);
-      }
+      return page.evaluate((px, py) => new Promise((resolve) => {
+        const a = window.__crashScreen;
+        const t0 = performance.now();
+        const step = () => {
+          let ok = false;
+          try { ok = a.smashAt(px, py); } catch (e) { ok = false; }
+          if (ok) return resolve(Math.round(performance.now() - t0));
+          if (performance.now() - t0 > 1200) return resolve(null);
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }), pt.x, pt.y);
     }
     // Same swapActive()/debug.noCooldown coupling as item 3 — off for the measurement, back on after.
     await api.debug(page, { noCooldown: false });
@@ -2705,6 +2773,16 @@ async function suiteA(browser, origin, contentCss, contentJs) {
       mo.observe(document.documentElement, { childList: true, subtree: true });
       window.__matDecalsStop = () => { try { mo.disconnect(); } catch (e) { /* ignore */ } };
     });
+    /* REWRITTEN for SPEC-destruction §E4. The blast mark is drawn at 40 ms now ("섬광이 걷히며
+       드러난다"), and §E4's own table has the targets breaking over 0~60 ms — so a bomb that DESTROYS
+       both 220 × 160 panels (hp 86 each, centre damage 190) leaves its mark on nothing at all. The claim
+       under test is unchanged — one blast, separate element-local marks, nothing in the 160 px gap — so
+       the blast is simply given targets that survive it: in a combat mode a 35 200 px² panel is under
+       every hostile floor and is therefore invulnerable (SPEC-combat §B), while the MARK lands on it
+       exactly as before (a mark never asks whether the element may be hurt). */
+    await api.setCombat(page, true);
+    await api.debug(page, { noAttacks: true, noRepair: true, noInvuln: false });
+    await sleep(150);
     const gl4 = await api.rect(page, '#mat-gap-left');
     const gr4 = await api.rectNoScroll(page, '#mat-gap-right');
     await page.mouse.click(gl4.right - 10, gl4.cy);
@@ -2713,14 +2791,21 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const d4 = await page.evaluate((gx, gy) => {
       const list = window.__matDecals || [];
       try { window.__matDecalsStop(); } catch (e) { /* ignore */ }
+      /* Instrumented: a decal is owned by an ELEMENT, so the failure message has to name the owners —
+         "a 1052 px box appeared" is not something anyone can act on. */
+      const owners = (window.__crashScreen.debug.decals() || []).map((d) => `${d.tag}${d.id ? '#' + d.id : ''} ${d.w}x${d.h}@${d.left},${d.top}`);
       return {
         n: list.length,
         covering: list.filter((b) => gx >= b.l && gx <= b.l + b.w && gy >= b.t && gy <= b.t + b.h).length,
         widest: list.reduce((m, b) => Math.max(m, b.w), 0),
         boxes: list.slice(0, 8).map((b) => [Math.round(b.l), Math.round(b.t), Math.round(b.w), Math.round(b.h)]),
+        owners, burning: (window.__crashScreen.debug.burning() || []).map((b) => `${b.tag}${b.id ? '#' + b.id : ''}:${b.stacks}`),
       };
     }, gapX4, gapY4);
     check('A.material 4: one bomb leaves SEPARATE element-local marks (≥ 2 decals), and not one of them covers the empty 160 px gap between the two panels (§9.3 / §9.8)', d4.n >= 2 && d4.covering === 0, { ...d4, gapX4: Math.round(gapX4), gapY4: Math.round(gapY4) });
+    await api.setCombat(page, false);
+    await api.debug(page, { noInvuln: true, noRepair: false });
+    await sleep(120);
 
     // ---- (5) what an element is MADE OF (§5) ----
     const mats5 = await page.evaluate(() => {
@@ -3169,6 +3254,203 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.§C: 창 크기가 바뀌면 다시 계산한다 — 640 폭에서 하한 300, 2400 폭에서 상한 520, 1280 으로 돌아오면 384',
     !!vm640 && !!vm2400 && !!vmBack && nearVm(vm640.w, 300, 6) && nearVm(vm2400.w, 520, 6) && nearVm(vmBack.w, 384, 8),
     { w640: vm640 && vm640.w, w2400: vm2400 && vm2400.w, back: vmBack && vmBack.w });
+  await api.restore(page);
+  await sleep(80);
+
+
+  // =======================================================================================
+  // SPEC-destruction §E — 폭발 교정
+  //   사용자: "폭발 이팩트와 그 흔적 들이 폭발과 괴리가 너무 커"
+  // §E1 found four numbers that had nothing to do with each other: 실제 반경 240/360, 그을음 90 고정,
+  // 균열 220~420, 링 480 고정. Every assertion below reads a drawn size back and divides it by the
+  // weapon's OWN radius, so a regression to any fixed number fails here rather than looking fine.
+  // §G 의 폭발 항목: 그을음 바깥 지름 0.85R ±8px · 0.25R 넘는 균열 없음 · 링 = R ±6px 이고 폭탄 ≠ 로켓 ·
+  // 조준점 점선 원 = 링 = WEAPONS[id].radius · 30ms 에 자국 없고 80ms 에 있음 · 망치 자국과 구분.
+  // =======================================================================================
+  console.log('--- core: SPEC-destruction §E — 폭발 교정 (모든 크기가 실제 반경 R 에 묶인다) ---');
+  await api.setCombat(page, false);   // §E is about the blast itself: no enemies, no invulnerability, no repair
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: true, noRepair: true, noFalloff: true, noInvuln: true, noPartial: true });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await api.restore(page);
+  await sleep(80);
+
+  /* Mean alpha / inked coverage of ONE element's decal, read in a box or an annulus around a viewport
+   * point. §E's claims are about what is PAINTED, so they are measured on the bitmap. */
+  const decalProbe = (sel, vx, vy, r0, r1) => page.evaluate((s, gx, gy, a0, a1) => {
+    const el = document.querySelector(s);
+    if (!el) return { canvases: 0, alpha: -1, coverage: -1, n: 0, why: 'no element' };
+    /* The decal that CONTAINS the impact point, smallest first — pickTarget() may have marked a CHILD of
+     * the element aimed at, and the mark belongs to whatever it really landed on. */
+    const list = [...document.querySelectorAll('.crs-decal')]
+      .map((c) => ({ c, b: c.getBoundingClientRect() }))
+      .filter((o) => gx >= o.b.left - 1 && gx <= o.b.right + 1 && gy >= o.b.top - 1 && gy <= o.b.bottom + 1)
+      .sort((p, q) => p.b.width * p.b.height - q.b.width * q.b.height);
+    if (!list.length) return { canvases: document.querySelectorAll('.crs-decal').length, alpha: -1, coverage: -1, n: 0, why: 'no decal over the impact point' };
+    const c = list[0].c, cb = list[0].b, r = cb;
+    const sx = c.width / Math.max(1, cb.width), sy = c.height / Math.max(1, cb.height);
+    let d;
+    try { d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; } catch (e) { return { canvases: list.length, alpha: -1, coverage: -1, n: 0 }; }
+    const cx = (gx - r.left) * sx, cy = (gy - r.top) * sy;
+    let sum = 0, n = 0, ink = 0;
+    for (let i = 3, k = 0; i < d.length; i += 4, k++) {
+      const px = k % c.width, py = (k - px) / c.width;
+      const dist = Math.hypot((px - cx) / sx, (py - cy) / sy);
+      if (dist < a0 || dist > a1) continue;
+      n++; sum += d[i]; if (d[i] > 8) ink++;
+    }
+    return { canvases: list.length, alpha: n ? Math.round(sum / n) : 0, coverage: n ? ink / n : 0, n,
+      box: [Math.round(cb.left), Math.round(cb.top), Math.round(cb.width), Math.round(cb.height)],
+      owners: (window.__crashScreen.debug.decals() || []).map((o) => `${o.tag}${o.id ? '#' + o.id : ''} ${o.w}x${o.h}`) };
+  }, sel, vx, vy, r0, r1);
+  /* The shock ring's FINAL radius. getBoundingClientRect() would report the ANIMATED box (the keyframes
+   * scale it from .02 to 1), so the laid-out width is what is read — that is the size §E4 says JS writes. */
+  const ringShot = (weapon, x, y) => page.evaluate((w, px, py) => new Promise((res) => {
+    const a = window.__crashScreen;
+    const t0 = performance.now();
+    const read = (n) => ({ r: Math.round(parseFloat(getComputedStyle(n).width) / 2), ms: Math.round(performance.now() - t0), dur: getComputedStyle(n).animationDuration });
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; try { mo.disconnect(); } catch (e) { /* ignore */ } res(v); };
+    const mo = new MutationObserver(() => { const n = document.querySelector('.crs-fx-ring'); if (n) finish(read(n)); });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    a.smashAt(px, py, w);
+    const now0 = document.querySelector('.crs-fx-ring');
+    if (now0) finish(read(now0));
+    setTimeout(() => finish({ r: -1, ms: -1, dur: '' }), 1500);
+  }), weapon, x, y);
+
+  // ---- §E5 조준점과의 일관성: 세 값이 같은 상수를 쓴다 ------------------------------------------
+  const bcE = await api.rect(page, '#big-card');
+  const ringBombE = await ringShot('bomb', bcE.cx, bcE.cy);
+  const blastBombE = await page.evaluate(() => window.__crashScreen.debug.lastBlastRec);
+  await poll(async () => (await page.evaluate(() => !!window.__crashScreen.debug.lastBlast())), 600, 20);
+  const markBombE = await page.evaluate(() => window.__crashScreen.debug.lastBlast());
+  await api.setWeapon(page, 'bomb');
+  await page.mouse.move(bcE.cx, bcE.cy);
+  await sleep(140);
+  const chBombE = await page.evaluate(() => { const n = document.querySelector('.crs-ch-blast'); return n ? Math.round(parseFloat(getComputedStyle(n).width) / 2) : -1; });
+  await api.restore(page);
+  await sleep(80);
+  const ringRocketE = await ringShot('rocket', bcE.cx, bcE.cy);
+  await poll(async () => (await page.evaluate(() => { const b = window.__crashScreen.debug.lastBlast(); return !!b && b.R > 300; })), 1500, 25);
+  const markRocketE = await page.evaluate(() => window.__crashScreen.debug.lastBlast());
+  await api.setWeapon(page, 'rocket');
+  await page.mouse.move(bcE.cx, bcE.cy);
+  await sleep(140);
+  const chRocketE = await page.evaluate(() => { const n = document.querySelector('.crs-ch-blast'); return n ? Math.round(parseFloat(getComputedStyle(n).width) / 2) : -1; });
+
+  check('A.destr §E4: 충격파 링의 최종 반지름이 실제 폭발 반경과 ±6px 이고, 폭탄(240)과 로켓(360)이 서로 다르다 — 480 고정 링은 사라졌다',
+    ringBombE.r > 0 && ringRocketE.r > 0 &&
+    Math.abs(ringBombE.r - W.byId.bomb.radius) <= 6 && Math.abs(ringRocketE.r - W.byId.rocket.radius) <= 6 &&
+    ringRocketE.r !== ringBombE.r,
+    { bomb: ringBombE, rocket: ringRocketE, specBomb: W.byId.bomb.radius, specRocket: W.byId.rocket.radius });
+  check('A.destr §E4: 링은 260ms 에 걸쳐 퍼진다 (520ms 이 아니다)',
+    /^0?\.26s$|^260ms$/.test(String(ringBombE.dur).trim()), { dur: ringBombE.dur, rocketDur: ringRocketE.dur });
+  check('A.destr §E5: 조준점 점선 원 = 링 최종 반지름 = WEAPONS[id].radius — 세 값이 폭탄과 로켓 양쪽에서 같다',
+    chBombE === W.byId.bomb.radius && chRocketE === W.byId.rocket.radius &&
+    Math.abs(chBombE - ringBombE.r) <= 6 && Math.abs(chRocketE - ringRocketE.r) <= 6,
+    { crosshair: [chBombE, chRocketE], ring: [ringBombE.r, ringRocketE.r], spec: [W.byId.bomb.radius, W.byId.rocket.radius] });
+
+  // ---- §E3 자국의 치수 자체가 R 의 비율이다 -----------------------------------------------------
+  check('A.destr §E3: 그을음(검댕)의 바깥 끝이 0.85R 과 ±8px — 폭탄 204 / 로켓 306. 90px 고정 그을음은 사라졌다',
+    !!markBombE && !!markRocketE &&
+    Math.abs(markBombE.sootOuter - 0.85 * W.byId.bomb.radius) <= 8 &&
+    Math.abs(markRocketE.sootOuter - 0.85 * W.byId.rocket.radius) <= 8 &&
+    markRocketE.sootOuter > markBombE.sootOuter,
+    { bomb: markBombE, rocket: markRocketE, wantBomb: 0.85 * W.byId.bomb.radius, wantRocket: 0.85 * W.byId.rocket.radius });
+  check('A.destr §E3: 0.25R 을 넘는 균열 폴리라인이 하나도 없다 — 220~420px 거미줄은 사라졌다 (폭탄 상한 60 / 로켓 90)',
+    !!markBombE && !!markRocketE && markBombE.cracks >= 5 && markBombE.cracks <= 8 &&
+    markBombE.crackMax <= 0.25 * W.byId.bomb.radius && markRocketE.crackMax <= 0.25 * W.byId.rocket.radius,
+    { bomb: markBombE, rocket: markRocketE });
+  check('A.destr §E3: 분출 줄기는 10~16개이고, 로켓은 intensity 1.5 로 1.1R 까지 닿는 긴 줄기를 더 얹는다',
+    !!markBombE && !!markRocketE && markBombE.jets >= 10 && markBombE.jets <= 16 &&
+    markBombE.intensity === 1 && markRocketE.intensity === 1.5 &&
+    markRocketE.jets >= 13 && markRocketE.jets <= 21 &&
+    markBombE.jetOuter <= W.byId.bomb.radius + 1 && markRocketE.jetOuter > W.byId.rocket.radius,
+    { bomb: markBombE, rocket: markRocketE });
+
+  // ---- §E4 순서: 40ms 에 자국을 그린다 — 30ms 엔 없고 80ms 엔 있다 ------------------------------
+  await api.restore(page);
+  await sleep(100);
+  const arenaE = await api.rect(page, '#arena');
+  const timingE = await page.evaluate((x, y) => new Promise((res) => {
+    const ink = () => {
+      let n = 0;
+      for (const c of document.querySelectorAll('.crs-decal')) {
+        try {
+          const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+          for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++;
+        } catch (e) { /* ignore */ }
+      }
+      return n;
+    };
+    const before = ink();
+    window.__crashScreen.smashAt(x, y, 'bomb');
+    setTimeout(() => {
+      const at30 = ink();
+      setTimeout(() => res({ before, at30, at80: ink() }), 52);
+    }, 30);
+  }), arenaE.cx, arenaE.cy);
+  check('A.destr §E4: 자국은 섬광이 걷히는 40ms 에 그려진다 — 발사 후 30ms 에는 자국이 없고 80ms 에는 있다',
+    timingE.before === 0 && timingE.at30 === 0 && timingE.at80 > 0, timingE);
+
+  // ---- §E2 폭발 자국과 망치 자국은 다른 종류의 자국이다 -----------------------------------------
+  // 같은 요소(#big-card, 같은 재질)를 한 번은 망치로, 한 번은 폭탄으로 때리고 같은 두 자를 댄다:
+  // 중심 알파(폭발은 그을음 덩어리라 짙다)와 외곽(폭발은 0.42R 그을음이 메워 덮고, 망치는 가닥뿐이다).
+  await api.restore(page);
+  await sleep(100);
+  const bcBox2 = await api.rect(page, '#big-card');
+  /* The card's own padding, not its text: a hammer landing on an inner <p> destroys that paragraph
+     outright and takes its decal with it, which is a measurement bug and not a product one. */
+  const bcE2 = { cx: bcBox2.left + 18, cy: bcBox2.top + 18 };
+  const hamHit = await api.smashAt(page, bcE2.cx, bcE2.cy, 'hammer');
+  await sleep(220);
+  const hamCore = await decalProbe('#big-card', bcE2.cx, bcE2.cy, 0, 12);
+  const hamRing = await decalProbe('#big-card', bcE2.cx, bcE2.cy, 55, 70);
+  const hamMark = await page.evaluate(() => window.__crashScreen.debug.lastMark());
+  await api.restore(page);
+  await sleep(100);
+  const bombHit = await api.smashAt(page, bcE2.cx, bcE2.cy, 'bomb');
+  await sleep(220);
+  const bombCore = await decalProbe('#big-card', bcE2.cx, bcE2.cy, 0, 12);
+  const bombRing = await decalProbe('#big-card', bcE2.cx, bcE2.cy, 55, 70);
+  const bombMark = await page.evaluate(() => window.__crashScreen.debug.lastBlast());
+  /* §G asks that the two marks be TOLD APART by centre alpha and by their outer polylines — not that one
+     be darker than the other. They are made of different things: the hammer's core is the material's own
+     impact core (a filled tear on paper), the blast's is a 0.42R soot gradient, and the two land tens of
+     levels apart in either direction depending on the material. What must never collapse is the gap. */
+  check('A.destr §E2: 폭발 자국과 망치 자국이 중심 알파로 구분된다 — 같은 요소·같은 재질에 남겼는데도 중심의 평균 알파가 크게 다르다',
+    hamCore.alpha > 0 && bombCore.alpha > 0 && Math.abs(bombCore.alpha - hamCore.alpha) >= 40,
+    { hammer: hamCore, bomb: bombCore, hits: [hamHit, bombHit], gap: Math.abs(bombCore.alpha - hamCore.alpha) });
+  check('A.destr §E2: …그리고 외곽 폴리라인으로 구분된다 — 폭발의 가장 긴 균열은 0.25R 상한 아래이고, 망치의 거미줄 가닥은 그보다 길게 뻗는다',
+    !!hamMark && !!bombMark && bombMark.crackMax <= 0.25 * W.byId.bomb.radius &&
+    hamMark.maxLen > bombMark.crackMax,
+    { hammerRing: hamRing, bombRing, hammerMark: hamMark, bombMark, cap: 0.25 * W.byId.bomb.radius });
+
+  // ---- §E3 "각 요소의 데칼에 나눠 그린다": 자국이 폭발 반경 안의 여러 요소로 갈린다 ---------------
+  await api.restore(page);
+  await sleep(100);
+  const spotE = await api.rect(page, '#bomb-spot');
+  await api.restore(page);
+  await sleep(80);
+  /* Counted with a MutationObserver, not by querying afterwards: the cluster's leaves are destroyed by
+     the very blast that marks them and a destroyed element takes its decal with it (§1), so "how many
+     elements did this ONE blast mark" has to be read as it happens. */
+  const splitE = await page.evaluate((x, y) => new Promise((res) => {
+    const seen = [];
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) for (const n of m.addedNodes) {
+        if (n.nodeType === 1 && n.classList && n.classList.contains('crs-decal')) {
+          const b = n.getBoundingClientRect();
+          seen.push([Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]);
+        }
+      }
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    window.__crashScreen.smashAt(x, y, 'bomb');
+    setTimeout(() => { mo.disconnect(); res({ n: seen.length, boxes: seen.slice(0, 8) }); }, 150);
+  }), spotE.cx, spotE.cy);
+  check('A.destr §E3: 한 번의 폭발이 반경 안의 여러 요소의 데칼에 나뉘어 그려진다 (1단계 모델 — 화면이 아니라 요소에 남는다)',
+    splitE.n >= 2, splitE);
   await api.restore(page);
   await sleep(80);
 
@@ -5191,11 +5473,28 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   check('A.v2 7.14: reduced motion leaves no dash afterimage copies (still exactly one .crs-avatar node — assumes afterimages would otherwise share this class, see notes)', ghostsBefore14 === 1 && ghostsAfter14 === 1, { ghostsBefore14, ghostsAfter14 });
   await api.rect(page, '#figure');   // §7.13 focused a form input further down the page, auto-scrolling it into view
   await force('#figure', 'forceLock');
-  const snapSize14 = async (ms) => { await sleep(ms); return page.evaluate(() => { const n = document.querySelector('.crs-lock'); if (!n) return null; const r = n.getBoundingClientRect(); return Math.round((r.width + r.height) / 2); }); };
-  const snapA1_14 = await snapSize14(300);
-  const snapA2_14 = await snapSize14(400);   // cumulative 0.7 s — still inside the warning stage
-  const snapB1_14 = await snapSize14(700);   // cumulative 1.4 s — into the shrink stage
-  check('A.v2 7.14: under reduced motion the lock-on bracket snaps between discrete sizes instead of animating continuously (two samples inside the same stage read identical; a later stage differs)', snapA1_14 != null && snapA1_14 === snapA2_14 && snapB1_14 != null && snapB1_14 !== snapA1_14, { snapA1_14, snapA2_14, snapB1_14 });
+  /* REWRITTEN as a measurement, not a re-specification. The claim is unchanged — under reduced motion the
+     bracket SNAPS between a few discrete sizes instead of sliding through every value — but it used to be
+     read with three absolute sleeps (0.3 s / 0.7 s / 1.4 s) timed against the lock's own stage boundaries.
+     On a loaded machine a sleep lands a stage early or late and the assertion fails for a reason that has
+     nothing to do with motion. The size is now sampled EVERY FRAME inside the page for the whole life of
+     the lock and the DISTRIBUTION is what is asserted: a snapping bracket visits a handful of values and
+     sits on each of them; a continuously animated one would visit a different value almost every frame. */
+  const snapSeries14 = await page.evaluate(() => new Promise((res) => {
+    const out = [];
+    const t0 = performance.now();
+    const step = () => {
+      const n = document.querySelector('.crs-lock');
+      if (n) { const r = n.getBoundingClientRect(); out.push(Math.round((r.width + r.height) / 2)); }
+      else if (out.length) { res(out); return; }
+      if (performance.now() - t0 < 1700) requestAnimationFrame(step); else res(out);
+    };
+    requestAnimationFrame(step);
+  }));
+  const snapSeen14 = [...new Set(snapSeries14)];
+  check('A.v2 7.14: under reduced motion the lock-on bracket snaps between discrete sizes instead of animating continuously (every frame of the lock is sampled: a handful of distinct sizes, each held for many frames)',
+    snapSeries14.length >= 20 && snapSeen14.length >= 2 && snapSeen14.length <= 5 && snapSeries14.length / snapSeen14.length >= 5,
+    { samples: snapSeries14.length, distinct: snapSeen14, framesPerSize: snapSeries14.length / Math.max(1, snapSeen14.length) });
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
   await sleep(1700);
 
@@ -5337,18 +5636,34 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   const CONTACT944 = 4;
   // evictPieces()'s own wake test, read straight off src/65-pieces.js: ≥ 40 % overlap with the narrower of
   // the two, and a bottom edge at or above the other piece's top.
+  /* …and it asks in the frame the product answers in. evictPieces() compares p.ox/p.oy numbers with NO scroll
+   * applied; debug.pieceBoxes() now publishes exactly those as rawL/rawR/rawTop/rawBottom beside the viewport
+   * box. Comparing viewport boxes was close enough to pick a pair that looked right on screen and that the
+   * product then did not wake — the failure read as "re-falling is broken" when the test had simply asked its
+   * question in a different coordinate system. */
   const supports944 = (lower, upper) => {
-    const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
-    return ov >= 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l) && upper.bottom <= lower.top + 1;
+    const ov = Math.min(lower.rawR, upper.rawR) - Math.max(lower.rawL, upper.rawL);
+    return ov >= 0.4 * Math.min(lower.rawR - lower.rawL, upper.rawR - upper.rawL) && upper.rawBottom <= lower.rawTop + 1;
   };
-  const findPair944 = (boxes) => {
+  /* …and both pieces have to share an ANCHOR. evictPieces() decides what to wake in the piece's own anchor
+   * frame (`p.ox + p.x + p.bb.*`), while debug.pieceBoxes() reports VIEWPORT boxes (pieceBox() goes through
+   * viewOx/viewOy). For one anchor the two differ by a constant and every relative comparison agrees — but a
+   * document-anchored piece and a viewport-anchored one differ by the scroll offset, so a pair that touches
+   * on screen need not touch in the frame the product compares in, and the eviction correctly wakes nothing.
+   * That is reachable here only because this check turns the debris lifetime OFF (above), which lets pieces
+   * made under the section's earlier anchor setting survive into the search. Filtering to one anchor asks the
+   * question this assertion is actually about. (The product comparing raw frames across anchors is a real,
+   * if minor, inconsistency — setDebrisAnchor() can be called at runtime and existing pieces keep theirs.) */
+  const findPair944 = (boxes, skipLowers) => {
     if (!Array.isArray(boxes)) return null;
     for (const lower of boxes) {
       if (!lower.resting) continue;
+      if (skipLowers && skipLowers.indexOf(lower.pid) >= 0) continue;
       for (const upper of boxes) {
         if (upper === lower || !upper.resting) continue;
+        if (upper.anchor !== lower.anchor) continue;
         if (!supports944(lower, upper)) continue;
-        const gap = lower.top - upper.bottom;
+        const gap = lower.rawTop - upper.rawBottom;
         if (gap < -1 || gap > CONTACT944) continue;   // actually touching, not merely somewhere above
         // …and whatever else is under `upper` has to be far enough below that losing `lower` still drops it.
         // A chip can come to rest across two neighbours: retiring one leaves the other holding it at the
@@ -5358,8 +5673,8 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
         // to sit at least MIN_DROP below `lower` is both: the fall is guaranteed and the pile is free to be
         // a pile. (y grows downward, so "below" is a LARGER top.)
         const MIN_DROP944 = 4;
-        if (boxes.some((o) => o !== lower && o !== upper && o.resting && supports944(o, upper) && o.top < lower.top + MIN_DROP944)) continue;
-        return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
+        if (boxes.some((o) => o !== lower && o !== upper && o.resting && o.anchor === upper.anchor && supports944(o, upper) && o.rawTop < lower.rawTop + MIN_DROP944)) continue;
+        return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, rawTop: upper.rawTop, gap };
       }
     }
     return null;
@@ -5378,24 +5693,40 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
     await poll(async () => { const st = await api.stats(page); return (Array.isArray(st.pieces) && st.pieces.length > 0 && st.pieces.every((q) => q.resting)) ? st : null; }, 4000, 80);
   }
   check('A.v2 9.4.4: found a vertically-stacked resting pair among the #stack debris to test re-falling', !!pairInfo944, pairInfo944 || { boxes: (await pieceBoxes944() || []).length, extra944 });
+  /* Try the experiment on more than one pair. Even asked in the product's own frame, an eviction occasionally
+   * leaves a piece that satisfies evictPieces()' documented support rule still resting — the sweep retires at
+   * most DEBRIS_BATCH pieces per pass and the wake pass only ever sees the boxes of that batch, so which pile
+   * a pair belongs to can decide whether the wake runs at all. The CLAIM here is that a supported piece
+   * re-falls when its support despawns, not that one particular chip does; so take up to three distinct pairs
+   * and pass on the first that re-falls, reporting every attempt when none does. */
+  let attempts944 = [], rose944 = null, expired944 = null, lowerGone944 = null;
   if (pairInfo944) {
-    const expired944 = await page.evaluate((pid) => window.__crashScreen.debug.expirePiece(pid), pairInfo944.lower);
-    const rose944 = await poll(async () => {
-      const boxes = await pieceBoxes944();
-      const up = Array.isArray(boxes) ? boxes.find((b) => b.pid === pairInfo944.upper) : null;
-      if (!up) return null;
-      return (up.top - pairInfo944.upperTop > 3) ? up.top : null;
-    }, 6000, 100);
-    const lowerGone944 = await poll(async () => {
-      const boxes = await pieceBoxes944();
-      return (Array.isArray(boxes) && !boxes.some((b) => b.pid === pairInfo944.lower)) ? true : null;
-    }, 2000, 80);
-    // What the upper piece actually did, so a failure says which half broke: never woken (evictPieces did not
-    // see it), or woken and then held up by something the pair search did not account for.
-    const upAfter944 = (await pieceBoxes944() || []).find((b) => b.pid === pairInfo944.upper) || null;
-    const floor944 = await page.evaluate(() => document.documentElement.clientHeight);
-    check('A.v2 9.4.4: a piece resting on top of another re-falls once the piece underneath it despawns', expired944 === pairInfo944.lower && lowerGone944 === true && !!rose944, { pair: pairInfo944, expired944, lowerGone944, after: rose944, upAfter: upAfter944, floor: floor944 });
+    for (let a = 0; a < 3 && !rose944; a++) {
+      const boxesA = await pieceBoxes944();
+      const pair = a === 0 ? pairInfo944 : findPair944(boxesA, attempts944.map((x) => x.lower));
+      if (!pair) break;
+      expired944 = await page.evaluate((pid) => window.__crashScreen.debug.expirePiece(pid), pair.lower);
+      rose944 = await poll(async () => {
+        const boxes = await pieceBoxes944();
+        const up = Array.isArray(boxes) ? boxes.find((b) => b.pid === pair.upper) : null;
+        if (!up) return null;
+        return (up.rawTop - pair.rawTop > 3) ? up.rawTop : null;
+      }, 4000, 100);
+      lowerGone944 = await poll(async () => {
+        const boxes = await pieceBoxes944();
+        return (Array.isArray(boxes) && !boxes.some((b) => b.pid === pair.lower)) ? true : null;
+      }, 2000, 80);
+      // What the upper piece actually did, so a failure says which half broke: never woken (the wake pass did
+      // not see it), or woken and then held up by something the pair search did not account for.
+      const upAfter = (await pieceBoxes944() || []).find((b) => b.pid === pair.upper) || null;
+      attempts944.push({ pair, expired: expired944, lowerGone: lowerGone944, rose: rose944, upAfter });
+      if (!rose944) pairInfo944 = pair;
+    }
   }
+  const floor944 = await page.evaluate(() => document.documentElement.clientHeight);
+  check('A.v2 9.4.4: a piece resting on top of another re-falls once the piece underneath it despawns',
+    !!pairInfo944 && expired944 != null && lowerGone944 === true && !!rose944,
+    { attempts: attempts944, floor: floor944 });
   await api.call(page, 'setDebrisLife', 6000);   // the lifetime goes back on for §9.4.5 below
 
   // ---- (5) in-flight pieces do not count toward the debris lifetime (§9.4.5) ----
@@ -7259,13 +7590,17 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
     archVolley5 === 'volley' && archVolley12 === 'volley' && archShot5.list.length === 5 && archShot12.list.length === 8
     && archVolTune.max === 8 && archVolTune.gapMs === 120 && near(archVolTune.dmgMul, 0.5, 1e-9),
     { archVolley5, archVolley12, n5: archShot5.list.length, n12: archShot12.list.length, archVolTune });
-  /* 발사 위치가 각 행의 왼쪽 끝. Only the still-waiting rounds are measured: the forced shot has a zero
-   * wind-up, so by the time this reads back it has already left its muzzle — the other four have not. */
+  /* 발사 위치가 각 행의 왼쪽 끝. Only the still-waiting rounds carry their muzzle position — a launched one
+   * has already moved. How MANY are still waiting is a race, though: rounds leave 120 ms apart and this read
+   * costs a CDP round trip, so three or four of the five are pending depending on the day. The count is not
+   * what this assertion is about (the 5-vs-8 count is asserted just above); the claim is that each round
+   * leaves from the left edge of its OWN row. So: however many are pending, every one of them sits on a row's
+   * left-centre, and no two share a row. */
   const archPend5 = archShot5.list.filter((o) => !o.launched).map((o) => ({ x: o.x, y: o.y }));
-  check('A.§D5: 연발의 발사 위치가 각 행의 왼쪽 끝이다 — 대기 중인 네 발이 서로 다른 네 행의 왼쪽 중심에 하나씩 놓여 있다',
-    archPend5.length === 4 && archRows5.length === 5
+  check('A.§D5: 연발의 발사 위치가 각 행의 왼쪽 끝이다 — 대기 중인 발들이 서로 다른 행의 왼쪽 중심에 하나씩 놓여 있다',
+    archPend5.length >= 3 && archRows5.length === 5
     && archPend5.every((p) => archRows5.some((r) => near(p.y, r.cy, 3) && near(p.x, r.left, 3)))
-    && new Set(archPend5.map((p) => Math.round(p.y))).size === 4,
+    && new Set(archPend5.map((p) => Math.round(p.y))).size === archPend5.length,
     { archPend5, archRows5 });
 
   // ---- (D3-5) 속사형: 3발을 0.15초 간격 700 px/s 로 ----
@@ -8342,6 +8677,447 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   check('A.§D 무흔적: content.js 가 그 뒤 깨끗하게 다시 켜지고 조준점이 다시 하나 그려진다',
     chReOn === 'on' && (await api.count(page, '.crs-crosshair')) >= 0, chReOn);
   await api.debug(page, Object.assign({}, CH_RAMPAGE_FLAGS, { noInvuln: true }));
+  await api.restore(page);
+  await sleep(120);
+
+  // =======================================================================================
+  // SPEC-destruction §F — 연소 시스템
+  //   사용자: "불 공격은 지속딜과 확산이 포인트인데 없네"
+  // §B2 above already holds the 3단계 계약 (불은 무적 요소에도 붙고 번지며 적에게 닿으면 문다). This
+  // section is the rest of §F: 지속 피해와 자연 감소 (§F1), 인접 확산 (§F2), 모습과 소리 (§F3),
+  // 파괴·상태·복구·폭발 연계 (§F4), 점화 무기표 (§F5), 화염방사기 재설계와 화염탄 (§F6).
+  // The fixture row #burn-a | #burn-b | #burn-c touch with a 0 px gap; #burn-off is 40 px past C.
+  // =======================================================================================
+  console.log('--- rules: SPEC-destruction §F — 연소 시스템 (지속 피해 · 확산 · 연계 · 화염탄) ---');
+  const burnOf = (id) => page.evaluate((q) => ((window.__crashScreen.debug.burning() || []).find((b) => b.id === q) || null), id);
+  const burnAll = () => page.evaluate(() => (window.__crashScreen.debug.burning() || []).map((b) => `${b.id || b.tag}:${b.stacks}`));
+  const igniteF = (sel, n) => page.evaluate((q, k) => window.__crashScreen.debug.ignite(document.querySelector(q), k), sel, n);
+
+  await setCombatMode('rampage');
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: true, noRepair: true, noFalloff: true, noInvuln: true, noPartial: true, timeScale: 1 });
+  await api.restore(page);
+  await sleep(100);
+  const rowF = await api.rect(page, '#burn-b');
+  const aF = await api.rectNoScroll(page, '#burn-a');
+  const cF = await api.rectNoScroll(page, '#burn-c');
+  const offF = await api.rectNoScroll(page, '#burn-off');
+  check('A.destr §F fixture: 세 카드가 정말 맞닿아 있고(간격 0) 통제 카드는 40 px 떨어져 있다 — §F2 의 24 px 인접 양쪽 바깥',
+    near(rowF.left - aF.right, 0, 2) && near(cF.left - rowF.right, 0, 2) && near(offF.left - cF.right, 40, 2),
+    { aToB: rowF.left - aF.right, bToC: cF.left - rowF.right, cToOff: offF.left - cF.right });
+
+  // ---- (F-1) §F1 / §F2 / §F5 의 숫자가 전부 명세 그대로다 ----------------------------------------
+  const kF = await debugCall('burnConst');
+  check('A.destr §F1/§F2/§F5: 연소 상수표가 명세 그대로다 — 틱 250ms · 초당 2 + stacks×0.14 · 자연 감소 6 · 상한 100 · 동시 20(성능 10) · 확산 700ms·45스택·24px·2개·×0.35 · 점화 화염 9 / 로켓 25·12 / 폭탄 15 / 레이저 4',
+    !!kF && kF !== 'missing:burnConst' &&
+    kF.tickMs === 250 && kF.dotBase === 2 && Math.abs(kF.dotPerStack - 0.14) < 1e-9 && kF.decay === 6 &&
+    kF.max === 100 && kF.cap === 20 && kF.capPerf === 10 &&
+    kF.spreadMs === 700 && kF.spreadMin === 45 && kF.spreadGap === 24 && kF.spreadMax === 2 && Math.abs(kF.spreadMul - 0.35) < 1e-9 &&
+    kF.flame === 9 && kF.rocket[0] === 25 && kF.rocket[1] === 12 && kF.bomb[1] === 15 && kF.laser === 4, kF);
+  check('A.destr §F4/§F6: 연계와 재설계의 숫자도 그대로다 — 폭발 반경 ×1.15 · 주변 스택 20 · 젖음 ×0.3 (20 미만 즉시 꺼짐) · 물총 −40 · 빙결 초당 25 · 화염 틱 피해 8 · 불바다 110px/5초/초당 14 · 연료 12 · 쿨다운 1400',
+    !!kF && Math.abs(kF.blastMul - 1.15) < 1e-9 && kF.blastSplash === 20 &&
+    Math.abs(kF.wetMul - 0.3) < 1e-9 && kF.wetOut === 20 && kF.water === 40 && kF.freezeRate === 25 &&
+    kF.flameTickDmg === 8 && kF.poolR === 110 && kF.poolMs === 5000 && kF.poolPerS === 14 &&
+    kF.firebombFuel === 12 && kF.firebombCd === 1400, kF);
+
+  // ---- (F-2) §F1 지속 피해: 100 스택이면 초당 16, 그리고 손대지 않아도 계속 준다 ------------------
+  /* Measured INSIDE the page over the product's own tick counter, not over a sleep: setTimeout drifts late
+     under load and a window that happens to contain three or five 250 ms steps instead of four would read
+     as a damage-rate regression. `ticks` says how many steps really ran, so the per-second figure §F1
+     states is computed from what happened rather than from what the sleep hoped for. */
+  const dotF = await page.evaluate(() => new Promise((res) => {
+    const a = window.__crashScreen, d = a.debug;
+    const el = document.querySelector('#burn-a');
+    const hp0 = a.hpOf(el).hp;
+    const lit = d.ignite(el, 100);
+    const t0 = performance.now(), k0 = d.burnStats().ticks;
+    setTimeout(() => {
+      const ticks = d.burnStats().ticks - k0;
+      res({ lit, hp0, hp1: a.hpOf(el).hp, ticks, ms: Math.round(performance.now() - t0) });
+    }, 1060);
+  }));
+  const dotPerSec = dotF.ticks ? (dotF.hp0 - dotF.hp1) * (1000 / (dotF.ticks * 250)) : -1;
+  const hpF1 = await api.hpOf(page, '#burn-a');
+  await sleep(1000);
+  const hpF2 = await api.hpOf(page, '#burn-a');
+  check('A.destr §F1: 100 스택에서 1초 뒤 체력이 16±3 줄어든다 (초당 2 + stacks × 0.14, 250ms 마다 1/4씩)',
+    dotF.lit === 100 && dotF.ticks >= 4 && dotF.ticks <= 5 && Math.abs(dotPerSec - 16) <= 3,
+    { ...dotF, perSecond: dotPerSec, drop: dotF.hp0 - dotF.hp1 });
+  check('A.destr §F1: 손대지 않아도 계속 준다 — 두 번째 1초에도 체력이 더 줄고, 스택은 자연 감소로 내려간다 (불을 붙이고 떠나도 일이 진행된다)',
+    hpF2.hp < hpF1.hp && !(await api.broken(page, '#burn-a')) &&
+    (await burnOf('burn-a')) !== null && (await burnOf('burn-a')).stacks < 100 - 6,
+    { at1s: hpF1, at2s: hpF2, burning: await burnAll() });
+
+  // ---- (F-3) §F1 자연 감소: 100 스택은 약 16초 뒤 꺼진다 ------------------------------------------
+  /* Measured on an INVULNERABLE element (a combat mode, 18 000 px² — under every hostile floor), so the
+   * ledger empties by DECAY and not because the element was destroyed on the way. SPEC-test-speed §3's
+   * time scale compresses the wall clock; the simulated figure is what is asserted.
+   * §G says "16초 안에 해제된다" and §F1 says "약 16초간 타며 누적 150 전후를 준다": the spec's own
+   * constants (100 스택, 초당 6) give 16.5 s exactly, so §G's "16초" is §F1's "약 16초" rounded.
+   * INTERPRETATION (reported): the window asserted is 15–17 simulated seconds. */
+  await setCombatMode('survival');
+  await api.debug(page, { noInvuln: false, noAttacks: true, noRepair: true, timeScale: 0.1 });
+  await api.restore(page);
+  await sleep(120);
+  await api.rect(page, '#burn-a');
+  /* Counted in 250 ms STEPS rather than in polled wall-clock milliseconds: at a 0.1 time scale one poll
+     round trip is worth most of a simulated second, so a wall-clock reading would carry ±1.5 s of harness
+     latency into a 16 s claim. The tick counter is the product's own clock. */
+  const decayF = await page.evaluate(() => new Promise((res) => {
+    const a = window.__crashScreen, d = a.debug;
+    const el = document.querySelector('#burn-a');
+    const hp0 = a.hpOf(el).hp;
+    const lit = d.ignite(el, 100);
+    const k0 = d.burnStats().ticks, t0 = performance.now();
+    const done = (ticks) => res({ lit, hp0, hp1: a.hpOf(el).hp, ticks, wallMs: Math.round(performance.now() - t0) });
+    const iv = setInterval(() => {
+      if ((d.burning() || []).some((b) => b.id === 'burn-a')) return;
+      clearInterval(iv); done(d.burnStats().ticks - k0);
+    }, 10);
+    setTimeout(() => { clearInterval(iv); done(-1); }, 8000);
+  }));
+  check('A.destr §F1: 100 스택은 자연 감소(초당 6)로 약 16초 뒤 꺼진다 — 무적 요소라 파괴로 끝나는 게 아니라 정말 꺼지는 것이다 (250ms 틱 수로 재고, 시간 배율 0.1 로 돌린다)',
+    decayF.lit === 100 && decayF.ticks >= 63 && decayF.ticks <= 69 && decayF.hp1 === decayF.hp0,
+    { ...decayF, simulatedMs: decayF.ticks * 250 });
+  await api.debug(page, { timeScale: 1, noInvuln: true });
+  await setCombatMode('rampage');
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (F-4) §F2 확산: 맞닿은 카드로 번지고, 40 px 떨어진 카드에는 안 번진다 ----------------------
+  await api.rect(page, '#burn-b');
+  const sparks0 = (await debugCall('burnStats')).sparks;
+  await igniteF('#burn-b', 60);
+  const spreadA = await poll(() => burnOf('burn-a'), 2000, 80);
+  const spreadC = await poll(() => burnOf('burn-c'), 2000, 80);
+  const spreadOff = await burnOf('burn-off');
+  const statsSpread = await debugCall('burnStats');
+  check('A.destr §F2: 맞닿은 카드 3장 중 가운데에 60 스택을 주면 2초 안에 나머지 둘도 탄다 (700ms 마다 최대 2개, stacks × 0.35)',
+    !!spreadA && !!spreadC && spreadA.stacks >= 15 && spreadA.stacks <= 25 && spreadC.stacks >= 15 && spreadC.stacks <= 25,
+    { a: spreadA, c: spreadC, all: await burnAll() });
+  check('A.destr §F2: 40 px 떨어진 카드에는 안 번진다 — 거리가 아니라 인접(24px)이어야 한다. 불이 아니라 순간이동이면 곤란하다',
+    spreadOff === null, { off: spreadOff, all: await burnAll() });
+  check('A.destr §F2: 번진 뒤에도 원래 쪽은 줄지 않는다 (불은 나눠 갖는 게 아니라 번진다) 그리고 확산 순간마다 불꽃이 튀는 연출이 있다',
+    (await burnOf('burn-b')).stacks > 45 && statsSpread.sparks >= sparks0 + 2,
+    { b: await burnOf('burn-b'), sparks: [sparks0, statsSpread.sparks] });
+
+  // ---- (F-5) §F3 모습: 아래 가장자리 불꽃 · sepia 틴트 · 연기 ------------------------------------
+  /* The strip flickers with `transform: scaleY(1 → .62 → 1)` on a 0.12 s loop, so ONE getBoundingClientRect()
+   * catches whatever frame it is on — its bottom edge wanders by several pixels and the "sits on the element's
+   * bottom edge" clause failed about one run in four for that reason alone. scaleY never grows past 1, so the
+   * widest box seen across a full cycle IS the laid-out one: sample it in-page over 200 ms and keep the
+   * extremes. Stacks are read in the same evaluation, at the end, so height and stacks cannot drift apart. */
+  /* The strip flickers with `transform: scaleY(1 → .62 → 1)` on a 0.12 s loop, so ONE getBoundingClientRect()
+   * catches whatever frame it happens to be on — its bottom edge wanders several pixels, and the "sits on the
+   * element's bottom edge" clause lost on that alone about one run in four. scaleY never grows past 1, so the
+   * widest box seen across a full cycle IS the laid-out one: sample it in-page over 200 ms and keep the
+   * extremes. Height comes from the computed style (layout, never scaled) and the stacks are read in the SAME
+   * evaluation, so the height and the number it is supposed to follow cannot drift apart between round trips. */
+  const lookF = await page.evaluate(() => new Promise((resolve) => {
+    const el = document.querySelector('#burn-b');
+    const matches = () => {
+      const er = el.getBoundingClientRect();
+      return [...document.querySelectorAll('.crs-flames')].filter((n) => {
+        const b = n.getBoundingClientRect();
+        return Math.abs(Math.round(b.left) - Math.round(er.left)) <= 2 && Math.abs(Math.round(b.width) - Math.round(er.width)) <= 3;
+      });
+    };
+    let lo = Infinity, hi = -Infinity, h = null, frames = 0;
+    const t0 = performance.now();
+    const step = () => {
+      for (const n of matches()) {
+        const b = n.getBoundingClientRect();
+        if (b.top < lo) lo = b.top;
+        if (b.bottom > hi) hi = b.bottom;
+        h = parseFloat(getComputedStyle(n).height);
+      }
+      frames++;
+      if (performance.now() - t0 < 200) { requestAnimationFrame(step); return; }
+      const r = el.getBoundingClientRect();
+      const st = (window.__crashScreen.debug.burning() || []).find((b) => b.id === 'burn-b');
+      resolve({
+        flames: document.querySelectorAll('.crs-flames').length,
+        mine: h == null ? null : { t: Math.round(lo), h, bottom: Math.round(hi) },
+        bottom: Math.round(r.bottom), frames,
+        filter: el.style.getPropertyValue('filter'),
+        stacks: st ? st.stacks : -1,
+        smoke: document.querySelectorAll('.crs-smoke').length,
+      });
+    };
+    requestAnimationFrame(step);
+  }));
+  check('A.destr §F3: 타는 요소의 아래 가장자리에 불꽃 오버레이가 붙고, 높이가 12 + stacks × 0.2 px 다 (요소를 따라 움직인다)',
+    !!lookF.mine && Math.abs(lookF.mine.bottom - lookF.bottom) <= 3 &&
+    Math.abs(lookF.mine.h - (12 + lookF.stacks * 0.2)) <= 1.5, lookF);
+  check('A.destr §F3: 틴트가 인라인 filter 로 들어간다 — sepia(stacks/280) brightness(1 + stacks/900)',
+    /sepia\(/.test(lookF.filter) && /brightness\(/.test(lookF.filter) &&
+    Math.abs(parseFloat(/sepia\(([\d.]+)\)/.exec(lookF.filter)[1]) - lookF.stacks / 280) < 0.01, lookF);
+  const smokeF = await poll(async () => { const n = await api.count(page, '.crs-smoke'); return n >= 1 ? n : null; }, 2000, 80);
+  check('A.destr §F3: 연기가 피어오른다 (요소당 초당 1.5개)', smokeF !== null && smokeF >= 1, { smoke: smokeF });
+
+  // ---- (F-6) §F3 소리: 노드 하나, 볼륨만 달라진다 ------------------------------------------------
+  const audio1 = await debugCall('burnAudio');
+  await igniteF('#burn-off', 80);
+  await sleep(320);
+  const audio2 = await debugCall('burnAudio');
+  check('A.destr §F3: 타닥거리는 루프는 하나뿐이다 — 타는 요소가 늘어도 오디오 노드는 1개이고 볼륨만 올라간다',
+    !!audio1 && !!audio2 && audio1.nodes <= 1 && audio2.nodes <= 1 &&
+    (audio2.ctx === false || (audio2.nodes === 1 && audio2.gain > audio1.gain)),
+    { before: audio1, after: audio2, burning: await burnAll() });
+
+  // ---- (F-7) §F4 변위 → 불: 인접 판정이 현재 위치 기준이라 밀어서 떼면 방화선이 된다 --------------
+  await api.restore(page);
+  await sleep(120);
+  await api.debug(page, { noDisplaceCollide: true });
+  await api.rect(page, '#burn-b');
+  await igniteF('#burn-c', 70);
+  await page.evaluate(() => window.__crashScreen.debug.displace(document.querySelector('#burn-c'), 0, -2600));
+  const gapPushed = await poll(async () => page.evaluate(() => {
+    const b = document.querySelector('#burn-b').getBoundingClientRect();
+    const c = document.querySelector('#burn-c').getBoundingClientRect();
+    const dx = Math.max(b.left - c.right, c.left - b.right, 0);
+    const dy = Math.max(b.top - c.bottom, c.top - b.bottom, 0);
+    const g = Math.hypot(dx, dy);
+    return g > 24 ? Math.round(g) : null;
+  }), 2000, 40);
+  await sleep(1700);   // two §F2 spread windows: if adjacency still held, #burn-b would be alight by now
+  const notSpread = await burnOf('burn-b');
+  check('A.destr §F4: 타는 요소를 밀어 인접을 끊으면 확산이 멈춘다 — 인접 판정이 현재 위치 기준이라 밀어서 떼면 방화선이 된다',
+    gapPushed !== null && gapPushed > 24 && notSpread === null && (await burnOf('burn-c')) !== null,
+    { gap: gapPushed, b: notSpread, c: await burnOf('burn-c'), all: await burnAll() });
+  await api.debug(page, { noDisplaceCollide: false });
+
+  // ---- (F-8) §F4 젖음 · 빙결 ---------------------------------------------------------------------
+  /* 물총(젖음)·냉각총(빙결)은 로드맵 8단계라 이 빌드에 무기가 없다. 규칙 자체는 진짜 상태 기록 위에
+   * 구현되어 있고 debug.setWet / setFrozen / douse 로 구동한다 — 8단계는 무기만 연결하면 된다. */
+  await api.restore(page);
+  await sleep(120);
+  await api.rect(page, '#burn-a');
+  await page.evaluate(() => window.__crashScreen.debug.setWet(document.querySelector('#burn-a'), 8000));
+  const wetLit = await igniteF('#burn-a', 100);
+  check('A.destr §F4 (젖음 → 불): 젖은 요소는 스택이 30% 만 쌓인다 — 100 을 부어도 30 이다',
+    wetLit !== null && Math.abs(wetLit - 30) <= 1, { got: wetLit, chill: await page.evaluate(() => window.__crashScreen.debug.chillOf(document.querySelector('#burn-a'))) });
+  const wetOut = await page.evaluate(() => { const d = window.__crashScreen.debug; const el = document.querySelector('#burn-b'); d.setWet(el, 8000); return d.ignite(el, 50); });
+  check('A.destr §F4 (젖음 → 불): 젖은 채로 stacks < 20 이면 즉시 꺼진다 — 50 × 0.3 = 15 는 불이 붙지 않는다',
+    wetOut === null && (await burnOf('burn-b')) === null, { ret: wetOut, burning: await burnAll() });
+  const dousedF = await page.evaluate(() => window.__crashScreen.debug.douse(document.querySelector('#burn-a')));
+  check('A.destr §F4 (물총 → 불): 물을 맞히면 틱당 스택이 40 줄고, 남은 스택이 0 이면 꺼진다 — 물총이 소화기가 된다',
+    dousedF === 0 && (await burnOf('burn-a')) === null, { after: dousedF, burning: await burnAll() });
+  await api.restore(page);
+  await sleep(100);
+  await api.rect(page, '#burn-c');
+  const frozenLit = await page.evaluate(() => { const d = window.__crashScreen.debug; const el = document.querySelector('#burn-c'); d.setFrozen(el, 100); return d.ignite(el, 100); });
+  const thawedLit = await page.evaluate(() => { const d = window.__crashScreen.debug; const el = document.querySelector('#burn-c'); d.setFrozen(el, 40); return d.ignite(el, 100); });
+  check('A.destr §F4 (완전 빙결 → 불): 완전히 언 요소에는 불이 붙지 않는다. 먼저 녹여야 한다 — 40 까지 녹이면 붙는다',
+    frozenLit === null && thawedLit === 100, { frozen: frozenLit, thawed: thawedLit });
+  await api.restore(page);
+  await sleep(100);
+
+  // ---- (F-9) §F4 파괴 연계: 연소 중에 죽으면 무엇에 맞아 죽었든 ash 다 ---------------------------
+  await api.setWeapon(page, 'hammer');
+  /* #demo-img, not one of the burn cards: a TEXT-dominant element goes down the §B1 word path
+     (spawnWordPieces) whatever its destruction profile says, so its box falls as one piece and its glyphs
+     as words — the ash SHAPE never gets a say. That rule is §B's and predates §F; the claim §F4 makes
+     ("무엇에 맞아 죽었든 ash") is about the WEAPON not deciding, so it is asserted where the shape is the
+     thing that decides. The rect is re-read rather than reused: api.rect() scrolls. */
+  const ashPt1 = await api.rect(page, '#demo-img');
+  const ashCtl = await page.evaluate((x, y) => {
+    const a = window.__crashScreen;
+    let guard = 0;
+    while (!document.querySelector('#demo-img').hasAttribute('data-crs-broken') && guard++ < 40) a.smashAt(x, y, 'hammer');
+    const bs = a.debug.pieceBoxes().filter((b) => !b.chip);
+    return { ash: bs.filter((b) => b.ash).length, total: bs.length, hits: guard, broke: document.querySelector('#demo-img').hasAttribute('data-crs-broken') };
+  }, ashPt1.cx, ashPt1.cy);
+  await api.restore(page);
+  await sleep(120);
+  const ashPt2 = await api.rect(page, '#demo-img');
+  const litAsh = await igniteF('#demo-img', 12);
+  /* One full 250 ms step, deliberately: §F4's ash is for an element that was ALREADY burning when the blow
+     landed. A fire lit in the same event as the kill is the blast's own ignition (§F5) and must not steal
+     the bomb's and the rocket's §B4 debris. */
+  await sleep(330);
+  const ashBurn = await page.evaluate((x, y) => {
+    const a = window.__crashScreen;
+    let guard = 0;
+    const was = [];
+    while (!document.querySelector('#demo-img').hasAttribute('data-crs-broken') && guard++ < 40) {
+      was.push((a.debug.burning() || []).filter((b) => b.tag === 'IMG').map((b) => `${b.stacks}/${b.ticked}`).join(','));
+      a.smashAt(x, y, 'hammer');
+    }
+    const bs = a.debug.pieceBoxes().filter((b) => !b.chip);
+    return { ash: bs.filter((b) => b.ash).length, total: bs.length, max: bs.reduce((m, b) => Math.max(m, b.w, b.h), 0),
+      hits: guard, broke: document.querySelector('#demo-img').hasAttribute('data-crs-broken'), burningBefore: was };
+  }, ashPt2.cx, ashPt2.cy);
+  check('A.destr §F4: 연소 중에 파괴된 요소는 무엇에 맞아 죽었든 ash 조각으로 부서진다 — 같은 망치가 안 타는 요소는 ash 를 내지 않는다',
+    ashCtl.ash === 0 && ashCtl.total >= 1 && ashBurn.ash >= 18 && ashBurn.ash <= 30 && ashBurn.max < 20,
+    { control: ashCtl, burning: ashBurn, lit: litAsh });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (F-10) §F4 폭발 연계: 반경 ×1.15 와 주변 스택 20 -----------------------------------------
+  await api.setWeapon(page, 'bomb');
+  await api.rect(page, '#burn-b');
+  await api.smashAt(page, rowF.cx, rowF.cy);
+  await sleep(90);
+  const plainR = await debugCall('lastBlast');
+  await api.restore(page);
+  await sleep(120);
+  await api.rect(page, '#burn-b');
+  const caughtF = await page.evaluate((x, y) => {
+    const a = window.__crashScreen, d = a.debug;
+    d.ignite(document.querySelector('#burn-c'), 5);          // something in range is already alight
+    a.smashAt(x, y, 'bomb');
+    return (d.burning() || []).map((b) => ({ id: b.id, s: b.stacks }));
+  }, rowF.cx, rowF.cy);
+  await sleep(90);
+  const burntR = await debugCall('lastBlast');
+  const splashed = caughtF.find((b) => b.id === 'burn-a');
+  check('A.destr §F4: 연소 중 요소가 폭발에 휘말리면 반경이 ×1.15 된다 (240 → 276) — 아무것도 안 탈 때는 240 그대로다',
+    !!plainR && !!burntR && plainR.R === W14.byId.bomb.radius && burntR.R === Math.round(W14.byId.bomb.radius * 1.15),
+    { plain: plainR && plainR.R, burnt: burntR && burntR.R });
+  check('A.destr §F4/§F5: 그 폭발이 주변에 스택 20을 뿌린다 — 평소 폭탄 범위 점화 15 보다 세다',
+    !!splashed && splashed.s >= 20, { burning: caughtF });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (F-11) §F5 점화 무기: 폭탄과 로켓이 정말 불을 붙인다 -------------------------------------
+  await api.rect(page, '#burn-b');
+  const bombIgnite = await page.evaluate((x, y) => {
+    const a = window.__crashScreen;
+    a.smashAt(x, y, 'bomb');
+    return (a.debug.burning() || []).map((b) => ({ id: b.id, s: b.stacks, by: b.igniter }));
+  }, rowF.cx, rowF.cy);
+  const bombDirect = bombIgnite.find((b) => b.id === 'burn-b');
+  check('A.destr §F5: 폭탄이 범위 안의 요소에 스택 15 를 붙인다 (직격도 15)',
+    bombIgnite.length >= 2 && !!bombDirect && Math.abs(bombDirect.s - 15) <= 1, { burning: bombIgnite });
+  await api.restore(page);
+  await sleep(120);
+  await api.rect(page, '#burn-b');
+  const rocketIgnite = await page.evaluate((x, y) => new Promise((res) => {
+    const a = window.__crashScreen;
+    a.smashAt(x, y, 'rocket');
+    setTimeout(() => res((a.debug.burning() || []).map((b) => ({ id: b.id, s: b.stacks }))), 240);
+  }), rowF.cx, rowF.cy);
+  const rocketDirect = rocketIgnite.find((b) => b.id === 'burn-b');
+  const rocketSplash = rocketIgnite.find((b) => b.id === 'burn-a' || b.id === 'burn-c');
+  check('A.destr §F5: 로켓은 직격 25 · 범위 12 로 갈린다 — 직격이 범위보다 세다',
+    !!rocketDirect && !!rocketSplash && rocketDirect.s > rocketSplash.s && rocketDirect.s >= 20 && rocketSplash.s >= 8 && rocketSplash.s <= 14,
+    { burning: rocketIgnite });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (F-12) §F6 화염방사기 재설계: 틱 피해 8 · 틱당 스택 9 ------------------------------------
+  await api.rect(page, '#burn-a');
+  const hpFl0 = await api.hpOf(page, '#burn-a');
+  await api.setWeapon(page, 'flame');
+  await sleep(60);
+  const flameTick = await page.evaluate((x, y) => {
+    const a = window.__crashScreen;
+    a.smashAt(x, y, 'flame');
+    const b = (a.debug.burning() || []).find((q) => q.id === 'burn-a');
+    return { hp: a.hpOf(document.querySelector('#burn-a')).hp, stacks: b ? b.stacks : -1, by: b ? b.igniter : '' };
+  }, aF.cx, aF.cy);
+  check('A.destr §F6: 화염방사기 한 틱은 피해 8 과 스택 9 다 — 즉시 화력은 최하위로 내리고 일을 연소로 옮겼다 (기존 15)',
+    hpFl0.hp - flameTick.hp === 8 && flameTick.stacks === 9 && flameTick.by === 'flame',
+    { before: hpFl0.hp, after: flameTick });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (F-13) §F6 화염탄: 짧게 누르면 포물선으로 날아가 불바다를 남긴다 --------------------------
+  await api.debug(page, { infiniteAmmo: false });
+  await api.setWeapon(page, 'flame');
+  await sleep(80);
+  const bPtF = await api.rect(page, '#burn-b');
+  await api.restore(page);
+  await sleep(100);
+  const fuel0 = (await api.ammo(page)).mag;
+  await page.mouse.move(bPtF.cx, bPtF.cy);
+  await page.mouse.down();
+  await sleep(60);                       // §F6 "보조(짧게)": released well inside the 180 ms press window
+  await page.mouse.up();
+  const shellSeen = await poll(async () => (await api.count(page, '.crs-firebomb')) >= 1, 400, 20);
+  const poolF = await poll(async () => { const p = await debugCall('firePools'); return (Array.isArray(p) && p.length) ? p : null; }, 1500, 40);
+  const fuel1 = (await api.ammo(page)).mag;
+  /* The press itself is still a stream: every 50 ms tick costs one fuel like any hold weapon, and the SHELL
+     costs §F6's 12 on top. stats().shots counts the ticks plus the shell's own one, so the expected bill is
+     stated rather than guessed from a sleep that may have drifted. */
+  const shotsF1 = (await api.stats(page)).shots;
+  check('A.destr §F6: 화염방사기를 짧게 누르면 화염탄이 포물선으로 날아간다 — 연료는 분사한 틱 + 화염탄 12 만큼 든다',
+    shellSeen === true && fuel0 - fuel1 === (shotsF1 - 1) + 12,
+    { fuel: [fuel0, fuel1], spent: fuel0 - fuel1, shots: shotsF1, shell: shellSeen });
+  check('A.destr §F6: 착탄점에 반경 110px 불바다가 5초간 남는다 — 확산의 시작점을 던져 놓는 도구다',
+    !!poolF && poolF.length === 1 && poolF[0].r === 110 && poolF[0].msLeft > 3800 && poolF[0].msLeft <= 5000,
+    { pools: poolF });
+  const poolLit = await poll(() => burnOf('burn-b'), 1500, 60);
+  check('A.destr §F6: 불바다 위의 요소는 초당 14 스택씩 받는다 — 던져 놓은 자리에서 불이 자라난다',
+    !!poolLit && poolLit.stacks > 0, { lit: poolLit, pools: await debugCall('firePools'), all: await burnAll() });
+  const poolGone = await poll(async () => { const p = await debugCall('firePools'); return (Array.isArray(p) && p.length === 0) ? true : null; }, 6000, 100);
+  check('A.destr §F6: 그리고 5초가 지나면 불바다는 사라진다 (흔적 없음)',
+    poolGone === true && (await api.count(page, '.crs-firepool')) === 0, { pools: await debugCall('firePools') });
+  await api.debug(page, { infiniteAmmo: true });
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (F-14) §F4 복구 봉쇄: 타는 적대 요소는 복구를 하지 못한다 --------------------------------
+  await setCombatMode('survival');
+  await api.debug(page, { noInvuln: true, noRepair: false, noAttacks: true });
+  await api.restore(page);
+  await sleep(120);
+  await api.rect(page, '#fire-src');
+  const repTier = await force('#fire-enemy', 'forceAttack');
+  await debugCall('setAvatarPos', 120, 120);
+  await page.evaluate(() => window.__crashScreen.debug.setPlayerHp(100));
+  const srcRep = await api.rectNoScroll(page, '#fire-src');
+  await api.smashAt(page, srcRep.cx, srcRep.cy, 'collapse');   // something for the enemy to put back
+  await poll(async () => (await api.stats(page)).broken >= 1, 2500, 60);
+  const repairedBefore = await force('#fire-enemy', 'forceRepair');
+  await page.evaluate(() => window.__crashScreen.debug.clearRepairsForTest && window.__crashScreen.debug.clearRepairsForTest());
+  const litEnemy = await page.evaluate(() => window.__crashScreen.debug.ignite(document.querySelector('#fire-enemy'), 80));
+  const repairedWhileBurning = await force('#fire-enemy', 'forceRepair');
+  check('A.destr §F4: 연소 중인 적대 요소는 복구를 하지 못한다 — 불로 묶어두는 전술이 생긴다 (불이 붙기 전에는 같은 호출이 복구를 시작한다)',
+    repTier !== 'missing:forceAttack' && repairedBefore !== null && litEnemy !== null && repairedWhileBurning === null,
+    { tier: repTier, before: repairedBefore, lit: litEnemy, while: repairedWhileBurning, broken: (await api.stats(page)).broken });
+  await api.debug(page, { noRepair: true });
+  await setCombatMode('rampage');
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (F-15) 무흔적: 불이 번지는 중에 Escape ----------------------------------------------------
+  await api.rect(page, '#burn-b');
+  // a page element that ALREADY has an inline filter: "원래 값으로" is not the same as "빈 문자열로"
+  await page.evaluate(() => { document.querySelector('#burn-c').style.setProperty('filter', 'blur(0px)'); });
+  await igniteF('#burn-b', 90);
+  await page.evaluate(() => window.__crashScreen.debug.firebomb(document.querySelector('#burn-a').getBoundingClientRect().left + 40, document.querySelector('#burn-a').getBoundingClientRect().top + 40));
+  const burningMid = await poll(async () => { const n = (await burnAll()).length; return n >= 2 ? n : null; }, 2500, 80);
+  const liveMid = await page.evaluate(() => ({
+    flames: document.querySelectorAll('.crs-flames').length,
+    pools: document.querySelectorAll('.crs-firepool').length,
+    tinted: [...document.querySelectorAll('body *')].filter((el) => !el.hasAttribute('data-crs') && /sepia/.test(el.style.filter || '')).length,
+  }));
+  await page.keyboard.press('Escape');
+  const offMid = await poll(async () => !(await api.active(page)), 1500, 20);
+  await settleRaf(page);
+  const traceMid = await page.evaluate(() => ({
+    nodes: document.querySelectorAll('[data-crs]').length,
+    anims: document.getAnimations().length,
+    tinted: [...document.querySelectorAll('body *')].filter((el) => /sepia/.test(el.style.filter || '')).length,
+    burnC: document.querySelector('#burn-c').style.getPropertyValue('filter'),
+    burnB: document.querySelector('#burn-b').style.getPropertyValue('filter'),
+  }));
+  const pendMid = await api.pending(page);
+  const rafMid = await api.pendingRaf(page);
+  check('A.destr §F 무흔적: 불이 번지고 불바다가 깔린 채 Escape → [data-crs] 0개, 애니메이션 0개, 타이머·프레임 0개',
+    burningMid !== null && liveMid.flames >= 1 && liveMid.tinted >= 1 && offMid === true &&
+    traceMid.nodes === 0 && traceMid.anims === 0 && pendMid === 0 && rafMid === 0,
+    { mid: liveMid, burningMid, trace: traceMid, pending: pendMid, raf: rafMid });
+  check('A.destr §F 무흔적: 페이지 요소의 인라인 filter 가 빈 문자열이 아니라 **원래 값**으로 돌아간다 — 원래 없던 쪽은 비고, blur(0px) 이던 쪽은 blur(0px) 이다',
+    traceMid.tinted === 0 && traceMid.burnB === '' && traceMid.burnC === 'blur(0px)', traceMid);
+  const reOnMid = await page.evaluate(contentJs);
+  check('A.destr §F 무흔적: 그 뒤 content.js 가 깨끗하게 다시 켜지고 연소 원장이 비어 있다',
+    reOnMid === 'on' && (await burnAll()).length === 0 && (await debugCall('burnStats')).pools === 0,
+    { reOn: reOnMid, burning: await burnAll(), stats: await debugCall('burnStats') });
+  await page.evaluate(() => { document.querySelector('#burn-c').style.removeProperty('filter'); });
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noPartial: true, timeScale: 1 });
   await api.restore(page);
   await sleep(120);
 

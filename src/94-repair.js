@@ -65,6 +65,8 @@
     if (!root || !state.active || !modeHasRepair() || state.paused) return null;
     if (!forced && debug.noRepair) return null;
     if (!rec || !rec.el || !rec.el.isConnected || state.hostiles.get(rec.el) !== rec) return null;
+    /* SPEC-destruction §F4: "연소 중인 적대 요소는 복구를 하지 못한다. 불로 묶어두는 전술이 생긴다." */
+    if (isBurning(rec.el)) return null;
     const el = repairCandidate(rec);
     if (!el) return null;
     const node = mk('div', 'crs-repair');

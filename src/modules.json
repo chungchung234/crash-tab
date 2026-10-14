@@ -25,6 +25,7 @@
     "71-weapon-helpers.js",
     "73-hit-resolution.js",
     "76-weapon-fire.js",
+    "77-burn.js",
     "79-weapon-actions.js",
     "82-ammo-reload.js",
     "83-scope.js",

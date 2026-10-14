@@ -338,3 +338,27 @@ footer { padding: 20px; color: #6a7389; font-size: 13px; border-top: 1px solid #
 .fire-enemy { left: 230px; width: 300px; height: 180px; background: #d8e7ff; border: 1px solid #8fb6ea; }
 /* left 610 = 230 + 300 + 80: an 80 px gap from #fire-enemy, outside the adjacency rule */
 .fire-far { left: 610px; width: 200px; height: 80px; background: #e9e9ef; border: 1px solid #c2c2cf; }
+
+/* SPEC-destruction §F2 (연소 확산 격자): A | B | C with ZERO gap — really touching — and a control card
+   40 px past C, which is outside §F2's 24 px adjacency. Absolutely positioned so the gaps are exact
+   numbers a test can state rather than whatever flex rounding produces. */
+.burn-row { position: relative; height: 120px; margin-top: 40px; margin-bottom: 28px; }
+.burn-card {
+  position: absolute;
+  top: 0;
+  width: 200px;
+  height: 90px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+  background: #fff1e0;
+  border: 1px solid #e8b178;
+}
+#burn-a { left: 20px; }
+#burn-b { left: 220px; }   /* 20 + 200: a 0 px gap from A */
+#burn-c { left: 420px; }   /* 220 + 200: a 0 px gap from B */
+#burn-off { left: 660px; background: #eceef3; border-color: #c3c7d2; }   /* 620 + 40: outside the 24 px rule */
