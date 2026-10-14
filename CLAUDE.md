@@ -63,14 +63,14 @@ CSS 를 병합할 때는 규칙 본문 안에서 충돌이 나면 중괄호가 �
 ## 테스트
 
 ```bash
-node test/e2e.js                      # 전체, 87초, 919 단언
-CRS_BLOCKS=ammo node test/e2e.js      # 87초 — 탄창·저격경·로드아웃·가독성·보조 공격(§A)·레이저·미니건(§B)
-CRS_BLOCKS=rules node test/e2e.js     # 75초 — 모드·적만 피해·적만 포커싱·아키타입·투사체·연소(§F)
-CRS_BLOCKS=core node test/e2e.js      # 62초 — 픽스처·주입·HP·무기 아트·재질·조준점·파괴·폭발(§E)
-CRS_BLOCKS=debris node test/e2e.js    # 39초 — 파편 수명·누적 자국·무기별 분해·타격 지점
-CRS_BLOCKS=combat node test/e2e.js    # 34초 — 드론·락온·복구
-CRS_BLOCKS=depth node test/e2e.js     # 28초 — 깊이·관통·변위
-CRS_BLOCKS=settings node test/e2e.js  # 6초  — 스키마·성능 가드·접근성
+node test/e2e.js                      # 전체, 102초, 953 단언
+CRS_BLOCKS=ammo node test/e2e.js      # 92초 — 탄창·저격경·로드아웃·가독성·보조 공격(§A)·레이저·미니건(§B)·무기 표와 예능 밴드(§C·§D)
+CRS_BLOCKS=rules node test/e2e.js     # 76초 — 모드·적만 피해·적만 포커싱·아키타입·투사체·연소(§F)·나팔과 견인(§C·§D)
+CRS_BLOCKS=core node test/e2e.js      # 60초 — 픽스처·주입·HP·무기 아트·재질·조준점·파괴·폭발(§E)
+CRS_BLOCKS=depth node test/e2e.js     # 48초 — 깊이·관통·변위·상호작용 무기 물리(§C)·젖음(§D)
+CRS_BLOCKS=debris node test/e2e.js    # 38초 — 파편 수명·누적 자국·무기별 분해·타격 지점
+CRS_BLOCKS=combat node test/e2e.js    # 35초 — 드론·락온·복구
+CRS_BLOCKS=settings node test/e2e.js  # 7초  — 스키마·성능 가드·접근성
 ```
 
 - 반복 중에는 건드린 블록만 돌린다. **완료 판정은 항상 전체 실행이다.**

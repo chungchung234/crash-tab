@@ -23,6 +23,13 @@
   const MOVED_GRAVITY = 1200;        // §E2, ONLY while wet / bouncy
   const MOVED_OUT_MARGIN = 400;      // §E2, px past a viewport edge
   const MOVED_BOUNCE = 0.45;         // §E3, restitution
+  /* ── SPEC-arsenal §C / §D (8단계) — three numbers the interaction weapons need from THIS integrator ──
+   * They live here rather than in src/68-interaction.js because they are properties of the body, not of the
+   * weapon: whatever made a body wet or bouncy, it slides and bounces the same way afterwards. The flags
+   * themselves (`b.wet` / `b.bouncy`) were already part of §E2's record. */
+  const MOVED_FRICTION_WET = 0.94;   // §D 물총: "더 멀리 미끄러짐" — 0.86/s → 0.94/s
+  const MOVED_BOUNCE_BOUNCY = 0.85;  // §C 고무탄: 반발 0.85 (당구공)
+  const MOVED_BOUNCY_DMG = 1.6;      // §C 고무탄: 충돌 피해 ×1.6
   const MOVED_STATIC_MS = 300;       // §E3, the in-place candidate cache
   const MOVED_RETURN_MS = 400;       // §E1, the over-cap glide home
   const MOVED_REAPPLY_MAX = 3;       // §E4, reapply three times, then give up on the element
@@ -150,7 +157,7 @@
       el, x: 0, y: 0, rot: 0, vx: 0, vy: 0, vr: 0, resting: false, bornAt: now(),
       wet: false, bouncy: false,
       mass: movedMass(rect), saved, savedPriority: priority, want: '', wrote: '', reapplied: 0,
-      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0, retMs: 0,
+      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0, retMs: 0, floored: false,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
       hitAt: new WeakMap()
     };
@@ -237,11 +244,15 @@
   /* §E3 damage. It goes through collisionHit() (src/73-hit-resolution.js) and NOT through applyHit():
    * §B2 wants displacement on every element while the collision damage lands on hostiles only, and that
    * gate lives in exactly one place. */
-  function movedCollisionDamage(el, relSpeed, x, y) {
+  /* §C 고무탄's ×1.6 rides in as `mul`: collisionHit() turns relSpeed into damage (clamp(round(rel/14),1,60)),
+   * so scaling the speed it is handed IS scaling the damage, and the one damage gate stays the one gate. */
+  function movedCollisionDamage(el, relSpeed, x, y, mul) {
     if (!el || !el.isConnected) return;
     try { if (el.hasAttribute('data-crs-broken')) return; } catch (e) { return; }
-    try { collisionHit(el, relSpeed, x, y); } catch (e) { state.lastError = String((e && e.stack) || e); }
+    try { collisionHit(el, relSpeed * (mul > 0 ? mul : 1), x, y); } catch (e) { state.lastError = String((e && e.stack) || e); }
   }
+  function movedRestitution(a, c) { return (a && a.bouncy) || (c && c.bouncy) ? MOVED_BOUNCE_BOUNCY : MOVED_BOUNCE; }
+  function movedDmgMul(b) { return b && b.bouncy ? MOVED_BOUNCY_DMG : 1; }
   function movedCollide(t, rects) {
     const live = [];
     for (const b of state.movedList) { if (!b.returning && rects.get(b)) live.push(b); }
@@ -257,7 +268,7 @@
         const along = rvx * n.nx + rvy * n.ny;
         if (along >= 0) continue;                       // already separating — one impact, not a grind
         const relSpeed = Math.hypot(rvx, rvy);
-        const imp2 = -(1 + MOVED_BOUNCE) * along / (1 / a.mass + 1 / c.mass);
+        const imp2 = -(1 + movedRestitution(a, c)) * along / (1 / a.mass + 1 / c.mass);
         a.vx -= imp2 * n.nx / a.mass; a.vy -= imp2 * n.ny / a.mass;
         c.vx += imp2 * n.nx / c.mass; c.vy += imp2 * n.ny / c.mass;
         const half = n.depth / 2;
@@ -268,8 +279,8 @@
         if (!movedCanHit(a, c.el, t) || !movedCanHit(c, a.el, t)) continue;
         const cx = (Math.max(ra.left, rc.left) + Math.min(ra.right, rc.right)) / 2;
         const cy = (Math.max(ra.top, rc.top) + Math.min(ra.bottom, rc.bottom)) / 2;
-        movedCollisionDamage(a.el, relSpeed, cx, cy);
-        movedCollisionDamage(c.el, relSpeed, cx, cy);
+        movedCollisionDamage(a.el, relSpeed, cx, cy, movedDmgMul(c));
+        movedCollisionDamage(c.el, relSpeed, cx, cy, movedDmgMul(a));
       }
     }
     // ---- displaced ↔ in place ----
@@ -288,16 +299,17 @@
         const n = aabbPush(rb, rc);
         const along = b.vx * n.nx + b.vy * n.ny;
         if (along <= 0) continue;                       // moving away from it
+        const rest = movedRestitution(b, null);
         b.x -= n.nx * n.depth; b.y -= n.ny * n.depth;
-        b.vx -= (1 + MOVED_BOUNCE) * along * n.nx;
-        b.vy -= (1 + MOVED_BOUNCE) * along * n.ny;
+        b.vx -= (1 + rest) * along * n.nx;
+        b.vy -= (1 + rest) * along * n.ny;
         rb.left -= n.nx * n.depth; rb.right -= n.nx * n.depth;
         rb.top -= n.ny * n.depth; rb.bottom -= n.ny * n.depth;
         if (!movedCanHit(b, el, t)) continue;
         const cx = (Math.max(rb.left, rc.left) + Math.min(rb.right, rc.right)) / 2;
         const cy = (Math.max(rb.top, rc.top) + Math.min(rb.bottom, rc.bottom)) / 2;
-        movedCollisionDamage(b.el, speed, cx, cy);
-        movedCollisionDamage(el, speed, cx, cy);
+        movedCollisionDamage(b.el, speed, cx, cy, movedDmgMul(b));
+        movedCollisionDamage(el, speed, cx, cy, movedDmgMul(b));
         break;                                          // one in-place impact per body per frame
       }
     }
@@ -328,8 +340,10 @@
         busy = true;
         // §E2: no gravity. A displaced element was SHOVED, it is not falling — unless it is wet or bouncy.
         if (b.wet || b.bouncy) b.vy += MOVED_GRAVITY * dt;
-        b.vx *= Math.pow(MOVED_FRICTION, dt);
-        b.vy *= Math.pow(MOVED_FRICTION, dt);
+        // §D 물총: a wet thing SLIDES — the same shove carries it noticeably further before it parks.
+        const fr = b.wet ? MOVED_FRICTION_WET : MOVED_FRICTION;
+        b.vx *= Math.pow(fr, dt);
+        b.vy *= Math.pow(fr, dt);
         b.vr *= Math.pow(MOVED_ROT_FRICTION, dt);
         b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.vr * dt;
       }
@@ -345,10 +359,20 @@
       if (overL > 0) { b.x += overL; box.left += overL; box.right += overL; if (b.vx < 0) b.vx = 0; }
       if (overR > 0) { b.x -= overR; box.left -= overR; box.right -= overR; if (b.vx > 0) b.vx = 0; }
       if (overT > 0) { b.y += overT; box.top += overT; box.bottom += overT; if (b.vy < 0) b.vy = 0; }
+      b.floored = overB > 0;
       if (overB > 0) { b.y -= overB; box.top -= overB; box.bottom -= overB; if (b.vy > 0) b.vy = 0; }
       rects.set(b, box);
       // §E2: 정지하면 제자리로 돌아가지 않는다 — it parks where it stopped; only 복구 brings it back.
-      if (!b.resting && Math.abs(b.vx) < MOVED_SLEEP_V && Math.abs(b.vy) < MOVED_SLEEP_V && Math.abs(b.vr) < MOVED_SLEEP_R) {
+      /* ── SPEC-arsenal §C / §D (8단계) ──
+       * A body under gravity (젖음 / bouncy) may NOT park on velocity alone. The frame right after
+       * displaceEl() can carry a sub-millisecond dt — kick() stamps state.lastT and the rAF callback is
+       * often the very next tick — so gravity has only added a px/s or two by the time this test runs, and
+       * a weapon that grants gravity without an impulse (고무탄, 고무 치킨) would put its target to sleep on
+       * its FIRST frame and the thing would never fall at all. That is exactly what happened: §C 7 measured
+       * 26 frames of y === 0. A falling body is at rest only once the §E2 viewport floor has stopped it,
+       * which is what `floored` says. */
+      const gravOn = !!(b.wet || b.bouncy);
+      if (!b.resting && (!gravOn || b.floored) && Math.abs(b.vx) < MOVED_SLEEP_V && Math.abs(b.vy) < MOVED_SLEEP_V && Math.abs(b.vr) < MOVED_SLEEP_R) {
         b.vx = 0; b.vy = 0; b.vr = 0; b.resting = true;
       }
       writeMoved(b);
@@ -369,10 +393,11 @@
   debug.moved = () => state.movedList.map((b) => ({
     id: (b.el && b.el.id) || '', tag: tagOf(b.el),
     x: b.x, y: b.y, rot: b.rot, vx: b.vx, vy: b.vy,
-    resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied
+    resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied, wet: !!b.wet, bouncy: !!b.bouncy
   }));
+  debug.movedConst = () => ({ friction: MOVED_FRICTION, frictionWet: MOVED_FRICTION_WET, bounce: MOVED_BOUNCE, bounceBouncy: MOVED_BOUNCE_BOUNCY, bouncyDmg: MOVED_BOUNCY_DMG, gravity: MOVED_GRAVITY, cap: MOVED_CAP });
   debug.movedOf = (el) => {
     const b = el && state.moved.get(el);
-    return b ? { x: b.x, y: b.y, rot: b.rot, vx: b.vx, vy: b.vy, resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied } : null;
+    return b ? { x: b.x, y: b.y, rot: b.rot, vx: b.vx, vy: b.vy, resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied, wet: !!b.wet, bouncy: !!b.bouncy } : null;
   };
   debug.undisplace = (el) => undisplace(el);

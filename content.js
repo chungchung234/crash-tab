@@ -36,7 +36,11 @@
   /* SPEC-arsenal §B1: WEAPON_IDS is the ARSENAL now — every weapon that exists (12 since 레이저 커터 and
    * 미니건 landed). `state.loadout` is a chosen SUBSET of it, at most 10 long, and that subset is what the
    * number keys / Q / E / the HUD grid speak. Nothing else about the id set changed. */
-  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse', 'laser', 'minigun'];
+  /* SPEC-arsenal §C (상호작용) · §D (예능), 8단계: the arsenal grows 12 → 19. The three §C weapons ride the
+   * displacement system (src/67-displace.js) and the four §D weapons are the 예능 band — weak on paper, each
+   * carrying ONE effect that is not damage. Nothing about the loadout changed: it is still at most 10. */
+  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse', 'laser', 'minigun',
+    'shockwave', 'tractor', 'rubber', 'squeaky', 'watergun', 'horn', 'chicken'];
   const LOADOUT_MAX = 10;            // §B1: 숫자키 10칸
   const WEAPONS = {
     hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
@@ -66,21 +70,68 @@
      * the first round and `idleGraceMs` the 0.6 s 공회전 유예 that lets a re-press skip it. */
     minigun:  { id: 'minigun',  emoji: '⚙️', name: 'weaponMinigun', kind: 'gun',      damage: 26,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 60, mag: 200, reloadMs: 4000,
                 spinUpMs: 800, idleGraceMs: 600, fixedRounds: 20,
-                swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 }
+                swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 },
+    /* ── SPEC-arsenal §C 상호작용 무기 ──────────────────────────────────────────────────────────────
+     * All three are built on the displacement system, so what they publish here is not damage but the
+     * physics the fire() entries hand to displaceEl(): `impulse` (충격포), `grabMaxMass` (견인 광선),
+     * `bouncyMs` / `bounceRest` / `collisionMul` (고무탄). The stat block is inline for the same reason the
+     * laser's is: WEAPON_STATS (src/71) is not this workstream's file and Object.assign(W, undefined) leaves
+     * what is written here alone.
+     * INTERPRETATION (reported): §C gives each weapon its VERB and nothing else — no magazine, no cooldown,
+     * no swap time. Those had to be chosen for the weapon to exist in this engine at all; they are picked so
+     * the 특수 band of §F4 (40–90 % of the 실전 median) is plausible, and §F itself is 9단계. */
+    shockwave:{ id: 'shockwave', emoji: '🌀', name: 'weaponShockwave', kind: 'bomb', damage: 10, cooldownMs: 900, radius: 260, hold: false, input: 'click',
+                rings: [70, 150, 230], maxTargets: 14, mag: 4, reloadMs: 1700, impulse: 900,
+                swapMs: 360, recoil: 1.6, bloom: 0, critChance: 0.04, knockback: 2.4, moveSpeed: 0.92, falloff: 0, pierce: 0, aoeIgnoresCover: true },
+    /* 견인 광선: 길게 눌러 하나를 붙잡는다. No magazine — the price is a cooldown on release (`releaseCdMs`),
+     * because a grab is one continuous act and charging it by the tick would turn "hold to carry" into a
+     * stopwatch. `grabK` is the spring constant of the cursor follow (1/s). */
+    tractor:  { id: 'tractor', emoji: '🛸', name: 'weaponTractor', kind: 'gun', damage: 1, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 60,
+                mag: null, reloadMs: null, grabMaxMass: 4, grabK: 9, releaseCdMs: 600, yankImpulse: 1500,
+                swapMs: 380, recoil: 0, bloom: 0, critChance: 0, knockback: 0, moveSpeed: 0.95, falloff: 0, pierce: 0 },
+    rubber:   { id: 'rubber', emoji: '⚪', name: 'weaponRubber', kind: 'gun', damage: 18, cooldownMs: 260, radius: 0, hold: false, input: 'click', mag: 8, reloadMs: 1300,
+                bouncyMs: 6000, bounceRest: 0.85, collisionMul: 1.6,
+                swapMs: 240, recoil: 0.8, bloom: 4, critChance: 0.05, knockback: 1.2, moveSpeed: 1.00, falloff: 0.20, pierce: 0 },
+    /* ── SPEC-arsenal §D 예능 무기 ──────────────────────────────────────────────────────────────────
+     * "밸런스 밴드에서 제외하되 … 실효 화력이 중앙값의 25~50%, 그리고 각각 피해가 아닌 고유 효과를 하나씩."
+     * `quirk` names that effect so the rule is a field rather than a promise — §D's own table, in the table.
+     * 뿅망치 and 고무 치킨 are melee (no magazine), which is also what makes them the fastest things to swing. */
+    squeaky:  { id: 'squeaky', emoji: '🎈', name: 'weaponSqueaky', kind: 'hammer', damage: 8, cooldownMs: 0, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
+                quirk: 'squash', squashMs: 420,
+                swapMs: 120, recoil: 0.6, bloom: 0, critChance: 0.10, knockback: 0.9, moveSpeed: 1.20, falloff: 0, pierce: 0 },
+    /* 틱 40 ms / 탄창 180: §D fixes the tick DAMAGE at 3 and says nothing about the rate, and 3 damage every
+     * 70 ms put the 실효 화력 at 18 % of the 실전 중앙값 — under §D's own 25~50 % floor. §F7's rule ("피해량보다
+     * 핸들링을 먼저 건드린다") says which number moves: the published 3 stays and the stream gets finer. */
+    watergun: { id: 'watergun', emoji: '💧', name: 'weaponWatergun', kind: 'gun', damage: 3, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 40, mag: 180, reloadMs: 1300,
+                quirk: 'wet', wetMs: 8000, coolMul: 2.5, splashR: 120,
+                swapMs: 200, recoil: 0.2, bloom: 5, critChance: 0.03, knockback: 0.3, moveSpeed: 1.05, falloff: 0.45, pierce: 0 },
+    horn:     { id: 'horn', emoji: '🎺', name: 'weaponHorn', kind: 'gun', damage: 5, cooldownMs: 520, radius: 420, hold: false, input: 'click', mag: 6, reloadMs: 1500,
+                quirk: 'reflect', coneDeg: 90, coneImpulse: 520, rings: [120, 260, 400], maxTargets: 12,
+                swapMs: 260, recoil: 0.9, bloom: 0, critChance: 0.04, knockback: 1.5, moveSpeed: 1.05, falloff: 0, pierce: 0 },
+    chicken:  { id: 'chicken', emoji: '🐔', name: 'weaponChicken', kind: 'hammer', damage: 12, cooldownMs: 0, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
+                quirk: 'bouncy', bouncyChance: 0.20,
+                swapMs: 110, recoil: 0.5, bloom: 0, critChance: 0.18, knockback: 0.8, moveSpeed: 1.25, falloff: 0, pierce: 0 }
   };
   /* Loadout presets (v1.2 §4): permutations of WEAPON_IDS mapped onto keys 1 2 3 4 5 6 7 8 9 0. */
   /* SPEC-arsenal §B1: "프리셋이 서로 다른 10개 조합이 되어 실제 선택이 생긴다." The arsenal holds 12 and a
    * loadout holds 10, so each preset now LEAVES TWO OUT — and no two presets leave out the same pair, which
    * is what makes the choice real rather than a reshuffle. `default` keeps the exact v1.2 order (it is the
    * ten weapons that existed before this step), so an upgrade changes nothing for someone who never looked. */
+  /* §C / §D (8단계): the arsenal is 19 now and a loadout is still ten, so the five presets above can no
+   * longer reach seven of the weapons at all. Two more presets are the smallest fix that keeps §B1's promise
+   * ("프리셋이 서로 다른 10개 조합이 되어 실제 선택이 생긴다") true of the WHOLE arsenal: `interaction` is the
+   * push / pull / bounce loadout and `fun` is the 예능 one. The five that existed are untouched. */
   const PRESETS = {
     default:   ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'],                 // 빠짐: 레이저 · 미니건
     assault:   ['smg', 'minigun', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'collapse'],                // 빠짐: 카타나 · 레이저
     sniper:    ['sniper', 'pistol', 'laser', 'katana', 'hammer', 'axe', 'smg', 'bomb', 'rocket', 'collapse'],                 // 빠짐: 화염방사기 · 미니건
     explosive: ['rocket', 'bomb', 'flame', 'collapse', 'laser', 'minigun', 'smg', 'pistol', 'hammer', 'axe'],                 // 빠짐: 저격총 · 카타나
-    melee:     ['hammer', 'axe', 'katana', 'laser', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']                // 빠짐: 기관총 · 미니건
+    melee:     ['hammer', 'axe', 'katana', 'laser', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'collapse'],               // 빠짐: 기관총 · 미니건
+    interaction: ['shockwave', 'tractor', 'rubber', 'hammer', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'collapse'],       // §C 셋을 앞에 두고 뒤는 실전
+    fun:         ['squeaky', 'watergun', 'horn', 'chicken', 'rubber', 'hammer', 'pistol', 'smg', 'flame', 'collapse']          // §D 넷 + 고무탄, 뒤는 실전
   };
-  const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee' };
+  const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee',
+    interaction: 'presetInteraction', fun: 'presetFun' };
   const HOLD_WINDOW = 150;           // ms: hold-weapon damage aggregation / fx throttle window (A4, A5)
   const BURNT_FILTER = 'brightness(.55) sepia(.6)';   // flame-broken pieces (A9)
   const SWAP_MS = 250;               // weapon swap delay (v1.2 A5)
@@ -371,7 +422,7 @@
   /* schema file is absent (build.js then only warns): the unresolved form   */
   /* is Object.freeze([].concat()) — a frozen empty schema.                  */
   /* ===================================================================== */
-  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
+  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
   const SETTING_GROUPS = ['general', 'combat', 'accessibility', 'advanced'];
   /* chrome.storage.sync keys are namespaced `crs.<key>` so they can never collide with the v1 flat keys
    * (crsWeapon, crsMuted, …) that §1.2 migrates away from. Only big things go to `local` — the one that
@@ -2109,6 +2160,27 @@
       else if (kind === 'overheat') { noiseSweep(t, 0.5, 'lowpass', 3200, 300, 0.45 * gm); tone(t, 'sine', 300, 70, 0.45, 0.3 * gm, 0.5); }
       /* §B3 미니건 예열: 총열이 돌기 시작하는 0.8초. A rising motor whine with a noise bed under it. */
       else if (kind === 'spinup') { tone(t, 'sawtooth', 70, 230, 0.75, 0.2 * gm, 0.8); noiseSweep(t, 0.75, 'bandpass', 180, 900, 0.3 * gm); }
+      /* ── SPEC-arsenal §C 상호작용 · §D 예능 (8단계) ──
+       * Still no new audio graph: every one of these is the same tone() / noiseBurst() / noiseSweep() trio
+       * the rest of the file is made of. What makes them readable is that they do NOT share a profile with
+       * anything already here — a push, a tow, a bounce, a toy hammer, water, a horn and a rubber chicken
+       * have to be told apart by ear with the HUD out of view.
+       * 충격포: 피해가 아니라 압력이다 — a low thud with a wide noise front and no metal in it at all. */
+      else if (kind === 'shockwave') { tone(t, 'sine', 140, 38, 0.3, 0.9 * gm, 0.34); noiseSweep(t, 0.26, 'lowpass', 1800, 240, 0.55 * gm); }
+      /* 견인 광선: a hum that RISES while it takes hold and falls when it lets go — the same two voices,
+       * swept the other way, so grabbing and dropping are one gesture heard in both directions. */
+      else if (kind === 'tractor') { tone(t, 'triangle', 180, 430, 0.28, 0.17 * gm, 0.3); noiseSweep(t, 0.26, 'bandpass', 500, 1600, 0.16 * gm); }
+      else if (kind === 'tractorOff') { tone(t, 'triangle', 430, 170, 0.2, 0.15 * gm, 0.22); }
+      /* 고무탄: a short pitch-bent "boing". A sine sliding UP and straight back down is the whole trick. */
+      else if (kind === 'boing') { tone(t, 'sine', 240, 820, 0.07, 0.3 * gm, 0.08); tone(t + 0.06, 'sine', 780, 230, 0.12, 0.26 * gm, 0.14); if (crit) tinks(1, 0, 0.06 * gm); }
+      /* 뿅망치: the "뿅" §D names. A squeak is a fast rise with a puff of air under it — high, soft, silly. */
+      else if (kind === 'squeak') { tone(t, 'sine', 700, 1500, 0.07, 0.26 * gm, 0.08); tone(t + 0.05, 'sine', 1400, 620, 0.09, 0.2 * gm, 0.1); noiseBurst(t, 0.05, { type: 'highpass', freq: 3200, Q: 0.7 }, 0.12 * gm, 0.05); }
+      /* 물총: filtered noise, no tone at all — water has no pitch. */
+      else if (kind === 'water') { noiseSweep(t, 0.12, 'bandpass', 900, 2600, 0.3 * gm); noiseBurst(t, 0.06, { type: 'lowpass', freq: 1400, Q: 0.6 }, 0.14 * gm, 0.07); }
+      /* 나팔: a brass honk — a sawtooth with a flat tail and an octave above it. */
+      else if (kind === 'horn') { tone(t, 'sawtooth', 300, 290, 0.3, 0.3 * gm, 0.32); tone(t + 0.01, 'sawtooth', 600, 585, 0.26, 0.14 * gm, 0.28); noiseBurst(t, 0.05, { type: 'bandpass', freq: 1800, Q: 1.2 }, 0.1 * gm, 0.06); }
+      /* 고무 치킨: two squawks, the second lower and later, because one is a squeak and two is a chicken. */
+      else if (kind === 'chicken') { tone(t, 'sawtooth', 820, 520, 0.09, 0.2 * gm, 0.1); tone(t + 0.1, 'sawtooth', 620, 330, 0.11, 0.17 * gm, 0.13); noiseBurst(t + 0.02, 0.05, { type: 'bandpass', freq: 2400, Q: 1.6 }, 0.1 * gm, 0.06); }
     } catch (e) { /* ignore */ }
   }
 
@@ -2883,6 +2955,336 @@
           artRect(20, 32, 6, 11, c.mat('rubber', 'd'), 2, { 'data-part': 'grip' })
         ];
       }
+    },
+
+    /* ───────── 충격포 · SPEC-arsenal §C ─────────
+     * Not a gun — a PRESSURE emitter. Everything about the silhouette says "this moves air, it does not
+     * cut": a wide flared mouth instead of a bore, a fat pressure vessel slung under the body, and three
+     * concentric wave arcs leaving the mouth. There is no sight on it either; you do not aim pressure. */
+    shockwave: {
+      detail: (c) => [
+        artRect(14, 48, 52, 48, c.cyl('metal', 'v'), 10, { 'data-part': 'tank' }),
+        artRect(15.4, 49.4, 49, 3.4, RIM, 1.7),
+        artRect(22, 58, 36, 8, c.mat('dark', 'v'), 3, { 'data-part': 'gauge' }),
+        artCircle(32, 80, 8, c.cyl('brass', 'd'), { 'data-part': 'valve' }),
+        artCircle(32, 80, 3, ART.dark[2]),
+        artPath('M24,72 Q32,64 40,72 L38,74 Q32,68 26,74 Z', ART.gloss[0], { 'data-part': 'valve-rim' }),
+        artRect(62, 56, 26, 32, c.mat('dark', 'd'), 4, { 'data-part': 'coupler' }),
+        artRect(66, 50, 86, 44, c.mat('metal', 'd'), 7, { 'data-part': 'body' }),
+        artRect(66, 51.6, 86, 3.4, RIM, 1.7),
+        artRect(66, 90, 86, 4, SEAM),
+        artRect(78, 58, 60, 10, c.mat('dark', 'v'), 3, { 'data-part': 'rail' }),
+        artRect(78, 59, 60, 2.2, RIM2, 1.1),
+        artRect(96, 40, 10, 12, c.cyl('metal', 'h'), 2, { 'data-part': 'ribs' }),
+        artRect(112, 40, 10, 12, c.cyl('metal', 'h'), 2, { 'data-part': 'ribs' }),
+        artRect(128, 40, 10, 12, c.cyl('metal', 'h'), 2, { 'data-part': 'ribs' }),
+        poly([[74, 94], [108, 94], [100, 130], [72, 130]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[74, 94], [108, 94], [107.2, 97.6], [73.4, 97.6]], RIM2),
+        poly([[110, 94], [124, 94], [120, 110], [110, 106]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        poly([[152, 44], [178, 32], [178, 112], [152, 100]], c.mat('metal', 'r'), { 'data-part': 'throat' }),
+        poly([[152, 44], [178, 32], [178, 36], [152, 48]], RIM),
+        poly([[178, 32], [206, 14], [206, 130], [178, 112]], c.cyl('metal', 'v'), { 'data-part': 'mouth' }),
+        poly([[178, 32], [206, 14], [206, 20], [178, 37]], RIM),
+        poly([[178, 108], [206, 124], [206, 130], [178, 112]], SEAM),
+        artEllipse(206, 72, 6, 58, ART.dark[2], { 'data-part': 'bore' }),
+        artEllipse(204, 72, 3, 48, 'rgba(138,180,255,.35)'),
+        artPath('M206,20 A52,52 0 0 1 206,124 L202,120 A48,48 0 0 0 202,24 Z', RIM2, { 'data-part': 'mouth-rim' }),
+        artPath('M210,36 Q224,72 210,108 L216,108 Q230,72 216,36 Z', 'rgba(212,218,228,.55)', { 'data-part': 'wave' }),
+        artPath('M220,44 Q232,72 220,100 L225,100 Q237,72 225,44 Z', 'rgba(212,218,228,.34)', { 'data-part': 'wave' }),
+        artPath('M229,52 Q239,72 229,92 L233,92 Q243,72 233,52 Z', 'rgba(212,218,228,.2)', { 'data-part': 'wave' }),
+        artRect(24, 96, 30, 6, c.mat('dark', 'v'), 2, { 'data-part': 'strap' }),
+        artRect(24, 96.6, 30, 1.8, RIM2, 0.9)
+      ],
+      icon: (c) => [
+        artRect(2, 16, 12, 16, c.cyl('metal', 'v'), 3, { 'data-part': 'tank' }),
+        artRect(13, 17, 18, 14, c.mat('metal', 'd'), 3, { 'data-part': 'body' }),
+        artRect(13, 18, 18, 1.6, RIM, 0.8),
+        poly([[17, 31], [26, 31], [24, 43], [16, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[31, 14], [42, 7], [42, 41], [31, 34]], c.cyl('metal', 'v'), { 'data-part': 'mouth' }),
+        artEllipse(42, 24, 2.4, 17, ART.dark[2], { 'data-part': 'bore' }),
+        artPath('M44,12 Q47,24 44,36 L46,36 Q46,24 46,12 Z', 'rgba(212,218,228,.5)', { 'data-part': 'wave' })
+      ]
+    },
+
+    /* ───────── 견인 광선 · SPEC-arsenal §C ─────────
+     * A dish, not a barrel. The emitter is a shallow parabolic reflector with a single pin at its focus,
+     * and the cyan of the beam (#4ad8e6 in content.css) is quoted by the inner glow so the picture and the
+     * effect agree, exactly as the laser's magenta does. Two copper coils on the spine say "this pulls". */
+    tractor: {
+      detail: (c) => [
+        artRect(16, 54, 46, 40, c.mat('dark', 'd'), 6, { 'data-part': 'pack' }),
+        artRect(17.4, 55.4, 43, 3, RIM2, 1.5),
+        artRect(22, 62, 34, 9, 'rgba(74,216,230,.35)', 2, { 'data-part': 'cell' }),
+        artRect(22, 76, 34, 6, c.mat('brass', 'h'), 2, { 'data-part': 'cell' }),
+        artRect(60, 58, 20, 30, c.mat('metal', 'd'), 3, { 'data-part': 'spine' }),
+        artCircle(94, 44, 11, c.cyl('brass', 'd'), { 'data-part': 'coil' }),
+        artCircle(94, 44, 5, ART.dark[2]),
+        artCircle(122, 44, 11, c.cyl('brass', 'd'), { 'data-part': 'coil' }),
+        artCircle(122, 44, 5, ART.dark[2]),
+        artRect(78, 52, 76, 40, c.mat('metal', 'd'), 6, { 'data-part': 'body' }),
+        artRect(78, 53.6, 76, 3.2, RIM, 1.6),
+        artRect(78, 88, 76, 4, SEAM),
+        artRect(88, 60, 56, 9, c.mat('dark', 'v'), 2, { 'data-part': 'window' }),
+        artRect(90, 62, 52, 4, 'rgba(74,216,230,.5)', 2),
+        poly([[88, 92], [120, 92], [113, 128], [86, 128]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[88, 92], [120, 92], [119.2, 95.6], [87.4, 95.6]], RIM2),
+        poly([[122, 92], [136, 92], [132, 108], [122, 104]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        artRect(154, 60, 18, 24, c.cyl('metal', 'v'), 3, { 'data-part': 'neck' }),
+        artPath('M172,30 Q214,72 172,114 Q198,72 172,30 Z', c.mat('metal', 'r'), { 'data-part': 'dish' }),
+        artPath('M172,34 Q206,72 172,110 Q190,72 172,34 Z', ART.dark[0], { 'data-part': 'dish-in' }),
+        artPath('M174,38 Q198,56 196,68 L192,66 Q192,56 174,42 Z', RIM2),
+        artRect(176, 69, 32, 5, c.cyl('metal', 'h'), 2.5, { 'data-part': 'stem' }),
+        artCircle(210, 72, 9, c.glow('metal'), { 'data-part': 'focus' }),
+        artCircle(210, 72, 5, 'rgba(74,216,230,.85)'),
+        artCircle(208, 69, 2.2, ART.gloss[0]),
+        artPath('M216,62 Q236,72 216,82 L220,76 L220,68 Z', 'rgba(74,216,230,.45)', { 'data-part': 'pull' }),
+        artRect(26, 94, 28, 6, c.mat('dark', 'v'), 2, { 'data-part': 'latch' }),
+        artRect(26, 94.6, 28, 1.8, RIM2, 0.9),
+        artCircle(70, 72, 4, ART.dark[2])
+      ],
+      icon: (c) => [
+        artRect(2, 17, 11, 14, c.mat('dark', 'd'), 3, { 'data-part': 'pack' }),
+        artCircle(18, 12, 4.5, c.cyl('brass', 'd'), { 'data-part': 'coil' }),
+        artRect(12, 17, 20, 13, c.mat('metal', 'd'), 3, { 'data-part': 'body' }),
+        artRect(12, 18, 20, 1.6, RIM, 0.8),
+        poly([[17, 30], [26, 30], [24, 43], [16, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M33,10 Q46,23 33,36 Q39,23 33,10 Z', c.mat('metal', 'r'), { 'data-part': 'dish' }),
+        artCircle(43, 23, 3.4, 'rgba(74,216,230,.85)', { 'data-part': 'focus' })
+      ]
+    },
+
+    /* ───────── 고무탄 · SPEC-arsenal §C ─────────
+     * A break-action launcher with a fat white round sitting in the open breech — the ROUND is the picture,
+     * because what the weapon does is leave that rubber on whatever it touches. Short, wide bore, and a
+     * bounce trace behind the muzzle so the silhouette reads "this comes back". */
+    rubber: {
+      detail: (c) => [
+        poly([[20, 78], [58, 68], [62, 96], [24, 104]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        poly([[20, 78], [58, 68], [58.6, 72], [20.8, 82]], RIM2),
+        artRect(56, 62, 28, 40, c.mat('metal', 'd'), 5, { 'data-part': 'receiver' }),
+        artRect(56, 63.4, 28, 3, RIM, 1.5),
+        artRect(56, 98, 28, 4, SEAM),
+        artRect(84, 58, 16, 46, c.mat('dark', 'd'), 3, { 'data-part': 'hinge' }),
+        artCircle(92, 81, 5, c.cyl('brass', 'd'), { 'data-part': 'pin' }),
+        poly([[70, 102], [98, 102], [92, 132], [68, 132]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[70, 102], [98, 102], [97.2, 105.6], [69.4, 105.6]], RIM2),
+        poly([[100, 100], [114, 100], [110, 116], [100, 112]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        artRect(98, 56, 76, 50, c.cyl('metal', 'v'), 8, { 'data-part': 'barrel' }),
+        artRect(99.4, 57.6, 73, 4, RIM, 2),
+        artRect(98, 100, 76, 4, SEAM2),
+        artRect(108, 64, 20, 8, c.mat('dark', 'v'), 2, { 'data-part': 'breech' }),
+        artCircle(140, 81, 20, ART.dark[2], { 'data-part': 'chamber' }),
+        artCircle(140, 81, 15, c.glow('gloss'), { 'data-part': 'round' }),
+        artCircle(134, 75, 4.6, ART.gloss[0]),
+        artRect(174, 60, 24, 42, c.cyl('metal', 'v'), 5, { 'data-part': 'muzzle' }),
+        artRect(175.4, 61.6, 3, 38, RIM2, 1.5),
+        artEllipse(198, 81, 5, 20, ART.dark[2], { 'data-part': 'bore' }),
+        artEllipse(197, 81, 2.4, 15, c.mat('gloss', 'v')),
+        artPath('M206,54 Q226,66 212,80 Q228,94 208,108 L212,102 Q220,92 206,80 Q220,68 210,58 Z', 'rgba(246,250,254,.5)', { 'data-part': 'bounce' }),
+        artCircle(230, 54, 5, 'rgba(246,250,254,.75)', { 'data-part': 'bounce-dot' }),
+        artCircle(232, 108, 4, 'rgba(246,250,254,.5)', { 'data-part': 'bounce-dot' }),
+        artRect(60, 70, 18, 6, c.mat('dark', 'v'), 2, { 'data-part': 'plate' }),
+        artRect(60, 70.6, 18, 1.8, RIM2, 0.9),
+        artCircle(66, 88, 3.2, ART.dark[2]),
+        artCircle(76, 88, 3.2, ART.dark[2])
+      ],
+      icon: (c) => [
+        poly([[2, 24], [13, 20], [14, 31], [3, 34]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        artRect(12, 18, 10, 14, c.mat('metal', 'd'), 2, { 'data-part': 'receiver' }),
+        poly([[15, 32], [23, 32], [21, 43], [14, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(21, 17, 18, 16, c.cyl('metal', 'v'), 4, { 'data-part': 'barrel' }),
+        artCircle(30, 25, 6, ART.dark[2], { 'data-part': 'chamber' }),
+        artCircle(30, 25, 4, c.glow('gloss'), { 'data-part': 'round' }),
+        artRect(38, 18, 7, 14, c.cyl('metal', 'v'), 2, { 'data-part': 'muzzle' }),
+        artEllipse(45, 25, 1.8, 6, ART.dark[2], { 'data-part': 'bore' })
+      ]
+    },
+
+    /* ───────── 뿅망치 · SPEC-arsenal §D ─────────
+     * A TOY. Nothing on it is metal: a fat air-filled head in the one hot colour the palette owns, a thin
+     * bendy shaft, a squeeze bulb at the butt (that is where the "뿅" comes from), and a bow where the two
+     * meet. The head is set ACROSS the shaft like every other melee weapon in this file (§7). */
+    squeaky: {
+      detail: (c) => {
+        const fr = frame(96, 86, -34);
+        const a0 = fr(0, 0), a1 = fr(82, 0);
+        return [
+          artRect(30, 108, 44, 16, c.mat('rubber', 'd'), 8, { 'data-part': 'bulb' }),
+          artRect(31.4, 109.4, 41, 3.4, RIM2, 1.7),
+          artEllipse(28, 116, 9, 11, c.cyl('rubber', 'v'), { 'data-part': 'bulb-cap' }),
+          artCircle(24, 112, 2.6, ART.gloss[1]),
+          poly([[46, 104], [60, 96], [104, 70], [98, 60], [54, 86], [40, 96]], c.cyl('accent', 'h'), { 'data-part': 'shaft' }),
+          poly([[46, 104], [98, 60], [99.6, 62.6], [47.4, 106.6]], RIM2),
+          artEllipse(a0[0], a0[1], 7, 9, c.mat('brass', 'd'), { 'data-part': 'collar' }),
+          artPath('M88,68 Q96,56 108,58 Q98,62 94,72 Z', ART.gloss[0], { 'data-part': 'bow' }),
+          artPath('M100,56 Q112,44 120,52 Q110,52 104,62 Z', ART.gloss[2], { 'data-part': 'bow' }),
+          artEllipse(a1[0], a1[1], 40, 30, c.cyl('accent', 'd'), { 'data-part': 'head' }),
+          artEllipse(a1[0] - 10, a1[1] - 10, 15, 10, 'rgba(255,255,255,.45)', { 'data-part': 'head-gloss' }),
+          artPath('M126,12 Q156,6 170,26 L164,28 Q150,12 128,16 Z', RIM, { 'data-part': 'head-rim' }),
+          artEllipse(a1[0] + 20, a1[1] + 14, 14, 9, SEAM2),
+          artCircle(a1[0] + 30, a1[1] - 6, 4, ART.gloss[0], { 'data-part': 'glint' }),
+          artCircle(a1[0] - 26, a1[1] + 12, 3, ART.gloss[1], { 'data-part': 'glint' }),
+          artPath('M198,34 L202,44 L212,46 L203,52 L206,62 L197,56 L188,62 L191,52 L183,46 L193,44 Z', ART.hot[0], { 'data-part': 'star' }),
+          artPath('M60,34 L63,41 L70,42 L64,47 L66,54 L60,50 L54,54 L56,47 L50,42 L57,41 Z', ART.hot[1], { 'data-part': 'star' }),
+          artPath('M26,62 L28,67 L33,68 L29,71 L30,76 L26,73 L22,76 L23,71 L19,68 L24,67 Z', ART.hot[2], { 'data-part': 'star' }),
+          artCircle(214, 88, 3.4, ART.hot[0]),
+          artCircle(46, 24, 2.8, ART.hot[1]),
+          artRect(54, 98, 10, 8, c.mat('rubber', 'd'), 3, { 'data-part': 'band' }),
+          artRect(54, 98.6, 10, 1.8, RIM2, 0.9),
+          artEllipse(a1[0], a1[1] + 24, 26, 6, 'rgba(0,0,0,.18)', { 'data-part': 'shade' }),
+          artCircle(a0[0], a0[1], 2.4, ART.dark[2]),
+          artRect(36, 118, 30, 4, SEAM2, 2)
+        ];
+      },
+      icon: (c) => [
+        artRect(6, 32, 14, 7, c.mat('rubber', 'd'), 3.5, { 'data-part': 'bulb' }),
+        poly([[16, 34], [33, 18], [29, 14], [12, 30]], c.cyl('accent', 'h'), { 'data-part': 'shaft' }),
+        artEllipse(34, 15, 13, 10, c.cyl('accent', 'd'), { 'data-part': 'head' }),
+        artEllipse(30, 11, 5, 3.4, 'rgba(255,255,255,.45)', { 'data-part': 'head-gloss' }),
+        artPath('M7,6 L9,10 L13,11 L10,14 L11,18 L7,16 L4,18 L5,14 L2,11 L6,10 Z', ART.hot[0], { 'data-part': 'star' }),
+        artCircle(44, 32, 2.6, ART.hot[1], { 'data-part': 'glint' }),
+        artRect(10, 33, 8, 1.6, RIM2, 0.8)
+      ]
+    },
+
+    /* ───────── 물총 · SPEC-arsenal §D ─────────
+     * The other toy, and it has to read as one at 24 px: a translucent tank on top with the water line
+     * actually drawn in it, a chunky moulded body, a pump handle under the barrel and a round nozzle. The
+     * blue is an rgba tint over the palette rather than a new colour — §9.4 keeps literal fills to ART. */
+    watergun: {
+      detail: (c) => [
+        artPath('M62,22 Q118,10 172,24 L176,52 Q118,40 58,52 Z', c.mat('gloss', 'd'), { 'data-part': 'tank' }),
+        artPath('M62,22 Q118,10 172,24 L172,28 Q118,15 62,27 Z', RIM),
+        artPath('M60,38 Q118,27 174,39 L176,52 Q118,40 58,52 Z', 'rgba(74,180,230,.55)', { 'data-part': 'water' }),
+        artCircle(96, 32, 4, 'rgba(255,255,255,.6)', { 'data-part': 'bubble' }),
+        artCircle(132, 29, 3, 'rgba(255,255,255,.5)', { 'data-part': 'bubble' }),
+        artRect(108, 14, 20, 10, c.mat('rubber', 'd'), 3, { 'data-part': 'cap' }),
+        artRect(108, 14.8, 20, 2, RIM2, 1),
+        artRect(54, 50, 118, 44, c.mat('accent', 'd'), 9, { 'data-part': 'body' }),
+        artRect(54, 51.6, 118, 3.4, RIM, 1.7),
+        artRect(54, 90, 118, 4, SEAM),
+        artRect(66, 58, 76, 10, 'rgba(74,180,230,.45)', 3, { 'data-part': 'stripe' }),
+        poly([[62, 94], [96, 94], [88, 130], [58, 130]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[62, 94], [96, 94], [95.2, 97.6], [61.4, 97.6]], RIM2),
+        poly([[98, 92], [112, 92], [108, 108], [98, 104]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        artRect(112, 96, 60, 12, c.cyl('rubber', 'h'), 6, { 'data-part': 'pump' }),
+        artRect(113, 97, 58, 2.6, RIM2, 1.3),
+        artRect(150, 100, 34, 6, c.cyl('metal', 'h'), 3, { 'data-part': 'pump-rod' }),
+        artRect(172, 56, 34, 32, c.cyl('accent', 'v'), 6, { 'data-part': 'barrel' }),
+        artRect(173.4, 57.4, 3, 29, RIM2, 1.5),
+        artCircle(208, 72, 15, c.cyl('metal', 'd'), { 'data-part': 'nozzle' }),
+        artCircle(208, 72, 8, ART.dark[2]),
+        artCircle(208, 72, 4, 'rgba(74,180,230,.8)', { 'data-part': 'jet' }),
+        artCircle(204, 68, 2.4, ART.gloss[0]),
+        artPath('M224,66 Q240,70 236,78 Q234,72 222,76 Z', 'rgba(74,180,230,.6)', { 'data-part': 'drip' }),
+        artEllipse(232, 86, 4, 5.5, 'rgba(74,180,230,.5)', { 'data-part': 'drip' }),
+        artEllipse(224, 96, 3, 4, 'rgba(74,180,230,.38)', { 'data-part': 'drip' }),
+        artRect(64, 74, 22, 8, c.mat('dark', 'v'), 2, { 'data-part': 'label' }),
+        artRect(64, 74.6, 22, 1.8, RIM2, 0.9)
+      ],
+      icon: (c) => [
+        artPath('M12,6 Q24,2 36,7 L37,14 Q24,9 11,14 Z', c.mat('gloss', 'd'), { 'data-part': 'tank' }),
+        artPath('M11,11 Q24,6 37,11 L37,14 Q24,9 11,14 Z', 'rgba(74,180,230,.55)', { 'data-part': 'water' }),
+        artRect(9, 14, 27, 14, c.mat('accent', 'd'), 3, { 'data-part': 'body' }),
+        artRect(9, 15, 27, 1.8, RIM, 0.9),
+        poly([[12, 28], [21, 28], [19, 43], [11, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(22, 30, 17, 4, c.cyl('rubber', 'h'), 2, { 'data-part': 'pump' }),
+        artCircle(42, 20, 5, c.cyl('metal', 'd'), { 'data-part': 'nozzle' }),
+        artCircle(42, 20, 2.2, 'rgba(74,180,230,.8)', { 'data-part': 'jet' })
+      ]
+    },
+
+    /* ───────── 나팔 · SPEC-arsenal §D ─────────
+     * A brass air horn: a long flaring bell, a straight body behind it, a pressure can clamped underneath
+     * and a plunger on top. The bell is drawn as one curved path with a separate lip ellipse, so even at
+     * icon size the one thing that survives is the flare — which is also the one thing the weapon does. */
+    horn: {
+      detail: (c) => [
+        artRect(16, 60, 34, 54, c.cyl('metal', 'v'), 7, { 'data-part': 'can' }),
+        artRect(17.4, 61.4, 31, 3.4, RIM, 1.7),
+        artRect(22, 70, 22, 10, c.mat('accent', 'd'), 3, { 'data-part': 'label' }),
+        artRect(22, 86, 22, 6, c.mat('dark', 'v'), 2, { 'data-part': 'label' }),
+        artRect(24, 44, 18, 18, c.mat('dark', 'd'), 3, { 'data-part': 'plunger' }),
+        artRect(20, 36, 26, 10, c.cyl('rubber', 'h'), 4, { 'data-part': 'press' }),
+        artRect(21, 37, 24, 2.2, RIM2, 1.1),
+        artRect(48, 66, 20, 26, c.mat('dark', 'd'), 3, { 'data-part': 'clamp' }),
+        artRect(48, 67, 20, 2.2, RIM2, 1.1),
+        artRect(64, 58, 56, 36, c.cyl('brass', 'v'), 6, { 'data-part': 'body' }),
+        artRect(65.4, 59.6, 53, 3.4, RIM, 1.7),
+        artRect(64, 90, 56, 3.4, SEAM2),
+        artRect(78, 66, 30, 8, c.mat('dark', 'v'), 2, { 'data-part': 'vent' }),
+        artRect(118, 54, 14, 44, c.cyl('brass', 'v'), 3, { 'data-part': 'joint' }),
+        artRect(119, 55.4, 2.6, 41, RIM2, 1.3),
+        artPath('M132,54 Q176,48 196,14 L210,20 Q186,62 134,66 Z', c.cyl('brass', 'r'), { 'data-part': 'bell' }),
+        artPath('M132,98 Q176,104 196,138 L210,132 Q186,90 134,86 Z', c.mat('brass', 'd'), { 'data-part': 'bell' }),
+        artPath('M132,54 Q176,48 196,14 L198,19 Q178,50 133,58 Z', RIM),
+        artPath('M196,14 L210,20 L210,132 L196,138 Q206,76 196,14 Z', c.mat('brass', 'h'), { 'data-part': 'flare' }),
+        artEllipse(203, 76, 9, 62, c.cyl('brass', 'h'), { 'data-part': 'lip' }),
+        artEllipse(203, 76, 5, 54, ART.dark[1], { 'data-part': 'throat' }),
+        artEllipse(201, 76, 2.4, 44, ART.dark[2]),
+        artPath('M216,40 Q230,76 216,112 L221,112 Q234,76 221,40 Z', 'rgba(230,200,126,.5)', { 'data-part': 'blast' }),
+        artPath('M226,52 Q237,76 226,100 L230,100 Q240,76 230,52 Z', 'rgba(230,200,126,.32)', { 'data-part': 'blast' }),
+        poly([[72, 94], [104, 94], [98, 126], [70, 126]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[72, 94], [104, 94], [103.2, 97.6], [71.4, 97.6]], RIM2),
+        artCircle(56, 102, 3.4, ART.dark[2]),
+        artRect(26, 112, 16, 6, c.mat('dark', 'v'), 2, { 'data-part': 'foot' })
+      ],
+      icon: (c) => [
+        artRect(3, 18, 11, 18, c.cyl('metal', 'v'), 3, { 'data-part': 'can' }),
+        artRect(5, 12, 7, 7, c.mat('dark', 'd'), 2, { 'data-part': 'plunger' }),
+        artRect(13, 18, 14, 12, c.cyl('brass', 'v'), 3, { 'data-part': 'body' }),
+        artRect(13, 19, 14, 1.6, RIM, 0.8),
+        artPath('M27,18 Q36,16 41,5 L45,7 Q38,22 28,23 Z', c.cyl('brass', 'r'), { 'data-part': 'bell' }),
+        artPath('M27,30 Q36,32 41,43 L45,41 Q38,26 28,25 Z', c.mat('brass', 'd'), { 'data-part': 'bell' }),
+        artEllipse(43, 24, 3, 18, c.cyl('brass', 'h'), { 'data-part': 'lip' }),
+        artEllipse(43, 24, 1.6, 14, ART.dark[1], { 'data-part': 'throat' })
+      ]
+    },
+
+    /* ───────── 고무 치킨 · SPEC-arsenal §D ─────────
+     * The only weapon in the arsenal that is a whole animal, so it is drawn as one: a plucked body held by
+     * the neck, a comb, a beak, a wattle and two legs dangling off the bottom. "가볍고 예측 불가" is in the
+     * pose — nothing on it is horizontal, and the legs hang at two different angles. */
+    chicken: {
+      detail: (c) => [
+        artPath('M34,40 Q22,52 30,66 Q38,74 50,70 L46,60 Q38,56 40,46 Z', c.mat('rubber', 'd'), { 'data-part': 'hand' }),
+        artRect(28, 56, 26, 14, c.cyl('rubber', 'h'), 6, { 'data-part': 'grip' }),
+        artRect(29, 57, 24, 3, RIM2, 1.5),
+        artPath('M52,62 Q78,52 104,58 Q96,70 68,74 Z', c.mat('gloss', 'd'), { 'data-part': 'neck' }),
+        artPath('M52,62 Q78,52 104,58 L103,61 Q78,55 53,65 Z', RIM2),
+        artEllipse(146, 74, 48, 34, c.cyl('gloss', 'd'), { 'data-part': 'body' }),
+        artPath('M110,52 Q146,38 182,54 L180,60 Q146,46 112,58 Z', RIM, { 'data-part': 'back-rim' }),
+        artPath('M160,66 Q190,62 196,82 Q176,94 154,86 Z', 'rgba(255,233,176,.6)', { 'data-part': 'wing' }),
+        artPath('M162,70 Q184,68 190,80 L186,80 Q180,72 163,73 Z', RIM2),
+        artEllipse(118, 92, 20, 12, SEAM2, { 'data-part': 'belly-shade' }),
+        artPath('M188,56 Q210,42 216,58 Q222,46 230,60 Q222,74 206,72 Z', c.mat('accent', 'd'), { 'data-part': 'comb' }),
+        artPath('M188,56 Q210,42 216,58 L213,58 Q208,48 190,59 Z', ART.gloss[0]),
+        artEllipse(206, 76, 20, 17, c.cyl('gloss', 'v'), { 'data-part': 'head' }),
+        artCircle(212, 70, 4.4, ART.dark[2], { 'data-part': 'eye' }),
+        artCircle(213.4, 68.6, 1.6, ART.gloss[0]),
+        poly([[224, 76], [240, 82], [224, 88]], c.mat('hot', 'h'), { 'data-part': 'beak' }),
+        poly([[224, 76], [240, 82], [226, 80]], ART.hot[0]),
+        artPath('M206,92 Q214,96 210,106 Q202,102 206,92 Z', c.mat('accent', 'd'), { 'data-part': 'wattle' }),
+        artPath('M126,104 Q120,122 108,130 L112,134 Q128,124 132,106 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' }),
+        poly([[106, 128], [96, 134], [108, 136], [98, 140]], ART.hot[1], { 'data-part': 'foot' }),
+        artPath('M156,106 Q158,124 150,134 L155,136 Q166,124 162,106 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' }),
+        poly([[150, 132], [140, 138], [152, 139], [143, 140]], ART.hot[2], { 'data-part': 'foot' }),
+        artPath('M96,70 Q84,78 92,90 Q98,80 100,74 Z', 'rgba(246,250,254,.6)', { 'data-part': 'tail' }),
+        artEllipse(104, 76, 7, 11, 'rgba(246,250,254,.5)', { 'data-part': 'tail' }),
+        artCircle(140, 60, 3, 'rgba(0,0,0,.14)'),
+        artCircle(162, 92, 3.4, 'rgba(0,0,0,.12)'),
+        artEllipse(146, 108, 30, 5, 'rgba(0,0,0,.16)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artRect(3, 20, 11, 7, c.cyl('rubber', 'h'), 3.5, { 'data-part': 'grip' }),
+        artPath('M13,23 Q20,19 26,22 Q22,27 15,27 Z', c.mat('gloss', 'd'), { 'data-part': 'neck' }),
+        artEllipse(28, 26, 14, 11, c.cyl('gloss', 'd'), { 'data-part': 'body' }),
+        artPath('M36,15 Q42,10 44,17 Q46,12 48,19 Q43,24 38,22 Z', c.mat('accent', 'd'), { 'data-part': 'comb' }),
+        artEllipse(39, 24, 7, 6, c.cyl('gloss', 'v'), { 'data-part': 'head' }),
+        artCircle(41, 22, 1.7, ART.dark[2], { 'data-part': 'eye' }),
+        poly([[45, 24], [48, 26], [45, 28]], c.mat('hot', 'h'), { 'data-part': 'beak' }),
+        artPath('M24,36 Q22,41 18,44 L20,45 Q26,41 27,37 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' })
+      ]
     }
   };
 
@@ -3043,7 +3445,9 @@
     '.grid button.dragging{opacity:.6;transform:scale(.94)}',
     '.badge{position:absolute;top:2px;left:4px;font-size:9px;line-height:1.3;padding:0 3px;border-radius:4px;background:rgba(255,255,255,.18);font-weight:700}',
     '.cur{margin-top:6px;font-size:12.5px;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-    '.presets{display:flex;align-items:center;gap:3px;margin-top:6px}',
+    /* SPEC-arsenal §C / §D: seven presets no longer fit on one line of a 그리드-wide panel, and a preset
+       button that is clipped off the end is a preset nobody can pick. Wrapping is the whole fix. */
+    '.presets{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin-top:6px}',
     '.presets .plabel{flex:none;font-size:11.5px;color:rgba(255,255,255,.7);white-space:nowrap;margin-right:2px}',
     '.presets button{flex:0 0 auto;min-width:max-content;height:24px;padding:0 4px;font-size:11px;border-radius:7px}',
     '.presets .custom{flex:none;font-size:10.5px;color:#ffb224;white-space:nowrap}',
@@ -6437,6 +6841,13 @@
   const MOVED_GRAVITY = 1200;        // §E2, ONLY while wet / bouncy
   const MOVED_OUT_MARGIN = 400;      // §E2, px past a viewport edge
   const MOVED_BOUNCE = 0.45;         // §E3, restitution
+  /* ── SPEC-arsenal §C / §D (8단계) — three numbers the interaction weapons need from THIS integrator ──
+   * They live here rather than in src/68-interaction.js because they are properties of the body, not of the
+   * weapon: whatever made a body wet or bouncy, it slides and bounces the same way afterwards. The flags
+   * themselves (`b.wet` / `b.bouncy`) were already part of §E2's record. */
+  const MOVED_FRICTION_WET = 0.94;   // §D 물총: "더 멀리 미끄러짐" — 0.86/s → 0.94/s
+  const MOVED_BOUNCE_BOUNCY = 0.85;  // §C 고무탄: 반발 0.85 (당구공)
+  const MOVED_BOUNCY_DMG = 1.6;      // §C 고무탄: 충돌 피해 ×1.6
   const MOVED_STATIC_MS = 300;       // §E3, the in-place candidate cache
   const MOVED_RETURN_MS = 400;       // §E1, the over-cap glide home
   const MOVED_REAPPLY_MAX = 3;       // §E4, reapply three times, then give up on the element
@@ -6564,7 +6975,7 @@
       el, x: 0, y: 0, rot: 0, vx: 0, vy: 0, vr: 0, resting: false, bornAt: now(),
       wet: false, bouncy: false,
       mass: movedMass(rect), saved, savedPriority: priority, want: '', wrote: '', reapplied: 0,
-      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0, retMs: 0,
+      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0, retMs: 0, floored: false,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
       hitAt: new WeakMap()
     };
@@ -6651,11 +7062,15 @@
   /* §E3 damage. It goes through collisionHit() (src/73-hit-resolution.js) and NOT through applyHit():
    * §B2 wants displacement on every element while the collision damage lands on hostiles only, and that
    * gate lives in exactly one place. */
-  function movedCollisionDamage(el, relSpeed, x, y) {
+  /* §C 고무탄's ×1.6 rides in as `mul`: collisionHit() turns relSpeed into damage (clamp(round(rel/14),1,60)),
+   * so scaling the speed it is handed IS scaling the damage, and the one damage gate stays the one gate. */
+  function movedCollisionDamage(el, relSpeed, x, y, mul) {
     if (!el || !el.isConnected) return;
     try { if (el.hasAttribute('data-crs-broken')) return; } catch (e) { return; }
-    try { collisionHit(el, relSpeed, x, y); } catch (e) { state.lastError = String((e && e.stack) || e); }
+    try { collisionHit(el, relSpeed * (mul > 0 ? mul : 1), x, y); } catch (e) { state.lastError = String((e && e.stack) || e); }
   }
+  function movedRestitution(a, c) { return (a && a.bouncy) || (c && c.bouncy) ? MOVED_BOUNCE_BOUNCY : MOVED_BOUNCE; }
+  function movedDmgMul(b) { return b && b.bouncy ? MOVED_BOUNCY_DMG : 1; }
   function movedCollide(t, rects) {
     const live = [];
     for (const b of state.movedList) { if (!b.returning && rects.get(b)) live.push(b); }
@@ -6671,7 +7086,7 @@
         const along = rvx * n.nx + rvy * n.ny;
         if (along >= 0) continue;                       // already separating — one impact, not a grind
         const relSpeed = Math.hypot(rvx, rvy);
-        const imp2 = -(1 + MOVED_BOUNCE) * along / (1 / a.mass + 1 / c.mass);
+        const imp2 = -(1 + movedRestitution(a, c)) * along / (1 / a.mass + 1 / c.mass);
         a.vx -= imp2 * n.nx / a.mass; a.vy -= imp2 * n.ny / a.mass;
         c.vx += imp2 * n.nx / c.mass; c.vy += imp2 * n.ny / c.mass;
         const half = n.depth / 2;
@@ -6682,8 +7097,8 @@
         if (!movedCanHit(a, c.el, t) || !movedCanHit(c, a.el, t)) continue;
         const cx = (Math.max(ra.left, rc.left) + Math.min(ra.right, rc.right)) / 2;
         const cy = (Math.max(ra.top, rc.top) + Math.min(ra.bottom, rc.bottom)) / 2;
-        movedCollisionDamage(a.el, relSpeed, cx, cy);
-        movedCollisionDamage(c.el, relSpeed, cx, cy);
+        movedCollisionDamage(a.el, relSpeed, cx, cy, movedDmgMul(c));
+        movedCollisionDamage(c.el, relSpeed, cx, cy, movedDmgMul(a));
       }
     }
     // ---- displaced ↔ in place ----
@@ -6702,16 +7117,17 @@
         const n = aabbPush(rb, rc);
         const along = b.vx * n.nx + b.vy * n.ny;
         if (along <= 0) continue;                       // moving away from it
+        const rest = movedRestitution(b, null);
         b.x -= n.nx * n.depth; b.y -= n.ny * n.depth;
-        b.vx -= (1 + MOVED_BOUNCE) * along * n.nx;
-        b.vy -= (1 + MOVED_BOUNCE) * along * n.ny;
+        b.vx -= (1 + rest) * along * n.nx;
+        b.vy -= (1 + rest) * along * n.ny;
         rb.left -= n.nx * n.depth; rb.right -= n.nx * n.depth;
         rb.top -= n.ny * n.depth; rb.bottom -= n.ny * n.depth;
         if (!movedCanHit(b, el, t)) continue;
         const cx = (Math.max(rb.left, rc.left) + Math.min(rb.right, rc.right)) / 2;
         const cy = (Math.max(rb.top, rc.top) + Math.min(rb.bottom, rc.bottom)) / 2;
-        movedCollisionDamage(b.el, speed, cx, cy);
-        movedCollisionDamage(el, speed, cx, cy);
+        movedCollisionDamage(b.el, speed, cx, cy, movedDmgMul(b));
+        movedCollisionDamage(el, speed, cx, cy, movedDmgMul(b));
         break;                                          // one in-place impact per body per frame
       }
     }
@@ -6742,8 +7158,10 @@
         busy = true;
         // §E2: no gravity. A displaced element was SHOVED, it is not falling — unless it is wet or bouncy.
         if (b.wet || b.bouncy) b.vy += MOVED_GRAVITY * dt;
-        b.vx *= Math.pow(MOVED_FRICTION, dt);
-        b.vy *= Math.pow(MOVED_FRICTION, dt);
+        // §D 물총: a wet thing SLIDES — the same shove carries it noticeably further before it parks.
+        const fr = b.wet ? MOVED_FRICTION_WET : MOVED_FRICTION;
+        b.vx *= Math.pow(fr, dt);
+        b.vy *= Math.pow(fr, dt);
         b.vr *= Math.pow(MOVED_ROT_FRICTION, dt);
         b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.vr * dt;
       }
@@ -6759,10 +7177,20 @@
       if (overL > 0) { b.x += overL; box.left += overL; box.right += overL; if (b.vx < 0) b.vx = 0; }
       if (overR > 0) { b.x -= overR; box.left -= overR; box.right -= overR; if (b.vx > 0) b.vx = 0; }
       if (overT > 0) { b.y += overT; box.top += overT; box.bottom += overT; if (b.vy < 0) b.vy = 0; }
+      b.floored = overB > 0;
       if (overB > 0) { b.y -= overB; box.top -= overB; box.bottom -= overB; if (b.vy > 0) b.vy = 0; }
       rects.set(b, box);
       // §E2: 정지하면 제자리로 돌아가지 않는다 — it parks where it stopped; only 복구 brings it back.
-      if (!b.resting && Math.abs(b.vx) < MOVED_SLEEP_V && Math.abs(b.vy) < MOVED_SLEEP_V && Math.abs(b.vr) < MOVED_SLEEP_R) {
+      /* ── SPEC-arsenal §C / §D (8단계) ──
+       * A body under gravity (젖음 / bouncy) may NOT park on velocity alone. The frame right after
+       * displaceEl() can carry a sub-millisecond dt — kick() stamps state.lastT and the rAF callback is
+       * often the very next tick — so gravity has only added a px/s or two by the time this test runs, and
+       * a weapon that grants gravity without an impulse (고무탄, 고무 치킨) would put its target to sleep on
+       * its FIRST frame and the thing would never fall at all. That is exactly what happened: §C 7 measured
+       * 26 frames of y === 0. A falling body is at rest only once the §E2 viewport floor has stopped it,
+       * which is what `floored` says. */
+      const gravOn = !!(b.wet || b.bouncy);
+      if (!b.resting && (!gravOn || b.floored) && Math.abs(b.vx) < MOVED_SLEEP_V && Math.abs(b.vy) < MOVED_SLEEP_V && Math.abs(b.vr) < MOVED_SLEEP_R) {
         b.vx = 0; b.vy = 0; b.vr = 0; b.resting = true;
       }
       writeMoved(b);
@@ -6783,13 +7211,696 @@
   debug.moved = () => state.movedList.map((b) => ({
     id: (b.el && b.el.id) || '', tag: tagOf(b.el),
     x: b.x, y: b.y, rot: b.rot, vx: b.vx, vy: b.vy,
-    resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied
+    resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied, wet: !!b.wet, bouncy: !!b.bouncy
   }));
+  debug.movedConst = () => ({ friction: MOVED_FRICTION, frictionWet: MOVED_FRICTION_WET, bounce: MOVED_BOUNCE, bounceBouncy: MOVED_BOUNCE_BOUNCY, bouncyDmg: MOVED_BOUNCY_DMG, gravity: MOVED_GRAVITY, cap: MOVED_CAP });
   debug.movedOf = (el) => {
     const b = el && state.moved.get(el);
-    return b ? { x: b.x, y: b.y, rot: b.rot, vx: b.vx, vy: b.vy, resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied } : null;
+    return b ? { x: b.x, y: b.y, rot: b.rot, vx: b.vx, vy: b.vy, resting: !!b.resting, returning: !!b.returning, mass: b.mass, reapplied: b.reapplied, wet: !!b.wet, bouncy: !!b.bouncy } : null;
   };
   debug.undisplace = (el) => undisplace(el);
+
+// ── 68-interaction.js ──
+// ── SPEC-arsenal §C 상호작용 무기 (충격포 · 견인 광선 · 고무탄) · §D 예능 무기 (뿅망치 · 물총 · 나팔 · 고무 치킨) ──
+  /* =====================================================================
+   * 10.55 Interaction weapons — 8단계
+   *
+   * 사용자: "예능 무기도 넣어줘 뿅망치나 물총 같은거 그리고 컴포넌트들
+   *          혹은 프레임과 상호작용되는 무기들도 팅긴다거나 밀친다거나
+   *          땅긴다거나"
+   *
+   * Everything in here is built on the displacement system (§E of
+   * SPEC-combat, src/67-displace.js). That module owns the bodies, the
+   * integrator, the collision pass and — above all — the promise that a
+   * borrowed `transform` goes back to the value it was found at. Nothing
+   * below ever writes `transform` on a page element itself: it asks
+   * displaceEl() for an impulse and lets §E do the physics.
+   *
+   * §C — 상호작용 셋. One verb each:
+   *   충격포     민다    반경 260 을 바깥으로. 직접 피해 10뿐 — 피해는 부딪혀서 나온다
+   *   견인 광선  당긴다  하나를 붙잡아 커서를 따라오게 하고, 떼면 그 속도로 날아간다
+   *   고무탄     튕긴다  맞은 것이 6초간 중력과 반발 0.85 를 얻어 당구공이 된다
+   *
+   * §D — 예능 넷. 밴드에서 빠지는 대신 각자 피해가 아닌 효과를 하나씩 갖는다
+   * (`WEAPONS[id].quirk` — 표가 아니라 필드다):
+   *   뿅망치     squash   찌그러졌다 튀어오른다
+   *   물총       wet      젖음 8초 — 불을 끄고, 냉각을 2.5배로 만들고, 더 멀리 미끄러진다
+   *   나팔       reflect  90도 원뿔을 밀고 적의 탄환 방향을 뒤집는다
+   *   고무 치킨  bouncy   20% 확률로 고무탄과 같은 상태를 건다
+   *
+   * 물총이 이 묶음의 중심이다. 혼자서는 거의 아무것도 못 하지만 젖은 것은
+   * 불이 안 붙고, 2.5배로 얼고, 밀면 훨씬 멀리 간다 — 다른 무기를 강하게
+   * 만드는 준비 도구다 (물총 → 냉각총(9단계) → 망치).
+   *
+   * THE ONE STRUCTURAL RULE HERE: the two states this module owns on a PAGE
+   * element — 젖음's inline `filter` and the bouncy flag — are each written
+   * through one function and taken back through one function, and both are
+   * emptied by restore(). 연소(§F, src/77-burn.js) also borrows `filter`, so
+   * the two never hold it at once: igniteEl() is wrapped below to drop the
+   * wet look BEFORE the fire saves what it finds, and the wet look is never
+   * written onto something that is already burning. Getting that order wrong
+   * leaves a wet filter behind the moment a fire goes out, which is exactly
+   * the kind of trace CLAUDE.md forbids.
+   * ===================================================================== */
+
+  /* ── the table extras ─────────────────────────────────────────────────────
+   * DESTRUCTION (src/66-fracture.js) and CH_SHAPES (src/51-crosshair.js) are plain objects declared EARLIER
+   * in the bundle, so the new rows are added here rather than by editing two files this workstream only
+   * reads — the same device SPEC-arsenal §B used for the laser and the minigun. src/66's
+   * `for (const id of WEAPON_IDS) WEAPONS[id].destruction = DESTRUCTION[id]` has already run and wrote
+   * `undefined` for these seven ids; the lines below are what fill them in.
+   * INTERPRETATION (reported): §C and §D name no destruction profile, only the verb. The profiles follow the
+   * verb — a shove bursts, a tow drops a slab, rubber and the chicken throw wedges outward, the squeaky
+   * hammer and the horn shred in strips (nothing with that little force cuts), and water just drops. */
+  DESTRUCTION.shockwave = { shape: 'wedge', separation: 'burst',  finish: 'none', particles: 'dust',  delayMs: 0,  vaporise: 0 };
+  DESTRUCTION.tractor   = { shape: 'slab',  separation: 'drop',   finish: 'none', particles: 'none',  delayMs: 0,  vaporise: 0 };
+  DESTRUCTION.rubber    = { shape: 'wedge', separation: 'radial', finish: 'none', particles: 'dust',  delayMs: 0,  vaporise: 0 };
+  DESTRUCTION.squeaky   = { shape: 'strip', separation: 'radial', finish: 'none', particles: 'dust',  delayMs: 80, vaporise: 0 };
+  DESTRUCTION.watergun  = { shape: 'ash',   separation: 'drop',   finish: 'none', particles: 'none',  delayMs: 0,  vaporise: 0 };
+  DESTRUCTION.horn      = { shape: 'strip', separation: 'burst',  finish: 'none', particles: 'dust',  delayMs: 0,  vaporise: 0 };
+  DESTRUCTION.chicken   = { shape: 'wedge', separation: 'burst',  finish: 'none', particles: 'spark', delayMs: 0,  vaporise: 0 };
+  for (const id of ['shockwave', 'tractor', 'rubber', 'squeaky', 'watergun', 'horn', 'chicken']) WEAPONS[id].destruction = DESTRUCTION[id];
+
+  /* §A4 of SPEC-crosshair: every weapon has a shape. 충격포 is the blast circle (its radius IS the push
+   * radius, read from the weapon table by chBlastRadius()); 견인 광선 is an open ring with a dot in it — a
+   * grab point, not an aim point; 고무탄 a small bouncing ring; 뿅망치 a fat soft arc; 물총 a two-arm squirt;
+   * 나팔 the cone the flamethrower already speaks; 고무 치킨 a loose diagonal, because nothing it does is
+   * straight. */
+  CH_SHAPES.shockwave = { arms: 4, dot: false, armLen: 5, blast: true, parts: [{ cls: 'crs-ch-circle', size: 22, w: 2, rot: 0 }] };
+  CH_SHAPES.tractor   = { arms: 4, dot: true,  armLen: 3, thin: true, parts: [{ cls: 'crs-ch-circle', size: 28, w: 1, rot: 0 }] };
+  CH_SHAPES.rubber    = { arms: 4, dot: true,  armLen: 4, parts: [{ cls: 'crs-ch-circle', size: 13, w: 2, rot: 0 }] };
+  CH_SHAPES.squeaky   = { arms: 0, dot: false, armLen: 0, parts: [{ cls: 'crs-ch-arc crs-ch-arc-fat', size: 28, w: 4, rot: -30 }] };
+  CH_SHAPES.watergun  = { arms: 4, dot: true,  armLen: 6, thin: true, parts: [] };
+  CH_SHAPES.horn      = { arms: 0, dot: false, armLen: 0, cone: true, parts: [] };
+  CH_SHAPES.chicken   = { arms: 0, dot: true,  armLen: 0, parts: [{ cls: 'crs-ch-slash', size: 22, w: 2, rot: 28 }] };
+
+  /* ── constants ──────────────────────────────────────────────────────────── */
+  const IX_MAX_SPEED = 2800;          // px/s — no impulse here may out-run the integrator's own collision pass
+  const IX_TICK_MS = 100;             // the 젖음 / bouncy expiry heartbeat (one self-rescheduling chain, never setInterval)
+  const IX_WET_FILTER = 'saturate(.42) blur(.6px) brightness(.94)';   // §D 물총: 글자가 번지고 색이 빠진다
+  const IX_WET_COOL_MUL = 2.5;        // §D 물총: 냉각 2.5배 (9단계 냉각총이 읽을 규칙)
+  const IX_STAR_MS = 520;             // §D 뿅망치: 별 입자 수명
+  const IX_HORN_FLIP_PAD = 60;        // 나팔의 원뿔 판정에 주는 여유 — 탄환은 점이라 가장자리에서 아슬아슬하게 빠진다
+
+  /* ── §D 젖음 · §C 고무 — the two per-element states this module owns ────────
+   * Maps, not WeakMaps: the heartbeat below has to WALK them. Both are emptied by restore(). */
+  const ixWetEls = new Map();         // el -> { until, filterSaved, filterPriority, wrote, owns }
+  const ixBouncyEls = new Map();      // el -> until
+  let ixTimer = 0;
+
+  function ixArm() {
+    if (ixTimer || !state.active) return;
+    if (!ixWetEls.size && !ixBouncyEls.size) return;
+    ixTimer = later(ixStep, IX_TICK_MS);
+  }
+  function ixStep() {
+    ixTimer = 0;
+    if (!state.active) { ixClearStates(); return; }
+    const t = now();
+    for (const [el, rec] of Array.from(ixWetEls)) {
+      let gone = false;
+      try { gone = !el.isConnected || el.hasAttribute('data-crs-broken'); } catch (e) { gone = true; }
+      if (gone || t >= rec.until) { ixUnwet(el); continue; }
+      ixWetPaint(el, rec);
+    }
+    for (const [el, until] of Array.from(ixBouncyEls)) {
+      let gone = false;
+      try { gone = !el.isConnected || el.hasAttribute('data-crs-broken'); } catch (e) { gone = true; }
+      if (gone || t >= until) { ixUnbounce(el); continue; }
+    }
+    ixArm();
+  }
+
+  /* ── §D 물총 젖음 ──────────────────────────────────────────────────────────
+   * The look is an inline `filter`, so the original value AND its priority are saved before the first write
+   * and put back on expiry — 빈 문자열이 아니라 원래 값으로 (CLAUDE.md). `filter` carries no !important
+   * anywhere in content.css for page elements, which is why this is allowed to be a plain write at all. */
+  function ixWetPaint(el, rec) {
+    if (isBurning(el)) { ixWetUnpaint(el, rec); return; }      // 연소가 filter 를 쓰고 있다 — 양보한다
+    if (rec.owns && rec.wrote === IX_WET_FILTER) return;
+    if (!rec.owns) {
+      try { rec.filterSaved = el.style.getPropertyValue('filter') || ''; rec.filterPriority = el.style.getPropertyPriority('filter') || ''; }
+      catch (e) { rec.filterSaved = ''; rec.filterPriority = ''; }
+      rec.owns = true;
+    }
+    try { el.style.setProperty('filter', IX_WET_FILTER); rec.wrote = IX_WET_FILTER; } catch (e) { /* ignore */ }
+  }
+  function ixWetUnpaint(el, rec) {
+    if (!rec.owns) return;
+    rec.owns = false; rec.wrote = '';
+    try {
+      if (rec.filterSaved) el.style.setProperty('filter', rec.filterSaved, rec.filterPriority);
+      else el.style.removeProperty('filter');
+    } catch (e) { /* ignore */ }
+  }
+  /* The ONE way anything gets wet. ms defaults to the water pistol's 8 s (§D). */
+  function ixWet(el, ms) {
+    if (!el || el.nodeType !== 1 || !state.active || isOurs(el)) return null;
+    try { if (!el.isConnected || el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
+    const dur = scaleMs(ms > 0 ? ms : WEAPONS.watergun.wetMs);
+    let rec = ixWetEls.get(el);
+    if (!rec) { rec = { until: 0, filterSaved: '', filterPriority: '', wrote: '', owns: false }; ixWetEls.set(el, rec); }
+    rec.until = Math.max(rec.until, now() + dur);
+    /* §F4 of SPEC-destruction already has the whole 젖음 ↔ 불 table — it reads `chilled`, so the water
+     * pistol does not get a second ledger of its own, it fills in the one the burn system is already
+     * consulting. This is literally the line step 6 said step 8 would write. */
+    try { chillOf(el).wet = dur; } catch (e) { /* ignore */ }
+    const b = state.moved.get(el);
+    if (b && !b.released) b.wet = true;                       // §E2 중력 + §C의 낮은 마찰 — 처지고 미끄러진다
+    ixWetPaint(el, rec);
+    ixArm();
+    return rec;
+  }
+  function ixUnwet(el) {
+    const rec = ixWetEls.get(el);
+    if (!rec) return false;
+    ixWetEls.delete(el);
+    ixWetUnpaint(el, rec);
+    try { const c = chilled.get(el); if (c) c.wet = 0; } catch (e) { /* ignore */ }
+    const b = state.moved.get(el);
+    if (b && !b.released) b.wet = false;
+    return true;
+  }
+  function ixIsWet(el) {
+    const rec = el && ixWetEls.get(el);
+    return !!(rec && now() < rec.until);
+  }
+  /* §D 물총: "냉각 2.5배". The freeze gun itself is 9단계 (§E), so what lands now is the RULE and the one
+   * entry point it will call — exactly how step 6 landed 젖음 and 빙결 with no weapon behind them.
+   * INTERPRETATION (reported): §D's "냉각 2.5배" is read as "젖은 것은 빙결이 2.5배로 쌓인다", which is what
+   * makes the 물총 → 냉각총 → 망치 chain the brief names the strongest one in the game. */
+  function ixCoolMul(el) { return ixIsWet(el) ? IX_WET_COOL_MUL : 1; }
+  function ixFreeze(el, amount) {
+    if (!el || !(amount > 0)) return null;
+    let c = null;
+    try { c = chillOf(el); } catch (e) { return null; }
+    c.frozen = clamp(c.frozen + amount * ixCoolMul(el), 0, BURN_FROZEN_FULL);
+    return c.frozen;
+  }
+
+  /* ── §C 고무탄 / §D 고무 치킨 — bouncy ─────────────────────────────────────
+   * A bouncy body is given gravity and restitution 0.85 by the integrator (src/67-displace.js); all this
+   * does is turn the flag on, make sure a body exists to carry it, and take it off again after 6 s. */
+  function ixMakeBouncy(el, ms) {
+    if (!el || !state.active) return null;
+    const b = displaceEl(el, 0, 0, { bouncy: true });
+    if (!b) return null;
+    ixBouncyEls.set(el, now() + scaleMs(ms > 0 ? ms : WEAPONS.rubber.bouncyMs));
+    ixArm();
+    kick();
+    return b;
+  }
+  function ixUnbounce(el) {
+    if (!ixBouncyEls.has(el)) return false;
+    ixBouncyEls.delete(el);
+    const b = state.moved.get(el);
+    if (b && !b.released) b.bouncy = false;
+    return true;
+  }
+  function ixIsBouncy(el) {
+    const until = el && ixBouncyEls.get(el);
+    return !!(until && now() < until);
+  }
+  /* §D 고무 치킨's 20 %. The two debug switches are the same escape hatch noCrit / forceCrit are: a chance
+   * nothing can pin down is a chance nothing can assert either. */
+  function ixRollQuirk(p) { return debug.forceQuirk ? true : (debug.noQuirk ? false : Math.random() < p); }
+
+  /* ── pushing ──────────────────────────────────────────────────────────────
+   * §C 충격포: 충격량 900 × (1 − d/R), outward from the impact point. aoeCandidates() is reused whole so the
+   * push finds exactly the elements an explosion of the same radius would — including the ones behind cover,
+   * because a pressure wave does not care what is in front of what. */
+  function ixElCentre(el, fallbackX, fallbackY) {
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return { x: fallbackX, y: fallbackY };
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+  function ixClampImpulse(ix, iy) {
+    const m = Math.hypot(ix, iy);
+    const cap = IX_MAX_SPEED * 6;                 // mass is ≥ 0.6, so this is the ceiling on the resulting speed
+    if (!(m > cap)) return { ix, iy };
+    return { ix: ix * cap / m, iy: iy * cap / m };
+  }
+  function ixPushRadial(x, y, R, impulse, opts) {
+    const W = WEAPONS.shockwave;
+    const cands = aoeCandidates(x, y, R, (opts && opts.maxTargets) || W.maxTargets, W.rings, true);
+    const out = [];
+    for (const c of cands) {
+      const q = ixElCentre(c.el, x, y);
+      let dx = q.x - x, dy = q.y - y;
+      let L = Math.hypot(dx, dy);
+      if (!(L > 1)) { const a = Math.random() * Math.PI * 2; dx = Math.cos(a); dy = Math.sin(a); L = 1; }
+      const k = Math.max(0, 1 - clamp(c.d, 0, R) / R);        // §C: 900 × (1 − d/R) — d 는 가장자리까지의 거리
+      const mag = impulse * k;
+      if (!(mag > 0)) continue;
+      const imp = ixClampImpulse((dx / L) * mag, (dy / L) * mag);
+      const b = displaceEl(c.el, imp.ix, imp.iy, opts);
+      if (b) out.push(c.el);
+    }
+    return out;
+  }
+  /* §D 나팔: a 90° wedge. INTERPRETATION (reported): §D gives the cone an angle and a reach but not an apex.
+   * The apex is the AIM POINT and the axis is the direction the blast travels (origin → aim), because every
+   * other weapon in this product happens at the aim point, and an apex at the player's feet would put most
+   * of a 420 px cone inside the bottom bezel. Everything inside is pushed the SAME way — along the axis —
+   * since a horn blows forward, it does not scatter. */
+  function ixOrigin() {
+    if (state.avatar && isFinite(state.player.x)) return { x: state.player.x, y: state.player.y };
+    return { x: viewW() / 2, y: viewH() + 8 };
+  }
+  function ixInCone(px0, py0, ang, R, halfDeg, qx, qy, pad) {
+    const dx = qx - px0, dy = qy - py0, L = Math.hypot(dx, dy);
+    if (L > R + (pad || 0)) return false;
+    if (L < 1) return true;
+    let d = Math.atan2(dy, dx) - ang;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d) <= halfDeg * DEG;
+  }
+  function ixPushCone(x, y, ang, R, coneDeg, impulse) {
+    const W = WEAPONS.horn;
+    const half = coneDeg / 2;
+    const cands = aoeCandidates(x, y, R, W.maxTargets, W.rings, true);
+    const ux = Math.cos(ang), uy = Math.sin(ang);
+    const out = [];
+    for (const c of cands) {
+      const q = ixElCentre(c.el, x, y);
+      if (!ixInCone(x, y, ang, R, half, q.x, q.y, 0)) continue;
+      const k = Math.max(0.15, 1 - clamp(c.d, 0, R) / R);
+      const imp = ixClampImpulse(ux * impulse * k, uy * impulse * k);
+      const b = displaceEl(c.el, imp.ix, imp.iy, { spin: rand(-120, 120) });
+      if (b) out.push(c.el);
+    }
+    return out;
+  }
+  /* §D 나팔의 고유 효과: "적의 탄환 방향을 뒤집는다 — 유일하게 전투 효용이 분명하다." A projectile still in
+   * its wind-up has no velocity to reverse, so it is launched first and then turned around: the shot was
+   * fired, it simply goes the other way. */
+  function ixFlipOrbs(x, y, ang, R, coneDeg) {
+    const half = coneDeg / 2;
+    let n = 0;
+    for (const o of state.orbs.slice()) {
+      if (!ixInCone(x, y, ang, R, half, o.x, o.y, IX_HORN_FLIP_PAD)) continue;
+      if (!o.launched) { try { launchOrb(o); } catch (e) { continue; } }
+      if (o.kind === 'mortar') continue;                       // 포물선탄은 착탄 지점이 발사 때 고정된다 — 뒤집을 속도가 없다
+      o.vx = -o.vx; o.vy = -o.vy;
+      o.flipped = true;
+      o.launchAt = now();                                      // 3초 수명을 다시 센다: 되돌아가는 탄도 날아갈 시간이 있어야 한다
+      n++;
+    }
+    if (n) kick();
+    return n;
+  }
+
+  /* ── §D 뿅망치 — 찌그러졌다 튀어오른다 + 별 입자 ──────────────────────────
+   * A Web Animation with fill:'none' on the page element itself: it writes NO inline style, so there is
+   * nothing to put back afterwards, and trackAnim() hands it to restore()'s cancelAnims(). A displaced
+   * element is the one case it cannot show — §E writes `transform` inline with !important, which beats a
+   * WAAPI animation — and that is the right answer anyway: a thing in flight is not sitting there wobbling. */
+  function ixSquash(el) {
+    if (!el || reducedMotion()) return false;
+    try { if (!el.isConnected || el.hasAttribute('data-crs-broken')) return false; } catch (e) { return false; }
+    const ms = Math.max(60, scaleMs(WEAPONS.squeaky.squashMs));
+    try {
+      /* `composite: 'add'`, and it MUST be called after applyHit(), not before. reactDamage()
+       * (src/70-break.js) opens with cancelAnimsOf(el) and then plays the hit jolt with composite 'add' —
+       * a squash started first is simply cancelled, which is exactly what happened the first time (the test
+       * found one animation on the element and it was the jolt). Added rather than replacing, so the jolt
+       * and the squash are both still there: the thing is knocked back AND squashed. */
+      trackAnim(el.animate([
+        { transform: 'scale(1, 1)', offset: 0 },
+        { transform: 'scale(1.24, .6)', offset: 0.22 },
+        { transform: 'scale(.9, 1.17)', offset: 0.5 },
+        { transform: 'scale(1.06, .95)', offset: 0.74 },
+        { transform: 'scale(1, 1)', offset: 1 }
+      ], { duration: ms, easing: 'ease-out', fill: 'none', composite: 'add' }));
+    } catch (e) { return false; }
+    return true;
+  }
+  function ixStars(x, y, count) {
+    if (!root || reducedMotion()) return 0;
+    let n = 0;
+    for (let i = 0; i < count; i++) {
+      const s = rand(9, 17);
+      const node = mk('div', 'crs-star');
+      node.style.left = px(x - s / 2); node.style.top = px(y - s / 2);
+      node.style.width = px(s); node.style.height = px(s);
+      root.append(node);
+      state.fire.push(node);
+      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(node); if (k >= 0) state.fire.splice(k, 1); };
+      const a = rand(0, Math.PI * 2), d = rand(26, 62);
+      try {
+        const an = trackAnim(node.animate([
+          { transform: 'translate(0px, 0px) rotate(0deg) scale(.5)', opacity: 1 },
+          { transform: 'translate(' + px(Math.cos(a) * d) + ', ' + px(Math.sin(a) * d - 14) + ') rotate(' + Math.round(rand(-220, 220)) + 'deg) scale(1.1)', opacity: 0 }
+        ], { duration: scaleMs(IX_STAR_MS), easing: 'ease-out', fill: 'forwards' }));
+        an.addEventListener('finish', kill);
+      } catch (e) { /* ignore */ }
+      later(kill, IX_STAR_MS + 350);
+      n++;
+    }
+    return n;
+  }
+  /* §D 물총의 물방울. Same ledger as the fire particles (state.fire), so the particle cap, the restore()
+   * sweep and the "흔적 없음" assertions all cover them with no second bookkeeping. */
+  function ixSplash(x, y, count) {
+    if (!root || reducedMotion()) return 0;
+    let n = 0;
+    for (let i = 0; i < count; i++) {
+      const s = rand(5, 11);
+      const node = mk('div', 'crs-splash');
+      node.style.left = px(x - s / 2); node.style.top = px(y - s / 2);
+      node.style.width = px(s); node.style.height = px(s);
+      root.append(node);
+      state.fire.push(node);
+      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(node); if (k >= 0) state.fire.splice(k, 1); };
+      try {
+        const an = trackAnim(node.animate([
+          { transform: 'translate(0px, 0px) scale(1)', opacity: 0.9 },
+          { transform: 'translate(' + px(rand(-26, 26)) + ', ' + px(rand(10, 44)) + ') scale(.4)', opacity: 0 }
+        ], { duration: scaleMs(rand(260, 420)), easing: 'ease-in', fill: 'forwards' }));
+        an.addEventListener('finish', kill);
+      } catch (e) { /* ignore */ }
+      later(kill, 900);
+      n++;
+    }
+    return n;
+  }
+  /* §D 나팔의 원뿔 — two edges and a sweep, drawn as divs (no canvas, §금지 목록). */
+  function ixConeFx(x, y, ang, R, coneDeg) {
+    if (!root) return null;
+    const node = mk('div', 'crs-horn-cone');
+    node.style.left = px(x); node.style.top = px(y);
+    node.style.width = px(R); node.style.height = px(2 * R * Math.tan((coneDeg / 2) * DEG));
+    node.style.transformOrigin = '0 50%';
+    node.style.transform = 'translateY(-50%) rotate(' + ang.toFixed(4) + 'rad)';
+    root.append(node);
+    const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } };
+    try {
+      const an = trackAnim(node.animate([
+        { opacity: 0.85, transform: 'translateY(-50%) rotate(' + ang.toFixed(4) + 'rad) scaleX(.25)' },
+        { opacity: 0, transform: 'translateY(-50%) rotate(' + ang.toFixed(4) + 'rad) scaleX(1)' }
+      ], { duration: reducedMotion() ? 90 : 260, easing: 'ease-out', fill: 'forwards' }));
+      an.addEventListener('finish', kill);
+    } catch (e) { /* ignore */ }
+    later(kill, 700);
+    return node;
+  }
+
+  /* ── §C 견인 광선 ─────────────────────────────────────────────────────────
+   * 길게 눌러 하나를 붙잡는다. 커서를 따라오고(스프링 추종) 떼면 그 속도로 날아간다. mass > 4 는 못 잡는다.
+   * 잡힌 적은 공격을 멈춘다.
+   *
+   * The follow is written as a VELOCITY, not as a position: the body stays a body in §E's integrator, so it
+   * still collides with everything on the way (which is most of the fun), and "떼면 그 속도로 날아간다" needs
+   * no special case at all — letting go simply stops writing the velocity and the last one is still there. */
+  const tb = { el: null, body: null, at: 0, beam: null, grip: null, grabs: 0, refusals: 0, lastRefusal: '', peak: 0 };
+  function tbHeld() { return !!(tb.el && tb.body && !tb.body.released); }
+  function tbMassOf(el) {
+    const r = rectOf(el);
+    if (!r || r.width < 1 || r.height < 1) return Infinity;
+    return movedMass(r);
+  }
+  function tbGrab(x, y) {
+    if (tbHeld()) return tb.el;
+    const el = pickTarget(x, y);
+    if (!el) { tb.refusals++; tb.lastRefusal = 'nothing'; return null; }
+    if (!movedEligible(el)) { tb.refusals++; tb.lastRefusal = 'ineligible'; return null; }
+    /* §C: "mass > 4 는 못 잡는다." Measured BEFORE anything is created — a refused grab must not leave a
+     * displacement body (and therefore a borrowed transform) behind on an element it never moved. */
+    const m = tbMassOf(el);
+    if (!(m <= WEAPONS.tractor.grabMaxMass)) { tb.refusals++; tb.lastRefusal = 'mass'; sfx('clack'); return null; }
+    const b = displaceEl(el, 0, 0, {});
+    if (!b) { tb.refusals++; tb.lastRefusal = 'nobody'; return null; }
+    tb.el = el; tb.body = b; tb.at = now(); tb.grabs++; tb.peak = 0;
+    b.resting = false;
+    sfx('tractor');
+    tbDraw();
+    kick();
+    return el;
+  }
+  function tbRelease(silent) {
+    const held = tbHeld();
+    const el = tb.el;
+    tb.el = null; tb.body = null;
+    tbClearNodes();
+    if (!held) return false;
+    if (!silent) { sfx('tractorOff'); startCooldown('tractor', WEAPONS.tractor.releaseCdMs); }
+    kick();
+    return !!el;
+  }
+  /* Runs from the wrapped stepMoved() below — the SAME frame the integrator uses, so the spring is solved
+   * against the position the body is actually at rather than one frame behind it. */
+  function tbStep(t, dt) {
+    if (!tbHeld()) return;
+    const b = tb.body;
+    let gone = false;
+    try { gone = !tb.el.isConnected || tb.el.hasAttribute('data-crs-broken'); } catch (e) { gone = true; }
+    if (gone) { tbRelease(true); return; }
+    const q = ixElCentre(tb.el, state.hoverX, state.hoverY);
+    const k = WEAPONS.tractor.grabK;
+    let vx = (state.hoverX - q.x) * k, vy = (state.hoverY - q.y) * k;
+    const sp = Math.hypot(vx, vy);
+    if (sp > IX_MAX_SPEED) { vx = vx * IX_MAX_SPEED / sp; vy = vy * IX_MAX_SPEED / sp; }
+    b.vx = vx; b.vy = vy; b.resting = false;
+    if (sp > tb.peak) tb.peak = Math.min(sp, IX_MAX_SPEED);
+    tbDraw();
+  }
+  function tbDraw() {
+    if (!root || !tbHeld()) return;
+    const o = ixOrigin();
+    const q = ixElCentre(tb.el, state.hoverX, state.hoverY);
+    if (!tb.beam || !tb.beam.isConnected) { tb.beam = mk('div', 'crs-tractor-beam'); root.append(tb.beam); }
+    if (!tb.grip || !tb.grip.isConnected) {
+      tb.grip = mk('div', 'crs-tractor-grip');
+      for (let i = 0; i < 4; i++) tb.grip.append(mk('span', 'crs-tractor-grip-c crs-tractor-grip-c' + i));
+      root.append(tb.grip);
+    }
+    const len = Math.hypot(q.x - o.x, q.y - o.y), ang = Math.atan2(q.y - o.y, q.x - o.x);
+    try {
+      tb.beam.style.left = px(o.x); tb.beam.style.top = px(o.y);
+      tb.beam.style.width = px(len); tb.beam.style.height = '16px';
+      tb.beam.style.transformOrigin = '0 50%';
+      tb.beam.style.transform = 'translateY(-8px) rotate(' + ang.toFixed(4) + 'rad)';
+      const r = rectOf(tb.el);
+      if (r) {
+        tb.grip.style.left = px(r.left); tb.grip.style.top = px(r.top);
+        tb.grip.style.width = px(r.width); tb.grip.style.height = px(r.height);
+      }
+    } catch (e) { /* ignore */ }
+  }
+  /* One hold tick. The first one takes hold of something; every one after it is the beam staying on, which
+   * is why it costs nothing and does no damage — the carrying is tbStep()'s job on the integrator's frame. */
+  function tbTick(x, y) {
+    if (!tbHeld()) return tbGrab(x, y);
+    tbDraw();
+    return tb.el;
+  }
+  function tbClearNodes() {
+    for (const k of ['beam', 'grip']) {
+      const n = tb[k];
+      tb[k] = null;
+      if (n) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+    }
+  }
+
+  /* ── §C 충격포 / §D 나팔 — the two area pushes, as plain functions the fire() entries call ───────────── */
+  function ixShockwaveAt(x, y) {
+    const W = WEAPONS.shockwave;
+    interceptOrbsWithin(x, y, W.radius);
+    sfx('shockwave');
+    flash(x, y, 'bomb', { size: W.radius, dur: 110 });
+    ring(x, y, { r: W.radius });
+    shake('bomb', { amp: 8, dur: 300 });
+    blastMark(x, y, W.radius, 0.35, { ink: 0.35, weapon: W });
+    const pushed = ixPushRadial(x, y, W.radius, W.impulse, {});
+    /* §C: "직접 피해 10뿐 — 피해는 부딪혀서 나온다." The 10 is flat, with no falloff: there is nothing left
+     * to taper. Every point of real damage this weapon deals comes from movedCollide() in src/67. */
+    let hurt = 0;
+    for (const el of pushed) {
+      if (!el.isConnected) continue;
+      const crit = rollCrit('shockwave');
+      if (applyHit(el, rollDamage(W.damage, crit), 'bomb', x, y, { crit, aoe: true, radius: W.radius, toward: { x, y } }) !== 'none') hurt++;
+    }
+    kick();
+    return { pushed: pushed.length, hurt };
+  }
+  function ixHornAt(x, y, scale) {
+    const W = WEAPONS.horn;
+    const o = ixOrigin();
+    let ang = Math.atan2(y - o.y, x - o.x);
+    if (!isFinite(ang)) ang = -Math.PI / 2;
+    const R = W.radius * (scale > 0 ? scale : 1);
+    sfx('horn');
+    ixConeFx(x, y, ang, R, W.coneDeg);
+    shake('gun', { amp: 3.4 });
+    const pushed = ixPushCone(x, y, ang, R, W.coneDeg, W.coneImpulse * (scale > 0 ? scale : 1));
+    const flipped = ixFlipOrbs(x, y, ang, R, W.coneDeg);
+    let hurt = 0;
+    for (const el of pushed) {
+      if (!el.isConnected) continue;
+      const crit = rollCrit('horn');
+      if (applyHit(el, rollDamage(W.damage, crit), 'gun', x, y, { crit, aoe: true, toward: { x, y } }) !== 'none') hurt++;
+    }
+    kick();
+    return { pushed: pushed.length, flipped, hurt, angle: ang, radius: R, coneDeg: W.coneDeg };
+  }
+
+  /* ===================================================================== */
+  /* wiring — every one of these is a WRAP, never a fork                     */
+  /* ===================================================================== */
+  /* A body created AFTER the element was already wet / bouncy must still carry the flag: movedBody() mints a
+   * fresh record with both off, and §E is not this workstream's file. displaceEl() is §E's one entry point,
+   * so one wrapper covers every caller there will ever be. */
+  const ixDisplaceBase = displaceEl;
+  displaceEl = function (el, ix, iy, opts) {
+    const b = ixDisplaceBase(el, ix, iy, opts);
+    if (b) {
+      if (ixIsWet(el)) b.wet = true;
+      if (ixIsBouncy(el)) b.bouncy = true;
+    }
+    return b;
+  };
+  /* The tractor's spring is solved on the integrator's own frame, immediately before it runs. */
+  const ixStepMovedBase = stepMoved;
+  stepMoved = function (t, dt) {
+    if (tbHeld()) tbStep(t, dt);
+    return ixStepMovedBase(t, dt);
+  };
+  /* §C 견인 광선: "잡힌 적은 공격을 멈춘다." The gate goes where every other attack gate already lives — the
+   * attack is RESCHEDULED rather than dropped, so the enemy picks straight back up when it is let go. */
+  const ixHostileAttackBase = hostileAttack;
+  hostileAttack = function (rec, forced) {
+    if (rec && rec.el && tb.el === rec.el && tbHeld()) {
+      try { scheduleAttack(rec, attackInterval(rec)); } catch (e) { /* ignore */ }
+      return false;
+    }
+    return ixHostileAttackBase(rec, forced);
+  };
+  /* 연소 and 젖음 both borrow the element's inline `filter`. The fire is about to save whatever it finds, so
+   * the wet look has to be off the element BEFORE that — otherwise burnUntint() would one day "restore" a
+   * wet filter onto a dry element, which is a trace. */
+  const ixIgniteBase = igniteEl;
+  igniteEl = function (el, stacks) {
+    const rec = el && ixWetEls.get(el);
+    if (rec && rec.owns) ixWetUnpaint(el, rec);
+    return ixIgniteBase(el, stacks);
+  };
+  /* A hold that ends — pointer up, weapon swap, KO, restore — lets go of whatever the beam was carrying. */
+  const ixStopHoldBase = stopHold;
+  stopHold = function (silent) {
+    const h = state.hold;
+    const wasTractor = !!(h && h.id === 'tractor');
+    const r = ixStopHoldBase(silent);
+    if (wasTractor) tbRelease(!!silent);
+    return r;
+  };
+  /* restore() (Z / Escape / deactivate) must leave NOTHING of ours: no node, no timer, no borrowed filter,
+   * no state flag. It runs BEFORE the base so the base's own node sweep and clearMoved() see an already
+   * quiet module — and the wet filter is put back while the element is still the element we saved it from. */
+  const ixRestoreBase = restore;
+  restore = function () { ixResetAll(); return ixRestoreBase(); };
+  function ixClearStates() {
+    for (const el of Array.from(ixWetEls.keys())) ixUnwet(el);
+    ixWetEls.clear();
+    for (const el of Array.from(ixBouncyEls.keys())) ixUnbounce(el);
+    ixBouncyEls.clear();
+    untrack(ixTimer); ixTimer = 0;
+  }
+  function ixResetAll() {
+    tbRelease(true);
+    tbClearNodes();
+    tb.grabs = 0; tb.refusals = 0; tb.lastRefusal = ''; tb.peak = 0;
+    ixClearStates();
+    if (root) {
+      let leftovers = [];
+      try { leftovers = root.querySelectorAll('.crs-star, .crs-splash, .crs-horn-cone, .crs-tractor-beam, .crs-tractor-grip'); } catch (e) { leftovers = []; }
+      for (const n of leftovers) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+    }
+  }
+
+  /* ---- debug surface (the suite is written against these) ------------------------------------------ */
+  Object.assign(debug, { forceQuirk: false, noQuirk: false });
+  debug.wetOf = (el) => {
+    const rec = el && ixWetEls.get(el);
+    if (!rec) return null;
+    let filter = '';
+    try { filter = el.style.getPropertyValue('filter') || ''; } catch (e) { filter = ''; }
+    return { msLeft: Math.max(0, Math.round(rec.until - now())), owns: !!rec.owns, filter, coolMul: ixCoolMul(el), saved: rec.filterSaved };
+  };
+  debug.bouncyOf = (el) => {
+    const until = el && ixBouncyEls.get(el);
+    if (!until) return null;
+    const b = state.moved.get(el);
+    return { msLeft: Math.max(0, Math.round(until - now())), flag: !!(b && b.bouncy) };
+  };
+  debug.wet = (el, ms) => { const r = ixWet(el, ms); return r ? Math.round(r.until - now()) : null; };
+  debug.unwet = (el) => ixUnwet(el);
+  debug.bouncy = (el, ms) => !!ixMakeBouncy(el, ms);
+  debug.freeze = (el, n) => ixFreeze(el, n == null ? 10 : +n);
+  debug.coolMul = (el) => ixCoolMul(el);
+  debug.shockwave = (x, y) => ixShockwaveAt(+x, +y);
+  debug.horn = (x, y) => ixHornAt(+x, +y, 1);
+  debug.tractor = () => ({
+    held: tbHeld(), id: (tb.el && tb.el.id) || '', tag: tagOf(tb.el),
+    grabs: tb.grabs, refusals: tb.refusals, lastRefusal: tb.lastRefusal,
+    mass: tb.body ? +tb.body.mass.toFixed(3) : 0, peak: Math.round(tb.peak), maxMass: WEAPONS.tractor.grabMaxMass,
+    beam: !!(tb.beam && tb.beam.isConnected), grip: !!(tb.grip && tb.grip.isConnected),
+    v: tb.body ? { vx: Math.round(tb.body.vx), vy: Math.round(tb.body.vy) } : null
+  });
+  debug.tractorGrab = (x, y) => !!tbGrab(+x, +y);
+  debug.tractorRelease = () => tbRelease(false);
+  debug.interaction = () => ({
+    wet: ixWetEls.size, bouncy: ixBouncyEls.size, timer: !!ixTimer,
+    stars: root ? root.querySelectorAll('.crs-star').length : 0,
+    splash: root ? root.querySelectorAll('.crs-splash').length : 0,
+    cones: root ? root.querySelectorAll('.crs-horn-cone').length : 0,
+    beams: root ? root.querySelectorAll('.crs-tractor-beam, .crs-tractor-grip').length : 0
+  });
+  debug.ixConst = () => ({
+    wetFilter: IX_WET_FILTER, coolMul: IX_WET_COOL_MUL, tickMs: IX_TICK_MS, maxSpeed: IX_MAX_SPEED,
+    shockR: WEAPONS.shockwave.radius, shockImpulse: WEAPONS.shockwave.impulse, shockDamage: WEAPONS.shockwave.damage,
+    grabMaxMass: WEAPONS.tractor.grabMaxMass, bouncyMs: WEAPONS.rubber.bouncyMs, bounceRest: WEAPONS.rubber.bounceRest,
+    collisionMul: WEAPONS.rubber.collisionMul, wetMs: WEAPONS.watergun.wetMs, coneDeg: WEAPONS.horn.coneDeg,
+    coneR: WEAPONS.horn.radius, bouncyChance: WEAPONS.chicken.bouncyChance
+  });
+  /* §D's band rule ("실효 화력이 중앙값의 25~50%") is arithmetic over numbers the weapon table already
+   * publishes, and §F — where the formula itself lives — is 9단계. So the product hands over the INPUTS and
+   * nothing else: the quirk field, and the seven numbers §F3's `effective` is made of. The arithmetic and
+   * the category grouping are the suite's. */
+  debug.weaponBand = () => WEAPON_IDS.map((id) => {
+    const W = WEAPONS[id];
+    return {
+      id, quirk: W.quirk || null, damage: W.damage, cooldownMs: W.cooldownMs || 0, tickMs: W.tickMs || 0,
+      hold: !!W.hold, mag: W.mag == null ? null : W.mag, reloadMs: W.reloadMs == null ? null : W.reloadMs,
+      swapMs: W.swapMs || SWAP_MS, moveSpeed: W.moveSpeed == null ? 1 : W.moveSpeed, bloom: W.bloom || 0,
+      radius: isFinite(W.radius) ? W.radius : null, maxTargets: W.maxTargets || 1
+    };
+  });
+  /* 젖음 / bouncy / 견인 are all things that move every frame, and sampling them over CDP measures the
+   * protocol rather than the product (25–40 ms a round trip). One hop, real animation frames, inside the
+   * page — exactly the shape debug.altSamples() already established. */
+  debug.ixSamples = (ms, sel) => new Promise((resolve) => {
+    const out = [], t0 = now(), want = clamp(+ms || 400, 50, 6000);
+    let el = null;
+    try { el = sel ? doc.querySelector(sel) : null; } catch (e) { el = null; }
+    const step = () => {
+      const b = el ? state.moved.get(el) : null;
+      const r = el ? rectOf(el) : null;
+      out.push({
+        t: Math.round(now() - t0),
+        x: b ? +b.x.toFixed(2) : null, y: b ? +b.y.toFixed(2) : null,
+        vx: b ? Math.round(b.vx) : null, vy: b ? Math.round(b.vy) : null,
+        resting: b ? !!b.resting : null, wet: b ? !!b.wet : null, bouncy: b ? !!b.bouncy : null,
+        top: r ? +r.top.toFixed(1) : null, left: r ? +r.left.toFixed(1) : null,
+        held: tbHeld(), heldSame: !!(el && tb.el === el), bodies: state.movedList.length
+      });
+      if (now() - t0 >= want) { resolve(out); return; }
+      raf(step);
+    };
+    raf(step);
+  });
 
 // ── 70-break.js ──
   /* ===================================================================== */
@@ -8278,6 +9389,115 @@
     state.collapse = null;
   }
 
+  /* ══ SPEC-arsenal §C 상호작용 무기 · §D 예능 무기 — the seven fire() entries ═══════════════════════
+   * The mechanics all live in src/68-interaction.js (and the physics under them in src/67-displace.js);
+   * these are only the triggers, written in exactly the shape the other nine already have. */
+
+  /* §C 충격포: 단발, 반경 260px 를 바깥으로 민다. 직접 피해 10뿐 — 피해는 부딪혀서 나온다. */
+  function fireShockwave(x, y) {
+    state.shots++;
+    ixShockwaveAt(x, y);
+    return null;
+  }
+  /* §C 견인 광선: 길게 눌러 하나를 붙잡는다. A hold weapon whose ticks do no damage at all — the first tick
+   * takes hold of something and every tick after it is the beam staying on. The carrying itself is done by
+   * tbStep() on the integrator's frame, not here: a 60 ms tick is far too coarse to follow a cursor. */
+  function fireTractor(x, y) {
+    state.shots++;
+    return tbTick(x, y);
+  }
+  /* §C 고무탄: 맞은 요소가 6초간 bouncy. 중력과 반발 0.85 를 얻어 당구공이 된다. */
+  function fireRubber(x, y) {
+    state.shots++;
+    const W = WEAPONS.rubber;
+    const p = shotPoint(x, y, 'rubber');
+    x = p.x; y = p.y;
+    noteShot('rubber');
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y);
+    const crit = el ? rollCrit('rubber') : false;
+    const dmg = rollDamage(W.damage, crit, falloffMul('rubber', x, y));
+    sfx('boing', { crit });
+    flash(x, y, 'gun', { size: 40, dur: 130 });
+    shake('gun', { amp: 2.2 });
+    drawCrack(x, y, 'gun', { ink: 0.2 });
+    spawnChips(x, y, randInt(2, 4));
+    if (el) {
+      applyHit(el, dmg, 'gun', x, y, { crit });
+      /* The state is put on AFTER the damage: an element the round just destroyed has nothing to bounce,
+       * and ixMakeBouncy() would otherwise mint a displacement body on a corpse. */
+      let alive = false;
+      try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      if (alive) ixMakeBouncy(el, W.bouncyMs);
+    }
+    return el;
+  }
+  /* §D 뿅망치: 피해 8. 맞은 요소가 찌그러졌다 튀어오른다. "뿅" 소리와 별 입자. 가장 빠르게 휘두른다. */
+  function fireSqueaky(x, y) {
+    state.shots++;
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y);
+    const crit = el ? rollCrit('squeaky') : false;
+    const dmg = rollDamage(WEAPONS.squeaky.damage, crit);
+    sfx('squeak', { crit });
+    flash(x, y, 'hammer', { size: 76, dur: 170 });
+    shake('hammer', { amp: crit ? 2.6 : 1.8 });
+    ixStars(x, y, randInt(4, 7));
+    // 찌그러짐은 피해 **뒤**에 건다 — reactDamage() 가 cancelAnimsOf(el) 로 시작하기 때문이다 (ixSquash 주석)
+    if (el) { applyHit(el, dmg, 'hammer', x, y, { crit }); ixSquash(el); }
+    return el;
+  }
+  /* §D 물총: 3/틱. 젖음 8초 — 처지고 글자가 번지고 색이 빠진다. 냉각 2.5배, 더 멀리 미끄러짐. 불을 끈다. */
+  function fireWater(x, y, c) {
+    state.shots++;
+    const W = WEAPONS.watergun;
+    const h = (c && c.hold && c.h) || null;
+    const n = h ? h.tick : 1;
+    const fp = shotPoint(x, y, 'watergun');
+    x = fp.x; y = fp.y;
+    noteShot('watergun');
+    ixSplash(x, y, 2);
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    if (!h || n % 3 === 1) sfx('water', { gain: 0.6 });
+    if (!el) return null;
+    let crit = false, win = null;
+    if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('watergun');
+    const dmg = rollDamage(W.damage, crit, falloffMul('watergun', x, y));
+    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    /* The two halves of the quirk, in the order §F4 of SPEC-destruction wants them: the water puts the fire
+     * out first (틱당 스택 −40) and what is left is a wet element that the next fire will barely take. */
+    try { douseEl(el, BURN_WATER_STACKS); } catch (e) { /* ignore */ }
+    let alive = false;
+    try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+    if (alive) ixWet(el, W.wetMs);
+    return el;
+  }
+  /* §D 나팔: 피해 5. 90도 원뿔 420px 를 민다. 적의 탄환 방향을 뒤집는다. */
+  function fireHorn(x, y) {
+    state.shots++;
+    ixHornAt(x, y, 1);
+    return null;
+  }
+  /* §D 고무 치킨: 피해 12. 20% 확률로 bouncy 부여. 가장 빠르고 가볍고 예측 불가. */
+  function fireChicken(x, y) {
+    state.shots++;
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y);
+    const crit = el ? rollCrit('chicken') : false;
+    const dmg = rollDamage(WEAPONS.chicken.damage, crit);
+    sfx('chicken', { crit });
+    flash(x, y, 'hammer', { size: 58, dur: 150 });
+    shake('hammer', { amp: 1.6 });
+    if (el) {
+      applyHit(el, dmg, 'hammer', x, y, { crit });
+      let alive = false;
+      try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      if (alive && ixRollQuirk(WEAPONS.chicken.bouncyChance)) ixMakeBouncy(el, WEAPONS.rubber.bouncyMs);
+    }
+    return el;
+  }
+
 // ── 77-burn.js ──
 // ── SPEC-destruction §F: 연소 시스템 — 지속 피해 · 확산 · 모습과 소리 · 상태 연계 · 화염탄 ──
   /* 사용자: "불 공격은 지속딜과 확산이 포인트인데 없네"
@@ -8825,7 +10045,26 @@
     flame:    { type: 'burst',  fuel: FIREBOMB_FUEL },
     collapse: { type: 'marquee' },
     laser:    { type: 'burst',  heat: 25, damage: 90 },
-    minigun:  { type: 'burst',  rounds: 20, spreadMul: 0.5 }
+    minigun:  { type: 'burst',  rounds: 20, spreadMul: 0.5 },
+    /* ── SPEC-arsenal §C / §D (8단계): the seven new weapons ───────────────────────────────────────
+     * §A1 is a grammar, not a list — "길게 누르면 모으고, 떼면 나간다" has to be true of the whole arsenal
+     * or it is true of nothing, so every new weapon gets a row here too. §C and §D name no 보조 공격 at all,
+     * so each row is an INTERPRETATION (reported) and every one of them is the SAME attack with the charge
+     * spent on its own verb rather than a second weapon bolted on:
+     *   충격포     반경과 충격량이 함께 커진다 (폭탄의 심지 조절과 같은 모양)
+     *   견인 광선  짧게 누르면 붙잡지 않고 한 번 확 당긴다 — hold 무기이므로 §A2 의 burst 쪽
+     *   고무탄     반경 안 전부에 고무를 입힌다
+     *   뿅망치     반경 90 을 한 번에 — 여전히 약하지만 넓다 (가장 짧은 충전 0.4초)
+     *   물총       짧게 누르면 물풍선. 한 번에 넓게 적신다 — 준비 도구라는 정체성 그대로
+     *   나팔       원뿔이 길어지고 세진다
+     *   고무 치킨  완충이면 20% 가 아니라 반드시 걸린다 */
+    shockwave:{ type: 'charge', ms: 700, radius: 260, radiusMax: 420, impulseMul: 1.8 },
+    tractor:  { type: 'burst',  yank: true, rounds: 0 },
+    rubber:   { type: 'charge', ms: 500, radius: 150, dmgMul: 1.5 },
+    squeaky:  { type: 'charge', ms: 400, dmgMul: 2.0, radius: 90 },
+    watergun: { type: 'burst',  fuel: 8, splashR: 120 },
+    horn:     { type: 'charge', ms: 600, rangeMul: 1.6 },
+    chicken:  { type: 'charge', ms: 450, dmgMul: 1.5 }
   };
   function altOf(id) { return ALTS[id] || null; }
   function altChargeMs(id) { const a = altOf(id); return (a && a.ms > 0) ? a.ms : 0; }
@@ -9041,7 +10280,115 @@
     if (id === 'katana') return altIaido(x, y, p);
     if (id === 'bomb') return altFuseBomb(x, y, p);
     if (id === 'rocket') return altGuidedRocket(x, y);
+    // ── §C / §D ──
+    if (id === 'shockwave') return altShockBlast(x, y, p);
+    if (id === 'rubber') return altRubberSpray(x, y, p);
+    if (id === 'squeaky') return altSqueakSmash(x, y, p);
+    if (id === 'horn') return altHornBlast(x, y, p);
+    if (id === 'chicken') return altChickenFling(x, y, p);
     return null;
+  }
+
+  /* ── §C 충격포 보조: 반경 260 → 420, 충격량 ×1.8 ─────────────────────────────────────────────────── */
+  function altShockBlast(x, y, p) {
+    const a = ALTS.shockwave, W = WEAPONS.shockwave;
+    const R = Math.round(a.radius + (a.radiusMax - a.radius) * p);
+    const imp = W.impulse * (1 + (a.impulseMul - 1) * p);
+    return altAction('shockwave', x, y, () => {
+      state.shots++;
+      const BW = Object.assign({}, W, { radius: R, impulse: imp, rings: (W.rings || []).map((r) => r * (R / W.radius)), maxTargets: W.maxTargets + 4 });
+      interceptOrbsWithin(x, y, R);
+      sfx('shockwave', { gain: 1.25, pitch: 0.82 });
+      flash(x, y, 'bomb', { size: R, dur: 140 });
+      ring(x, y, { r: R });
+      shake('bomb', { amp: 10 + 6 * p, dur: 380 });
+      blastMark(x, y, R, 0.4, { ink: 0.4, weapon: BW });
+      const pushed = ixPushRadial(x, y, R, imp, { maxTargets: BW.maxTargets });
+      for (const el of pushed) {
+        if (!el.isConnected) continue;
+        const crit = rollCrit('shockwave');
+        applyHit(el, rollDamage(W.damage, crit), 'bomb', x, y, { crit, aoe: true, radius: R, toward: { x, y } });
+      }
+      startCooldown('shockwave', W.cooldownMs);
+      return null;
+    });
+  }
+  /* ── §C 고무탄 보조: 반경 150 안의 요소 전부에 고무를 입힌다 ─────────────────────────────────────── */
+  function altRubberSpray(x, y, p) {
+    const a = ALTS.rubber, W = WEAPONS.rubber;
+    const R = Math.max(24, a.radius * p);
+    return altAction('rubber', x, y, () => {
+      state.shots++;
+      interceptOrbsWithin(x, y, R);
+      sfx('boing', { gain: 1.2, pitch: 0.8 });
+      flash(x, y, 'gun', { size: R, dur: 160 });
+      ring(x, y, { r: R });
+      shake('gun', { amp: 3 });
+      const cands = aoeCandidates(x, y, R, 10, [R * 0.4, R * 0.75, R], false);
+      let n = 0;
+      for (const c of cands) {
+        const crit = rollCrit('rubber');
+        applyHit(c.el, rollDamage(Math.round(W.damage * (1 + (a.dmgMul - 1) * p)), crit), 'gun', x, y, { crit, aoe: true, toward: { x, y } });
+        let alive = false;
+        try { alive = c.el.isConnected && !c.el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+        if (alive && ixMakeBouncy(c.el, W.bouncyMs)) n++;
+      }
+      return null;
+    });
+  }
+  /* ── §D 뿅망치 보조: 반경 90 을 한 번에. 소리도 별도 그대로다 ───────────────────────────────────── */
+  function altSqueakSmash(x, y, p) {
+    const a = ALTS.squeaky, W = WEAPONS.squeaky;
+    const R = Math.max(14, a.radius * p);
+    const mul = 1 + (a.dmgMul - 1) * p;
+    return altAction('squeaky', x, y, () => {
+      state.shots++;
+      interceptOrbsWithin(x, y, R);
+      sfx('squeak', { gain: 1.3, pitch: 0.7 });
+      flash(x, y, 'hammer', { size: R * 2, dur: 220 });
+      ring(x, y, { r: R });
+      shake('hammer', { amp: 3 + 2 * p });
+      ixStars(x, y, randInt(7, 12));
+      for (const c of aoeCandidates(x, y, R, 8, [R * 0.4, R * 0.8, R], false)) {
+        const crit = rollCrit('squeaky');
+        applyHit(c.el, rollDamage(Math.round(W.damage * mul), crit), 'hammer', x, y, { crit, aoe: true, toward: { x, y } });
+        ixSquash(c.el);                      // 피해 뒤에 — reactDamage() 가 cancelAnimsOf(el) 로 시작한다
+      }
+      return null;
+    });
+  }
+  /* ── §D 나팔 보조: 원뿔이 1.6배로 길어지고 그만큼 세진다 ─────────────────────────────────────────── */
+  function altHornBlast(x, y, p) {
+    const a = ALTS.horn;
+    const scale = 1 + (a.rangeMul - 1) * p;
+    return altAction('horn', x, y, () => {
+      state.shots++;
+      ixHornAt(x, y, scale);
+      startCooldown('horn', WEAPONS.horn.cooldownMs);
+      return null;
+    });
+  }
+  /* ── §D 고무 치킨 보조: 완충이면 20% 가 아니라 반드시 걸린다 ───────────────────────────────────── */
+  function altChickenFling(x, y, p) {
+    const a = ALTS.chicken, W = WEAPONS.chicken;
+    const mul = 1 + (a.dmgMul - 1) * p;
+    return altAction('chicken', x, y, () => {
+      state.shots++;
+      if (interceptOrb(x, y)) return null;
+      const el = pickTarget(x, y);
+      const crit = el ? rollCrit('chicken') : false;
+      sfx('chicken', { gain: 1.3, pitch: 0.75 });
+      flash(x, y, 'hammer', { size: 70, dur: 180 });
+      shake('hammer', { amp: 2.4 });
+      if (!el) return null;
+      applyHit(el, rollDamage(Math.round(W.damage * mul), crit), 'hammer', x, y, { crit });
+      let alive = false;
+      try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      /* The charge BUYS the certainty: a full charge always sticks, a half charge is half-way between the
+       * weapon's own 20 % and 100 %. That is what §A5's "charge 유형만 중간값을 보간한다" means here. */
+      if (alive && (debug.noQuirk ? false : (debug.forceQuirk || Math.random() < W.bouncyChance + (1 - W.bouncyChance) * p))) ixMakeBouncy(el, WEAPONS.rubber.bouncyMs);
+      return el;
+    });
   }
 
   /* 망치 내려치기 / 도끼 회전 베기 (§A2). Both are a radius: the hammer crushes everything inside 120 px for
@@ -9398,6 +10745,66 @@
       if (el) applyHit(el, dmg, 'gun', x, y, { crit });
       return el;
     });
+    return true;
+  }
+
+  /* ── §C 견인 광선 보조 (짧게): 붙잡지 않고 한 번 확 당긴다 ────────────────────────────────────────
+   * A hold weapon's short press is its alt (§A2 burst). The beam has no magazine, so the price is the same
+   * cooldown a release pays — nothing here is free. */
+  function altTractorYank(x, y) {
+    const W = WEAPONS.tractor;
+    if (onCooldown()) { cooldownFeedback(); return false; }
+    const el = pickTarget(x, y);
+    if (!el) { emptyClick(); return false; }
+    const o = ixOrigin();
+    const r = rectOf(el);
+    const cx = r ? r.left + r.width / 2 : x, cy = r ? r.top + r.height / 2 : y;
+    const dx = o.x - cx, dy = o.y - cy, L = Math.hypot(dx, dy) || 1;
+    const b = displaceEl(el, (dx / L) * W.yankImpulse, (dy / L) * W.yankImpulse, { spin: rand(-90, 90) });
+    state.shots++;
+    sfx('tractor', { gain: 1.2, pitch: 1.2 });
+    flash(cx, cy, 'gun', { size: 50, dur: 140 });
+    shake('gun', { amp: 2 });
+    startCooldown('tractor', W.releaseCdMs);
+    kick();
+    return !!b;
+  }
+  /* ── §D 물총 보조 (짧게): 물풍선. 한 번에 넓게 적신다 ───────────────────────────────────────────
+   * §A4 gives the burst alts bespoke costs (3점사는 3발, 화염탄은 연료 12); the balloon is 연료 8. */
+  function altWaterBalloon(x, y) {
+    const a = ALTS.watergun, W = WEAPONS.watergun;
+    if (onCooldown()) { cooldownFeedback(); return false; }
+    if (!altSpendRounds('watergun', a.fuel)) { emptyClick(); return false; }
+    state.shots++;
+    const R = a.splashR;
+    sfx('water', { gain: 1.3, pitch: 0.7 });
+    flash(x, y, 'gun', { size: R, dur: 170 });
+    ring(x, y, { r: R });
+    ixSplash(x, y, randInt(8, 14));
+    let n = 0;
+    for (const c of aoeCandidates(x, y, R, 10, [R * 0.4, R * 0.8, R], false)) {
+      const crit = rollCrit('watergun');
+      applyHit(c.el, rollDamage(W.damage, crit), 'gun', x, y, { crit, aoe: true, toward: { x, y } });
+      let alive = false;
+      try { alive = c.el.isConnected && !c.el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      if (!alive) continue;
+      try { douseEl(c.el, BURN_WATER_STACKS); } catch (e) { /* ignore */ }
+      if (ixWet(c.el, W.wetMs)) n++;
+    }
+    startCooldown('watergun', 500);
+    scheduleHud();
+    return n >= 0;
+  }
+  /* The magazine side of a bespoke burst cost. Same shape as spendFuel() (src/77-burn.js), generalised to
+   * any id so the water balloon does not need a second copy of it. */
+  function altSpendRounds(id, n) {
+    const W = WEAPONS[id];
+    if (!W || W.mag == null || debug.infiniteAmmo) return true;
+    const have = state.ammo[id] || 0;
+    if (have < n) return false;
+    state.ammo[id] = Math.max(0, have - n);
+    if (state.ammo[id] <= 0) state.pendingReload = id;
+    updateAmmoHud();
     return true;
   }
 
@@ -9854,6 +11261,9 @@
     if (id === 'smg') altBurstSmg(state.hoverX, state.hoverY);
     else if (id === 'laser') altLaserPulse(state.hoverX, state.hoverY);
     else if (id === 'minigun') altFixedFire(state.hoverX, state.hoverY);
+    // ── SPEC-arsenal §C / §D: the two hold weapons the arsenal grew by ──
+    else if (id === 'tractor') altTractorYank(state.hoverX, state.hoverY);
+    else if (id === 'watergun') altWaterBalloon(state.hoverX, state.hoverY);
     return r;
   };
   /* §B2 / §B3: the two new hold weapons' own gates — the laser may be overheated, the minigun has to spin up
@@ -9996,6 +11406,10 @@
   WEAPONS.collapse.fire = (x, y) => { state.shots++; doCollapse(x, y); return null; };
   // ── SPEC-arsenal §B: the two weapons the arsenal grew by ──
   WEAPONS.laser.fire = fireLaser; WEAPONS.minigun.fire = fireMinigun;
+  /* ── SPEC-arsenal §C 상호작용 (충격포 · 견인 광선 · 고무탄) · §D 예능 (뿅망치 · 물총 · 나팔 · 고무 치킨) ── */
+  WEAPONS.shockwave.fire = fireShockwave; WEAPONS.tractor.fire = fireTractor; WEAPONS.rubber.fire = fireRubber;
+  WEAPONS.squeaky.fire = fireSqueaky; WEAPONS.watergun.fire = fireWater; WEAPONS.horn.fire = fireHorn;
+  WEAPONS.chicken.fire = fireChicken;
 
   /* --- actions (A3 ordering + v1.2 A5 gates): mount → cooldown → swap delay → spend → counters/combo/swing → fire → HUD --- */
   function action(id, x, y, run) {

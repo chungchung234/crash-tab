@@ -1,7 +1,7 @@
 [
   { "key": "mode", "type": "enum", "default": "rampage", "options": ["rampage", "arcade", "survival"], "labelKey": "setMode", "group": "general" },
   { "key": "defaultWeapon", "type": "enum", "default": "hammer", "options": ["hammer", "pistol", "smg", "sniper", "axe", "katana", "bomb", "rocket", "flame", "collapse"], "labelKey": "setDefaultWeapon", "group": "general" },
-  { "key": "loadoutPreset", "type": "enum", "default": "default", "options": ["default", "assault", "sniper", "explosive", "melee", "custom"], "labelKey": "setLoadoutPreset", "group": "general" },
+  { "key": "loadoutPreset", "type": "enum", "default": "default", "options": ["default", "assault", "sniper", "explosive", "melee", "interaction", "fun", "custom"], "labelKey": "setLoadoutPreset", "group": "general" },
   { "key": "debrisAnchor", "type": "enum", "default": "document", "options": ["document", "viewport"], "labelKey": "setDebrisAnchor", "group": "general" },
   { "key": "debrisLifeMs", "type": "enum", "default": 6000, "options": [3000, 6000, 12000, 0], "labelKey": "setDebrisLife", "group": "general" },
   { "key": "debrisCap", "type": "int", "default": 160, "min": 20, "max": 300, "labelKey": "setDebrisCap", "group": "advanced" },

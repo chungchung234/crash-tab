@@ -23,7 +23,9 @@
     '.grid button.dragging{opacity:.6;transform:scale(.94)}',
     '.badge{position:absolute;top:2px;left:4px;font-size:9px;line-height:1.3;padding:0 3px;border-radius:4px;background:rgba(255,255,255,.18);font-weight:700}',
     '.cur{margin-top:6px;font-size:12.5px;color:rgba(255,255,255,.92);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-    '.presets{display:flex;align-items:center;gap:3px;margin-top:6px}',
+    /* SPEC-arsenal §C / §D: seven presets no longer fit on one line of a 그리드-wide panel, and a preset
+       button that is clipped off the end is a preset nobody can pick. Wrapping is the whole fix. */
+    '.presets{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin-top:6px}',
     '.presets .plabel{flex:none;font-size:11.5px;color:rgba(255,255,255,.7);white-space:nowrap;margin-right:2px}',
     '.presets button{flex:0 0 auto;min-width:max-content;height:24px;padding:0 4px;font-size:11px;border-radius:7px}',
     '.presets .custom{flex:none;font-size:10.5px;color:#ffb224;white-space:nowrap}',

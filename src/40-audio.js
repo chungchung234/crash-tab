@@ -198,5 +198,26 @@
       else if (kind === 'overheat') { noiseSweep(t, 0.5, 'lowpass', 3200, 300, 0.45 * gm); tone(t, 'sine', 300, 70, 0.45, 0.3 * gm, 0.5); }
       /* §B3 미니건 예열: 총열이 돌기 시작하는 0.8초. A rising motor whine with a noise bed under it. */
       else if (kind === 'spinup') { tone(t, 'sawtooth', 70, 230, 0.75, 0.2 * gm, 0.8); noiseSweep(t, 0.75, 'bandpass', 180, 900, 0.3 * gm); }
+      /* ── SPEC-arsenal §C 상호작용 · §D 예능 (8단계) ──
+       * Still no new audio graph: every one of these is the same tone() / noiseBurst() / noiseSweep() trio
+       * the rest of the file is made of. What makes them readable is that they do NOT share a profile with
+       * anything already here — a push, a tow, a bounce, a toy hammer, water, a horn and a rubber chicken
+       * have to be told apart by ear with the HUD out of view.
+       * 충격포: 피해가 아니라 압력이다 — a low thud with a wide noise front and no metal in it at all. */
+      else if (kind === 'shockwave') { tone(t, 'sine', 140, 38, 0.3, 0.9 * gm, 0.34); noiseSweep(t, 0.26, 'lowpass', 1800, 240, 0.55 * gm); }
+      /* 견인 광선: a hum that RISES while it takes hold and falls when it lets go — the same two voices,
+       * swept the other way, so grabbing and dropping are one gesture heard in both directions. */
+      else if (kind === 'tractor') { tone(t, 'triangle', 180, 430, 0.28, 0.17 * gm, 0.3); noiseSweep(t, 0.26, 'bandpass', 500, 1600, 0.16 * gm); }
+      else if (kind === 'tractorOff') { tone(t, 'triangle', 430, 170, 0.2, 0.15 * gm, 0.22); }
+      /* 고무탄: a short pitch-bent "boing". A sine sliding UP and straight back down is the whole trick. */
+      else if (kind === 'boing') { tone(t, 'sine', 240, 820, 0.07, 0.3 * gm, 0.08); tone(t + 0.06, 'sine', 780, 230, 0.12, 0.26 * gm, 0.14); if (crit) tinks(1, 0, 0.06 * gm); }
+      /* 뿅망치: the "뿅" §D names. A squeak is a fast rise with a puff of air under it — high, soft, silly. */
+      else if (kind === 'squeak') { tone(t, 'sine', 700, 1500, 0.07, 0.26 * gm, 0.08); tone(t + 0.05, 'sine', 1400, 620, 0.09, 0.2 * gm, 0.1); noiseBurst(t, 0.05, { type: 'highpass', freq: 3200, Q: 0.7 }, 0.12 * gm, 0.05); }
+      /* 물총: filtered noise, no tone at all — water has no pitch. */
+      else if (kind === 'water') { noiseSweep(t, 0.12, 'bandpass', 900, 2600, 0.3 * gm); noiseBurst(t, 0.06, { type: 'lowpass', freq: 1400, Q: 0.6 }, 0.14 * gm, 0.07); }
+      /* 나팔: a brass honk — a sawtooth with a flat tail and an octave above it. */
+      else if (kind === 'horn') { tone(t, 'sawtooth', 300, 290, 0.3, 0.3 * gm, 0.32); tone(t + 0.01, 'sawtooth', 600, 585, 0.26, 0.14 * gm, 0.28); noiseBurst(t, 0.05, { type: 'bandpass', freq: 1800, Q: 1.2 }, 0.1 * gm, 0.06); }
+      /* 고무 치킨: two squawks, the second lower and later, because one is a squeak and two is a chicken. */
+      else if (kind === 'chicken') { tone(t, 'sawtooth', 820, 520, 0.09, 0.2 * gm, 0.1); tone(t + 0.1, 'sawtooth', 620, 330, 0.11, 0.17 * gm, 0.13); noiseBurst(t + 0.02, 0.05, { type: 'bandpass', freq: 2400, Q: 1.6 }, 0.1 * gm, 0.06); }
     } catch (e) { /* ignore */ }
   }
