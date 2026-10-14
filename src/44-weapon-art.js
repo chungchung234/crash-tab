@@ -768,6 +768,336 @@
           artRect(20, 32, 6, 11, c.mat('rubber', 'd'), 2, { 'data-part': 'grip' })
         ];
       }
+    },
+
+    /* ───────── 충격포 · SPEC-arsenal §C ─────────
+     * Not a gun — a PRESSURE emitter. Everything about the silhouette says "this moves air, it does not
+     * cut": a wide flared mouth instead of a bore, a fat pressure vessel slung under the body, and three
+     * concentric wave arcs leaving the mouth. There is no sight on it either; you do not aim pressure. */
+    shockwave: {
+      detail: (c) => [
+        artRect(14, 48, 52, 48, c.cyl('metal', 'v'), 10, { 'data-part': 'tank' }),
+        artRect(15.4, 49.4, 49, 3.4, RIM, 1.7),
+        artRect(22, 58, 36, 8, c.mat('dark', 'v'), 3, { 'data-part': 'gauge' }),
+        artCircle(32, 80, 8, c.cyl('brass', 'd'), { 'data-part': 'valve' }),
+        artCircle(32, 80, 3, ART.dark[2]),
+        artPath('M24,72 Q32,64 40,72 L38,74 Q32,68 26,74 Z', ART.gloss[0], { 'data-part': 'valve-rim' }),
+        artRect(62, 56, 26, 32, c.mat('dark', 'd'), 4, { 'data-part': 'coupler' }),
+        artRect(66, 50, 86, 44, c.mat('metal', 'd'), 7, { 'data-part': 'body' }),
+        artRect(66, 51.6, 86, 3.4, RIM, 1.7),
+        artRect(66, 90, 86, 4, SEAM),
+        artRect(78, 58, 60, 10, c.mat('dark', 'v'), 3, { 'data-part': 'rail' }),
+        artRect(78, 59, 60, 2.2, RIM2, 1.1),
+        artRect(96, 40, 10, 12, c.cyl('metal', 'h'), 2, { 'data-part': 'ribs' }),
+        artRect(112, 40, 10, 12, c.cyl('metal', 'h'), 2, { 'data-part': 'ribs' }),
+        artRect(128, 40, 10, 12, c.cyl('metal', 'h'), 2, { 'data-part': 'ribs' }),
+        poly([[74, 94], [108, 94], [100, 130], [72, 130]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[74, 94], [108, 94], [107.2, 97.6], [73.4, 97.6]], RIM2),
+        poly([[110, 94], [124, 94], [120, 110], [110, 106]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        poly([[152, 44], [178, 32], [178, 112], [152, 100]], c.mat('metal', 'r'), { 'data-part': 'throat' }),
+        poly([[152, 44], [178, 32], [178, 36], [152, 48]], RIM),
+        poly([[178, 32], [206, 14], [206, 130], [178, 112]], c.cyl('metal', 'v'), { 'data-part': 'mouth' }),
+        poly([[178, 32], [206, 14], [206, 20], [178, 37]], RIM),
+        poly([[178, 108], [206, 124], [206, 130], [178, 112]], SEAM),
+        artEllipse(206, 72, 6, 58, ART.dark[2], { 'data-part': 'bore' }),
+        artEllipse(204, 72, 3, 48, 'rgba(138,180,255,.35)'),
+        artPath('M206,20 A52,52 0 0 1 206,124 L202,120 A48,48 0 0 0 202,24 Z', RIM2, { 'data-part': 'mouth-rim' }),
+        artPath('M210,36 Q224,72 210,108 L216,108 Q230,72 216,36 Z', 'rgba(212,218,228,.55)', { 'data-part': 'wave' }),
+        artPath('M220,44 Q232,72 220,100 L225,100 Q237,72 225,44 Z', 'rgba(212,218,228,.34)', { 'data-part': 'wave' }),
+        artPath('M229,52 Q239,72 229,92 L233,92 Q243,72 233,52 Z', 'rgba(212,218,228,.2)', { 'data-part': 'wave' }),
+        artRect(24, 96, 30, 6, c.mat('dark', 'v'), 2, { 'data-part': 'strap' }),
+        artRect(24, 96.6, 30, 1.8, RIM2, 0.9)
+      ],
+      icon: (c) => [
+        artRect(2, 16, 12, 16, c.cyl('metal', 'v'), 3, { 'data-part': 'tank' }),
+        artRect(13, 17, 18, 14, c.mat('metal', 'd'), 3, { 'data-part': 'body' }),
+        artRect(13, 18, 18, 1.6, RIM, 0.8),
+        poly([[17, 31], [26, 31], [24, 43], [16, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[31, 14], [42, 7], [42, 41], [31, 34]], c.cyl('metal', 'v'), { 'data-part': 'mouth' }),
+        artEllipse(42, 24, 2.4, 17, ART.dark[2], { 'data-part': 'bore' }),
+        artPath('M44,12 Q47,24 44,36 L46,36 Q46,24 46,12 Z', 'rgba(212,218,228,.5)', { 'data-part': 'wave' })
+      ]
+    },
+
+    /* ───────── 견인 광선 · SPEC-arsenal §C ─────────
+     * A dish, not a barrel. The emitter is a shallow parabolic reflector with a single pin at its focus,
+     * and the cyan of the beam (#4ad8e6 in content.css) is quoted by the inner glow so the picture and the
+     * effect agree, exactly as the laser's magenta does. Two copper coils on the spine say "this pulls". */
+    tractor: {
+      detail: (c) => [
+        artRect(16, 54, 46, 40, c.mat('dark', 'd'), 6, { 'data-part': 'pack' }),
+        artRect(17.4, 55.4, 43, 3, RIM2, 1.5),
+        artRect(22, 62, 34, 9, 'rgba(74,216,230,.35)', 2, { 'data-part': 'cell' }),
+        artRect(22, 76, 34, 6, c.mat('brass', 'h'), 2, { 'data-part': 'cell' }),
+        artRect(60, 58, 20, 30, c.mat('metal', 'd'), 3, { 'data-part': 'spine' }),
+        artCircle(94, 44, 11, c.cyl('brass', 'd'), { 'data-part': 'coil' }),
+        artCircle(94, 44, 5, ART.dark[2]),
+        artCircle(122, 44, 11, c.cyl('brass', 'd'), { 'data-part': 'coil' }),
+        artCircle(122, 44, 5, ART.dark[2]),
+        artRect(78, 52, 76, 40, c.mat('metal', 'd'), 6, { 'data-part': 'body' }),
+        artRect(78, 53.6, 76, 3.2, RIM, 1.6),
+        artRect(78, 88, 76, 4, SEAM),
+        artRect(88, 60, 56, 9, c.mat('dark', 'v'), 2, { 'data-part': 'window' }),
+        artRect(90, 62, 52, 4, 'rgba(74,216,230,.5)', 2),
+        poly([[88, 92], [120, 92], [113, 128], [86, 128]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[88, 92], [120, 92], [119.2, 95.6], [87.4, 95.6]], RIM2),
+        poly([[122, 92], [136, 92], [132, 108], [122, 104]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        artRect(154, 60, 18, 24, c.cyl('metal', 'v'), 3, { 'data-part': 'neck' }),
+        artPath('M172,30 Q214,72 172,114 Q198,72 172,30 Z', c.mat('metal', 'r'), { 'data-part': 'dish' }),
+        artPath('M172,34 Q206,72 172,110 Q190,72 172,34 Z', ART.dark[0], { 'data-part': 'dish-in' }),
+        artPath('M174,38 Q198,56 196,68 L192,66 Q192,56 174,42 Z', RIM2),
+        artRect(176, 69, 32, 5, c.cyl('metal', 'h'), 2.5, { 'data-part': 'stem' }),
+        artCircle(210, 72, 9, c.glow('metal'), { 'data-part': 'focus' }),
+        artCircle(210, 72, 5, 'rgba(74,216,230,.85)'),
+        artCircle(208, 69, 2.2, ART.gloss[0]),
+        artPath('M216,62 Q236,72 216,82 L220,76 L220,68 Z', 'rgba(74,216,230,.45)', { 'data-part': 'pull' }),
+        artRect(26, 94, 28, 6, c.mat('dark', 'v'), 2, { 'data-part': 'latch' }),
+        artRect(26, 94.6, 28, 1.8, RIM2, 0.9),
+        artCircle(70, 72, 4, ART.dark[2])
+      ],
+      icon: (c) => [
+        artRect(2, 17, 11, 14, c.mat('dark', 'd'), 3, { 'data-part': 'pack' }),
+        artCircle(18, 12, 4.5, c.cyl('brass', 'd'), { 'data-part': 'coil' }),
+        artRect(12, 17, 20, 13, c.mat('metal', 'd'), 3, { 'data-part': 'body' }),
+        artRect(12, 18, 20, 1.6, RIM, 0.8),
+        poly([[17, 30], [26, 30], [24, 43], [16, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M33,10 Q46,23 33,36 Q39,23 33,10 Z', c.mat('metal', 'r'), { 'data-part': 'dish' }),
+        artCircle(43, 23, 3.4, 'rgba(74,216,230,.85)', { 'data-part': 'focus' })
+      ]
+    },
+
+    /* ───────── 고무탄 · SPEC-arsenal §C ─────────
+     * A break-action launcher with a fat white round sitting in the open breech — the ROUND is the picture,
+     * because what the weapon does is leave that rubber on whatever it touches. Short, wide bore, and a
+     * bounce trace behind the muzzle so the silhouette reads "this comes back". */
+    rubber: {
+      detail: (c) => [
+        poly([[20, 78], [58, 68], [62, 96], [24, 104]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        poly([[20, 78], [58, 68], [58.6, 72], [20.8, 82]], RIM2),
+        artRect(56, 62, 28, 40, c.mat('metal', 'd'), 5, { 'data-part': 'receiver' }),
+        artRect(56, 63.4, 28, 3, RIM, 1.5),
+        artRect(56, 98, 28, 4, SEAM),
+        artRect(84, 58, 16, 46, c.mat('dark', 'd'), 3, { 'data-part': 'hinge' }),
+        artCircle(92, 81, 5, c.cyl('brass', 'd'), { 'data-part': 'pin' }),
+        poly([[70, 102], [98, 102], [92, 132], [68, 132]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[70, 102], [98, 102], [97.2, 105.6], [69.4, 105.6]], RIM2),
+        poly([[100, 100], [114, 100], [110, 116], [100, 112]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        artRect(98, 56, 76, 50, c.cyl('metal', 'v'), 8, { 'data-part': 'barrel' }),
+        artRect(99.4, 57.6, 73, 4, RIM, 2),
+        artRect(98, 100, 76, 4, SEAM2),
+        artRect(108, 64, 20, 8, c.mat('dark', 'v'), 2, { 'data-part': 'breech' }),
+        artCircle(140, 81, 20, ART.dark[2], { 'data-part': 'chamber' }),
+        artCircle(140, 81, 15, c.glow('gloss'), { 'data-part': 'round' }),
+        artCircle(134, 75, 4.6, ART.gloss[0]),
+        artRect(174, 60, 24, 42, c.cyl('metal', 'v'), 5, { 'data-part': 'muzzle' }),
+        artRect(175.4, 61.6, 3, 38, RIM2, 1.5),
+        artEllipse(198, 81, 5, 20, ART.dark[2], { 'data-part': 'bore' }),
+        artEllipse(197, 81, 2.4, 15, c.mat('gloss', 'v')),
+        artPath('M206,54 Q226,66 212,80 Q228,94 208,108 L212,102 Q220,92 206,80 Q220,68 210,58 Z', 'rgba(246,250,254,.5)', { 'data-part': 'bounce' }),
+        artCircle(230, 54, 5, 'rgba(246,250,254,.75)', { 'data-part': 'bounce-dot' }),
+        artCircle(232, 108, 4, 'rgba(246,250,254,.5)', { 'data-part': 'bounce-dot' }),
+        artRect(60, 70, 18, 6, c.mat('dark', 'v'), 2, { 'data-part': 'plate' }),
+        artRect(60, 70.6, 18, 1.8, RIM2, 0.9),
+        artCircle(66, 88, 3.2, ART.dark[2]),
+        artCircle(76, 88, 3.2, ART.dark[2])
+      ],
+      icon: (c) => [
+        poly([[2, 24], [13, 20], [14, 31], [3, 34]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        artRect(12, 18, 10, 14, c.mat('metal', 'd'), 2, { 'data-part': 'receiver' }),
+        poly([[15, 32], [23, 32], [21, 43], [14, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(21, 17, 18, 16, c.cyl('metal', 'v'), 4, { 'data-part': 'barrel' }),
+        artCircle(30, 25, 6, ART.dark[2], { 'data-part': 'chamber' }),
+        artCircle(30, 25, 4, c.glow('gloss'), { 'data-part': 'round' }),
+        artRect(38, 18, 7, 14, c.cyl('metal', 'v'), 2, { 'data-part': 'muzzle' }),
+        artEllipse(45, 25, 1.8, 6, ART.dark[2], { 'data-part': 'bore' })
+      ]
+    },
+
+    /* ───────── 뿅망치 · SPEC-arsenal §D ─────────
+     * A TOY. Nothing on it is metal: a fat air-filled head in the one hot colour the palette owns, a thin
+     * bendy shaft, a squeeze bulb at the butt (that is where the "뿅" comes from), and a bow where the two
+     * meet. The head is set ACROSS the shaft like every other melee weapon in this file (§7). */
+    squeaky: {
+      detail: (c) => {
+        const fr = frame(96, 86, -34);
+        const a0 = fr(0, 0), a1 = fr(82, 0);
+        return [
+          artRect(30, 108, 44, 16, c.mat('rubber', 'd'), 8, { 'data-part': 'bulb' }),
+          artRect(31.4, 109.4, 41, 3.4, RIM2, 1.7),
+          artEllipse(28, 116, 9, 11, c.cyl('rubber', 'v'), { 'data-part': 'bulb-cap' }),
+          artCircle(24, 112, 2.6, ART.gloss[1]),
+          poly([[46, 104], [60, 96], [104, 70], [98, 60], [54, 86], [40, 96]], c.cyl('accent', 'h'), { 'data-part': 'shaft' }),
+          poly([[46, 104], [98, 60], [99.6, 62.6], [47.4, 106.6]], RIM2),
+          artEllipse(a0[0], a0[1], 7, 9, c.mat('brass', 'd'), { 'data-part': 'collar' }),
+          artPath('M88,68 Q96,56 108,58 Q98,62 94,72 Z', ART.gloss[0], { 'data-part': 'bow' }),
+          artPath('M100,56 Q112,44 120,52 Q110,52 104,62 Z', ART.gloss[2], { 'data-part': 'bow' }),
+          artEllipse(a1[0], a1[1], 40, 30, c.cyl('accent', 'd'), { 'data-part': 'head' }),
+          artEllipse(a1[0] - 10, a1[1] - 10, 15, 10, 'rgba(255,255,255,.45)', { 'data-part': 'head-gloss' }),
+          artPath('M126,12 Q156,6 170,26 L164,28 Q150,12 128,16 Z', RIM, { 'data-part': 'head-rim' }),
+          artEllipse(a1[0] + 20, a1[1] + 14, 14, 9, SEAM2),
+          artCircle(a1[0] + 30, a1[1] - 6, 4, ART.gloss[0], { 'data-part': 'glint' }),
+          artCircle(a1[0] - 26, a1[1] + 12, 3, ART.gloss[1], { 'data-part': 'glint' }),
+          artPath('M198,34 L202,44 L212,46 L203,52 L206,62 L197,56 L188,62 L191,52 L183,46 L193,44 Z', ART.hot[0], { 'data-part': 'star' }),
+          artPath('M60,34 L63,41 L70,42 L64,47 L66,54 L60,50 L54,54 L56,47 L50,42 L57,41 Z', ART.hot[1], { 'data-part': 'star' }),
+          artPath('M26,62 L28,67 L33,68 L29,71 L30,76 L26,73 L22,76 L23,71 L19,68 L24,67 Z', ART.hot[2], { 'data-part': 'star' }),
+          artCircle(214, 88, 3.4, ART.hot[0]),
+          artCircle(46, 24, 2.8, ART.hot[1]),
+          artRect(54, 98, 10, 8, c.mat('rubber', 'd'), 3, { 'data-part': 'band' }),
+          artRect(54, 98.6, 10, 1.8, RIM2, 0.9),
+          artEllipse(a1[0], a1[1] + 24, 26, 6, 'rgba(0,0,0,.18)', { 'data-part': 'shade' }),
+          artCircle(a0[0], a0[1], 2.4, ART.dark[2]),
+          artRect(36, 118, 30, 4, SEAM2, 2)
+        ];
+      },
+      icon: (c) => [
+        artRect(6, 32, 14, 7, c.mat('rubber', 'd'), 3.5, { 'data-part': 'bulb' }),
+        poly([[16, 34], [33, 18], [29, 14], [12, 30]], c.cyl('accent', 'h'), { 'data-part': 'shaft' }),
+        artEllipse(34, 15, 13, 10, c.cyl('accent', 'd'), { 'data-part': 'head' }),
+        artEllipse(30, 11, 5, 3.4, 'rgba(255,255,255,.45)', { 'data-part': 'head-gloss' }),
+        artPath('M7,6 L9,10 L13,11 L10,14 L11,18 L7,16 L4,18 L5,14 L2,11 L6,10 Z', ART.hot[0], { 'data-part': 'star' }),
+        artCircle(44, 32, 2.6, ART.hot[1], { 'data-part': 'glint' }),
+        artRect(10, 33, 8, 1.6, RIM2, 0.8)
+      ]
+    },
+
+    /* ───────── 물총 · SPEC-arsenal §D ─────────
+     * The other toy, and it has to read as one at 24 px: a translucent tank on top with the water line
+     * actually drawn in it, a chunky moulded body, a pump handle under the barrel and a round nozzle. The
+     * blue is an rgba tint over the palette rather than a new colour — §9.4 keeps literal fills to ART. */
+    watergun: {
+      detail: (c) => [
+        artPath('M62,22 Q118,10 172,24 L176,52 Q118,40 58,52 Z', c.mat('gloss', 'd'), { 'data-part': 'tank' }),
+        artPath('M62,22 Q118,10 172,24 L172,28 Q118,15 62,27 Z', RIM),
+        artPath('M60,38 Q118,27 174,39 L176,52 Q118,40 58,52 Z', 'rgba(74,180,230,.55)', { 'data-part': 'water' }),
+        artCircle(96, 32, 4, 'rgba(255,255,255,.6)', { 'data-part': 'bubble' }),
+        artCircle(132, 29, 3, 'rgba(255,255,255,.5)', { 'data-part': 'bubble' }),
+        artRect(108, 14, 20, 10, c.mat('rubber', 'd'), 3, { 'data-part': 'cap' }),
+        artRect(108, 14.8, 20, 2, RIM2, 1),
+        artRect(54, 50, 118, 44, c.mat('accent', 'd'), 9, { 'data-part': 'body' }),
+        artRect(54, 51.6, 118, 3.4, RIM, 1.7),
+        artRect(54, 90, 118, 4, SEAM),
+        artRect(66, 58, 76, 10, 'rgba(74,180,230,.45)', 3, { 'data-part': 'stripe' }),
+        poly([[62, 94], [96, 94], [88, 130], [58, 130]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[62, 94], [96, 94], [95.2, 97.6], [61.4, 97.6]], RIM2),
+        poly([[98, 92], [112, 92], [108, 108], [98, 104]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        artRect(112, 96, 60, 12, c.cyl('rubber', 'h'), 6, { 'data-part': 'pump' }),
+        artRect(113, 97, 58, 2.6, RIM2, 1.3),
+        artRect(150, 100, 34, 6, c.cyl('metal', 'h'), 3, { 'data-part': 'pump-rod' }),
+        artRect(172, 56, 34, 32, c.cyl('accent', 'v'), 6, { 'data-part': 'barrel' }),
+        artRect(173.4, 57.4, 3, 29, RIM2, 1.5),
+        artCircle(208, 72, 15, c.cyl('metal', 'd'), { 'data-part': 'nozzle' }),
+        artCircle(208, 72, 8, ART.dark[2]),
+        artCircle(208, 72, 4, 'rgba(74,180,230,.8)', { 'data-part': 'jet' }),
+        artCircle(204, 68, 2.4, ART.gloss[0]),
+        artPath('M224,66 Q240,70 236,78 Q234,72 222,76 Z', 'rgba(74,180,230,.6)', { 'data-part': 'drip' }),
+        artEllipse(232, 86, 4, 5.5, 'rgba(74,180,230,.5)', { 'data-part': 'drip' }),
+        artEllipse(224, 96, 3, 4, 'rgba(74,180,230,.38)', { 'data-part': 'drip' }),
+        artRect(64, 74, 22, 8, c.mat('dark', 'v'), 2, { 'data-part': 'label' }),
+        artRect(64, 74.6, 22, 1.8, RIM2, 0.9)
+      ],
+      icon: (c) => [
+        artPath('M12,6 Q24,2 36,7 L37,14 Q24,9 11,14 Z', c.mat('gloss', 'd'), { 'data-part': 'tank' }),
+        artPath('M11,11 Q24,6 37,11 L37,14 Q24,9 11,14 Z', 'rgba(74,180,230,.55)', { 'data-part': 'water' }),
+        artRect(9, 14, 27, 14, c.mat('accent', 'd'), 3, { 'data-part': 'body' }),
+        artRect(9, 15, 27, 1.8, RIM, 0.9),
+        poly([[12, 28], [21, 28], [19, 43], [11, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(22, 30, 17, 4, c.cyl('rubber', 'h'), 2, { 'data-part': 'pump' }),
+        artCircle(42, 20, 5, c.cyl('metal', 'd'), { 'data-part': 'nozzle' }),
+        artCircle(42, 20, 2.2, 'rgba(74,180,230,.8)', { 'data-part': 'jet' })
+      ]
+    },
+
+    /* ───────── 나팔 · SPEC-arsenal §D ─────────
+     * A brass air horn: a long flaring bell, a straight body behind it, a pressure can clamped underneath
+     * and a plunger on top. The bell is drawn as one curved path with a separate lip ellipse, so even at
+     * icon size the one thing that survives is the flare — which is also the one thing the weapon does. */
+    horn: {
+      detail: (c) => [
+        artRect(16, 60, 34, 54, c.cyl('metal', 'v'), 7, { 'data-part': 'can' }),
+        artRect(17.4, 61.4, 31, 3.4, RIM, 1.7),
+        artRect(22, 70, 22, 10, c.mat('accent', 'd'), 3, { 'data-part': 'label' }),
+        artRect(22, 86, 22, 6, c.mat('dark', 'v'), 2, { 'data-part': 'label' }),
+        artRect(24, 44, 18, 18, c.mat('dark', 'd'), 3, { 'data-part': 'plunger' }),
+        artRect(20, 36, 26, 10, c.cyl('rubber', 'h'), 4, { 'data-part': 'press' }),
+        artRect(21, 37, 24, 2.2, RIM2, 1.1),
+        artRect(48, 66, 20, 26, c.mat('dark', 'd'), 3, { 'data-part': 'clamp' }),
+        artRect(48, 67, 20, 2.2, RIM2, 1.1),
+        artRect(64, 58, 56, 36, c.cyl('brass', 'v'), 6, { 'data-part': 'body' }),
+        artRect(65.4, 59.6, 53, 3.4, RIM, 1.7),
+        artRect(64, 90, 56, 3.4, SEAM2),
+        artRect(78, 66, 30, 8, c.mat('dark', 'v'), 2, { 'data-part': 'vent' }),
+        artRect(118, 54, 14, 44, c.cyl('brass', 'v'), 3, { 'data-part': 'joint' }),
+        artRect(119, 55.4, 2.6, 41, RIM2, 1.3),
+        artPath('M132,54 Q176,48 196,14 L210,20 Q186,62 134,66 Z', c.cyl('brass', 'r'), { 'data-part': 'bell' }),
+        artPath('M132,98 Q176,104 196,138 L210,132 Q186,90 134,86 Z', c.mat('brass', 'd'), { 'data-part': 'bell' }),
+        artPath('M132,54 Q176,48 196,14 L198,19 Q178,50 133,58 Z', RIM),
+        artPath('M196,14 L210,20 L210,132 L196,138 Q206,76 196,14 Z', c.mat('brass', 'h'), { 'data-part': 'flare' }),
+        artEllipse(203, 76, 9, 62, c.cyl('brass', 'h'), { 'data-part': 'lip' }),
+        artEllipse(203, 76, 5, 54, ART.dark[1], { 'data-part': 'throat' }),
+        artEllipse(201, 76, 2.4, 44, ART.dark[2]),
+        artPath('M216,40 Q230,76 216,112 L221,112 Q234,76 221,40 Z', 'rgba(230,200,126,.5)', { 'data-part': 'blast' }),
+        artPath('M226,52 Q237,76 226,100 L230,100 Q240,76 230,52 Z', 'rgba(230,200,126,.32)', { 'data-part': 'blast' }),
+        poly([[72, 94], [104, 94], [98, 126], [70, 126]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[72, 94], [104, 94], [103.2, 97.6], [71.4, 97.6]], RIM2),
+        artCircle(56, 102, 3.4, ART.dark[2]),
+        artRect(26, 112, 16, 6, c.mat('dark', 'v'), 2, { 'data-part': 'foot' })
+      ],
+      icon: (c) => [
+        artRect(3, 18, 11, 18, c.cyl('metal', 'v'), 3, { 'data-part': 'can' }),
+        artRect(5, 12, 7, 7, c.mat('dark', 'd'), 2, { 'data-part': 'plunger' }),
+        artRect(13, 18, 14, 12, c.cyl('brass', 'v'), 3, { 'data-part': 'body' }),
+        artRect(13, 19, 14, 1.6, RIM, 0.8),
+        artPath('M27,18 Q36,16 41,5 L45,7 Q38,22 28,23 Z', c.cyl('brass', 'r'), { 'data-part': 'bell' }),
+        artPath('M27,30 Q36,32 41,43 L45,41 Q38,26 28,25 Z', c.mat('brass', 'd'), { 'data-part': 'bell' }),
+        artEllipse(43, 24, 3, 18, c.cyl('brass', 'h'), { 'data-part': 'lip' }),
+        artEllipse(43, 24, 1.6, 14, ART.dark[1], { 'data-part': 'throat' })
+      ]
+    },
+
+    /* ───────── 고무 치킨 · SPEC-arsenal §D ─────────
+     * The only weapon in the arsenal that is a whole animal, so it is drawn as one: a plucked body held by
+     * the neck, a comb, a beak, a wattle and two legs dangling off the bottom. "가볍고 예측 불가" is in the
+     * pose — nothing on it is horizontal, and the legs hang at two different angles. */
+    chicken: {
+      detail: (c) => [
+        artPath('M34,40 Q22,52 30,66 Q38,74 50,70 L46,60 Q38,56 40,46 Z', c.mat('rubber', 'd'), { 'data-part': 'hand' }),
+        artRect(28, 56, 26, 14, c.cyl('rubber', 'h'), 6, { 'data-part': 'grip' }),
+        artRect(29, 57, 24, 3, RIM2, 1.5),
+        artPath('M52,62 Q78,52 104,58 Q96,70 68,74 Z', c.mat('gloss', 'd'), { 'data-part': 'neck' }),
+        artPath('M52,62 Q78,52 104,58 L103,61 Q78,55 53,65 Z', RIM2),
+        artEllipse(146, 74, 48, 34, c.cyl('gloss', 'd'), { 'data-part': 'body' }),
+        artPath('M110,52 Q146,38 182,54 L180,60 Q146,46 112,58 Z', RIM, { 'data-part': 'back-rim' }),
+        artPath('M160,66 Q190,62 196,82 Q176,94 154,86 Z', 'rgba(255,233,176,.6)', { 'data-part': 'wing' }),
+        artPath('M162,70 Q184,68 190,80 L186,80 Q180,72 163,73 Z', RIM2),
+        artEllipse(118, 92, 20, 12, SEAM2, { 'data-part': 'belly-shade' }),
+        artPath('M188,56 Q210,42 216,58 Q222,46 230,60 Q222,74 206,72 Z', c.mat('accent', 'd'), { 'data-part': 'comb' }),
+        artPath('M188,56 Q210,42 216,58 L213,58 Q208,48 190,59 Z', ART.gloss[0]),
+        artEllipse(206, 76, 20, 17, c.cyl('gloss', 'v'), { 'data-part': 'head' }),
+        artCircle(212, 70, 4.4, ART.dark[2], { 'data-part': 'eye' }),
+        artCircle(213.4, 68.6, 1.6, ART.gloss[0]),
+        poly([[224, 76], [240, 82], [224, 88]], c.mat('hot', 'h'), { 'data-part': 'beak' }),
+        poly([[224, 76], [240, 82], [226, 80]], ART.hot[0]),
+        artPath('M206,92 Q214,96 210,106 Q202,102 206,92 Z', c.mat('accent', 'd'), { 'data-part': 'wattle' }),
+        artPath('M126,104 Q120,122 108,130 L112,134 Q128,124 132,106 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' }),
+        poly([[106, 128], [96, 134], [108, 136], [98, 140]], ART.hot[1], { 'data-part': 'foot' }),
+        artPath('M156,106 Q158,124 150,134 L155,136 Q166,124 162,106 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' }),
+        poly([[150, 132], [140, 138], [152, 139], [143, 140]], ART.hot[2], { 'data-part': 'foot' }),
+        artPath('M96,70 Q84,78 92,90 Q98,80 100,74 Z', 'rgba(246,250,254,.6)', { 'data-part': 'tail' }),
+        artEllipse(104, 76, 7, 11, 'rgba(246,250,254,.5)', { 'data-part': 'tail' }),
+        artCircle(140, 60, 3, 'rgba(0,0,0,.14)'),
+        artCircle(162, 92, 3.4, 'rgba(0,0,0,.12)'),
+        artEllipse(146, 108, 30, 5, 'rgba(0,0,0,.16)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artRect(3, 20, 11, 7, c.cyl('rubber', 'h'), 3.5, { 'data-part': 'grip' }),
+        artPath('M13,23 Q20,19 26,22 Q22,27 15,27 Z', c.mat('gloss', 'd'), { 'data-part': 'neck' }),
+        artEllipse(28, 26, 14, 11, c.cyl('gloss', 'd'), { 'data-part': 'body' }),
+        artPath('M36,15 Q42,10 44,17 Q46,12 48,19 Q43,24 38,22 Z', c.mat('accent', 'd'), { 'data-part': 'comb' }),
+        artEllipse(39, 24, 7, 6, c.cyl('gloss', 'v'), { 'data-part': 'head' }),
+        artCircle(41, 22, 1.7, ART.dark[2], { 'data-part': 'eye' }),
+        poly([[45, 24], [48, 26], [45, 28]], c.mat('hot', 'h'), { 'data-part': 'beak' }),
+        artPath('M24,36 Q22,41 18,44 L20,45 Q26,41 27,37 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' })
+      ]
     }
   };
 

@@ -80,7 +80,26 @@
     flame:    { type: 'burst',  fuel: FIREBOMB_FUEL },
     collapse: { type: 'marquee' },
     laser:    { type: 'burst',  heat: 25, damage: 90 },
-    minigun:  { type: 'burst',  rounds: 20, spreadMul: 0.5 }
+    minigun:  { type: 'burst',  rounds: 20, spreadMul: 0.5 },
+    /* ── SPEC-arsenal §C / §D (8단계): the seven new weapons ───────────────────────────────────────
+     * §A1 is a grammar, not a list — "길게 누르면 모으고, 떼면 나간다" has to be true of the whole arsenal
+     * or it is true of nothing, so every new weapon gets a row here too. §C and §D name no 보조 공격 at all,
+     * so each row is an INTERPRETATION (reported) and every one of them is the SAME attack with the charge
+     * spent on its own verb rather than a second weapon bolted on:
+     *   충격포     반경과 충격량이 함께 커진다 (폭탄의 심지 조절과 같은 모양)
+     *   견인 광선  짧게 누르면 붙잡지 않고 한 번 확 당긴다 — hold 무기이므로 §A2 의 burst 쪽
+     *   고무탄     반경 안 전부에 고무를 입힌다
+     *   뿅망치     반경 90 을 한 번에 — 여전히 약하지만 넓다 (가장 짧은 충전 0.4초)
+     *   물총       짧게 누르면 물풍선. 한 번에 넓게 적신다 — 준비 도구라는 정체성 그대로
+     *   나팔       원뿔이 길어지고 세진다
+     *   고무 치킨  완충이면 20% 가 아니라 반드시 걸린다 */
+    shockwave:{ type: 'charge', ms: 700, radius: 260, radiusMax: 420, impulseMul: 1.8 },
+    tractor:  { type: 'burst',  yank: true, rounds: 0 },
+    rubber:   { type: 'charge', ms: 500, radius: 150, dmgMul: 1.5 },
+    squeaky:  { type: 'charge', ms: 400, dmgMul: 2.0, radius: 90 },
+    watergun: { type: 'burst',  fuel: 8, splashR: 120 },
+    horn:     { type: 'charge', ms: 600, rangeMul: 1.6 },
+    chicken:  { type: 'charge', ms: 450, dmgMul: 1.5 }
   };
   function altOf(id) { return ALTS[id] || null; }
   function altChargeMs(id) { const a = altOf(id); return (a && a.ms > 0) ? a.ms : 0; }
@@ -296,7 +315,115 @@
     if (id === 'katana') return altIaido(x, y, p);
     if (id === 'bomb') return altFuseBomb(x, y, p);
     if (id === 'rocket') return altGuidedRocket(x, y);
+    // ── §C / §D ──
+    if (id === 'shockwave') return altShockBlast(x, y, p);
+    if (id === 'rubber') return altRubberSpray(x, y, p);
+    if (id === 'squeaky') return altSqueakSmash(x, y, p);
+    if (id === 'horn') return altHornBlast(x, y, p);
+    if (id === 'chicken') return altChickenFling(x, y, p);
     return null;
+  }
+
+  /* ── §C 충격포 보조: 반경 260 → 420, 충격량 ×1.8 ─────────────────────────────────────────────────── */
+  function altShockBlast(x, y, p) {
+    const a = ALTS.shockwave, W = WEAPONS.shockwave;
+    const R = Math.round(a.radius + (a.radiusMax - a.radius) * p);
+    const imp = W.impulse * (1 + (a.impulseMul - 1) * p);
+    return altAction('shockwave', x, y, () => {
+      state.shots++;
+      const BW = Object.assign({}, W, { radius: R, impulse: imp, rings: (W.rings || []).map((r) => r * (R / W.radius)), maxTargets: W.maxTargets + 4 });
+      interceptOrbsWithin(x, y, R);
+      sfx('shockwave', { gain: 1.25, pitch: 0.82 });
+      flash(x, y, 'bomb', { size: R, dur: 140 });
+      ring(x, y, { r: R });
+      shake('bomb', { amp: 10 + 6 * p, dur: 380 });
+      blastMark(x, y, R, 0.4, { ink: 0.4, weapon: BW });
+      const pushed = ixPushRadial(x, y, R, imp, { maxTargets: BW.maxTargets });
+      for (const el of pushed) {
+        if (!el.isConnected) continue;
+        const crit = rollCrit('shockwave');
+        applyHit(el, rollDamage(W.damage, crit), 'bomb', x, y, { crit, aoe: true, radius: R, toward: { x, y } });
+      }
+      startCooldown('shockwave', W.cooldownMs);
+      return null;
+    });
+  }
+  /* ── §C 고무탄 보조: 반경 150 안의 요소 전부에 고무를 입힌다 ─────────────────────────────────────── */
+  function altRubberSpray(x, y, p) {
+    const a = ALTS.rubber, W = WEAPONS.rubber;
+    const R = Math.max(24, a.radius * p);
+    return altAction('rubber', x, y, () => {
+      state.shots++;
+      interceptOrbsWithin(x, y, R);
+      sfx('boing', { gain: 1.2, pitch: 0.8 });
+      flash(x, y, 'gun', { size: R, dur: 160 });
+      ring(x, y, { r: R });
+      shake('gun', { amp: 3 });
+      const cands = aoeCandidates(x, y, R, 10, [R * 0.4, R * 0.75, R], false);
+      let n = 0;
+      for (const c of cands) {
+        const crit = rollCrit('rubber');
+        applyHit(c.el, rollDamage(Math.round(W.damage * (1 + (a.dmgMul - 1) * p)), crit), 'gun', x, y, { crit, aoe: true, toward: { x, y } });
+        let alive = false;
+        try { alive = c.el.isConnected && !c.el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+        if (alive && ixMakeBouncy(c.el, W.bouncyMs)) n++;
+      }
+      return null;
+    });
+  }
+  /* ── §D 뿅망치 보조: 반경 90 을 한 번에. 소리도 별도 그대로다 ───────────────────────────────────── */
+  function altSqueakSmash(x, y, p) {
+    const a = ALTS.squeaky, W = WEAPONS.squeaky;
+    const R = Math.max(14, a.radius * p);
+    const mul = 1 + (a.dmgMul - 1) * p;
+    return altAction('squeaky', x, y, () => {
+      state.shots++;
+      interceptOrbsWithin(x, y, R);
+      sfx('squeak', { gain: 1.3, pitch: 0.7 });
+      flash(x, y, 'hammer', { size: R * 2, dur: 220 });
+      ring(x, y, { r: R });
+      shake('hammer', { amp: 3 + 2 * p });
+      ixStars(x, y, randInt(7, 12));
+      for (const c of aoeCandidates(x, y, R, 8, [R * 0.4, R * 0.8, R], false)) {
+        const crit = rollCrit('squeaky');
+        applyHit(c.el, rollDamage(Math.round(W.damage * mul), crit), 'hammer', x, y, { crit, aoe: true, toward: { x, y } });
+        ixSquash(c.el);                      // 피해 뒤에 — reactDamage() 가 cancelAnimsOf(el) 로 시작한다
+      }
+      return null;
+    });
+  }
+  /* ── §D 나팔 보조: 원뿔이 1.6배로 길어지고 그만큼 세진다 ─────────────────────────────────────────── */
+  function altHornBlast(x, y, p) {
+    const a = ALTS.horn;
+    const scale = 1 + (a.rangeMul - 1) * p;
+    return altAction('horn', x, y, () => {
+      state.shots++;
+      ixHornAt(x, y, scale);
+      startCooldown('horn', WEAPONS.horn.cooldownMs);
+      return null;
+    });
+  }
+  /* ── §D 고무 치킨 보조: 완충이면 20% 가 아니라 반드시 걸린다 ───────────────────────────────────── */
+  function altChickenFling(x, y, p) {
+    const a = ALTS.chicken, W = WEAPONS.chicken;
+    const mul = 1 + (a.dmgMul - 1) * p;
+    return altAction('chicken', x, y, () => {
+      state.shots++;
+      if (interceptOrb(x, y)) return null;
+      const el = pickTarget(x, y);
+      const crit = el ? rollCrit('chicken') : false;
+      sfx('chicken', { gain: 1.3, pitch: 0.75 });
+      flash(x, y, 'hammer', { size: 70, dur: 180 });
+      shake('hammer', { amp: 2.4 });
+      if (!el) return null;
+      applyHit(el, rollDamage(Math.round(W.damage * mul), crit), 'hammer', x, y, { crit });
+      let alive = false;
+      try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      /* The charge BUYS the certainty: a full charge always sticks, a half charge is half-way between the
+       * weapon's own 20 % and 100 %. That is what §A5's "charge 유형만 중간값을 보간한다" means here. */
+      if (alive && (debug.noQuirk ? false : (debug.forceQuirk || Math.random() < W.bouncyChance + (1 - W.bouncyChance) * p))) ixMakeBouncy(el, WEAPONS.rubber.bouncyMs);
+      return el;
+    });
   }
 
   /* 망치 내려치기 / 도끼 회전 베기 (§A2). Both are a radius: the hammer crushes everything inside 120 px for
@@ -653,6 +780,66 @@
       if (el) applyHit(el, dmg, 'gun', x, y, { crit });
       return el;
     });
+    return true;
+  }
+
+  /* ── §C 견인 광선 보조 (짧게): 붙잡지 않고 한 번 확 당긴다 ────────────────────────────────────────
+   * A hold weapon's short press is its alt (§A2 burst). The beam has no magazine, so the price is the same
+   * cooldown a release pays — nothing here is free. */
+  function altTractorYank(x, y) {
+    const W = WEAPONS.tractor;
+    if (onCooldown()) { cooldownFeedback(); return false; }
+    const el = pickTarget(x, y);
+    if (!el) { emptyClick(); return false; }
+    const o = ixOrigin();
+    const r = rectOf(el);
+    const cx = r ? r.left + r.width / 2 : x, cy = r ? r.top + r.height / 2 : y;
+    const dx = o.x - cx, dy = o.y - cy, L = Math.hypot(dx, dy) || 1;
+    const b = displaceEl(el, (dx / L) * W.yankImpulse, (dy / L) * W.yankImpulse, { spin: rand(-90, 90) });
+    state.shots++;
+    sfx('tractor', { gain: 1.2, pitch: 1.2 });
+    flash(cx, cy, 'gun', { size: 50, dur: 140 });
+    shake('gun', { amp: 2 });
+    startCooldown('tractor', W.releaseCdMs);
+    kick();
+    return !!b;
+  }
+  /* ── §D 물총 보조 (짧게): 물풍선. 한 번에 넓게 적신다 ───────────────────────────────────────────
+   * §A4 gives the burst alts bespoke costs (3점사는 3발, 화염탄은 연료 12); the balloon is 연료 8. */
+  function altWaterBalloon(x, y) {
+    const a = ALTS.watergun, W = WEAPONS.watergun;
+    if (onCooldown()) { cooldownFeedback(); return false; }
+    if (!altSpendRounds('watergun', a.fuel)) { emptyClick(); return false; }
+    state.shots++;
+    const R = a.splashR;
+    sfx('water', { gain: 1.3, pitch: 0.7 });
+    flash(x, y, 'gun', { size: R, dur: 170 });
+    ring(x, y, { r: R });
+    ixSplash(x, y, randInt(8, 14));
+    let n = 0;
+    for (const c of aoeCandidates(x, y, R, 10, [R * 0.4, R * 0.8, R], false)) {
+      const crit = rollCrit('watergun');
+      applyHit(c.el, rollDamage(W.damage, crit), 'gun', x, y, { crit, aoe: true, toward: { x, y } });
+      let alive = false;
+      try { alive = c.el.isConnected && !c.el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      if (!alive) continue;
+      try { douseEl(c.el, BURN_WATER_STACKS); } catch (e) { /* ignore */ }
+      if (ixWet(c.el, W.wetMs)) n++;
+    }
+    startCooldown('watergun', 500);
+    scheduleHud();
+    return n >= 0;
+  }
+  /* The magazine side of a bespoke burst cost. Same shape as spendFuel() (src/77-burn.js), generalised to
+   * any id so the water balloon does not need a second copy of it. */
+  function altSpendRounds(id, n) {
+    const W = WEAPONS[id];
+    if (!W || W.mag == null || debug.infiniteAmmo) return true;
+    const have = state.ammo[id] || 0;
+    if (have < n) return false;
+    state.ammo[id] = Math.max(0, have - n);
+    if (state.ammo[id] <= 0) state.pendingReload = id;
+    updateAmmoHud();
     return true;
   }
 
@@ -1109,6 +1296,9 @@
     if (id === 'smg') altBurstSmg(state.hoverX, state.hoverY);
     else if (id === 'laser') altLaserPulse(state.hoverX, state.hoverY);
     else if (id === 'minigun') altFixedFire(state.hoverX, state.hoverY);
+    // ── SPEC-arsenal §C / §D: the two hold weapons the arsenal grew by ──
+    else if (id === 'tractor') altTractorYank(state.hoverX, state.hoverY);
+    else if (id === 'watergun') altWaterBalloon(state.hoverX, state.hoverY);
     return r;
   };
   /* §B2 / §B3: the two new hold weapons' own gates — the laser may be overheated, the minigun has to spin up

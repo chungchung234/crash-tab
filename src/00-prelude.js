@@ -21,7 +21,11 @@
   /* SPEC-arsenal §B1: WEAPON_IDS is the ARSENAL now — every weapon that exists (12 since 레이저 커터 and
    * 미니건 landed). `state.loadout` is a chosen SUBSET of it, at most 10 long, and that subset is what the
    * number keys / Q / E / the HUD grid speak. Nothing else about the id set changed. */
-  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse', 'laser', 'minigun'];
+  /* SPEC-arsenal §C (상호작용) · §D (예능), 8단계: the arsenal grows 12 → 19. The three §C weapons ride the
+   * displacement system (src/67-displace.js) and the four §D weapons are the 예능 band — weak on paper, each
+   * carrying ONE effect that is not damage. Nothing about the loadout changed: it is still at most 10. */
+  const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse', 'laser', 'minigun',
+    'shockwave', 'tractor', 'rubber', 'squeaky', 'watergun', 'horn', 'chicken'];
   const LOADOUT_MAX = 10;            // §B1: 숫자키 10칸
   const WEAPONS = {
     hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
@@ -51,21 +55,68 @@
      * the first round and `idleGraceMs` the 0.6 s 공회전 유예 that lets a re-press skip it. */
     minigun:  { id: 'minigun',  emoji: '⚙️', name: 'weaponMinigun', kind: 'gun',      damage: 26,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 60, mag: 200, reloadMs: 4000,
                 spinUpMs: 800, idleGraceMs: 600, fixedRounds: 20,
-                swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 }
+                swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 },
+    /* ── SPEC-arsenal §C 상호작용 무기 ──────────────────────────────────────────────────────────────
+     * All three are built on the displacement system, so what they publish here is not damage but the
+     * physics the fire() entries hand to displaceEl(): `impulse` (충격포), `grabMaxMass` (견인 광선),
+     * `bouncyMs` / `bounceRest` / `collisionMul` (고무탄). The stat block is inline for the same reason the
+     * laser's is: WEAPON_STATS (src/71) is not this workstream's file and Object.assign(W, undefined) leaves
+     * what is written here alone.
+     * INTERPRETATION (reported): §C gives each weapon its VERB and nothing else — no magazine, no cooldown,
+     * no swap time. Those had to be chosen for the weapon to exist in this engine at all; they are picked so
+     * the 특수 band of §F4 (40–90 % of the 실전 median) is plausible, and §F itself is 9단계. */
+    shockwave:{ id: 'shockwave', emoji: '🌀', name: 'weaponShockwave', kind: 'bomb', damage: 10, cooldownMs: 900, radius: 260, hold: false, input: 'click',
+                rings: [70, 150, 230], maxTargets: 14, mag: 4, reloadMs: 1700, impulse: 900,
+                swapMs: 360, recoil: 1.6, bloom: 0, critChance: 0.04, knockback: 2.4, moveSpeed: 0.92, falloff: 0, pierce: 0, aoeIgnoresCover: true },
+    /* 견인 광선: 길게 눌러 하나를 붙잡는다. No magazine — the price is a cooldown on release (`releaseCdMs`),
+     * because a grab is one continuous act and charging it by the tick would turn "hold to carry" into a
+     * stopwatch. `grabK` is the spring constant of the cursor follow (1/s). */
+    tractor:  { id: 'tractor', emoji: '🛸', name: 'weaponTractor', kind: 'gun', damage: 1, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 60,
+                mag: null, reloadMs: null, grabMaxMass: 4, grabK: 9, releaseCdMs: 600, yankImpulse: 1500,
+                swapMs: 380, recoil: 0, bloom: 0, critChance: 0, knockback: 0, moveSpeed: 0.95, falloff: 0, pierce: 0 },
+    rubber:   { id: 'rubber', emoji: '⚪', name: 'weaponRubber', kind: 'gun', damage: 18, cooldownMs: 260, radius: 0, hold: false, input: 'click', mag: 8, reloadMs: 1300,
+                bouncyMs: 6000, bounceRest: 0.85, collisionMul: 1.6,
+                swapMs: 240, recoil: 0.8, bloom: 4, critChance: 0.05, knockback: 1.2, moveSpeed: 1.00, falloff: 0.20, pierce: 0 },
+    /* ── SPEC-arsenal §D 예능 무기 ──────────────────────────────────────────────────────────────────
+     * "밸런스 밴드에서 제외하되 … 실효 화력이 중앙값의 25~50%, 그리고 각각 피해가 아닌 고유 효과를 하나씩."
+     * `quirk` names that effect so the rule is a field rather than a promise — §D's own table, in the table.
+     * 뿅망치 and 고무 치킨 are melee (no magazine), which is also what makes them the fastest things to swing. */
+    squeaky:  { id: 'squeaky', emoji: '🎈', name: 'weaponSqueaky', kind: 'hammer', damage: 8, cooldownMs: 0, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
+                quirk: 'squash', squashMs: 420,
+                swapMs: 120, recoil: 0.6, bloom: 0, critChance: 0.10, knockback: 0.9, moveSpeed: 1.20, falloff: 0, pierce: 0 },
+    /* 틱 40 ms / 탄창 180: §D fixes the tick DAMAGE at 3 and says nothing about the rate, and 3 damage every
+     * 70 ms put the 실효 화력 at 18 % of the 실전 중앙값 — under §D's own 25~50 % floor. §F7's rule ("피해량보다
+     * 핸들링을 먼저 건드린다") says which number moves: the published 3 stays and the stream gets finer. */
+    watergun: { id: 'watergun', emoji: '💧', name: 'weaponWatergun', kind: 'gun', damage: 3, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 40, mag: 180, reloadMs: 1300,
+                quirk: 'wet', wetMs: 8000, coolMul: 2.5, splashR: 120,
+                swapMs: 200, recoil: 0.2, bloom: 5, critChance: 0.03, knockback: 0.3, moveSpeed: 1.05, falloff: 0.45, pierce: 0 },
+    horn:     { id: 'horn', emoji: '🎺', name: 'weaponHorn', kind: 'gun', damage: 5, cooldownMs: 520, radius: 420, hold: false, input: 'click', mag: 6, reloadMs: 1500,
+                quirk: 'reflect', coneDeg: 90, coneImpulse: 520, rings: [120, 260, 400], maxTargets: 12,
+                swapMs: 260, recoil: 0.9, bloom: 0, critChance: 0.04, knockback: 1.5, moveSpeed: 1.05, falloff: 0, pierce: 0 },
+    chicken:  { id: 'chicken', emoji: '🐔', name: 'weaponChicken', kind: 'hammer', damage: 12, cooldownMs: 0, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
+                quirk: 'bouncy', bouncyChance: 0.20,
+                swapMs: 110, recoil: 0.5, bloom: 0, critChance: 0.18, knockback: 0.8, moveSpeed: 1.25, falloff: 0, pierce: 0 }
   };
   /* Loadout presets (v1.2 §4): permutations of WEAPON_IDS mapped onto keys 1 2 3 4 5 6 7 8 9 0. */
   /* SPEC-arsenal §B1: "프리셋이 서로 다른 10개 조합이 되어 실제 선택이 생긴다." The arsenal holds 12 and a
    * loadout holds 10, so each preset now LEAVES TWO OUT — and no two presets leave out the same pair, which
    * is what makes the choice real rather than a reshuffle. `default` keeps the exact v1.2 order (it is the
    * ten weapons that existed before this step), so an upgrade changes nothing for someone who never looked. */
+  /* §C / §D (8단계): the arsenal is 19 now and a loadout is still ten, so the five presets above can no
+   * longer reach seven of the weapons at all. Two more presets are the smallest fix that keeps §B1's promise
+   * ("프리셋이 서로 다른 10개 조합이 되어 실제 선택이 생긴다") true of the WHOLE arsenal: `interaction` is the
+   * push / pull / bounce loadout and `fun` is the 예능 one. The five that existed are untouched. */
   const PRESETS = {
     default:   ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'],                 // 빠짐: 레이저 · 미니건
     assault:   ['smg', 'minigun', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'collapse'],                // 빠짐: 카타나 · 레이저
     sniper:    ['sniper', 'pistol', 'laser', 'katana', 'hammer', 'axe', 'smg', 'bomb', 'rocket', 'collapse'],                 // 빠짐: 화염방사기 · 미니건
     explosive: ['rocket', 'bomb', 'flame', 'collapse', 'laser', 'minigun', 'smg', 'pistol', 'hammer', 'axe'],                 // 빠짐: 저격총 · 카타나
-    melee:     ['hammer', 'axe', 'katana', 'laser', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'collapse']                // 빠짐: 기관총 · 미니건
+    melee:     ['hammer', 'axe', 'katana', 'laser', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'collapse'],               // 빠짐: 기관총 · 미니건
+    interaction: ['shockwave', 'tractor', 'rubber', 'hammer', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'collapse'],       // §C 셋을 앞에 두고 뒤는 실전
+    fun:         ['squeaky', 'watergun', 'horn', 'chicken', 'rubber', 'hammer', 'pistol', 'smg', 'flame', 'collapse']          // §D 넷 + 고무탄, 뒤는 실전
   };
-  const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee' };
+  const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee',
+    interaction: 'presetInteraction', fun: 'presetFun' };
   const HOLD_WINDOW = 150;           // ms: hold-weapon damage aggregation / fx throttle window (A4, A5)
   const BURNT_FILTER = 'brightness(.55) sepia(.6)';   // flame-broken pieces (A9)
   const SWAP_MS = 250;               // weapon swap delay (v1.2 A5)

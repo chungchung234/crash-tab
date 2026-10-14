@@ -454,5 +454,41 @@
   "hudHintBurst": {
     "message": "A short press fires a different attack",
     "description": "SPEC-arsenal A2: HUD hint for the sustained-fire weapons"
+  },
+  "weaponShockwave": {
+    "message": "Shockwave Cannon",
+    "description": "SPEC-arsenal C: shockwave cannon — pushes a 260 px radius outward, direct damage 10 only"
+  },
+  "weaponTractor": {
+    "message": "Tractor Beam",
+    "description": "SPEC-arsenal C: tractor beam — hold to grab one element, release to throw it"
+  },
+  "weaponRubber": {
+    "message": "Rubber Round",
+    "description": "SPEC-arsenal C: rubber round — the element it hits becomes bouncy for 6 s"
+  },
+  "weaponSqueaky": {
+    "message": "Squeaky Hammer",
+    "description": "SPEC-arsenal D: squeaky toy hammer — damage 8, squash and bounce, stars"
+  },
+  "weaponWatergun": {
+    "message": "Water Pistol",
+    "description": "SPEC-arsenal D: water pistol — soaks for 8 s, puts fires out, 2.5x cooling"
+  },
+  "weaponHorn": {
+    "message": "Air Horn",
+    "description": "SPEC-arsenal D: air horn — pushes a 90 degree cone and reverses enemy projectiles"
+  },
+  "weaponChicken": {
+    "message": "Rubber Chicken",
+    "description": "SPEC-arsenal D: rubber chicken — damage 12, 20 percent chance of bouncy"
+  },
+  "presetInteraction": {
+    "message": "Interaction",
+    "description": "SPEC-arsenal C: loadout preset built around the push / pull / bounce weapons"
+  },
+  "presetFun": {
+    "message": "Fun",
+    "description": "SPEC-arsenal D: loadout preset built around the joke weapons"
   }
 }

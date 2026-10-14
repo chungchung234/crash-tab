@@ -6,6 +6,10 @@
   WEAPONS.collapse.fire = (x, y) => { state.shots++; doCollapse(x, y); return null; };
   // ── SPEC-arsenal §B: the two weapons the arsenal grew by ──
   WEAPONS.laser.fire = fireLaser; WEAPONS.minigun.fire = fireMinigun;
+  /* ── SPEC-arsenal §C 상호작용 (충격포 · 견인 광선 · 고무탄) · §D 예능 (뿅망치 · 물총 · 나팔 · 고무 치킨) ── */
+  WEAPONS.shockwave.fire = fireShockwave; WEAPONS.tractor.fire = fireTractor; WEAPONS.rubber.fire = fireRubber;
+  WEAPONS.squeaky.fire = fireSqueaky; WEAPONS.watergun.fire = fireWater; WEAPONS.horn.fire = fireHorn;
+  WEAPONS.chicken.fire = fireChicken;
 
   /* --- actions (A3 ordering + v1.2 A5 gates): mount → cooldown → swap delay → spend → counters/combo/swing → fire → HUD --- */
   function action(id, x, y, run) {

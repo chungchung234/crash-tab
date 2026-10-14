@@ -1728,3 +1728,67 @@ crs-hud:popover-open {
   -webkit-mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 7px, #000 8px) !important;
   mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 7px, #000 8px) !important;
 }
+
+/* ---- SPEC-arsenal §C 상호작용 무기 · §D 예능 무기 (8단계) ----------------------------------------
+   USER-ORIGIN TRAP (CLAUDE.md): every node below is POSITIONED, SIZED and ANIMATED by JS —
+   tbDraw() writes left/top/width/height/transform on the tractor beam and its grip every frame,
+   ixStars() / ixSplash() animate transform and opacity, ixConeFx() animates transform (scaleX) and
+   opacity. So NONE of left / top / width / height / transform / transform-origin / opacity carries
+   !important here. Only what JS never touches is forced.
+   젖음 자체는 여기에 없다: 그것은 페이지 요소의 인라인 `filter` 이고, content.css 는 페이지 요소의
+   filter 에 !important 를 걸지 않는다 — 걸면 젖음이 조용히 안 보이게 된다. */
+.crs-star,
+.crs-splash,
+.crs-horn-cone,
+.crs-tractor-beam,
+.crs-tractor-grip {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+}
+/* §D 뿅망치: "뿅" 소리와 별 입자 — a real five-point star, cut with clip-path so it is one node. */
+.crs-star {
+  z-index: 5 !important;
+  background: radial-gradient(circle at 50% 42%, #fff 0%, #ffe08a 45%, #ffb224 100%);
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+/* §D 물총: 물방울. */
+.crs-splash {
+  z-index: 4 !important;
+  border-radius: 50% 50% 55% 55%;
+  background: radial-gradient(circle at 38% 32%, rgba(255, 255, 255, .95) 0%, rgba(120, 200, 255, .85) 45%, rgba(60, 150, 230, .55) 100%);
+}
+/* §D 나팔: 90도 원뿔 — a wedge, clipped from a rectangle whose left edge is the apex. */
+.crs-horn-cone {
+  z-index: 4 !important;
+  clip-path: polygon(0% 50%, 100% 0%, 100% 100%);
+  background: linear-gradient(90deg, rgba(255, 224, 138, .75) 0%, rgba(255, 178, 36, .3) 55%, rgba(255, 178, 36, 0) 100%);
+}
+/* §C 견인 광선: the beam itself and the grip brackets that ride the element it is holding. */
+.crs-tractor-beam {
+  z-index: 4 !important;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(74, 216, 230, 0) 0%, rgba(74, 216, 230, .35) 25%, rgba(74, 216, 230, .6) 100%);
+  box-shadow: 0 0 14px 3px rgba(74, 216, 230, .35);
+  filter: blur(1px);
+}
+.crs-tractor-grip {
+  z-index: 5 !important;
+  background: rgba(74, 216, 230, .07);
+}
+.crs-tractor-grip-c {
+  position: absolute !important;
+  width: 16px !important;
+  height: 16px !important;
+  border: 0 solid #4ad8e6 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+}
+.crs-tractor-grip-c0 { left: -2px; top: -2px; border-top-width: 2px !important; border-left-width: 2px !important; }
+.crs-tractor-grip-c1 { right: -2px; top: -2px; border-top-width: 2px !important; border-right-width: 2px !important; }
+.crs-tractor-grip-c2 { left: -2px; bottom: -2px; border-bottom-width: 2px !important; border-left-width: 2px !important; }
+.crs-tractor-grip-c3 { right: -2px; bottom: -2px; border-bottom-width: 2px !important; border-right-width: 2px !important; }

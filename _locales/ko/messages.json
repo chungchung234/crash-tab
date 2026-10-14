@@ -454,5 +454,41 @@
   "hudHintBurst": {
     "message": "짧게 누르면 다른 공격이 나가요",
     "description": "SPEC-arsenal A2: HUD hint for the sustained-fire weapons"
+  },
+  "weaponShockwave": {
+    "message": "충격포",
+    "description": "SPEC-arsenal C: shockwave cannon — pushes a 260 px radius outward, direct damage 10 only"
+  },
+  "weaponTractor": {
+    "message": "견인 광선",
+    "description": "SPEC-arsenal C: tractor beam — hold to grab one element, release to throw it"
+  },
+  "weaponRubber": {
+    "message": "고무탄",
+    "description": "SPEC-arsenal C: rubber round — the element it hits becomes bouncy for 6 s"
+  },
+  "weaponSqueaky": {
+    "message": "뿅망치",
+    "description": "SPEC-arsenal D: squeaky toy hammer — damage 8, squash and bounce, stars"
+  },
+  "weaponWatergun": {
+    "message": "물총",
+    "description": "SPEC-arsenal D: water pistol — soaks for 8 s, puts fires out, 2.5x cooling"
+  },
+  "weaponHorn": {
+    "message": "나팔",
+    "description": "SPEC-arsenal D: air horn — pushes a 90 degree cone and reverses enemy projectiles"
+  },
+  "weaponChicken": {
+    "message": "고무 치킨",
+    "description": "SPEC-arsenal D: rubber chicken — damage 12, 20 percent chance of bouncy"
+  },
+  "presetInteraction": {
+    "message": "상호작용",
+    "description": "SPEC-arsenal C: loadout preset built around the push / pull / bounce weapons"
+  },
+  "presetFun": {
+    "message": "예능",
+    "description": "SPEC-arsenal D: loadout preset built around the joke weapons"
   }
 }

@@ -426,3 +426,112 @@
     untrack(c.timer); untrack(c.thumpTimer); c.timer = 0; c.thumpTimer = 0;
     state.collapse = null;
   }
+
+  /* ══ SPEC-arsenal §C 상호작용 무기 · §D 예능 무기 — the seven fire() entries ═══════════════════════
+   * The mechanics all live in src/68-interaction.js (and the physics under them in src/67-displace.js);
+   * these are only the triggers, written in exactly the shape the other nine already have. */
+
+  /* §C 충격포: 단발, 반경 260px 를 바깥으로 민다. 직접 피해 10뿐 — 피해는 부딪혀서 나온다. */
+  function fireShockwave(x, y) {
+    state.shots++;
+    ixShockwaveAt(x, y);
+    return null;
+  }
+  /* §C 견인 광선: 길게 눌러 하나를 붙잡는다. A hold weapon whose ticks do no damage at all — the first tick
+   * takes hold of something and every tick after it is the beam staying on. The carrying itself is done by
+   * tbStep() on the integrator's frame, not here: a 60 ms tick is far too coarse to follow a cursor. */
+  function fireTractor(x, y) {
+    state.shots++;
+    return tbTick(x, y);
+  }
+  /* §C 고무탄: 맞은 요소가 6초간 bouncy. 중력과 반발 0.85 를 얻어 당구공이 된다. */
+  function fireRubber(x, y) {
+    state.shots++;
+    const W = WEAPONS.rubber;
+    const p = shotPoint(x, y, 'rubber');
+    x = p.x; y = p.y;
+    noteShot('rubber');
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y);
+    const crit = el ? rollCrit('rubber') : false;
+    const dmg = rollDamage(W.damage, crit, falloffMul('rubber', x, y));
+    sfx('boing', { crit });
+    flash(x, y, 'gun', { size: 40, dur: 130 });
+    shake('gun', { amp: 2.2 });
+    drawCrack(x, y, 'gun', { ink: 0.2 });
+    spawnChips(x, y, randInt(2, 4));
+    if (el) {
+      applyHit(el, dmg, 'gun', x, y, { crit });
+      /* The state is put on AFTER the damage: an element the round just destroyed has nothing to bounce,
+       * and ixMakeBouncy() would otherwise mint a displacement body on a corpse. */
+      let alive = false;
+      try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      if (alive) ixMakeBouncy(el, W.bouncyMs);
+    }
+    return el;
+  }
+  /* §D 뿅망치: 피해 8. 맞은 요소가 찌그러졌다 튀어오른다. "뿅" 소리와 별 입자. 가장 빠르게 휘두른다. */
+  function fireSqueaky(x, y) {
+    state.shots++;
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y);
+    const crit = el ? rollCrit('squeaky') : false;
+    const dmg = rollDamage(WEAPONS.squeaky.damage, crit);
+    sfx('squeak', { crit });
+    flash(x, y, 'hammer', { size: 76, dur: 170 });
+    shake('hammer', { amp: crit ? 2.6 : 1.8 });
+    ixStars(x, y, randInt(4, 7));
+    // 찌그러짐은 피해 **뒤**에 건다 — reactDamage() 가 cancelAnimsOf(el) 로 시작하기 때문이다 (ixSquash 주석)
+    if (el) { applyHit(el, dmg, 'hammer', x, y, { crit }); ixSquash(el); }
+    return el;
+  }
+  /* §D 물총: 3/틱. 젖음 8초 — 처지고 글자가 번지고 색이 빠진다. 냉각 2.5배, 더 멀리 미끄러짐. 불을 끈다. */
+  function fireWater(x, y, c) {
+    state.shots++;
+    const W = WEAPONS.watergun;
+    const h = (c && c.hold && c.h) || null;
+    const n = h ? h.tick : 1;
+    const fp = shotPoint(x, y, 'watergun');
+    x = fp.x; y = fp.y;
+    noteShot('watergun');
+    ixSplash(x, y, 2);
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    if (!h || n % 3 === 1) sfx('water', { gain: 0.6 });
+    if (!el) return null;
+    let crit = false, win = null;
+    if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('watergun');
+    const dmg = rollDamage(W.damage, crit, falloffMul('watergun', x, y));
+    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    /* The two halves of the quirk, in the order §F4 of SPEC-destruction wants them: the water puts the fire
+     * out first (틱당 스택 −40) and what is left is a wet element that the next fire will barely take. */
+    try { douseEl(el, BURN_WATER_STACKS); } catch (e) { /* ignore */ }
+    let alive = false;
+    try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+    if (alive) ixWet(el, W.wetMs);
+    return el;
+  }
+  /* §D 나팔: 피해 5. 90도 원뿔 420px 를 민다. 적의 탄환 방향을 뒤집는다. */
+  function fireHorn(x, y) {
+    state.shots++;
+    ixHornAt(x, y, 1);
+    return null;
+  }
+  /* §D 고무 치킨: 피해 12. 20% 확률로 bouncy 부여. 가장 빠르고 가볍고 예측 불가. */
+  function fireChicken(x, y) {
+    state.shots++;
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y);
+    const crit = el ? rollCrit('chicken') : false;
+    const dmg = rollDamage(WEAPONS.chicken.damage, crit);
+    sfx('chicken', { crit });
+    flash(x, y, 'hammer', { size: 58, dur: 150 });
+    shake('hammer', { amp: 1.6 });
+    if (el) {
+      applyHit(el, dmg, 'hammer', x, y, { crit });
+      let alive = false;
+      try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      if (alive && ixRollQuirk(WEAPONS.chicken.bouncyChance)) ixMakeBouncy(el, WEAPONS.rubber.bouncyMs);
+    }
+    return el;
+  }
