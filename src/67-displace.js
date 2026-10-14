@@ -108,7 +108,8 @@
     return n;
   }
   /* §E1: over the cap the OLDEST glides home over 0.4 s rather than snapping — the element is still on
-   * the page and a snap would read as a layout bug. */
+   * the page and a snap would read as a layout bug. `b.retMs` lets a caller retime that one glide —
+   * SPEC-combat §D5's 돌격 comes home over 0.35 s — and everything else keeps MOVED_RETURN_MS. */
   function startMovedReturn(b) {
     if (b.returning) return;
     b.returning = true;
@@ -149,7 +150,7 @@
       el, x: 0, y: 0, rot: 0, vx: 0, vy: 0, vr: 0, resting: false, bornAt: now(),
       wet: false, bouncy: false,
       mass: movedMass(rect), saved, savedPriority: priority, want: '', wrote: '', reapplied: 0,
-      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0,
+      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0, retMs: 0,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
       hitAt: new WeakMap()
     };
@@ -316,7 +317,7 @@
       if (gone) { releaseMoved(b); continue; }
       if (b.returning) {
         busy = true;
-        const k = clamp((t - b.retAt) / scaleMs(MOVED_RETURN_MS), 0, 1);
+        const k = clamp((t - b.retAt) / scaleMs(b.retMs || MOVED_RETURN_MS), 0, 1);
         const e = 1 - Math.pow(1 - k, 3);              // ease-out, same feel as the repair fly-home
         b.x = b.retX * (1 - e); b.y = b.retY * (1 - e); b.rot = b.retRot * (1 - e);
         if (k >= 1) { releaseMoved(b); continue; }

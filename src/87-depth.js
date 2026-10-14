@@ -89,7 +89,9 @@
   function setHostileLabel(rec) {
     if (!rec || !rec.label) return;
     try {
-      rec.label.textContent = (rec.aim ? '🎯 ' : '') + '👿 ' + tagOf(rec.el).toUpperCase() + ' ' + depthMark(rec.dtier || 'mid');
+      /* SPEC-combat §D3: `👿 IMG ◉ ▲▲` — 종류 · 공격 · 깊이 on one line. archGlyphMark() contributes the
+       * archetype glyph (src/88-archetypes.js) and is '' for 범용형, which the table gives no glyph. */
+      rec.label.textContent = (rec.aim ? '🎯 ' : '') + '👿 ' + tagOf(rec.el).toUpperCase() + archGlyphMark(rec) + ' ' + depthMark(rec.dtier || 'mid');
     } catch (e) { /* ignore */ }
   }
   /* back enemies read as "further away": blurred, desaturated, dashed. While one is actually repairing (§10.4)

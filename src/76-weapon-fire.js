@@ -392,6 +392,7 @@
   function doCollapse(x, y) {
     cancelCollapse();
     sfx('rumble');
+    pullOrbsIn(x, y);   // SPEC-combat §D4: 중력탄은 빨아들인다 (src/88-archetypes.js)
     flash(x, y, 'collapse'); ring(x, y); shake('collapse');
     drawCrack(x, y, 'bomb');
     const cands = collapseCandidates(x, y);

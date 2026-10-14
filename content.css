@@ -1116,3 +1116,120 @@ crs-hud:popover-open {
 .crs-selfbox.crs-invul .crs-self-dot {
   display: none !important;
 }
+
+/* ===================================================================== */
+/* SPEC-combat §D3–§D5 — 아키타입 · 투사체 4종 · 돌격과 연발                  */
+/* ===================================================================== */
+/* USER-ORIGIN TRAP (CLAUDE.md): every property JS writes or animates below is declared
+   WITHOUT !important — `left/top/width/height` on the floor mark, the shield and the row
+   flash, `transform` on the seeker fins, `opacity` everywhere. A user-origin !important
+   outranks both the inline style and a Web Animation, and the cue would silently freeze.
+   Everything JS never touches keeps !important, because these nodes are injected into an
+   arbitrary, possibly hostile page. */
+
+/* §D4 "모양으로 구분한다" — 유도=꼬리 깃 3개. The fins are children of the bullet, so they
+   inherit its translate AND its hit/miss scale without a second transform to keep in sync. */
+.crs-orb.crs-orb-seeker {
+  background: radial-gradient(circle at 42% 38%, #fff 0%, #ffe3b0 20%, #ff9f1c 56%, rgba(255, 159, 28, 0) 80%) !important;
+  box-shadow: 0 0 14px 4px rgba(255, 159, 28, .8), 0 0 30px 10px rgba(255, 140, 20, .32), 0 0 0 1px rgba(40, 20, 0, .5) !important;
+}
+.crs-orb-fin {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  width: 14px !important;
+  height: 3px !important;
+  margin: -1.5px 0 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: linear-gradient(90deg, rgba(255, 190, 90, .95), rgba(255, 190, 90, 0)) !important;
+  transform-origin: 0 50% !important;
+  pointer-events: none !important;
+  display: block !important;
+  /* NOT !important — orbVisuals() writes the per-fin rotation */
+  transform: rotate(0deg);
+}
+/* §D4 산탄 = 작은 마름모 */
+.crs-orb.crs-orb-scatter {
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 0 !important;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%) !important;
+  background: radial-gradient(circle at 45% 40%, #fff 0%, #ffd2d2 30%, #ff5252 100%) !important;
+  box-shadow: 0 0 10px 3px rgba(255, 90, 90, .7) !important;
+}
+/* §D4 포물선 = 긴 캡슐 */
+.crs-orb.crs-orb-mortar {
+  width: 32px !important;
+  height: 15px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(90deg, rgba(255, 220, 160, .25), #ff7b2c 55%, #ffd9a0 100%) !important;
+  box-shadow: 0 0 16px 5px rgba(255, 123, 44, .75), 0 0 0 1px rgba(40, 20, 0, .5) !important;
+}
+/* §D4 포물선탄의 바닥 표식: 착탄 예정 지점이 비행 내내 보인다. A dashed ring, never a solid
+   one — SPEC-crosshair reserves the hard solid line for "지금 나를 해치려는 것". */
+.crs-mortar-mark {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 2px dashed rgba(255, 140, 50, .95) !important;
+  border-radius: 50% !important;
+  box-sizing: border-box !important;
+  background: radial-gradient(circle, rgba(255, 140, 50, .22) 0%, rgba(255, 140, 50, 0) 72%) !important;
+  pointer-events: none !important;
+  display: block !important;
+  z-index: 4 !important;
+  /* NOT !important — written per frame by mortarMark() / animated by its pulse */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: .9;
+}
+/* §D3 지원형의 보호막: 공격 안 함, 대신 가까운 적을 감싼다 */
+.crs-guard {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 2px solid rgba(110, 200, 255, .85) !important;
+  border-radius: 8px !important;
+  box-sizing: border-box !important;
+  background: rgba(110, 200, 255, .10) !important;
+  box-shadow: 0 0 18px rgba(110, 200, 255, .55), inset 0 0 18px rgba(110, 200, 255, .35) !important;
+  pointer-events: none !important;
+  display: block !important;
+  z-index: 3 !important;
+  /* NOT !important — placeGuards() writes the box every aura frame */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 1;
+}
+/* §D5 연발: 요격하면 그 행이 깜빡인다 — our own overlay, never a style on the page row */
+.crs-row-flash {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 3px !important;
+  box-sizing: border-box !important;
+  background: rgba(255, 220, 140, .55) !important;
+  pointer-events: none !important;
+  display: block !important;
+  z-index: 4 !important;
+  /* NOT !important — written and animated by flashRow() */
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: .9;
+}
+/* §D5 돌격 예비: 붉게 밝아진다. The aura's own pulse animation drives opacity, so only the
+   filter and the outline colour are set here. */
+.crs-hostile.crs-lunging {
+  filter: brightness(1.9) !important;
+  outline-color: rgba(255, 80, 80, 1) !important;
+  box-shadow: inset 0 0 34px rgba(255, 60, 60, .7) !important;
+}

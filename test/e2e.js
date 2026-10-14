@@ -4353,17 +4353,27 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   const dirRing = sideOf(fgR);
   const farRing = { x: fgR.cx + dirRing * 500, y: fgR.cy };
   await api.setPlayerPos(page, farRing.x, farRing.y);
+  const tRing0 = Date.now();   // the launch instant: every ringAt reading below is measured from HERE
   const tierRing = await api.forceAttack(page, '#figure');
   await settleRaf(page);   // the ring's left/top/width are written by the NEXT tick, not at spawn time
-  const ringSamples = [];
-  for (let i = 0; i < 8; i++) {
+  /* CHANGED for SPEC-combat §D4 (feat/archetypes): the arrival ring is now drawn only over the LAST 40 % of
+   * the flight — "도착 예상 링은 비행의 마지막 40% 구간에만", one line fewer on screen. The §3.3 property this
+   * assertion was written for (the radius falls monotonically onto the orb) is unchanged and still asserted;
+   * what changed is WHEN the ring exists, so the sampler now runs at 35 ms instead of 80 and records the
+   * flight fraction of each reading. §D4's "링이 60% 지점까지 없다" is asserted on those fractions below. */
+  const ringSamples = [], ringAt = [];
+  for (let i = 0; i < 40; i++) {
     const w = await page.evaluate(() => { const n = document.querySelector('.crs-orb-ring'); return n ? n.getBoundingClientRect().width : null; });
-    if (w == null) { if (ringSamples.length) break; }   // orb has landed — stop sampling
-    else if (w > 20) ringSamples.push(w);   // ignore a pre-layout read (border-only box, a few px)
-    await sleep(80);
+    const seen = await api.count(page, '.crs-orb');
+    if (w == null) { if (ringSamples.length || !seen) break; }   // orb landed, or still in the ringless first 60 %
+    else if (w > 20) { ringSamples.push(w); ringAt.push(Date.now() - tRing0); }
+    await sleep(35);
   }
   const monotonic = ringSamples.length >= 3 && ringSamples.every((v, i) => i === 0 || v <= ringSamples[i - 1] + 0.5);
-  check('A.readability 6: the arrival ring exists and its radius falls monotonically as the orb approaches', tierRing === 'shooter' && ringSamples.length >= 3 && monotonic, { tier: tierRing, ringSamples });
+  check('A.readability 6: the arrival ring exists and its radius falls monotonically as the orb approaches', tierRing === 'shooter' && ringSamples.length >= 3 && monotonic, { tier: tierRing, ringSamples, ringAt });
+  // §D4 / §F "투사체": the ring is silent for the first 60 % of a ~960 ms flight — the first reading is late
+  check('A.§D4/§F: 도착 예상 링은 비행의 마지막 40% 구간에만 — 500 px 비행에서 첫 링 표본이 500 ms 이후에 나온다',
+    ringAt.length >= 1 && ringAt[0] >= 500, { firstRingMs: ringAt[0], ringAt });
   await api.restore(page);
   await sleep(60);
   await api.setCombat(page, true);
@@ -6421,6 +6431,597 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   check('A.§B2/§E3 (§F/§B1): 그 충돌에서 민 쪽은 §B1 그대로 튕겨 나온다 — `무적` 과 `.crs-deflect` 가 같은 프레임에 뜨고 조각은 하나도 생기지 않는다',
     !!markP && markP.deflect >= 1 && markP.debris === 0 && markP.texts.indexOf('무적') >= 0 && markP.texts.some((s) => /^-\d+$/.test(s)),
     markP || 'no deflect frame seen within 3 s');
+  await api.restore(page);
+  await sleep(100);
+
+  // =======================================================================================
+  // SPEC-combat §D2–§D5 — 세 축 분리 · 아키타입 10종 · 투사체 4종 · 돌격과 연발
+  //   §F "아키타입": 표대로 분류된다. 연발형이 행 5개면 5발, 12개면 8발에서 멈춘다.
+  //     속사형이 3발을 0.15초 간격 700 px/s 로. 돌격형이 0.4초 당겨졌다 돌진하고 복귀하며,
+  //     예비 중에 쏘면 취소된다. 질량 큰 요소는 돌격 대신 직사탄. 추적형이 0.8초만 선회한다.
+  //     지원형은 공격하지 않고 보호막을 건다. 라벨에 아키타입 글리프와 깊이 표식이 함께 나온다.
+  //   §F "투사체": 4종의 속도·크기·요격 반경이 표와 일치한다. 요격하면 소멸하고 점수가 오르며 그 뒤
+  //     페이지 요소는 피해를 안 받는다. 산탄 한 발만 요격해도 나머지 4발이 남는다. 포물선탄의 바닥
+  //     표식이 착탄 전에 보이고 비행 중에만 요격된다.
+  //     (도착 링의 60% 규칙과 1.0/0.55 불투명도는 ammo 블록의 §3.3 가독성 절에 있다 — 같은 노드를
+  //      재는 단언이 두 블록으로 갈리지 않도록 원래 자리에 두었다.)
+  //
+  //   The fixture page has no button, link, form, nav or footer big enough to BE an enemy, so this
+  //   section builds its own lab with page.evaluate and takes it away again (test/fixture.html is
+  //   shared — the §2.4 perf block does the same). Every subject is absolutely placed inside one fixed
+  //   620 × 760 box with NO overlaps, so each measures depth 0 ("front") and nothing shadows anything
+  //   else; the two links straddle §D5's mass rule on purpose (70 × 70 → 3.89, 400 × 150 → 6).
+  // =======================================================================================
+  console.log('--- rules: SPEC-combat §D2–§D5 — archetypes, four projectiles, lunge and volley ---');
+  const archImgSrc = 'data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27220%27%20height%3D%27140%27%3E%3Crect%20width%3D%27220%27%20height%3D%27140%27%20fill%3D%27%234a7bd0%27%2F%3E%3C%2Fsvg%3E';
+  const archBuild = (src) => page.evaluate((imgSrc) => {
+    const old = document.getElementById('arch-lab');
+    if (old) old.remove();
+    const box = (x, y, w, h) => 'position:absolute;left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;height:' + h + 'px;margin:0;padding:0;border:0;box-sizing:border-box;background:#dde3f0;color:#101418;font:12px system-ui;overflow:hidden;';
+    const mk = (tag, id, css, text) => {
+      const n = document.createElement(tag);
+      n.id = id;
+      n.style.cssText = css;
+      if (text != null) n.textContent = text;
+      return n;
+    };
+    const lab = document.createElement('section');
+    lab.id = 'arch-lab';
+    lab.style.cssText = 'position:fixed;left:8px;top:8px;width:620px;height:760px;margin:0;padding:0;border:0;z-index:1;background:#eef1f8;';
+    const table = (id, css, rows) => {
+      const t = mk('table', id, css);
+      const tb = document.createElement('tbody');
+      for (let i = 0; i < rows; i++) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.textContent = '행 ' + (i + 1);
+        tr.appendChild(td);
+        tb.appendChild(tr);
+      }
+      t.appendChild(tb);
+      return t;
+    };
+    const img = mk('img', 'arch-img', box(240, 10, 220, 140));
+    img.setAttribute('alt', '아키타입 이미지');
+    img.setAttribute('src', imgSrc);
+    const link = mk('a', 'arch-link', box(470, 180, 70, 70) + 'display:block;');
+    link.setAttribute('href', '#nav');
+    for (let i = 0; i < 3; i++) { const sp = document.createElement('span'); sp.textContent = '칸' + i; link.appendChild(sp); }
+    const linkBig = mk('a', 'arch-link-big', box(10, 590, 400, 150) + 'display:block;', '무거운 링크 — 돌격 대신 직사탄');
+    linkBig.setAttribute('href', '#nav');
+    const role = mk('div', 'arch-role', box(470, 500, 140, 80), 'role=button');
+    role.setAttribute('role', 'button');
+    const frame = mk('iframe', 'arch-iframe', box(10, 10, 200, 120));
+    frame.setAttribute('title', '아키타입 프레임');
+    frame.setAttribute('srcdoc', '<p>frame</p>');
+    const wrap = mk('div', 'arch-sticky-wrap', box(470, 600, 140, 90) + 'overflow:auto;');
+    const sticky = mk('div', 'arch-sticky', 'position:sticky;top:0;width:140px;height:90px;margin:0;padding:0;border:0;background:#cfd8ee;', '스티키');
+    wrap.appendChild(sticky);
+    lab.append(
+      frame, img,
+      mk('button', 'arch-btn', box(470, 10, 140, 70), '속사'),
+      table('arch-table', box(10, 180, 200, 150), 5),
+      table('arch-table12', box(240, 180, 200, 260), 12),
+      link,
+      mk('form', 'arch-form', box(470, 270, 140, 90), '추적 폼'),
+      mk('p', 'arch-p', box(10, 350, 200, 100), '산탄형 문단입니다. 낱말이 흩어집니다.'),
+      mk('div', 'arch-div', box(470, 380, 140, 100), '범용'),
+      mk('nav', 'arch-nav', box(10, 470, 200, 90), '조준 내비'),
+      mk('footer', 'arch-footer', box(240, 470, 200, 110), '지원 푸터'),
+      role, linkBig, wrap
+    );
+    document.body.appendChild(lab);
+    const ids = ['arch-iframe', 'arch-img', 'arch-btn', 'arch-table', 'arch-table12', 'arch-link', 'arch-form',
+      'arch-p', 'arch-div', 'arch-nav', 'arch-footer', 'arch-role', 'arch-link-big', 'arch-sticky', 'arch-sticky-wrap'];
+    const styles = {}, rects = {};
+    for (const id of ids) {
+      const n = document.getElementById(id);
+      styles[id] = n ? (n.getAttribute('style') || '') : null;
+      const r = n ? n.getBoundingClientRect() : null;
+      rects[id] = r ? { left: r.left, top: r.top, width: r.width, height: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 } : null;
+    }
+    return { ids, styles, rects };
+  }, src);
+  const archDrop = () => page.evaluate(() => { const n = document.getElementById('arch-lab'); if (n) n.remove(); return true; });
+  const archId = (sel) => page.evaluate((s) => {
+    const d = window.__crashScreen.debug;
+    return typeof d.archetypeOf === 'function' ? d.archetypeOf(document.querySelector(s)) : 'missing:archetypeOf';
+  }, sel);
+  const archTable = (sel) => page.evaluate((s) => {
+    const d = window.__crashScreen.debug;
+    if (typeof d.archetypeTable !== 'function') return 'missing:archetypeTable';
+    return d.archetypeTable(s ? document.querySelector(s) : null);
+  }, sel || null);
+  // One snapshot of everything a projectile assertion asks about: the engine's own list AND what is on screen.
+  const archShot = () => page.evaluate(() => {
+    const a = window.__crashScreen, d = a.debug;
+    const list = typeof d.orbList === 'function' ? d.orbList() : [];
+    const nodes = [...document.querySelectorAll('.crs-orb')].map((n) => {
+      const r = n.getBoundingClientRect();
+      return { cls: n.className, w: Math.round(r.width * 100) / 100, h: Math.round(r.height * 100) / 100, fins: n.querySelectorAll('.crs-orb-fin').length };
+    });
+    return { list, nodes, rings: document.querySelectorAll('.crs-orb-ring').length, marks: document.querySelectorAll('.crs-mortar-mark').length };
+  });
+  const archMovedOf = (sel) => page.evaluate((s) => {
+    const d = window.__crashScreen.debug;
+    return typeof d.movedOf === 'function' ? d.movedOf(document.querySelector(s)) : 'missing:movedOf';
+  }, sel);
+  const archPop = (offX) => page.evaluate((dx) => {
+    const a = window.__crashScreen;
+    const o = (a.debug.orbList() || []).filter((q) => q.launched)[0];
+    if (!o) return null;
+    a.smashAt(o.x + dx, o.y);
+    return { x: o.x, y: o.y, dx };
+  }, offX || 0);
+
+  await setCombatMode('survival');
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: true, noRepair: true, noFalloff: true });
+  await api.restore(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const archLab = await archBuild(archImgSrc);
+  await sleep(150);
+  const archR = archLab.rects;
+  check('A.§D fixture: the archetype lab is on screen with all 15 subjects laid out, none overlapping, and the two links straddling mass 4',
+    !!archR['arch-link'] && near(archR['arch-link'].width, 70, 1) && near(archR['arch-link'].height, 70, 1)
+    && !!archR['arch-link-big'] && near(archR['arch-link-big'].width, 400, 1)
+    && archLab.ids.every((id) => !!archR[id] && archR[id].width >= 1 && archR[id].height >= 1),
+    { link: archR['arch-link'], big: archR['arch-link-big'] });
+
+  // ---- (D3-1) 표대로, 순서대로 분류된다 ----
+  const archPairs = [
+    ['#arch-iframe', 'alien'], ['#arch-img', 'bombard'], ['#arch-table', 'volley'], ['#arch-table12', 'volley'],
+    ['#arch-btn', 'rapid'], ['#arch-role', 'rapid'], ['#arch-link', 'lunger'], ['#arch-link-big', 'lunger'],
+    ['#arch-form', 'tracker'], ['#arch-nav', 'aimer'], ['#arch-sticky', 'aimer'], ['#arch-p', 'scatter'],
+    ['#arch-footer', 'support'], ['#arch-div', 'generic'],
+    // the fixture's own elements answer the same way, so the rule is not a property of the lab
+    ['#site-header', 'aimer'], ['#frame', 'alien'], ['#demo-img', 'bombard'], ['#table', 'volley'],
+    ['#test-btn', 'rapid'], ['#card-link', 'lunger'], ['#long-para', 'scatter'], ['#nav', 'support'], ['#big-card', 'generic']
+  ];
+  const archGot = [];
+  for (const pair of archPairs) archGot.push(await archId(pair[0]));
+  check('A.§D3/§F: archetypeOf() 가 표의 행을 순서대로 적용한다 — iframe 이형 · img 포격형 · table 연발형 · button/[role=button] 속사형 · a 돌격형 · form 추적형 · nav/sticky 조준형 · p 산탄형 · footer 지원형 · div 범용형',
+    archPairs.every((pair, i) => archGot[i] === pair[1]),
+    archPairs.map((pair, i) => pair[0] + ':' + archGot[i] + (archGot[i] === pair[1] ? '' : '(want ' + pair[1] + ')')).join(' '));
+
+  // ---- (D3-2) 글리프가 표대로 ----
+  const archGlyphs = await archTable(null);
+  const archWantGlyph = { alien: '◈', bombard: '◉', volley: '▤', rapid: '⁘', lunger: '➤', tracker: '◎', aimer: '🎯', scatter: '⁂', support: '✚', generic: '' };
+  check('A.§D3/§F: 열 가지 아키타입이 표의 글리프를 쓴다 — 이형 ◈ · 포격형 ◉ · 연발형 ▤ · 속사형 ⁘ · 돌격형 ➤ · 추적형 ◎ · 조준형 🎯 · 산탄형 ⁂ · 지원형 ✚, 범용형은 글리프가 없다',
+    !!archGlyphs && Array.isArray(archGlyphs.list) && archGlyphs.list.length === 10
+    && archGlyphs.list.every((e) => e.glyph === archWantGlyph[e.id]),
+    archGlyphs && archGlyphs.list);
+
+  // ---- (D3-3) 라벨: `👿 IMG ◉ ▲` — 종류 · 공격 · 깊이가 한 줄에 ----
+  await api.restore(page);
+  await sleep(80);
+  const archLabelTier = await force('#arch-img', 'forceAttack');
+  await sleep(150);
+  const archLabelText = await page.evaluate(() => {
+    const n = document.querySelector('.crs-hostile-label');
+    return n ? (n.textContent || '').trim() : null;
+  });
+  check('A.§D3/§F: 라벨에 아키타입 글리프와 깊이 표식이 함께 나온다 — `👿 IMG ◉ ▲` 형태로 종류·공격·깊이가 한 줄에 있다',
+    archLabelTier === 'mortar' && !!archLabelText && /^(🎯 )?👿 IMG ◉ ▲+$/.test(archLabelText), { archLabelTier, archLabelText });
+
+  // ---- (D3-4) 연발형: 행 5개면 5발, 12개면 8발에서 멈춘다 ----
+  await api.restore(page);
+  await sleep(80);
+  await debugCall('setAvatarPos', 1100, 780);
+  const archVolley5 = await force('#arch-table', 'forceAttack');
+  await sleep(50);
+  const archShot5 = await archShot();
+  const archRows5 = await page.evaluate(() => [...document.querySelectorAll('#arch-table tr')].map((r) => { const b = r.getBoundingClientRect(); return { left: b.left, cy: b.top + b.height / 2 }; }));
+  await api.restore(page);
+  await sleep(80);
+  await debugCall('setAvatarPos', 1100, 780);
+  const archVolley12 = await force('#arch-table12', 'forceAttack');
+  await sleep(50);
+  const archShot12 = await archShot();
+  const archVolTune = (await debugCall('projectileTuning')).volley;
+  check('A.§D5/§F: 연발형이 행 5개면 5발, 12개면 8발에서 멈춘다 — 자식 행의 실제 개수를 세고 상한은 8이다',
+    archVolley5 === 'volley' && archVolley12 === 'volley' && archShot5.list.length === 5 && archShot12.list.length === 8
+    && archVolTune.max === 8 && archVolTune.gapMs === 120 && near(archVolTune.dmgMul, 0.5, 1e-9),
+    { archVolley5, archVolley12, n5: archShot5.list.length, n12: archShot12.list.length, archVolTune });
+  /* 발사 위치가 각 행의 왼쪽 끝. Only the still-waiting rounds are measured: the forced shot has a zero
+   * wind-up, so by the time this reads back it has already left its muzzle — the other four have not. */
+  const archPend5 = archShot5.list.filter((o) => !o.launched).map((o) => ({ x: o.x, y: o.y }));
+  check('A.§D5: 연발의 발사 위치가 각 행의 왼쪽 끝이다 — 대기 중인 네 발이 서로 다른 네 행의 왼쪽 중심에 하나씩 놓여 있다',
+    archPend5.length === 4 && archRows5.length === 5
+    && archPend5.every((p) => archRows5.some((r) => near(p.y, r.cy, 3) && near(p.x, r.left, 3)))
+    && new Set(archPend5.map((p) => Math.round(p.y))).size === 4,
+    { archPend5, archRows5 });
+
+  // ---- (D3-5) 속사형: 3발을 0.15초 간격 700 px/s 로 ----
+  await api.restore(page);
+  await sleep(80);
+  await debugCall('setAvatarPos', 1100, 780);
+  const archRapidTier = await force('#arch-btn', 'forceAttack');
+  await sleep(50);
+  const archRapidN = (await archShot()).list.length;
+  await sleep(440);   // wind-ups 0 / 120 / 270 / 420 ms: by here every round has launched
+  const archRapidSpeeds = (await archShot()).list.filter((o) => o.launched).map((o) => Math.round(o.speed));
+  const archRapidTune = (await debugCall('projectileTuning')).rapid;
+  check('A.§D3/§F: 속사형이 3발을 0.15초 간격 700 px/s 로 쏜다 — 발사 수·간격·속도를 live 코드에서 읽는다',
+    archRapidTier === 'rapid' && archRapidN === 3
+    && archRapidTune.count === 3 && archRapidTune.gapMs === 150 && near(archRapidTune.speed, 700, 0.5)
+    && archRapidSpeeds.length >= 2 && archRapidSpeeds.every((v) => near(v, 700, 2)),
+    { archRapidTier, archRapidN, archRapidTune, archRapidSpeeds });
+
+  // ---- (D3-6) 산탄형: 5발 25도 부채꼴, 한 발만 요격해도 나머지가 남는다 ----
+  await api.restore(page);
+  await sleep(80);
+  await debugCall('setAvatarPos', 1100, 780);
+  const archScatterTier = await force('#arch-p', 'forceAttack');
+  await sleep(90);
+  const archScatterShot = await archShot();
+  const archScTune = (await debugCall('projectileTuning')).scatter;
+  const archScAngles = archScatterShot.list.filter((o) => o.launched).map((o) => Math.atan2(o.vy, o.vx) * 180 / Math.PI).sort((a, b) => a - b);
+  const archScSpread = archScAngles.length >= 2 ? archScAngles[archScAngles.length - 1] - archScAngles[0] : null;
+  check('A.§D4/§F: 산탄형이 5발을 25도 부채꼴로 쏘고, 발마다 따로 요격 가능한 작은 마름모로 그려진다',
+    archScatterTier === 'scatter' && archScatterShot.list.length === 5
+    && archScTune.count === 5 && archScTune.fanDeg === 25 && near(archScTune.dmgMul, 1 / 3, 1e-9)
+    && archScSpread != null && near(archScSpread, 25, 1)
+    && archScatterShot.nodes.length === 5 && archScatterShot.nodes.every((n) => /crs-orb-scatter/.test(n.cls)),
+    { archScatterTier, n: archScatterShot.list.length, archScSpread, archScAngles, archScTune });
+  const archScScore0 = (await api.player(page)).score;
+  await api.setWeapon(page, 'pistol');
+  const archScPop = await archPop(0);
+  await sleep(60);
+  const archScLeft = (await archShot()).list.length;
+  const archScScore1 = (await api.player(page)).score;
+  check('A.§D4/§F: 산탄 한 발만 요격해도 나머지 4발이 남는다 — 요격한 발만 소멸하고 점수가 5 오른다',
+    !!archScPop && archScLeft === 4 && archScScore1 === archScScore0 + 5,
+    { archScLeft, archScScore0, archScScore1, archScPop });
+  await api.setWeapon(page, 'hammer');
+
+  // ---- (D3-7) 포격형: 포물선탄 — 바닥 표식이 착탄 전에 보이고 비행 중에만 요격된다 ----
+  await api.restore(page);
+  await sleep(80);
+  await debugCall('setAvatarPos', 1000, 700);
+  const archMortarTier = await force('#arch-img', 'forceAttack');
+  await sleep(130);
+  const archMortarMid = await archShot();
+  const archMTune = (await debugCall('projectileTuning')).mortar;
+  check('A.§D4/§F: 포물선탄의 바닥 표식이 착탄 전에 보인다 — 1.1초 비행, 반경 90px, 긴 캡슐, 도착 링 대신 표식',
+    archMortarTier === 'mortar' && archMortarMid.list.length === 1 && archMortarMid.marks === 1 && archMortarMid.rings === 0
+    && archMTune.flightMs === 1100 && archMTune.radius === 90
+    && archMortarMid.nodes.length === 1 && /crs-orb-mortar/.test(archMortarMid.nodes[0].cls),
+    { archMortarTier, archMortarMid, archMTune });
+  await api.setWeapon(page, 'pistol');
+  await archPop(0);
+  await sleep(80);
+  const archMortarAfter = await archShot();
+  await sleep(1300);   // well past the 1.1 s flight it no longer has
+  const archMortarHp = (await api.player(page)).hp;
+  check('A.§D4/§F: 포물선탄은 비행 중에만 요격된다 — 요격하면 탄과 바닥 표식이 함께 사라지고 착탄 피해도 일어나지 않는다',
+    archMortarAfter.list.length === 0 && archMortarAfter.marks === 0 && archMortarHp === 100,
+    { archMortarAfter, archMortarHp });
+  await api.setWeapon(page, 'hammer');
+
+  // ---- (D3-8) 추적형: 0.8초만 선회한다 ----
+  await api.restore(page);
+  await sleep(80);
+  await debugCall('setAvatarPos', 1200, 400);
+  const archSeekTier = await force('#arch-form', 'forceAttack');
+  const archHeading = () => page.evaluate(() => {
+    const o = (window.__crashScreen.debug.orbList() || [])[0];
+    return o && o.launched ? Math.atan2(o.vy, o.vx) * 180 / Math.PI : null;
+  });
+  await sleep(110);
+  await debugCall('setAvatarPos', 1200, 850);   // inside the 0.8 s window: it must bend toward this
+  const archH1 = await archHeading();
+  await sleep(420);
+  const archH2 = await archHeading();
+  await sleep(380);                              // past 0.8 s — the turn is over
+  await debugCall('setAvatarPos', 60, 60);      // a demand in the opposite direction it must now IGNORE
+  const archH3 = await archHeading();
+  await sleep(320);
+  const archH4 = await archHeading();
+  const archSeekTune = (await debugCall('projectileTuning')).seeker;
+  const archOrbTune = (await debugCall('projectileTuning')).orb;
+  const archTurnEarly = (archH1 != null && archH2 != null) ? Math.abs(angDist(archH1, archH2)) : null;
+  const archTurnLate = (archH3 != null && archH4 != null) ? Math.abs(angDist(archH3, archH4)) : null;
+  check('A.§D4/§F: 추적형의 유도탄이 0.8초만 선회한다 — 창 안에서는 목표를 따라 꺾이고, 창이 닫힌 뒤에는 목표가 반대편으로 옮겨도 방향이 그대로다',
+    archSeekTier === 'seeker' && archSeekTune.turnMs === 800 && archSeekTune.turnDeg === 90
+    && archTurnEarly != null && archTurnEarly > 5 && archTurnLate != null && archTurnLate < 1.5,
+    { archSeekTier, archH1, archH2, archH3, archH4, archTurnEarly, archTurnLate, archSeekTune });
+  check('A.§D4/§F: 유도탄의 요격 반경이 직사탄의 1.3배다 — 23.4 px 대 18 px',
+    near(archSeekTune.interceptR, 18 * 1.3, 0.01) && near(archOrbTune.interceptR, 18, 0.01),
+    { archSeekTune, archOrbTune });
+
+  // ---- (D3-9) 이형 → 레이저 쓸기 · 조준형 → 조준 락온 (기존 공격이 표가 지정한 자리에 남는다) ----
+  await api.restore(page);
+  await sleep(100);
+  const archAlienTier = await force('#arch-iframe', 'forceAttack');
+  const archBeamSeen = await poll(() => api.has(page, '.crs-beam'), 900);
+  check('A.§D3: 이형(iframe)은 레이저 쓸기를 쓴다 — forceAttack 이 "laser" 를 돌려주고 .crs-beam 이 뜬다',
+    archAlienTier === 'laser' && archBeamSeen === true, { archAlienTier, archBeamSeen });
+  await api.restore(page);
+  await sleep(120);
+  const archAimTier = await force('#arch-nav', 'forceAttack');
+  const archLockSeen = await api.count(page, '.crs-lock');
+  check('A.§D3: 조준형(nav)은 조준 락온을 쓴다 — forceAttack 이 "lock" 을 돌려주고 .crs-lock 이 뜬다',
+    archAimTier === 'lock' && archLockSeen >= 1, { archAimTier, archLockSeen });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (D3-10) 지원형: 공격하지 않고 보호막을 건다 ----
+  const archSupTier = await force('#arch-footer', 'forceAttack');
+  await sleep(120);
+  const archSupState = await page.evaluate(() => ({
+    guards: document.querySelectorAll('.crs-guard').length,
+    orbs: document.querySelectorAll('.crs-orb').length,
+    beams: document.querySelectorAll('.crs-beam').length,
+    locks: document.querySelectorAll('.crs-lock').length,
+    list: (window.__crashScreen.debug.guards && window.__crashScreen.debug.guards()) || []
+  }));
+  check('A.§D3/§F: 지원형(footer)은 공격하지 않고 보호막을 건다 — 투사체도 빔도 락온도 없고 .crs-guard 가 하나 뜬다',
+    archSupTier === 'guard' && archSupState.guards === 1 && archSupState.orbs === 0 && archSupState.beams === 0
+    && archSupState.locks === 0 && archSupState.list.length === 1 && archSupState.list[0].id === 'arch-footer',
+    { archSupTier, archSupState });
+  // and the shield DOES something: the same pistol round takes half as much off a shielded enemy
+  await api.setWeapon(page, 'pistol');
+  const archSupHp0 = await api.hpOf(page, '#arch-footer');
+  await api.smashAt(page, archR['arch-footer'].cx, archR['arch-footer'].cy);
+  await sleep(90);
+  const archSupHp1 = await api.hpOf(page, '#arch-footer');
+  const archGuardedDrop = archSupHp0.hp - archSupHp1.hp;
+  await api.restore(page);                       // clearArchetypes() takes the shield with everything else
+  await sleep(100);
+  await api.debug(page, { noInvuln: true });     // no enemy, no shield: the unguarded reference reading
+  const archRefHp0 = await api.hpOf(page, '#arch-footer');
+  await api.smashAt(page, archR['arch-footer'].cx, archR['arch-footer'].cy);
+  await sleep(90);
+  const archRefHp1 = await api.hpOf(page, '#arch-footer');
+  await api.debug(page, { noInvuln: false });
+  const archPlainDrop = archRefHp0.hp - archRefHp1.hp;
+  check('A.§D3: 보호막은 장식이 아니다 — 보호막이 걸린 적은 같은 권총 한 발에 피해를 절반만 받는다 (25 → 13)',
+    archPlainDrop === 25 && archGuardedDrop === 13,
+    { archGuardedDrop, archPlainDrop, guarded: [archSupHp0, archSupHp1], plain: [archRefHp0, archRefHp1] });
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(100);
+
+  // ---- (D5-1) 돌격형: 0.4초 당겨졌다 돌진하고 복귀한다 ----
+  const archLungeTune = await debugCall('lungeTuning');
+  check('A.§D5/§F: 돌격의 타이밍·거리·속도가 명세 그대로다 — 0.4초 예비 / 40px / 900 px/s / 0.5초 뒤 0.35초 이징 복귀 / mass > 4 제외',
+    archLungeTune && archLungeTune.windupMs === 400 && archLungeTune.pullPx === 40 && archLungeTune.speed === 900
+    && archLungeTune.holdMs === 500 && archLungeTune.returnMs === 350 && archLungeTune.maxMass === 4, archLungeTune);
+  /* §E3's collisions are switched off for the three geometry readings below, the same escape hatch §E's own
+   * free-flight assertions use (debug.noDisplaceCollide): the lunge flies across a page full of boxes, and a
+   * bounce off one of them is a different claim than "it was pulled 40 px back and then ran at 900 px/s".
+   * The shove it gives those boxes is asserted with collisions back ON, right after. */
+  await api.debug(page, { noDisplaceCollide: true });
+  await debugCall('setAvatarPos', 1100, 780);    // down-right of the lab: the pull is up-left, the dash down-right
+  const archLungeTier = await force('#arch-link', 'forceAttack');
+  await sleep(300);                              // inside the 0.4 s wind-up
+  const archPull = await archMovedOf('#arch-link');
+  /* The dash window is POLLED FOR, never slept to. The wind-up ends on a 25 ms chain and a loaded box adds
+   * tens of ms on top, so "sleep 160 then read" measured a travel that started anywhere between 15 ms and
+   * 60 ms earlier — the reading moved, not the product (this cost one intermittent failure). Both ends of
+   * the measured window are pinned here instead: the first reading is the frame the body first carries dash
+   * speed, the second is a fixed 90 ms later, and the distance between them is what the assertion reads. */
+  const archDash = await poll(async () => { const b = await archMovedOf('#arch-link'); return (b && Math.hypot(b.vx, b.vy) > 600) ? b : null; }, 1200, 20);
+  await sleep(90);
+  const archDash2 = await archMovedOf('#arch-link');
+  const archLungeList = await debugCall('lunges');
+  const archPullMag = archPull ? Math.hypot(archPull.x, archPull.y) : null;
+  const archDashSpeed = archDash ? Math.hypot(archDash.vx, archDash.vy) : null;
+  const archTravel = (archDash && archDash2) ? Math.hypot(archDash2.x - archDash.x, archDash2.y - archDash.y) : null;
+  check('A.§D5/§F: 돌격형이 0.4초 동안 목표 반대 방향으로 당겨졌다가 목표를 향해 900 px/s 로 돌진한다',
+    archLungeTier === 'lunge' && !!archPull && !!archDash && !!archDash2
+    && archPull.x < -8 && archPull.y < -8 && archPullMag > 18 && archPullMag < 70
+    && archDash.vx > 0 && archDash.vy > 0 && archDashSpeed > 760 && archDashSpeed <= 910
+    && archDash2.x > archDash.x && archDash2.y > archDash.y && archTravel > 40
+    && Array.isArray(archLungeList) && archLungeList.length === 1,
+    { archLungeTier, archPull, archPullMag, archDash, archDashSpeed, archDash2, archTravel, archLungeList });
+  // 0.5초 뒤 제자리로 복귀 (0.35초 이징) — and the borrowed transform goes back to exactly what was there
+  /* "끝났다" is TWO facts and they do not land on the same frame: the displaced body is released when the
+   * 0.35 s glide completes, and the charge record is dropped by the timer that outlives it by 40 ms. Polling
+   * on the body alone read the record inside that gap and called a finished charge unfinished (one
+   * intermittent failure). Both are polled together, so the assertion waits for the end it is describing. */
+  const archHome = await poll(async () => {
+    const body = await archMovedOf('#arch-link');
+    const list = await debugCall('lunges');
+    return (body === null && Array.isArray(list) && list.length === 0) ? { body, list } : null;
+  }, 2500, 60);
+  const archHomeStyle = await page.evaluate(() => { const n = document.getElementById('arch-link'); return n ? (n.getAttribute('style') || '') : null; });
+  check('A.§D5/§F: 돌격이 끝나면 요소가 제자리로 돌아오고 빌려 썼던 인라인 transform 이 원래 값 그대로 사라진다',
+    !!archHome && archHomeStyle === archLab.styles['arch-link'],
+    { archHome, archHomeStyle, want: archLab.styles['arch-link'], lastList: await debugCall('lunges') });
+  await api.debug(page, { noDisplaceCollide: false });
+  await api.restore(page);
+  await sleep(100);
+  // 경로 위의 다른 요소를 밀친다 — with collisions back on, the charge shoves what it meets
+  await debugCall('setAvatarPos', 1100, 780);
+  await force('#arch-link', 'forceAttack');
+  await sleep(620);
+  const archShoved = await debugCall('lunges');
+  const archMovedN = (await debugCall('moved')).length;
+  check('A.§D5: 돌진이 경로 위의 다른 요소를 밀친다 — 날아간 요소 말고도 변위된 몸체가 생긴다',
+    Array.isArray(archShoved) && archShoved.length === 1 && archShoved[0].shoved >= 1 && archMovedN >= 2,
+    { archShoved, archMovedN });
+  await api.restore(page);
+  await sleep(150);
+
+  // ---- (D5-2) 예비 중에 쏘면 취소된다 ----
+  await debugCall('setAvatarPos', 1100, 780);
+  const archCancelTier = await force('#arch-link', 'forceAttack');
+  const archLinkHp0 = await api.hpOf(page, '#arch-link');
+  const archCancelWeapon = archLinkHp0.hp > 26 ? 'pistol' : (archLinkHp0.hp > 16 ? 'flame' : null);
+  check('A.§D5 fixture: 돌격 취소를 확인할 무기가 있다 — 한 방에 부수지는 않고 피해만 주는 무기',
+    archCancelTier === 'lunge' && archCancelWeapon !== null, { archLinkHp0, archCancelWeapon });
+  await api.setWeapon(page, archCancelWeapon || 'flame');
+  await sleep(150);                              // still inside the 0.4 s wind-up
+  await api.smashAt(page, archR['arch-link'].cx, archR['arch-link'].cy);
+  const archCancelled = await poll(async () => { const l = await debugCall('lunges'); return (Array.isArray(l) && l.length === 0) ? true : null; }, 1200, 40);
+  await sleep(520);                              // the dash window it must never have entered
+  const archCancelBody = await archMovedOf('#arch-link');
+  const archCancelHp = await api.hpOf(page, '#arch-link');
+  check('A.§D5/§F: 돌격 예비 중에 그 적을 쏘면 돌격이 취소된다 — 돌진은 일어나지 않고 요소는 제자리로 돌아간다',
+    archCancelled === true && archCancelBody === null && archCancelHp.hp < archLinkHp0.hp,
+    { archCancelled, archCancelBody, archLinkHp0, archCancelHp });
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (D5-3) 질량 큰 요소는 돌격 대신 직사탄 ----
+  const archBigT = await archTable('#arch-link-big');
+  const archSmallT = await archTable('#arch-link');
+  await debugCall('setAvatarPos', 1100, 780);
+  const archBigTier = await force('#arch-link-big', 'forceAttack');
+  await sleep(90);
+  const archBigShot = await archShot();
+  const archBigLunges = await debugCall('lunges');
+  const archBigMoved = await archMovedOf('#arch-link-big');
+  check('A.§D5/§F: 질량이 큰 돌격형은 돌격 대신 직사탄을 쏜다 — 같은 `a` 태그라도 mass 가 4 를 넘으면 날아오지 않는다 (섹션이 날아오면 못 피한다)',
+    archBigT.id === 'lunger' && archSmallT.id === 'lunger' && archBigT.mass > 4 && archSmallT.mass <= 4
+    && archBigTier === 'shooter' && archBigShot.list.length === 1
+    && Array.isArray(archBigLunges) && archBigLunges.length === 0 && archBigMoved === null,
+    { archBigT, archSmallT, archBigTier, orbs: archBigShot.list.length, archBigLunges, archBigMoved });
+  await api.restore(page);
+  await sleep(100);
+
+  // ---- (D4) 4종의 속도·크기·요격 반경이 표와 일치한다 ----
+  const archProjTune = await debugCall('projectileTuning');
+  check('A.§D4/§F: 투사체 4종의 표가 live 값과 일치한다 — 직사 520 px/s 요격 18px · 유도 0.8초 90°/s 요격 1.3배 · 산탄 5발 25도 1/3 · 포물선 1.1초 반경 90px, 동시 상한 18개',
+    archProjTune && near(archProjTune.orb.speed, 520, 0.5) && archProjTune.orb.interceptR === 18
+    && archProjTune.seeker.turnMs === 800 && archProjTune.seeker.turnDeg === 90 && near(archProjTune.seeker.interceptR, 23.4, 0.01)
+    && archProjTune.scatter.count === 5 && archProjTune.scatter.fanDeg === 25 && near(archProjTune.scatter.dmgMul, 1 / 3, 1e-9)
+    && archProjTune.mortar.flightMs === 1100 && archProjTune.mortar.radius === 90
+    && archProjTune.cap === 18, archProjTune);
+  // 모양으로 구분한다: 직사=꽉 찬 원 22px, 유도=꼬리 깃 3개, 산탄=작은 마름모, 포물선=긴 캡슐
+  const archShapeOf = async (sel) => {
+    await api.restore(page);
+    await sleep(80);
+    await debugCall('setAvatarPos', 1100, 780);
+    await force(sel, 'forceAttack');
+    await sleep(50);
+    return (await archShot()).nodes[0] || null;
+  };
+  const archShapeOrb = await archShapeOf('#arch-link-big');
+  const archShapeSeeker = await archShapeOf('#arch-form');
+  const archShapeScatter = await archShapeOf('#arch-p');
+  const archShapeMortar = await archShapeOf('#arch-img');
+  check('A.§D4/§F: 네 종류가 모양으로 구분된다 — 직사 22px 꽉 찬 원 · 유도 꼬리 깃 3개 · 산탄 작은 마름모 · 포물선 긴 캡슐',
+    !!archShapeOrb && near(archShapeOrb.w, 22, 1) && near(archShapeOrb.h, 22, 1) && archShapeOrb.fins === 0
+    && !!archShapeSeeker && archShapeSeeker.fins === 3 && /crs-orb-seeker/.test(archShapeSeeker.cls)
+    && !!archShapeScatter && archShapeScatter.w < archShapeOrb.w && /crs-orb-scatter/.test(archShapeScatter.cls)
+    && !!archShapeMortar && archShapeMortar.w > archShapeMortar.h * 1.5 && /crs-orb-mortar/.test(archShapeMortar.cls),
+    { archShapeOrb, archShapeSeeker, archShapeScatter, archShapeMortar });
+
+  // 요격하면 소멸하고 점수가 오르며 그 뒤 페이지 요소는 피해를 안 받는다 (유도탄의 1.3배 반경에서)
+  await api.restore(page);
+  await sleep(80);
+  await debugCall('setAvatarPos', 1100, 780);
+  await force('#arch-form', 'forceAttack');
+  await sleep(130);
+  await api.setWeapon(page, 'pistol');
+  const archDivHp0 = await api.hpOf(page, '#arch-div');
+  const archSeekScore0 = (await api.player(page)).score;
+  const archSeekPop = await archPop(21);   // 21 px off centre: outside a 직사탄's 18, inside the seeker's 23.4
+  await sleep(80);
+  const archSeekLeft = (await archShot()).list.length;
+  const archSeekScore1 = (await api.player(page)).score;
+  const archDivHp1 = await api.hpOf(page, '#arch-div');
+  check('A.§D4/§F: 투사체를 요격하면 소멸하고 점수가 5 오르며 그 사격은 뒤의 페이지 요소에 닿지 않는다 (유도탄은 21px 밖에서도 요격된다)',
+    !!archSeekPop && archSeekLeft === 0 && archSeekScore1 === archSeekScore0 + 5 && archDivHp1.hp === archDivHp0.hp,
+    { archSeekPop, archSeekLeft, archSeekScore0, archSeekScore1, divHp: [archDivHp0, archDivHp1] });
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(100);
+
+  // 폭발 무기 범위 안의 투사체는 소멸하고, 중력탄은 빨아들인다 (§D4 공통 규칙)
+  await debugCall('setAvatarPos', 1100, 780);
+  await force('#arch-table', 'forceAttack');    // 다섯 발을 띄워 둔다
+  await sleep(60);
+  const archBlastBefore = (await archShot()).list.length;
+  await api.setWeapon(page, 'bomb');
+  const archBlastAt = await page.evaluate(() => {
+    const list = window.__crashScreen.debug.orbList() || [];
+    if (!list.length) return null;
+    let x = 0, y = 0;
+    for (const o of list) { x += o.x; y += o.y; }
+    window.__crashScreen.smashAt(x / list.length, y / list.length);
+    return { x: x / list.length, y: y / list.length, n: list.length };
+  });
+  await sleep(120);
+  const archBlastAfter = (await archShot()).list.length;
+  check('A.§D4/§F: 폭발 무기의 범위 안에 든 투사체는 소멸한다 — 다섯 발의 한가운데에 폭탄을 터뜨리면 전부 사라진다',
+    archBlastBefore === 5 && !!archBlastAt && archBlastAfter === 0,
+    { archBlastBefore, archBlastAt, archBlastAfter });
+  await api.restore(page);
+  await sleep(100);
+  await debugCall('setAvatarPos', 1100, 780);
+  await force('#arch-table', 'forceAttack');
+  await sleep(60);
+  const archSuckBefore = (await archShot()).list.length;
+  await api.setWeapon(page, 'collapse');
+  // 중력탄은 멀리서 터져도 빨아들인다: fired at the far corner, nowhere near any of the five rounds
+  await api.smashAt(page, 1240, 60);
+  const archSucked = await poll(async () => ((await archShot()).list.length === 0 ? true : null), 2500, 60);
+  const archSuckTune = (await debugCall('projectileTuning')).suck;
+  check('A.§D4/§F: 중력탄은 빨아들인다 — 붕괴를 반대편 구석에 쏴도 날던 다섯 발이 특이점으로 끌려가 삼켜진다',
+    archSuckBefore === 5 && archSucked === true && !!archSuckTune && archSuckTune.speed > 0,
+    { archSuckBefore, archSucked, archSuckTune });
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(150);
+
+  // ---- (D2) 세 축이 정말로 분리되어 있다 ----
+  await debugCall('setAvatarPos', 1100, 780);
+  const archAxisA = await force('#arch-p', 'forceAttack');        // 200 × 100 텍스트
+  await api.restore(page); await sleep(80);
+  await debugCall('setAvatarPos', 1100, 780);
+  const archAxisB = await force('#arch-nav', 'forceAttack');      // 200 × 90  내비
+  await api.restore(page); await sleep(80);
+  await debugCall('setAvatarPos', 1100, 780);
+  const archAxisC = await force('#arch-footer', 'forceAttack');   // 200 × 110 푸터
+  await api.restore(page); await sleep(80);
+  check('A.§D2: 요소 종류가 공격을 정한다 — 거의 같은 크기에 같은 깊이인 p · nav · footer 가 산탄 · 락온 · 보호막으로 완전히 다르게 행동한다',
+    archAxisA === 'scatter' && archAxisB === 'lock' && archAxisC === 'guard',
+    { archAxisA, archAxisB, archAxisC });
+  const archBtnT = await archTable('#arch-btn');
+  const archDivT = await archTable('#arch-div');
+  check('A.§D2: 표가 이름 붙인 요소는 작아도 적이 된다 — 9 800 px² 버튼의 적 판정 하한이 1 200, 범용형 div 는 여전히 §B3 의 40 000',
+    archBtnT.id === 'rapid' && archBtnT.minArea === 1200 && archDivT.id === 'generic' && archDivT.minArea === 40000,
+    { archBtnT, archDivT });
+
+  // ---- (§F 무흔적) 투사체 비행 중 · 돌격 중 · 연발 중에 Escape ----
+  await api.restore(page);
+  await sleep(100);
+  await debugCall('setAvatarPos', 1100, 780);
+  await force('#arch-table', 'forceAttack');    // 연발 5발이 순차 발사 중
+  await force('#arch-img', 'forceAttack');      // 포물선탄 비행 + 바닥 표식
+  await force('#arch-link', 'forceAttack');     // 돌격: 예비 → 돌진
+  await sleep(520);                             // the lunge is mid-dash, the volley mid-sequence
+  const archLive = await page.evaluate(() => ({
+    orbs: document.querySelectorAll('.crs-orb').length,
+    marks: document.querySelectorAll('.crs-mortar-mark').length,
+    lunges: (window.__crashScreen.debug.lunges && window.__crashScreen.debug.lunges().length) || 0,
+    moved: (window.__crashScreen.debug.moved && window.__crashScreen.debug.moved().length) || 0
+  }));
+  check('A.§D/§F 무흔적: Escape 직전에 투사체·바닥 표식·돌격이 모두 살아 있다',
+    archLive.orbs >= 1 && archLive.marks >= 1 && archLive.lunges === 1 && archLive.moved >= 1, archLive);
+  await page.keyboard.press('Escape');
+  const archInactive = await poll(async () => !(await api.active(page)), 1500, 20);
+  const archNodes = await api.count(page, '[data-crs]');
+  const archPend = await api.pending(page);
+  await settleRaf(page);
+  const archRaf = await api.pendingRaf(page);
+  const archStylesNow = await page.evaluate((ids) => {
+    const out = {};
+    for (const id of ids) { const n = document.getElementById(id); out[id] = n ? (n.getAttribute('style') || '') : null; }
+    return out;
+  }, archLab.ids);
+  const archStyleSame = archLab.ids.every((id) => archStylesNow[id] === archLab.styles[id]);
+  check('A.§D/§F 무흔적: 투사체 비행 중 · 돌격 중 · 연발 중에 Escape → [data-crs] 0개, 타이머 0, 프레임 0, 모든 페이지 요소의 인라인 스타일이 원래 값 그대로',
+    archInactive === true && archNodes === 0 && archPend === 0 && archRaf === 0 && archStyleSame,
+    { archInactive, archNodes, archPend, archRaf, diff: archLab.ids.filter((id) => archStylesNow[id] !== archLab.styles[id]).map((id) => ({ id, was: archLab.styles[id], now: archStylesNow[id] })) });
+  const archReOn = await page.evaluate(contentJs);
+  check('A.§D/§F 무흔적: content.js 가 그 뒤 깨끗하게 다시 켜진다', archReOn === 'on', archReOn);
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true, noFalloff: true });
+  await archDrop();
   await api.restore(page);
   await sleep(100);
 
