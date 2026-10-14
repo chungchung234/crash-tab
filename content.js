@@ -214,7 +214,9 @@
     a11yMode: '모드', a11yKo: '패배', a11yRepair: '복구',
     a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료',
     // ── SPEC-combat §B1: the word a deflected hit prints instead of a damage number ──
-    invulLabel: '무적'
+    invulLabel: '무적',
+    // ── SPEC-combat §D1: what the meter says while the roster is empty ──
+    scanningEnemies: '적 탐색 중…'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));
@@ -2721,6 +2723,14 @@
     '.crs-progress .rlabel{display:block;font-size:13px;font-weight:700;text-align:center;margin-bottom:4px;white-space:nowrap}',
     '.crs-progress .rbar{width:220px;height:10px;background:rgba(255,255,255,.2);border-radius:5px;overflow:hidden}',
     '.crs-progress .rfill{height:100%;width:0;background:#e5484d;border-radius:5px}',
+    /* SPEC-combat §D1: `적 탐색 중…` beside the meter, pulsing on a 1.5 s cycle while no enemy is live.
+     * Absolutely positioned off the meter's right edge so it reads as "next to it" without moving the bar
+     * a pixel. `.scan` is toggled by syncEnemyScan(); with the class off the span is display:none, so the
+     * animation is not merely paused but never constructed (nothing for a traceless Escape to clean up). */
+    '.crs-progress .rscan{display:none;position:absolute;left:100%;bottom:0;margin-left:10px;font-size:12px;font-weight:700;color:#ffd166;white-space:nowrap}',
+    '.crs-progress.scan .rscan{display:inline-block;animation:crs-scan 1500ms ease-in-out infinite}',
+    '@keyframes crs-scan{0%{opacity:1}50%{opacity:.25}100%{opacity:1}}',
+    '@media (prefers-reduced-motion:reduce){.crs-progress.scan .rscan{animation:none;opacity:.8}}',
     '.crs-player .pdash{display:none;width:10px;height:10px;margin-left:8px;border-radius:50%;vertical-align:-1px;background:rgba(255,255,255,.22);box-shadow:0 0 0 1px rgba(255,255,255,.35) inset}',
     '.crs-player .pdash.ready{background:#58a6ff;box-shadow:0 0 6px 1px rgba(88,166,255,.75)}'
   ].join('\n');
@@ -2915,9 +2925,12 @@
     const rbar = doc.createElement('div'); rbar.className = 'rbar';
     const rfill = doc.createElement('div'); rfill.className = 'rfill';
     rbar.append(rfill);
-    prog.append(rlabel, rbar);
+    // SPEC-combat §D1: 적이 하나도 없을 때 미터 옆에서 맥동하는 `적 탐색 중…`
+    const rscan = doc.createElement('span'); rscan.className = 'rscan';
+    rscan.textContent = msg('scanningEnemies');
+    prog.append(rlabel, rbar, rscan);
     mountPoint.append(prog);
-    state.ratioNodes = { box: prog, label: rlabel, fill: rfill };
+    state.ratioNodes = { box: prog, label: rlabel, fill: rfill, scan: rscan };
 
     // ── v1.4 §1.2: one dash-cooldown dot on the health panel ──
     hudEls.dashDot = doc.createElement('span'); hudEls.dashDot.className = 'pdash';
@@ -2950,6 +2963,8 @@
           const rb = state.ratioNodes.fill.parentNode;
           if (rb) { rb.style.width = '220px'; rb.style.height = '10px'; rb.style.background = 'rgba(255,255,255,.2)'; rb.style.borderRadius = '5px'; rb.style.overflow = 'hidden'; }
           state.ratioNodes.fill.style.height = '100%'; state.ratioNodes.fill.style.background = '#e5484d';
+          // §D1: the scan tag has no stylesheet to hide it here either — syncEnemyScan() drives `display` directly
+          if (state.ratioNodes.scan) { const sc = state.ratioNodes.scan.style; sc.display = 'none'; sc.marginLeft = '10px'; sc.fontSize = '12px'; sc.fontWeight = '700'; sc.color = '#ffd166'; sc.whiteSpace = 'nowrap'; }
         }
         hudEls.fallback = true;   // showKo() styles the on-demand KO overlay the same way
       }
@@ -2968,6 +2983,22 @@
    * unreachable today on purpose; it is the one line step 4 flips if rampage is ever given the bar.
    * Nothing is deleted and no existing assertion is broken by the reading. */
   function meterKind() { return modeHasEnemies() ? 'kills' : 'ratio'; }
+  /* ── SPEC-combat §D1: 적이 없을 때 ────────────────────────────────────────────────────────
+   * "미터 옆에 `적 탐색 중…` 을 1.5초 주기로 맥동시킨다." With §D1 in force the bracket no longer follows
+   * the mouse, so a combat mode between rosters would otherwise look identical to a broken one — nothing
+   * highlights, nothing is shootable, and the HUD says nothing about why. This is the line that says why.
+   * Driven from updateRatioHud() (src/94-repair.js), the one place every kill, spawn, repair, mode switch
+   * and 2 s meter tick already passes through. The pulse itself is a CSS animation on a class, so it stops
+   * existing — rather than merely pausing — the moment the class or the HUD goes. */
+  function syncEnemyScan() {
+    const n = state.ratioNodes;
+    if (!n || !n.box) return;
+    const on = !!(state.active && modeHasEnemies() && !state.hostiles.size);
+    try {
+      n.box.classList.toggle('scan', on);
+      if (hudEls.fallback && n.scan) n.scan.style.display = on ? 'inline-block' : 'none';
+    } catch (e) { /* ignore */ }
+  }
   function killProgress() {
     const p = state.player;
     const total = p.kills + state.hostiles.size + state.repaired;
@@ -3463,8 +3494,10 @@
     return null;
   }
   /* opts.noLock (v1.4): skip the lock-frame aim assist below. isCovered() asks that, because it needs the raw
-   * answer "what would a click here really hit?" — with the assist on, a locked enemy would always look clear. */
-  function pickTarget(x, y, cache, opts) {
+   * answer "what would a click here really hit?" — with the assist on, a locked enemy would always look clear.
+   * SPEC-combat §D1 rides on the SAME flag (see pickTarget() below): a caller that wants the raw page answer
+   * wants it whole, enemy-only focusing included. */
+  function pickPhysical(x, y, cache, opts) {
     const env = { vw: viewW(), vh: viewH(), op: cache || new Map() };
     /* v1.4 §2.2 aim assist: a click inside a closing lock frame is a click on THAT enemy, not on a child of it.
      * Only for a frame actually drawn ON the enemy (lk.onEnemy) — otherwise the frame rides the PLAYER and then
@@ -3511,6 +3544,61 @@
     if (!r || r.width * r.height > 0.8 * vw * vh * mag2) return null;
     if (el.hasAttribute('data-crs-broken')) return null;
     return el;
+  }
+
+  /* ── SPEC-combat §D1: 적만 포커싱 ────────────────────────────────────────────────────────
+   * 사용자: "전투 모드일 땐 적만 포커싱 가능하게 해줘 정신 없어". The box that followed the mouse across
+   * every paragraph and button of the page was the direct cause — in a combat mode nothing but an enemy
+   * can be damaged (§B), so nothing but an enemy should be bracketed either. This is the AIM-side twin of
+   * §B's damageable(): the two gates answer the same question (is this thing part of the fight?) and are
+   * turned off by the same named escape hatch, debug.noInvuln. A suite that is allowed to wear down
+   * ordinary page elements while enemies are live must also be allowed to AIM at them, or it could never
+   * build its own precondition.
+   *
+   * 조준 보정 (§D1): with the cursor off every enemy, an enemy rect within 40 px (arcade 60 px — one hand
+   * is aiming AND dodging there) becomes the target. The bracket appears on THAT enemy, which is what makes
+   * the correction visible rather than magic.
+   *
+   * AMBIGUITY, reading chosen — §D1 says "pickTarget 은 적대 요소 또는 null 만 돌려준다", and §B/§F say a
+   * shot on a non-hostile element still deflects (`.crs-deflect` + `무적`, 탄약 1발). Both cannot hold for
+   * ONE return value: a null hands the weapon nothing to deflect off. Read as two questions asked of one
+   * function:
+   *   opts.focus  — "what may the player aim at?"  → §D1: the hostile, or null. refreshHover() and
+   *                 debug.pickAt() ask this, and it is what the bracket, the health bar and the §B1 aim
+   *                 point are driven by. This is the sentence §D1 is actually about.
+   *   (default)   — "what did this shot land on?"  → the assisted hostile when there is one, otherwise the
+   *                 element really under the point, so §B's deflect still has something to bounce off.
+   * The player-visible rules of §D1 are all on the focus side; keeping the impact side physical changes
+   * nothing a player sees and leaves §B intact.
+   * opts.noLock callers (decals, isCovered(), schedulePierce(), blastThroughCover()) opt out of both: they
+   * are asking about the PAGE, not about the fight. */
+  const AIM_ASSIST_PX = 40;          // survival — mouse aims, WASD dodges
+  const AIM_ASSIST_PX_ARCADE = 60;   // arcade — the cursor is the character, so the window is wider
+  function aimAssistPx() { return state.mode === 'arcade' ? AIM_ASSIST_PX_ARCADE : AIM_ASSIST_PX; }
+  /* The §D1 rule is live exactly where §B's invulnerability is, and dies with it. */
+  function enemyFocusOn() { return modeHasEnemies() && !debug.noInvuln; }
+  /* Nearest live hostile whose rect is within `maxPx` of (x, y), measured edge-to-edge (0 inside the rect). */
+  function nearestHostileWithin(x, y, maxPx) {
+    if (!(maxPx > 0) || !state.hostiles.size) return null;
+    let best = null, bestD = Infinity;
+    for (const rec of state.hostiles.values()) {
+      const el = rec && rec.el;
+      if (!el || el.nodeType !== 1 || !el.isConnected) continue;
+      try { if (el.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+      const r = rectOf(el);
+      if (!r || r.width <= 0 || r.height <= 0) continue;
+      const d = edgeDist(r, x, y);
+      if (d <= maxPx && d < bestD) { bestD = d; best = el; }
+    }
+    return best;
+  }
+  function pickTarget(x, y, cache, opts) {
+    const raw = pickPhysical(x, y, cache, opts);
+    if ((opts && opts.noLock) || !enemyFocusOn()) return raw;   // rampage / raw page query / §B escape hatch
+    if (raw && hostileUnit(raw)) return raw;
+    const near = nearestHostileWithin(x, y, aimAssistPx());     // §D1 조준 보정
+    if (near) return near;
+    return (opts && opts.focus) ? null : raw;                   // §D1 focus answer vs. §B impact answer
   }
   /* Size-based OWN max HP (v1.1 A1 / SPEC-combat §C2 `ownHp`): base = 20 + 0.35·sqrt(area); media ×1.2,
    * controls ×1, text-ish ×0.6 capped at 60 (a hammer always one-shots text), containers ×1; clamp [10, 400].
@@ -3688,7 +3776,8 @@
   function refreshHover() {
     if (!state.active) return;
     if (state.overHud || state.hoverX < 0) { showTarget(null); return; }
-    showTarget(pickTarget(state.hoverX, state.hoverY));
+    // SPEC-combat §D1: the hover bracket is the FOCUS answer — an enemy, or nothing at all
+    showTarget(pickTarget(state.hoverX, state.hoverY, null, { focus: true }));
   }
   function scheduleHover() {
     if (state.moveRaf) return;
@@ -3707,9 +3796,11 @@
   /* ── v1.4: what would a click at this point actually hit? ──
    * pickTarget() is where the hostile-unit rule (§5), the §2.2 lock aim assist and the §10 depth/occlusion
    * rules all land, so "the shot went nowhere" has several possible causes that look identical from outside.
-   * This reports the resolved element without firing anything, so a failing assertion can say which rule ran. */
+   * This reports the resolved element without firing anything, so a failing assertion can say which rule ran.
+   * SPEC-combat §D1: it reports the FOCUS answer — the one the bracket and the health bar are drawn from, and
+   * the one §D1's "적대 요소 또는 null" is about. debug.aimAssist() below says how wide the correction is. */
   debug.pickAt = (x, y) => {
-    const el = pickTarget(+x, +y);
+    const el = pickTarget(+x, +y, null, { focus: true });
     if (!el) return null;
     const r = rectOf(el) || { left: 0, top: 0, width: 0, height: 0 };
     let cls = '';
@@ -3723,6 +3814,9 @@
       rect: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) },
     };
   };
+  /* SPEC-combat §D1: the aim-correction window actually in force, and whether enemy-only focusing is live at
+   * all (rampage and debug.noInvuln both switch it off). Read rather than assumed, like debug.hostileTuning(). */
+  debug.aimAssist = () => ({ px: enemyFocusOn() ? aimAssistPx() : 0, on: enemyFocusOn(), mode: state.mode });
 
 // ── 55-geometry.js ──
   /* ===================================================================== */
@@ -6488,7 +6582,10 @@
    * (and possibly broken) before we look at what is behind it — §10.3 item 2's "최전면 대상을 처리한 뒤".
    * `noLock` asks for the raw "what is really under this point?": the §2.2 lock-frame aim assist can send the
    * PRIMARY hit to an enemy nowhere near (x, y), but the stack the bullet went through is still the one at
-   * (x, y) — isCovered() above reads the point the same way.
+   * (x, y) — isCovered() above reads the point the same way. SPEC-combat §D1's enemy-only focusing and its
+   * 40/60 px aim correction ride on the SAME flag for the same reason: both would answer about the FIGHT when
+   * what is wanted here is the PAGE. isCovered() in particular would otherwise report every enemy clear,
+   * because the §D1 filter hands back the enemy itself rather than the thing painted over it.
    * §10.3 item 3 (aoeIgnoresCover) needs no code here: aoeCandidates() samples rings of POINTS, so a blast
    * already reaches whatever is inside its radius no matter how many layers are painted over it. */
   function schedulePierce(x, y) {
@@ -7465,10 +7562,13 @@
    * The dot is hidden by a CLASS, never by an inline style: `.crs-self-dot { display: block !important }`
    * is USER-origin, and an inline `display:none` would lose to it (CLAUDE.md, the USER-origin trap). */
   const SELF_INVUL_COLOR = 'rgba(168, 176, 190, .72)';
+  /* SPEC-combat §D1 ("조준점은 적 위에서 붉고 활성, 그 외 흐린 회색에 중심 점 없음") folds the empty page
+   * into the same grey as an invulnerable element: both are "nothing you can shoot". state.hoverEl is now
+   * §D1's FOCUS answer (the hostile, or null — see pickTarget() in src/50-target.js), so the one null check
+   * covers the wall and the background at once, and the §B1 reading above is unchanged where it applied. */
   function aimInvulnerable() {
     if (!modeHasEnemies() || debug.noInvuln) return false;
-    const el = state.hoverEl;
-    return !!(el && !hostileUnit(el));
+    return !hostileUnit(state.hoverEl);
   }
   function syncSelfInvul(s) {
     const dim = aimInvulnerable();
@@ -8596,6 +8696,7 @@
     try {
       n.box.classList.toggle('on', on);
       if (hudEls.fallback) n.box.style.display = on ? 'block' : 'none';
+      syncEnemyScan();   // SPEC-combat §D1: `적 탐색 중…` beside the meter (src/45-hud.js)
       if (!on) return;
       // ── SPEC-combat §B4: the meter means KILLS where there are enemies (see meterKind(), src/45-hud.js) ──
       if (meterKind() === 'kills') {

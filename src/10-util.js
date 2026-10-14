@@ -99,7 +99,9 @@
     a11yMode: '모드', a11yKo: '패배', a11yRepair: '복구',
     a11yChallengeStart: '챌린지 시작', a11yChallengeEnd: '챌린지 종료',
     // ── SPEC-combat §B1: the word a deflected hit prints instead of a damage number ──
-    invulLabel: '무적'
+    invulLabel: '무적',
+    // ── SPEC-combat §D1: what the meter says while the roster is empty ──
+    scanningEnemies: '적 탐색 중…'
   };
   function msg(key) {
     const s = safe(() => chrome.i18n.getMessage(key));

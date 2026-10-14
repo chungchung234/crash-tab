@@ -237,6 +237,7 @@
     try {
       n.box.classList.toggle('on', on);
       if (hudEls.fallback) n.box.style.display = on ? 'block' : 'none';
+      syncEnemyScan();   // SPEC-combat §D1: `적 탐색 중…` beside the meter (src/45-hud.js)
       if (!on) return;
       // ── SPEC-combat §B4: the meter means KILLS where there are enemies (see meterKind(), src/45-hud.js) ──
       if (meterKind() === 'kills') {

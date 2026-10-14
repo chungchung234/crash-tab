@@ -179,7 +179,10 @@
    * (and possibly broken) before we look at what is behind it — §10.3 item 2's "최전면 대상을 처리한 뒤".
    * `noLock` asks for the raw "what is really under this point?": the §2.2 lock-frame aim assist can send the
    * PRIMARY hit to an enemy nowhere near (x, y), but the stack the bullet went through is still the one at
-   * (x, y) — isCovered() above reads the point the same way.
+   * (x, y) — isCovered() above reads the point the same way. SPEC-combat §D1's enemy-only focusing and its
+   * 40/60 px aim correction ride on the SAME flag for the same reason: both would answer about the FIGHT when
+   * what is wanted here is the PAGE. isCovered() in particular would otherwise report every enemy clear,
+   * because the §D1 filter hands back the enemy itself rather than the thing painted over it.
    * §10.3 item 3 (aoeIgnoresCover) needs no code here: aoeCandidates() samples rings of POINTS, so a blast
    * already reaches whatever is inside its radius no matter how many layers are painted over it. */
   function schedulePierce(x, y) {

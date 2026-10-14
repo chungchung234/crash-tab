@@ -142,10 +142,13 @@
    * The dot is hidden by a CLASS, never by an inline style: `.crs-self-dot { display: block !important }`
    * is USER-origin, and an inline `display:none` would lose to it (CLAUDE.md, the USER-origin trap). */
   const SELF_INVUL_COLOR = 'rgba(168, 176, 190, .72)';
+  /* SPEC-combat §D1 ("조준점은 적 위에서 붉고 활성, 그 외 흐린 회색에 중심 점 없음") folds the empty page
+   * into the same grey as an invulnerable element: both are "nothing you can shoot". state.hoverEl is now
+   * §D1's FOCUS answer (the hostile, or null — see pickTarget() in src/50-target.js), so the one null check
+   * covers the wall and the background at once, and the §B1 reading above is unchanged where it applied. */
   function aimInvulnerable() {
     if (!modeHasEnemies() || debug.noInvuln) return false;
-    const el = state.hoverEl;
-    return !!(el && !hostileUnit(el));
+    return !hostileUnit(state.hoverEl);
   }
   function syncSelfInvul(s) {
     const dim = aimInvulnerable();

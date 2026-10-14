@@ -390,5 +390,9 @@
   "invulLabel": {
     "message": "IMMUNE",
     "description": "SPEC-combat B1: shown instead of a damage number when a hit lands on an invulnerable (non-hostile) element in a combat mode"
+  },
+  "scanningEnemies": {
+    "message": "Scanning for enemies…",
+    "description": "SPEC-combat D1: pulsed beside the meter in a combat mode while no enemy is live"
   }
 }
