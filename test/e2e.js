@@ -404,7 +404,8 @@ const api = {
   slash: (page, x1, y1, x2, y2) => page.evaluate((a, b, c, d) => window.__crashScreen.slash(a, b, c, d), x1, y1, x2, y2),
   // merge `patch` into api.debug (a plain object per A12) and return a copy of the whole flag set (A11; functions dropped)
   debug: (page, patch) => page.evaluate((p) => { const d = window.__crashScreen.debug; Object.assign(d, p || {}); const out = {}; for (const k of Object.keys(d)) if (typeof d[k] !== 'function') out[k] = d[k]; return out; }, patch || {}),
-  hpOf: (page, sel) => page.evaluate((s) => { const r = window.__crashScreen.hpOf(document.querySelector(s)); return { hp: r.hp, max: r.max }; }, sel),
+  // SPEC-combat §C: `own` is the shell's own HP (the v1.1 A1 formula) and `approx` says the §C4 walk budget ran out
+  hpOf: (page, sel) => page.evaluate((s) => { const r = window.__crashScreen.hpOf(document.querySelector(s)); return { hp: r.hp, max: r.max, own: r.own, approx: r.approx }; }, sel),
   store: (page) => page.evaluate(() => Object.assign({}, window.__crsStore || {})),
   pending: (page) => page.evaluate(() => (window.__crsPending ? window.__crsPending.size : -1)),
   pendingRaf: (page) => page.evaluate(() => (window.__crsPendingRaf ? window.__crsPendingRaf.size : -1)),
@@ -674,6 +675,13 @@ async function smashUntil(page, isBroken, x, y, max = 3) {
   }
   return 0;
 }
+/* SPEC-combat §C2 made containers outlast a magazine: a shot loop that used to fit in 12 rounds no longer
+ * does, and a shot fired during an auto-reload is simply rejected. Wait for a chambered round first. */
+async function ammoReady(page) {
+  const a = await api.ammo(page);
+  if (a && a.mag === 0 && !a.reloading) await api.reload(page);
+  return poll(async () => { const b = await api.ammo(page); return b && b.mag > 0 && !b.reloading ? b : null; }, 2500, 20);
+}
 // Damage numbers from api.weapons() (fallback: the A2 table) keyed by id.
 async function weaponTable(page) {
   let list = [];
@@ -844,8 +852,14 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const sc = await api.rect(page, '#small-card');
   const brokenBefore = (await api.stats(page)).broken;
   const smallPt = { x: sc.left + 12, y: sc.top + 12 };
-  const smallClicks = await clickUntilBroken(page, '#small-card', smallPt.x, smallPt.y, 3);
-  check('A.hammer small card: broken on the 2nd hammer hit (99 hp / 65)', smallClicks === 2, smallClicks);
+  /* SPEC-combat §C2 changed this number: the card is no longer worth its own 99-hp shell alone, it also carries
+   * 0.6 × the h3 / p / a inside it, so it takes one hammer hit more. The count is DERIVED from the live max
+   * (font metrics decide the children's heights, and those differ between machines) — what is asserted is the
+   * relation the spec states: aggregate > own, and the card breaks on exactly the hit the aggregate predicts. */
+  const smallHp0 = await api.hpOf(page, '#small-card');
+  const smallWant = hitsFor(smallHp0.max, DMG('hammer'));
+  const smallClicks = await clickUntilBroken(page, '#small-card', smallPt.x, smallPt.y, 4);
+  check('A.hammer small card: broken on hammer hit hitsFor(max, 65), and §C max > its own shell', smallClicks === smallWant && smallHp0.max > smallHp0.own, { smallClicks, smallWant, hp: smallHp0 });
   const s1 = await api.stats(page);
   check('A.hammer small card: stats().broken ≥ 1', s1.broken >= brokenBefore + 1 && s1.broken >= 1, s1.broken);
   check('A.hammer small card: .crs-debris count ≥ 1', (await api.count(page, '.crs-debris')) >= 1);
@@ -918,9 +932,12 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await api.setWeapon(page, 'hammer');
   const bc = await api.rect(page, '#big-card');
   const bigPt = { x: bc.left + 12, y: bc.top + 12 };
-  const bigMax = (await api.hpOf(page, '#big-card')).max;
+  const bigHp0 = await api.hpOf(page, '#big-card');
+  const bigMax = bigHp0.max;
   const nBig = hitsFor(bigMax, DMG('hammer'));
-  check('A.hammer large card: hitsFor(max, 65) === 3', nBig === 3, { bigMax, nBig });
+  /* Was `nBig === 3` (184 / 65). SPEC-combat §C2 adds 0.6 × the h2 / p / ul inside the card, so the shell is
+   * no longer the whole price — more hits, derived from the live max rather than frozen into the test. */
+  check('A.hammer large card: hitsFor(max, 65) > hitsFor(own, 65) — §C2 charges for what the card holds', nBig === hitsFor(bigMax, DMG('hammer')) && nBig > hitsFor(bigHp0.own, DMG('hammer')), { bigMax, own: bigHp0.own, nBig, ownHits: hitsFor(bigHp0.own, DMG('hammer')) });
   const b0 = (await api.stats(page)).broken;
   let bigOk = true;
   const bigSteps = [];
@@ -944,20 +961,25 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.gun: setMode("gun") → api.mode === "pistol" and api.weapon === "pistol" (legacy alias)', (await api.mode(page)) === 'pistol' && (await api.weapon(page)) === 'pistol', { mode: await api.mode(page), weapon: await api.weapon(page) });
   const gc = await api.rect(page, '#big-card');
   const gunPt = { x: gc.left + 12, y: gc.top + 12 };
-  const gunMax = (await api.hpOf(page, '#big-card')).max;
+  const gunHp0 = await api.hpOf(page, '#big-card');
+  const gunMax = gunHp0.max;
   const nGun = hitsFor(gunMax, DMG('pistol'));
-  check('A.gun large card: hitsFor(max, 25) === 8', nGun === 8, { gunMax, nGun });
+  /* Was `nGun === 8` (184 / 25). Same §C2 change as the hammer run above — and the count now exceeds the
+   * pistol's 12-round magazine, so every shot waits for a chambered round (ammoReady). */
+  check('A.gun large card: hitsFor(max, 25) > hitsFor(own, 25) — §C2 charges for what the card holds', nGun === hitsFor(gunMax, DMG('pistol')) && nGun > hitsFor(gunHp0.own, DMG('pistol')), { gunMax, own: gunHp0.own, nGun });
   const debris0 = await api.count(page, '.crs-debris');
   const gunSteps = [];
   for (let k = 1; k < nGun; k++) {
+    await ammoReady(page);
     await page.mouse.click(gunPt.x, gunPt.y);
     const expected = 'DIV ' + (gunMax - DMG('pistol') * k) + '/' + gunMax;
     const tb = await poll(async () => { const t = await api.targetBox(page); return t && t.label === expected ? t : null; }, 600, 20);
     gunSteps.push({ k, broken: await api.broken(page, '#big-card'), debris: await api.count(page, '.crs-debris'), label: (tb || await api.targetBox(page) || {}).label, expected });
   }
-  check('A.gun large card: shots 1 … 7 → not broken, debris count unchanged', gunSteps.length === nGun - 1 && gunSteps.every((s) => !s.broken && s.debris === debris0), { debris0, steps: gunSteps.map((s) => [s.k, s.broken, s.debris]) });
+  check('A.gun large card: shots 1 … ' + (nGun - 1) + ' → not broken, debris count unchanged', gunSteps.length === nGun - 1 && gunSteps.every((s) => !s.broken && s.debris === debris0), { debris0, steps: gunSteps.map((s) => [s.k, s.broken, s.debris]) });
   check('A.gun large card: shot 1 → label "DIV ' + (gunMax - DMG('pistol')) + '/' + gunMax + '"', gunSteps[0] && gunSteps[0].label === gunSteps[0].expected, gunSteps[0]);
   check('A.gun large card: shot 2 → label "DIV ' + (gunMax - 2 * DMG('pistol')) + '/' + gunMax + '"', gunSteps[1] && gunSteps[1].label === gunSteps[1].expected, gunSteps[1]);
+  await ammoReady(page);
   await page.mouse.click(gunPt.x, gunPt.y);
   check(`A.gun large card: shot ${nGun} → broken`, await poll(() => api.broken(page, '#big-card'), 1500));
 
@@ -1045,11 +1067,14 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const R = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return { w: r.width, h: r.height }; };
     return { img: R('#demo-img'), card: R('#big-card') };
   });
-  const inRange = (r) => r.max >= 10 && r.max <= 400 && r.hp === r.max;
+  // SPEC-combat §C2: `own` keeps the v1.1 [10, 400] clamp, the aggregate `max` is clamped at [10, 2500]
+  const inRange = (r) => r.own >= 10 && r.own <= 400 && r.max >= 10 && r.max <= 2500 && r.hp === r.max;
   check('A.hp 1: max scales with size — leaf < button < image < large card', hpLeaf.max < hpBtn.max && hpBtn.max < hpImg.max && hpImg.max < hpCard.max, { leaf: hpLeaf.max, btn: hpBtn.max, img: hpImg.max, card: hpCard.max });
-  check('A.hp 1: every max within [10, 400] and hp === max on a fresh page', [hpLeaf, hpBtn, hpImg, hpCard, hpPara].every(inRange), { leaf: hpLeaf, btn: hpBtn, img: hpImg, card: hpCard, para: hpPara });
+  check('A.hp 1: every own within [10, 400], every max within [10, 2500] and hp === max on a fresh page', [hpLeaf, hpBtn, hpImg, hpCard, hpPara].every(inRange), { leaf: hpLeaf, btn: hpBtn, img: hpImg, card: hpCard, para: hpPara });
   check('A.hp 1: image max === round((20 + 0.35·√area) × 1.2) from its live rect', hpImg.max === specMaxHp(rects.img.w, rects.img.h, 1.2, false), { got: hpImg.max, expected: specMaxHp(rects.img.w, rects.img.h, 1.2, false), rect: rects.img });
-  check('A.hp 1: large card max === round(20 + 0.35·√area) (mult 1.0) from its live rect', hpCard.max === specMaxHp(rects.card.w, rects.card.h, 1.0, false), { got: hpCard.max, expected: specMaxHp(rects.card.w, rects.card.h, 1.0, false), rect: rects.card });
+  /* Was `hpCard.max === specMaxHp(...)`. SPEC-combat §C2: that formula is now `own`, and the card's max adds
+   * 0.6 × what it holds. The own half is still asserted exactly — it is the v1.1 A1 formula, unchanged. */
+  check('A.hp 1: large card own === round(20 + 0.35·√area) (mult 1.0) from its live rect, and §C max is strictly above it', hpCard.own === specMaxHp(rects.card.w, rects.card.h, 1.0, false) && hpCard.max > hpCard.own, { got: hpCard, expected: specMaxHp(rects.card.w, rects.card.h, 1.0, false), rect: rects.card });
   check('A.hp 1: long paragraph (text-ish) max === 60 (cap)', hpPara.max === 60, hpPara);
 
   // (2) fresh large card: hammer −65, pistol −25, axe −130 (restore between checks)
@@ -1278,17 +1303,25 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   });
   const t9 = Date.now();   // anchored BEFORE the click round-trip
   await page.mouse.click(rocketPt.x, rocketPt.y);
-  const seen9 = { rocketAt: -1, ringAt: -1, brokenAt: -1 };
-  while (Date.now() - t9 < 900 && (seen9.ringAt < 0 || seen9.brokenAt < 0)) {
-    const s = await page.evaluate(() => ({ ring: document.querySelectorAll('.crs-fx-ring.crs-fx-ring-xl').length, broken: document.getElementById('big-card').hasAttribute('data-crs-broken') }));
+  /* `hurtAt` is new and `brokenAt` no longer fires on one rocket: SPEC-combat §C2 puts the card above the
+   * rocket's 260, so the IMPACT (what the 600 ms deadline is really about — the 0.5 s flight) is now measured
+   * as the moment the card's hp moves. The break itself is asserted below, on the second rocket. */
+  const seen9 = { rocketAt: -1, ringAt: -1, brokenAt: -1, hurtAt: -1 };
+  while (Date.now() - t9 < 900 && (seen9.ringAt < 0 || seen9.hurtAt < 0)) {
+    const s = await page.evaluate(() => {
+      const el = document.getElementById('big-card');
+      const h = window.__crashScreen.hpOf(el);
+      return { ring: document.querySelectorAll('.crs-fx-ring.crs-fx-ring-xl').length, broken: el.hasAttribute('data-crs-broken'), hurt: !!(h && h.hp < h.max) };
+    });
     const ms = Date.now() - t9;
     if (seen9.ringAt < 0 && s.ring) seen9.ringAt = ms;
     if (seen9.brokenAt < 0 && s.broken) seen9.brokenAt = ms;
+    if (seen9.hurtAt < 0 && (s.hurt || s.broken)) seen9.hurtAt = ms;
     await sleep(10);
   }
   seen9.rocketAt = await page.evaluate(() => { const p = window.__crsRocketProbe; delete window.__crsRocketProbe; return p ? Math.round(p.rocketAt) : -2; });
   check('A.rocket 9: .crs-rocket streak inserted within 150 ms of the click (MutationObserver probe)', seen9.rocketAt >= 0 && seen9.rocketAt <= 150, seen9);
-  check('A.rocket 9: #big-card broken within 600 ms', seen9.brokenAt >= 0 && seen9.brokenAt <= 600, seen9);
+  check('A.rocket 9: #big-card takes the rocket hit within 600 ms (hp below max — the §C2 aggregate survives one 260)', seen9.hurtAt >= 0 && seen9.hurtAt <= 600, seen9);
   check('A.rocket 9: .crs-fx-ring.crs-fx-ring-xl seen at impact', seen9.ringAt >= 0, seen9);
   const aoe = await poll(async () => {
     const r = await page.evaluate(() => {
@@ -1302,11 +1335,17 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await page.screenshot({ path: path.join(OUT, 'rocket.png') });
   info('screenshot test/out/rocket.png');
   check('A.rocket 9: no .crs-rocket left after impact', await poll(async () => (await api.count(page, '.crs-rocket')) === 0, 500, 20));
+  // the break the first rocket used to get on its own: 260 × 2 clears the §C2 aggregate
+  await ammoReady(page);
+  const bc9c = await api.rect(page, '#big-card');
+  await page.mouse.click(bc9c.left + 12, bc9c.top + 12);
+  check('A.rocket 9: a second rocket breaks #big-card (260 × 2 > the §C2 aggregate max)', await poll(() => api.broken(page, '#big-card'), 1500));
   // restore() 40 ms into the flight: the streak goes at once and the impact timer never fires on the restored page
   await api.restore(page);
   await sleep(60);
   const bc9b = await api.rect(page, '#big-card');
   const h9b0 = await api.hpOf(page, '#big-card');
+  await ammoReady(page);   // the two rockets above emptied the tube; a shot fired mid-reload is rejected
   await page.mouse.click(bc9b.left + 12, bc9b.top + 12);
   await sleep(40);
   await api.restore(page);
@@ -1348,8 +1387,12 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const innerGone10 = await poll(() => api.broken(page, '#x-aoe-inner'), 400, 20);
   await sleep(120);   // the AoE stagger is ≤ 90 ms (edgeDist / 4)
   const boxHp1 = await api.hpOf(page, '#x-aoe');
+  const innerMax10 = (await api.hpOf(page, '#x-aoe-inner')).max;
   check('A.bomb 10: a bomb centred on a nested 200 × 200 child breaks the child (90 hp < 190)', innerGone10, await api.hpOf(page, '#x-aoe-inner'));
-  check('A.bomb 10: its padded 400 × 400 container keeps full hp — ancestors of candidate 0 are never AoE candidates', boxHp1.hp === boxHp1.max && boxHp1.max === boxHp0.max && !(await api.broken(page, '#x-aoe')), { before: boxHp0, after: boxHp1, containerBroken: await api.broken(page, '#x-aoe') });
+  /* The AoE rule under test is unchanged — the container takes NO blast damage, which is still `hp === max`.
+   * What changed is the max itself: SPEC-combat §C3 takes 0.6 × the child it just lost off both max and hp,
+   * so the container falls back to its own 160-hp shell. Asserted as a subtraction, not as "unchanged". */
+  check('A.bomb 10: its padded 400 × 400 container takes no AoE damage (hp === max — ancestors of candidate 0 are never AoE candidates) and §C3 takes 0.6 × the lost child off both', boxHp1.hp === boxHp1.max && boxHp1.max === boxHp0.max - Math.round(0.6 * innerMax10) && boxHp1.max === boxHp1.own && !(await api.broken(page, '#x-aoe')), { before: boxHp0, after: boxHp1, innerMax: innerMax10, containerBroken: await api.broken(page, '#x-aoe') });
   await api.restore(page);
   await page.evaluate(() => { const b = document.getElementById('x-aoe'); if (b) b.remove(); });
 
@@ -2858,6 +2901,121 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     await sleep(100);
   }
 
+  // =============================================================================================
+  // SPEC-combat §C — 체력 합산: a container is worth what it holds (§F "체력 합산")
+  // Appended at the END of suite A per the shared-file rule. Everything but the first check builds
+  // its own fixture with page.evaluate and removes it again: test/fixture.html is shared with the
+  // other worktrees, and these shapes only exist to pin numbers down.
+  // =============================================================================================
+  console.log('--- SPEC-combat §C: aggregate HP ---');
+  await api.restore(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await api.setWeapon(page, 'hammer');
+  await sleep(100);
+
+  // (1) §F item 1 on the real page: section.hero holds exactly the three cards
+  const heroAgg = await page.evaluate(() => {
+    const crs = window.__crashScreen;
+    const hero = document.querySelector('section.hero');
+    const h = crs.hpOf(hero);
+    const kids = Array.from(hero.children).map((c) => ({ id: c.id || c.tagName, max: crs.hpOf(c).max }));
+    const sum = kids.reduce((a, k) => a + k.max, 0);
+    return { max: h.max, own: h.own, approx: h.approx, kids, expect: h.own + 0.6 * sum };
+  });
+  check('A.hpagg 1: section.hero (3 cards) max === ownHp + 0.6 × Σ maxHp(children), within ±2 (§C2)',
+    heroAgg.kids.length === 3 && Math.abs(heroAgg.max - heroAgg.expect) <= 2 && heroAgg.max > heroAgg.own && heroAgg.approx === false, heroAgg);
+
+  // (2) a container with three equal children, sized so each child falls to ONE hammer hit (own 64 < 65)
+  const nestLab = await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'x-hp-nest';
+    Object.assign(box.style, { position: 'fixed', left: '60px', top: '150px', width: '420px', height: '210px', padding: '14px', boxSizing: 'border-box', background: '#eef2ff', border: '1px solid #99a', zIndex: '60' });
+    for (let i = 0; i < 3; i++) {
+      const kid = document.createElement('div'); kid.id = 'x-hp-kid-' + i;
+      Object.assign(kid.style, { width: '392px', height: '40px', marginBottom: '6px', background: '#4a7bd0' });
+      box.append(kid);
+    }
+    document.body.append(box);
+    const b = box.getBoundingClientRect();
+    return {
+      shell: { x: Math.round(b.left + 5), y: Math.round(b.top + 5) },   // inside the 14 px padding: the box itself is the pick
+      kids: Array.from(box.children).map((k) => { const r = k.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })
+    };
+  });
+  const nest0 = await api.hpOf(page, '#x-hp-nest');
+  const nestKid = await api.hpOf(page, '#x-hp-kid-0');
+  check('A.hpagg 2: a 420 × 210 container over three 392 × 40 children === round(ownHp + 0.6 × Σ), nothing approximated (§C2)',
+    nest0.max === Math.round(nest0.own + 0.6 * 3 * nestKid.max) && nest0.max > nest0.own && nest0.approx === false && nestKid.max === nestKid.own, { nest0, nestKid });
+
+  // (3) §F item 3: one child gone → 0.6 × its maxHp off the ancestor's max AND hp
+  await page.mouse.click(nestLab.kids[0].x, nestLab.kids[0].y);
+  check('A.hpagg 3: one hammer hit breaks a 392 × 40 child (own 64 < 65)', await poll(() => api.broken(page, '#x-hp-kid-0'), 1500));
+  const nestShare = Math.round(0.6 * nestKid.max);
+  const nest1 = await api.hpOf(page, '#x-hp-nest');
+  check('A.hpagg 3: breaking one child takes 0.6 × its maxHp off the ancestor — both max and hp (§C3)',
+    nest1.max === nest0.max - nestShare && nest1.hp === nest0.hp - nestShare && nest1.hp === nest1.max, { before: nest0, after: nest1, share: nestShare });
+
+  // (4) §F item 4: empty it out and the shell is worth ownHp — one or two hammer hits
+  for (let i = 1; i < 3; i++) {
+    await page.mouse.click(nestLab.kids[i].x, nestLab.kids[i].y);
+    await poll(() => api.broken(page, '#x-hp-kid-' + i), 1500);
+  }
+  const nest2 = await api.hpOf(page, '#x-hp-nest');
+  check('A.hpagg 4: with every child gone the container is back to its own shell (±3, three rounded 0.6 shares) and undamaged',
+    Math.abs(nest2.max - nest2.own) <= 3 && nest2.hp === nest2.max && !(await api.broken(page, '#x-hp-nest')), { nest2, nest0 });
+  const nestHits = await clickUntilBroken(page, '#x-hp-nest', nestLab.shell.x, nestLab.shell.y, 3);
+  check('A.hpagg 4: the emptied shell then falls to one or two hammer hits (§C3)', nestHits >= 1 && nestHits <= 2, { nestHits, max: nest2.max, own: nest2.own });
+
+  // (5) §F item 5: repair puts it back
+  await api.restore(page);
+  await sleep(100);
+  const nest3 = await api.hpOf(page, '#x-hp-nest');
+  check('A.hpagg 5: after repair the container is whole again at its full aggregate (§C3)',
+    nest3.max === nest0.max && nest3.hp === nest3.max && !(await api.broken(page, '#x-hp-nest')) && !(await api.broken(page, '#x-hp-kid-0')), { before: nest0, after: nest3 });
+
+  // (6) §F item 6: the walk runs once per element, however often it is hovered (§C4)
+  const hc0 = (await api.stats(page)).hpCalcs;
+  for (let i = 0; i < 10; i++) {
+    await page.mouse.move(nestLab.kids[1].x + (i % 2), nestLab.kids[1].y);
+    await sleep(30);
+  }
+  const hc1 = (await api.stats(page)).hpCalcs;
+  check('A.hpagg 6: hovering the same element ten times computes its max ONCE — stats().hpCalcs +1 (§C4)', hc1 - hc0 === 1, { hc0, hc1 });
+  await page.evaluate(() => { const b = document.getElementById('x-hp-nest'); if (b) b.remove(); });
+
+  // (7) §F item 2: the 2500 ceiling — 40 big children sum past it while staying inside the 200-node budget
+  const capLab = await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'x-hp-cap';
+    Object.assign(box.style, { position: 'fixed', left: '0px', top: '0px', width: '1200px', height: '900px', background: '#fee8e8', zIndex: '55', overflow: 'hidden' });
+    for (let i = 0; i < 40; i++) { const k = document.createElement('div'); Object.assign(k.style, { width: '300px', height: '180px', background: '#cc9999' }); box.append(k); }
+    document.body.append(box);
+    const crs = window.__crashScreen;
+    const h = crs.hpOf(box), kid = crs.hpOf(box.firstElementChild);
+    return { max: h.max, own: h.own, approx: h.approx, kidMax: kid.max, n: box.children.length };
+  });
+  check('A.hpagg 7: 40 big children sum past the ceiling — max === 2500 exactly, and the walk still finished (§C2)',
+    capLab.max === 2500 && capLab.approx === false && capLab.own + 0.6 * capLab.n * capLab.kidMax > 2500, capLab);
+  await page.evaluate(() => { const b = document.getElementById('x-hp-cap'); if (b) b.remove(); });
+
+  // (8) §F item 7: 300 descendants blow the node budget → ownHp × 3, flagged, and the readout says `~`
+  const apxLab = await page.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'x-hp-approx';
+    Object.assign(box.style, { position: 'fixed', left: '200px', top: '180px', width: '600px', height: '400px', padding: '20px', boxSizing: 'border-box', background: '#eefaee', zIndex: '55', overflow: 'hidden' });
+    for (let i = 0; i < 300; i++) { const k = document.createElement('div'); Object.assign(k.style, { width: '560px', height: '30px', background: '#99cc99' }); box.append(k); }
+    document.body.append(box);
+    const h = window.__crashScreen.hpOf(box);
+    const b = box.getBoundingClientRect();
+    return { max: h.max, own: h.own, approx: h.approx, n: box.children.length, shell: { x: Math.round(b.left + 6), y: Math.round(b.top + 6) } };
+  });
+  check('A.hpagg 8: 300 descendants blow the 200-node budget — approx === true and max === ownHp × 3 (§C4)',
+    apxLab.n === 300 && apxLab.approx === true && apxLab.max === Math.min(2500, apxLab.own * 3), apxLab);
+  await page.mouse.move(apxLab.shell.x, apxLab.shell.y);
+  const tbApx = await poll(async () => { const t = await api.targetBox(page); return t && t.display !== 'none' && /~/.test(t.label || '') ? t : null; }, 900, 20);
+  check('A.hpagg 8: an approximated max wears a trailing ~ in the hover readout (§C4)', !!tbApx && /\/\d+~/.test(tbApx.label), tbApx && tbApx.label);
+  await page.evaluate(() => { const b = document.getElementById('x-hp-approx'); if (b) b.remove(); });
+  await api.restore(page);
+  await page.mouse.move(2, 2);
+  await sleep(80);
+
   // --- console / CSP (this block's own page; every block tallies its own, SPEC-test-speed §5) -------
   await closeBlockPage('A.core', { page, log, client });
 }
@@ -3498,10 +3656,13 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.setWeapon(page, 'sniper');
   const bossR = await api.rect(page, '#boss');
   const bossPt = { x: bossR.cx, y: bossR.cy };
-  const maxBefore = (await api.hpOf(page, '#boss')).max;
+  const bossHp0 = await api.hpOf(page, '#boss');
+  const maxBefore = bossHp0.max;
   // #big-card has not been touched since the restore above, so its first hp contact happens WHILE scoped (A3)
   const bcUnscaled = await api.rectNoScroll(page, '#big-card');
-  check('A.sniper 3: #boss max HP from its live rect (≈ 253) and sniper damage read from api.weapons() (200)', maxBefore === specMaxHp(bossR.width, bossR.height, 1.0, false) && DMG('sniper') === SPEC_DMG.sniper, { maxBefore, expected: specMaxHp(bossR.width, bossR.height, 1.0, false), dmg: DMG('sniper') });
+  /* Was `maxBefore === specMaxHp(...)`. SPEC-combat §C2: the section also carries 0.6 × its caption now, so
+   * the v1.1 size formula is asserted against `own` and the aggregate is required to sit above it. */
+  check('A.sniper 3: #boss ownHp from its live rect (≈ 253), §C2 max above it, and sniper damage read from api.weapons() (200)', bossHp0.own === specMaxHp(bossR.width, bossR.height, 1.0, false) && maxBefore > bossHp0.own && DMG('sniper') === SPEC_DMG.sniper, { bossHp0, expected: specMaxHp(bossR.width, bossR.height, 1.0, false), dmg: DMG('sniper') });
   await page.mouse.move(bossPt.x, bossPt.y);
   await sleep(50);
   const scOn = await api.scope(page, true);
@@ -3514,7 +3675,8 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.sniper 3: body inline transform contains scale(2) (CSSOM, !important) and no will-change is set', /scale\(2\)/.test(bodyOn.transform) && bodyOn.willChange === '', bodyOn);
   check('A.sniper 3: #boss getBoundingClientRect doubled under the transform (± 2 px)', near(bossScoped.width, 2 * bossR.width, 2) && near(bossScoped.height, 2 * bossR.height, 2), { before: [bossR.width, bossR.height], scoped: [bossScoped.width, bossScoped.height] });
   check('A.sniper 3: hpOf(#boss).max unchanged while scoped (the cached record survives scope-in)', hpScoped.max === maxBefore && hpScoped.hp === maxBefore, { maxBefore, scoped: hpScoped });
-  check('A.sniper 3: a FIRST hp contact made while scoped is page-space — hpMax() divides the doubled rect by scopeMag()', hpFresh.max === specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false) && hpFresh.hp === hpFresh.max, { got: hpFresh, expected: specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false), unscaledRect: [bcUnscaled.width, bcUnscaled.height] });
+  // same §C2 split as above: the page-space rule is what `own` proves, and the §C walk divides every child rect by scopeMag() too
+  check('A.sniper 3: a FIRST hp contact made while scoped is page-space — ownHp() divides the doubled rect by scopeMag()', hpFresh.own === specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false) && hpFresh.max > hpFresh.own && hpFresh.hp === hpFresh.max, { got: hpFresh, expected: specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false), unscaledRect: [bcUnscaled.width, bcUnscaled.height] });
   const shot3 = await api.smashAt(page, bossPt.x, bossPt.y);
   const hp3 = (await poll(async () => { const r = await api.hpOf(page, '#boss'); return r.hp < r.max ? r : null; }, 500, 15)) || await api.hpOf(page, '#boss');
   check('A.sniper 3: one scoped shot at the boss centre → hp === max − dmg(sniper) (253 → 53)', shot3 === true && hp3.hp === hp3.max - DMG('sniper') && hp3.max === maxBefore, { shot: shot3, hp: hp3, dmg: DMG('sniper') });
@@ -3989,7 +4151,8 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   const fg9 = await api.rect(page, '#figure');
   const sc9 = await api.rectNoScroll(page, '#small-card');
   const scPt9 = { x: sc9.left + 12, y: sc9.top + 12 };
-  await page.evaluate((p) => { const a = window.__crashScreen; a.smashAt(p.x, p.y); a.smashAt(p.x, p.y); }, scPt9);
+  // SPEC-combat §C2: the card is worth its h3 / p / a too, so two hammer swings no longer finish it — swing until it goes
+  await page.evaluate((p) => { const a = window.__crashScreen; const el = document.getElementById('small-card'); for (let i = 0; i < 5 && !el.hasAttribute('data-crs-broken'); i++) a.smashAt(p.x, p.y); }, scPt9);
   const brokenPre9 = await poll(() => api.broken(page, '#small-card'), 500, 15);
   await api.setWeapon(page, 'sniper');
   await page.mouse.move(fg9.cx, fg9.cy);   // the scope magnifies around the pointer, so #figure stays on screen
@@ -4267,7 +4430,8 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.setWeapon(page, 'hammer');
   const sc11 = await api.rect(page, '#small-card');
   const scPt11 = { x: sc11.left + 12, y: sc11.top + 12 };
-  await page.evaluate((p) => { const a = window.__crashScreen; a.smashAt(p.x, p.y); a.smashAt(p.x, p.y); }, scPt11);
+  // SPEC-combat §C2: two hammer swings no longer finish the card (it carries its children) — swing until it goes
+  await page.evaluate((p) => { const a = window.__crashScreen; const el = document.getElementById('small-card'); for (let i = 0; i < 5 && !el.hasAttribute('data-crs-broken'); i++) a.smashAt(p.x, p.y); }, scPt11);
   const broken11 = await poll(() => api.broken(page, '#small-card'), 500, 15);
   await page.keyboard.press('r');
   await sleep(150);
@@ -4832,7 +4996,25 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   await sleep(80);
   await api.setWeapon(page, 'hammer');
   const bc943 = await api.rect(page, '#big-card');
-  await smashUntil(page, () => api.broken(page, '#big-card'), bc943.cx, bc943.cy, 6);
+  // SPEC-combat §C2: #big-card is a container, so its max now includes 0.6 × what it holds and a flat cap of
+  // 6 hammer swings no longer reaches it — the block then watched an empty floor and "nothing despawned"
+  // passed for the wrong reason. Derive the cap from the live number instead, with two swings of slack.
+  /* Two things changed under this setup and both made it watch an empty floor:
+   *   - SPEC-combat §C2 gave #big-card an aggregate max, and §C3 then MOVES that max while the swings land
+   *     (each child that breaks takes 0.6 × its own max off the parent). A hit count worked out once from
+   *     the starting number stops in the wrong place, so swing until it actually breaks instead.
+   *   - page.mouse.click() hit-tests the real cursor, and by this point in the block one of OUR OWN
+   *     overlay nodes (.crs-shield, left by the support-archetype section above) sits over the card, so
+   *     the clicks were landing on the shield. api.smashAt() aims at page coordinates directly, which is
+   *     what every other damage-delivery loop in this block already uses. */
+  const hp943 = await api.hpOf(page, '#big-card');
+  let hits943 = 0;
+  for (let i = 0; i < 40 && !(await api.broken(page, '#big-card')); i++) {
+    await api.smashAt(page, bc943.cx, bc943.cy);
+    hits943++;
+    await sleep(30);
+  }
+  check('A.v2 9.4.3 precondition: #big-card really broke, so the lifetime assertion below watches real debris and not an empty floor', (await api.broken(page, '#big-card')) === true, { hp943, hits943, hpAfter: await api.hpOf(page, '#big-card') });
   await poll(async () => { const s = await api.stats(page); return (s.pieceCount > 0 && s.pieces.every((p) => p.resting)) ? s : null; }, 4000, 60);
   const countAt0_943 = await api.count(page, '.crs-piece');
   // SPEC-test-speed §2/§3: the longest single wait in the suite, and a pure negative — "nothing despawns".
@@ -5350,8 +5532,17 @@ async function suiteB(browser, origin, contentCss, contentJs) {
   const bcB2 = await api.rect(page, '#big-card');
   await page.mouse.click(bcB2.left + 12, bcB2.top + 12);
   await sleep(250);
+  /* SPEC-combat §C2: one rocket (260) no longer clears the card's aggregate max, so the second round in the
+   * tube is fired too. What is under test here is unchanged — that all of this CSSOM-heavy fx runs at all
+   * under strict CSP + Trusted Types and really breaks the card. */
+  if (!(await api.broken(page, '#big-card'))) {
+    await ammoReady(page);
+    const bcB3 = await api.rect(page, '#big-card');
+    await page.mouse.click(bcB3.left + 12, bcB3.top + 12);
+    await sleep(250);
+  }
   const sB1 = await api.stats(page);
-  check('B.weapons: smg hold, katana drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rocket)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots] });
+  check('B.weapons: smg hold, katana drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rockets)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots] });
   // v1.2 nodes whose CSSOM styling would be the next to trip style-src / Trusted Types: the scope overlay plus the
   // 2× body transform, the sniper tracer, a hostile aura + orb, the player HUD and the KO overlay
   await api.restore(page);

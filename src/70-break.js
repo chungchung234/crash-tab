@@ -327,6 +327,10 @@
       if (state.hostiles.has(el)) hostileKilled(el, max);
       else if (state.combat) { state.player.score += Math.round(max / 4); updatePlayerHud(); }
     } catch (e) { state.lastError = String((e && e.stack) || e); }
+    /* SPEC-combat §C3: everything above this element just got weaker by 0.6 × what it was worth — and an
+     * ancestor that was already hurt that much goes down with it. Runs AFTER hideOriginal(), so a recount
+     * started from up there can no longer see what has just left. */
+    try { hpDescendantBroken(el, ix, iy, mode); } catch (e) { state.lastError = String((e && e.stack) || e); }
     kick();
     return made > 0;
   }
