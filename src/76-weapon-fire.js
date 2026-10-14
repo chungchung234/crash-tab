@@ -97,8 +97,13 @@
     const t = L2 > 0 ? clamp(((pxv - ax) * dx + (pyv - ay) * dy) / L2, 0, 1) : 0;
     return { x: ax + dx * t, y: ay + dy * t };
   }
-  function slashFx(x1, y1, x2, y2) {   // 160 ms bright streak along the segment
+  /* SPEC-destruction §D2: the streak is a CRESCENT that follows the blade's arc (0–180 ms), not a straight
+   * bright bar with saw teeth — see fracCrescent() in src/66-fracture.js. The straight bar is still what a
+   * slash with no curve gets, which in practice is only a degenerate zero-length segment. */
+  function slashFx(x1, y1, x2, y2) {
     if (!root) return;
+    const cu = fracGetCurve();
+    if (cu && fracCrescent(cu)) return;
     const n = mk('div', 'crs-slash-fx');
     const len = Math.hypot(x2 - x1, y2 - y1), a = Math.atan2(y2 - y1, x2 - x1);
     n.style.left = px(x1); n.style.top = px(y1); n.style.width = px(len); n.style.height = '4px';
@@ -111,25 +116,31 @@
     try { const an = trackAnim(n.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: 'ease-out', fill: 'forwards' })); an.addEventListener('finish', kill); } catch (e) { /* ignore */ }
     later(kill, 400);
   }
-  /* Slash (A8): samples every 24 px (both ends), unique targets (≤ 12) each take 60 × power (crit per element);
-   * a broken element splits in two along the slash line. Returns the number of elements damaged. */
-  function doSlash(x1, y1, x2, y2) {
+  /* Slash (A8 + SPEC-destruction §D2): the blade travels on a quadratic Bézier through the drag's start,
+   * middle and end, and the hit test samples THAT curve every 24 px. Unique targets (≤ 12) each take the
+   * katana's damage (crit per element); a broken element splits in two along the curve. Returns the number
+   * of elements damaged. */
+  function doSlash(x1, y1, x2, y2, mid) {
     state.shots++;
-    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
-    const angle = Math.atan2(dy, dx);
-    const n = Math.max(2, Math.ceil(len / 24) + 1);
+    const cu = fracSetCurve(fracMakeCurve(x1, y1, x2, y2, mid));
+    const angle = fracCurveAngle(cu, 0.5);
     const cache = new Map(), seen = new Set(), hits = [];
     const vw = viewW(), vh = viewH();
-    for (let i = 0; i < n && hits.length < 12; i++) {
-      const f = i / (n - 1), sx = x1 + dx * f, sy = y1 + dy * f;
-      if (sx < 0 || sy < 0 || sx > vw || sy > vh) continue;
-      const el = pickTarget(sx, sy, cache);
+    const samples = fracCurveSamples(cu, 24);   // §D2: 24 px along the curve, both ends included
+    for (const s of samples) {
+      if (hits.length >= 12) break;
+      if (s.x < 0 || s.y < 0 || s.x > vw || s.y > vh) continue;
+      const el = pickTarget(s.x, s.y, cache);
       if (el && !seen.has(el)) { seen.add(el); hits.push(el); }
     }
     interceptOrbsAlong(x1, y1, x2, y2, 18);   // v1.2 A9: orbs within 18 px of the segment pop; the page is still hit
     // roll every element's crit before any sound / effect (A4) so the swish can carry the crit sparkle
     const plan = hits.map((el) => { const crit = rollCrit('katana'); return { el, crit, dmg: rollDamage(WEAPONS.katana.damage, crit) }; });
-    sfx('swish', { crit: plan.some((p) => p.crit) });
+    /* §D2's three layers: the draw (metal on air), the air being cut, and — only when something was really
+     * cut — the ring of contact. Slicing thin air has no ring, and that difference is the whole feel. */
+    sfx('katanaDraw', { crit: plan.some((p) => p.crit) });
+    sfx('katanaAir');
+    if (plan.length) later(() => sfx('katanaRing', { gain: 0.9 }), 40);
     slashFx(x1, y1, x2, y2);
     drawSlash(x1, y1, x2, y2);
     shake('hammer', { amp: 3 });
@@ -146,6 +157,9 @@
       }
       applyHit(el, dmg, 'hammer', pv.x, pv.y, { crit, slash: true, pieces: 2, textSplit: false, splitLine: { angle, cx: pv.x, cy: pv.y }, toward: q });
     }
+    /* The curve belongs to ONE slash: everything that reads it — the crescent, the scar, the curved cut —
+     * has run by now, and a later break must not be cut along a slash that is over. */
+    later(() => { if (fracGetCurve() === cu) fracSetCurve(null); }, 0);
     return hits.length;
   }
   function fireBomb(x, y) {

@@ -5,6 +5,13 @@
     const dx = cx - ix, dy = cy - iy, dist = Math.hypot(dx, dy);
     const s = Math.sign(dx) || (Math.random() < 0.5 ? -1 : 1);
     let vx, vy, vr;
+    /* SPEC-destruction §B2: the weapon's own separation (implode · cleave · slide · burst · drop) answers
+     * first; `radial` and everything with no profile fall through to the v1 behaviour below, unchanged. */
+    const sep = opts && opts.sep;
+    if (sep && sep !== 'radial') {
+      const v = fracSeparation(sep, ix, iy, cx, cy, opts);
+      if (v) { if (opts && opts.word) { const k = 1 + 0.6 * (1 - Math.min(dist, 200) / 200); v.vx *= k; v.vy *= k; } v.dist = dist; return v; }
+    }
     if (mode === 'bomb') {
       const R = (opts && opts.radius) || BOMB_RADIUS;   // rocket passes 360 (A7)
       const sp = clamp(900 * (1 - dist / R) + 250, 250, 1100);
@@ -165,7 +172,12 @@
     readScroll(true);   // SPEC-material §4: ox/oy are anchor-frame, so report what is actually on screen
     return state.pieces.map((p) => {
       const b = pieceBox(p);
-      return { pid: p.pid, resting: !!p.resting, anchor: p.docAnchor ? 'document' : 'viewport', l: b.l, r: b.r, top: b.top, bottom: b.bottom };
+      /* SPEC-destruction §B/§C add `w`/`h` (the piece's own size, which never changes) and `cx`/`cy` (the
+       * centre it was BORN at). A reader comparing "the cell the blast went off in" with a far one, or the
+       * average distance of imploding debris, must not be fooled by how far each piece has since flown. */
+      return { pid: p.pid, resting: !!p.resting, anchor: p.docAnchor ? 'document' : 'viewport', l: b.l, r: b.r, top: b.top, bottom: b.bottom,
+        w: p.bb.maxX - p.bb.minX, h: p.bb.maxY - p.bb.minY, cx: viewOx(p) + p.cx, cy: viewOy(p) + p.cy, chip: !!p.chip, ash: !!p.ash,
+        vx: p.vx, vy: p.vy, vr: p.vr, rot: p.rot };
     });
   };
   /* Retire ONE identified piece on the next sweep, as if its §9.1 lifetime had just run out. §9.4.1 already
@@ -258,6 +270,17 @@
       }
     }
     kick();
+  }
+  /* SPEC-destruction §B4 `vaporise`: that share of a blast's debris never lands — it fades out over
+   * 400–700 ms WHILE STILL IN THE AIR, which is what stops a rocket from burying the page in rubble. The
+   * piece keeps being integrated the whole time; only its opacity is animated, and the node goes silently
+   * at the end (there is nothing left to watch fade a second time). */
+  function vaporisePiece(p) {
+    if (!p || !p.node) return;
+    p.vapour = true;
+    const dur = rand(400, 700);
+    try { trackAnim(p.node.animate([{ opacity: 1 }, { opacity: 1, offset: 0.35 }, { opacity: 0 }], { duration: dur, easing: 'ease-in', fill: 'forwards' })); } catch (e) { /* ignore */ }
+    later(() => { if (state.pieces.indexOf(p) >= 0) evictPieces([p], true); }, dur);
   }
   /* GPU cost (w·h·dpr², as addPiece charges it) of a batch of [node, p] pairs about to be added. */
   function batchGpu(nodes) {

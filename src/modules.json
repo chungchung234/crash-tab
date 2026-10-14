@@ -19,6 +19,7 @@
     "55-geometry.js",
     "60-clone.js",
     "65-pieces.js",
+    "66-fracture.js",
     "67-displace.js",
     "70-break.js",
     "71-weapon-helpers.js",

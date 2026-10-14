@@ -376,7 +376,12 @@ async function freshPage(browser, origin, contentCss, contentJs, opts = {}) {
   // that is injected and shimmed but not yet on.
   const on = opts.activate === false ? null : await page.evaluate(contentJs);
   if (opts.activate !== false && opts.debug !== false) {
-    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true });
+    /* `noPartial` (SPEC-destruction §C3): every block written before §C aims at an element's PADDING to
+     * reach the element itself rather than a child — which is now a `corner` / `edge` hit, so it sheds a
+     * plate and, after enough of them, converts to total destruction. Those blocks are about HP accounting,
+     * decal geometry and ammo, not about fracture, so they run with §C's partial destruction off — the same
+     * escape hatch `noInvuln` gives the pre-§B suites. The §A–§D block turns it back on for itself. */
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true, noPartial: true });
   }
   return { page, log, client, on };
 }
@@ -848,7 +853,8 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   // predates falloff and expects the flat, unreduced numbers) needs it off too; only SPEC-weapons §6 item 11
   // and the SPEC-combat-v2 §10.6 pierce block turn it back on locally to measure the real formula.
   let dbg = null;
-  try { dbg = await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true }); } catch (e) { dbg = String(e && e.message || e); }
+  // noPartial: see freshPage() — the pre-§C assertions below aim at card padding, which §C now reads as an edge hit
+  try { dbg = await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true, noPartial: true }); } catch (e) { dbg = String(e && e.message || e); }
   check('A.inject: api.debug noCrit / noCooldown / noSpread / noAttacks / fastReload / noFalloff set for the suite', dbg && dbg.noCrit === true && dbg.noCooldown === true && dbg.noSpread === true && dbg.noAttacks === true && dbg.fastReload === true && dbg.noFalloff === true, dbg);
   /* ── SPEC-crosshair §B2 / §A9 `showHpNumber` ────────────────────────────────────────────────────
    * §B2 moved the health readout off the element and under the crosshair, and took the NUMBERS away
@@ -1180,7 +1186,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const critText = await poll(async () => { const t = await api.dmgTexts(page); return t.includes('-' + 2 * DMG('hammer') + '!') ? t : null; }, 300, 15);
   check('A.crit 4: debug.forceCrit → hammer deals 130', c4.hp === c4.max - 2 * DMG('hammer'), c4);
   check('A.crit 4: a .crs-dmg with text "-130!" appears', !!critText, await api.dmgTexts(page));
-  const dbgReset = await api.debug(page, { forceCrit: false, noCrit: true });
+  const dbgReset = await api.debug(page, { forceCrit: false, noCrit: true, noPartial: true });
   check('A.crit 4: debug flags reset (forceCrit false, noCrit true)', dbgReset.forceCrit === false && dbgReset.noCrit === true, dbgReset);
   check('A.crit 4: stats().crits ≥ 1 after the forced crit', (await api.stats(page)).crits >= 1, (await api.stats(page)).crits);
 
@@ -1251,7 +1257,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.smg crit: a gold "-<sum>!" window number appears during a forced-crit smg hold', !!goldSeen, await api.dmgTexts(page));
   check('A.smg crit: the window sum is a multiple of the crit shot (44 = 22 × 2)', !!goldSeen && parseInt(goldSeen.slice(1), 10) % (2 * DMG('smg')) === 0, goldSeen);
   check('A.smg crit: stats().crits ≥ 1 (one per window) and arena lost ≥ 2 crit shots (≥ 88)', s6crit.crits >= 1 && h6c0.hp - h6c1.hp >= 2 * 2 * DMG('smg'), { crits: s6crit.crits, lost: h6c0.hp - h6c1.hp });
-  const dbg6 = await api.debug(page, { forceCrit: false, noCrit: true });
+  const dbg6 = await api.debug(page, { forceCrit: false, noCrit: true, noPartial: true });
   check('A.smg crit: debug flags reset (forceCrit false, noCrit true)', dbg6.forceCrit === false && dbg6.noCrit === true, dbg6);
 
   // (7) flame hold on the arena (+ flame.png during the hold)
@@ -1780,7 +1786,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const waitViewmodelIdle = (timeout) => poll(async () => { const s = await api.stats(page); return s.viewmodel === 'idle' ? s : null; }, timeout || 800, 20);
     const rOnV15 = await page.evaluate(contentJs);
     check('A.weapons 0: content.js reactivated for the v1.5 weapon/viewmodel/pierce block', rOnV15 === 'on', rOnV15);
-    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noPartial: true });
     await api.applyPreset(page, 'default');
     await api.setWeapon(page, 'hammer');
     await api.restore(page);
@@ -2458,7 +2464,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const katanaCritChance = (W.byId.katana && typeof W.byId.katana.critChance === 'number') ? W.byId.katana.critChance : SPEC_STATS.katana.critChance;
     const critRate10 = crit10.hits / 200;
     check(`A.weapons 10: katana crit rate over 200 hits (seeded RNG, no debug.forceCrit) is ${katanaCritChance.toFixed(2)} ± 0.08`, Math.abs(critRate10 - katanaCritChance) <= 0.08, { seed: '0x' + CRIT_SEED.toString(16), crit10, critRate10, katanaCritChance });
-    await api.debug(page, { noCrit: true, forceCrit: false });
+    await api.debug(page, { noCrit: true, forceCrit: false, noPartial: true });
     await api.restore(page);
 
     // ---- (11) falloff: pistol hit near screen-centre vs far from it does different damage (±1 of the
@@ -2504,7 +2510,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     // SPEC-combat-v2 §10.6 items 5-6 — pierce / "explosions ignore cover" on the new overlapping
     // #pierce-front / #pierce-back fixture pair (test/fixture.html).
     // =============================================================================================
-    await api.debug(page, { noCrit: true, infiniteAmmo: true, noCooldown: true, noSpread: true });
+    await api.debug(page, { noCrit: true, infiniteAmmo: true, noCooldown: true, noSpread: true, noPartial: true });
     await api.restore(page);
     const rFrontP = await api.rect(page, '#pierce-front');
     const rBackP = await api.rectNoScroll(page, '#pierce-back');
@@ -2606,7 +2612,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     // ends on its Escape test, which leaves content.js INACTIVE with zero nodes. suiteA14 used to sit in
     // between and reactivate as a side effect; with it lifted out, this block reactivates for itself.
     if (!(await api.active(page))) await page.evaluate(contentJs);
-    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true });
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true, noPartial: true });
     await page.evaluate(() => window.scrollTo(0, 0));
     await api.restore(page);
     await api.setWeapon(page, 'pistol');
@@ -2766,7 +2772,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check('A.material 6: re-activation comes back with no viewport canvas and no stale decal', on6 === 'on' && !(await api.has(page, '.crs-canvas')) && (await api.count(page, '.crs-decal')) === 0, on6);
 
     // back to the state suiteA14 handed over
-    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
+    await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noPartial: true });
     await api.setWeapon(page, 'hammer');
     await api.restore(page);
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -4758,7 +4764,7 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   // re-activate for the v1 blocks that follow (A.escape 16 needs an active page)
   const rOn = await page.evaluate(contentJs);
   check('A.exit 12: re-evaluating content.js after the exit → "on" again', rOn === 'on', rOn);
-  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false });
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noPartial: true });
   await api.applyPreset(page, 'default');
   await api.setWeapon(page, 'hammer');
   await api.restore(page);
@@ -4822,7 +4828,7 @@ async function combatSetup(browser, origin, contentCss, contentJs, label) {
    * be off by name — the same escape hatch they already use for noAttacks / noRepair / noFalloff. It is
    * re-set after every page.evaluate(contentJs) below, because a reactivation builds a fresh debug object.
    * §B's own behaviour is asserted at the END of this block ("적만 피해"), with the rule explicitly ON. */
-  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noPartial: true });
   await page.evaluate(() => window.scrollTo(0, 0));
   await api.restore(page);
   await sleep(80);
@@ -4864,7 +4870,7 @@ async function combatTeardown(ctx) {
   const { h, page, label, setCombatMode } = ctx;
   // ---- tidy up: back to the block's baseline mode/weapon/debug flags before the evidence tally ----
   await setCombatMode('rampage');
-  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: false });
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: false, noPartial: true });
   await api.setWeapon(page, 'hammer');
   await api.restore(page);
   await sleep(100);
@@ -5139,7 +5145,7 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   check('A.v2 7.12: Escape with avatar/lock/repair all live → inactive, zero [data-crs] nodes, zero timers, zero animation frames', inactive12v2 === true && nodes12v2 === 0 && pend12v2 === 0 && raf12v2 === 0, { inactive12v2, nodes12v2, pend12v2, raf12v2 });
   const rOn12v2 = await page.evaluate(contentJs);
   check('A.v2 7.12: content.js reactivates cleanly afterwards', rOn12v2 === 'on', rOn12v2);
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true });   // §B escape hatch — see the block header
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true, noPartial: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
 
@@ -5195,7 +5201,7 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   // §9.4 — debris auto-despawn (SPEC-combat-v2 §9)
   // =======================================================================================
   await setCombatMode('rampage');
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true });   // §B escape hatch — see the block header
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true, noPartial: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
 
@@ -5234,7 +5240,7 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   const off943 = await page.evaluate(contentJs);
   const on943 = await page.evaluate(contentJs);
   check('A.v2 9.4.3: toggled off/on after setting crsDebrisLifeMs = 0 in storage so loadPrefs() re-reads it', off943 === 'off' && on943 === 'on', { off943, on943 });
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true });   // §B escape hatch — see the block header
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true, noPartial: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
   await api.setWeapon(page, 'hammer');
@@ -5273,7 +5279,7 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   await page.evaluate(() => { window.__crsStore.crsDebrisLifeMs = 6000; });
   await page.evaluate(contentJs);
   await page.evaluate(contentJs);
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true });   // §B escape hatch — see the block header
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noInvuln: true, noPartial: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
 
@@ -5417,7 +5423,499 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   check('A.v2 9.4.6: Escape while debris fade-out animations are in flight still leaves zero [data-crs] nodes, timers and animation frames', inactive946 === true && nodes946 === 0 && pend946 === 0 && raf946 === 0, { fadingSeenBefore: fadingSeen946, inactive946, nodes946, pend946, raf946 });
   const rOn946 = await page.evaluate(contentJs);
   check('A.v2 9.4.6: content.js reactivates cleanly afterwards', rOn946 === 'on', rOn946);
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true });   // §B escape hatch — see the block header
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true, noPartial: true });   // §B escape hatch — see the block header
+  await api.restore(page);
+  await sleep(80);
+
+  // =======================================================================================
+  // SPEC-destruction §A–§D — 누적 데칼 · 무기별 분해 · 타격 지점 · 카타나 베기
+  // The ONE section in the whole suite that runs with §C's partial destruction ON: every other block
+  // asks for `noPartial` because it aims at an element's padding to reach the element itself, which §C
+  // now reads as an edge hit. Here that IS the subject.
+  // =======================================================================================
+  await setCombatMode('rampage');
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: true, noRepair: true, noFalloff: true, noInvuln: true, noPartial: false });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await api.restore(page);
+  await sleep(80);
+
+  /* Reads back ONE element's decal bitmap: how many canvases are laid over it, how many pixels carry any
+   * ink at all, their mean alpha, and the bounding box of the inked pixels. §A's claims are all about how
+   * that bitmap GROWS, so they are measured on the bitmap and not on a screenshot. */
+  const decalInk = (sel) => page.evaluate((s) => {
+    const el = document.querySelector(s);
+    const r = el.getBoundingClientRect();
+    const list = [...document.querySelectorAll('.crs-decal')].filter((c) => {
+      const b = c.getBoundingClientRect();
+      return Math.abs(b.left - r.left) <= 2 && Math.abs(b.top - r.top) <= 2 && Math.abs(b.width - r.width) <= 2;
+    });
+    if (!list.length) return { canvases: 0, ink: 0, alpha: 0, coverage: 0, boxW: 0, boxH: 0 };
+    const c = list[0];
+    let d;
+    try { d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; } catch (e) { return { canvases: list.length, ink: -1 }; }
+    let n = 0, sum = 0, minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
+    const W = c.width;
+    for (let i = 3, k = 0; i < d.length; i += 4, k++) {
+      if (d[i] <= 8) continue;
+      n++; sum += d[i];
+      const x = k % W, y = (k - x) / W;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    const total = c.width * c.height;
+    return { canvases: list.length, ink: n, alpha: n ? sum / n : 0, coverage: n / total,
+      boxW: maxX < 0 ? 0 : (maxX - minX + 1) / c.width, boxH: maxY < 0 ? 0 : (maxY - minY + 1) / c.height };
+  }, sel);
+  const remainOf = (sel) => page.evaluate((s) => {
+    const d = window.__crashScreen.debug;
+    return typeof d.remainOf === 'function' ? d.remainOf(document.querySelector(s)) : 'missing:remainOf';
+  }, sel);
+  const clipOf = (sel) => page.evaluate((s) => document.querySelector(s).style.getPropertyValue('clip-path'), sel);
+  const zoneOf = (sel, x, y) => page.evaluate((s, a, b) => {
+    const d = window.__crashScreen.debug;
+    return typeof d.hitZone === 'function' ? d.hitZone(document.querySelector(s), a, b) : 'missing:hitZone';
+  }, sel, x, y);
+
+  // ---- §A (1) a mark is made once and then ACCUMULATES on the same canvas --------------------------
+  await api.setWeapon(page, 'pistol');
+  const dcImg = await api.rect(page, '#demo-img');
+  await api.smashAt(page, dcImg.cx, dcImg.cy);
+  await poll(async () => (await api.count(page, '.crs-decal')) > 0, 2000, 25);
+  await sleep(160);
+  const inkA1 = await decalInk('#demo-img');
+  await api.smashAt(page, dcImg.cx + 10, dcImg.cy + 8);
+  await sleep(200);
+  const inkA2 = await decalInk('#demo-img');
+  check('A.destr §A1: 첫 피해에 요소의 데칼 1개가 생기고, 추가 타격에도 캔버스는 여전히 1개이며 비투명 픽셀이 늘어난다',
+    inkA1.canvases === 1 && inkA2.canvases === 1 && inkA1.ink > 0 && inkA2.ink > inkA1.ink, { inkA1, inkA2 });
+  check('A.destr §A1: 파괴되면 그 요소의 데칼이 사라진다 (조각이 자국을 가져간다)',
+    await (async () => { await api.setWeapon(page, 'axe'); await api.smashAt(page, dcImg.cx, dcImg.cy); await poll(() => api.broken(page, '#demo-img'), 1200); await sleep(80); return (await decalInk('#demo-img')).canvases === 0; })(), await decalInk('#demo-img'));
+
+  // ---- §A (2) 망치 자국과 화염 자국은 평균 알파와 바운딩 박스로 구분된다 ---------------------------
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'hammer');
+  const gl = await api.rect(page, '#mat-gap-left');
+  const gr = await api.rectNoScroll(page, '#mat-gap-right');
+  await api.smashAt(page, gl.cx, gl.cy);
+  await sleep(200);
+  const inkHammer = await decalInk('#mat-gap-left');
+  await api.setWeapon(page, 'flame');
+  for (let i = 0; i < 4 && !(await api.broken(page, '#mat-gap-right')); i++) { await api.smashAt(page, gr.cx, gr.cy); await sleep(60); }
+  await sleep(450);   // the hit makes the element itself wobble for 260 ms; the decal settles onto it after
+  const inkFlame = await decalInk('#mat-gap-right');
+  /* The discriminator the spec names is "평균 알파와 바운딩 박스". On a 220 × 160 panel a hammer's web
+   * reaches almost every edge, so the bounding BOX alone does not separate the two — what does is how much
+   * of that box is actually inked: the flame chars every pixel of the element, the hammer only the strands
+   * of its web. Mean alpha separates them a second time, in the other direction. */
+  check('A.destr §A2: 망치 자국과 화염 자국이 칠해진 면적과 평균 알파로 구분된다 (화염은 요소 전체를 그을리고 망치는 타격점 둘레만 금 간다)',
+    inkHammer.ink > 0 && inkFlame.ink > 0 && inkFlame.coverage > 0.9 && inkHammer.coverage < 0.6
+      && inkFlame.boxW > 0.95 && inkFlame.boxH > 0.95
+      && Math.abs(inkFlame.alpha - inkHammer.alpha) > 5,
+    { inkHammer, inkFlame, flameBroken: await api.broken(page, '#mat-gap-right') });
+
+  // ---- §B4 분해 방식: 무기마다 조각 수가 다르다 ----------------------------------------------------
+  await api.restore(page);
+  await sleep(80);
+  const destr = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    if (typeof d.destructionOf !== 'function') return 'missing:destructionOf';
+    const out = {};
+    for (const id of ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse']) out[id] = d.destructionOf(id);
+    return out;
+  });
+  check('A.destr §B4: WEAPONS[id].destruction 이 명세의 표 그대로다 (모양 · 분리 · 마감 · 입자 · 지연 · 소멸)',
+    !!destr && destr.axe.shape === 'half' && destr.axe.separation === 'cleave' && destr.axe.delayMs === 60
+      && destr.katana.shape === 'half' && destr.katana.separation === 'slide' && destr.katana.delayMs === 140 && destr.katana.particles === 'none'
+      && destr.pistol.separation === 'implode' && destr.smg.shape === 'strip' && destr.sniper.shape === 'half'
+      && destr.bomb.shape === 'wedge' && destr.bomb.finish === 'scorch' && Math.abs(destr.bomb.vaporise - 0.15) < 1e-9
+      && destr.rocket.shape === 'shard' && destr.rocket.finish === 'ember' && Math.abs(destr.rocket.vaporise - 0.30) < 1e-9
+      && destr.flame.shape === 'ash' && destr.flame.finish === 'char' && Math.abs(destr.flame.vaporise - 0.25) < 1e-9
+      && destr.collapse.shape === 'slab' && destr.collapse.separation === 'drop', destr);
+
+  // 도끼 2조각 · 회전 부호가 서로 반대
+  await api.setWeapon(page, 'axe');
+  const axeImg = await api.rect(page, '#demo-img');
+  const axeOut = await page.evaluate((x, y) => {
+    const a = window.__crashScreen;
+    a.smashAt(x, y, 'axe');
+    return { broken: document.querySelector('#demo-img').hasAttribute('data-crs-broken'),
+      pieces: a.stats().lastBreakPieces,
+      vr: a.debug.pieceBoxes().filter((b) => !b.chip && !b.ash).map((b) => b.vr) };
+  }, axeImg.cx, axeImg.cy);
+  check('A.destr §B4: 도끼는 정확히 2조각으로 쪼개지고 §B2 cleave — 두 반쪽의 회전 부호가 반대다',
+    axeOut.broken === true && axeOut.pieces === 2 && axeOut.vr.length === 2
+      && axeOut.vr[0] !== 0 && axeOut.vr[1] !== 0 && Math.sign(axeOut.vr[0]) === -Math.sign(axeOut.vr[1]), axeOut);
+
+  // 카타나 2조각
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'katana');
+  const katImg = await api.rect(page, '#demo-img');
+  // 60 a cut against the image's ~101 hp: the first slash only wounds it, the second is the one that splits it
+  await api.slash(page, katImg.left - 30, katImg.cy - 20, katImg.right + 30, katImg.cy + 20);
+  await sleep(260);
+  await api.slash(page, katImg.left - 30, katImg.cy - 20, katImg.right + 30, katImg.cy + 20);
+  const katBroken = await poll(() => api.broken(page, '#demo-img'), 1200);
+  const katPieces = (await api.stats(page)).lastBreakPieces;
+  check('A.destr §B4: 카타나 베기도 정확히 2조각이다', katBroken === true && katPieces === 2, { katBroken, katPieces });
+
+  // 로켓 6~8 — 폭발은 여러 요소를 한꺼번에 부수므로 이미지가 부서지는 바로 그 순간의 값을 읽는다
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'rocket');
+  const rkImg = await api.rect(page, '#demo-img');
+  await page.evaluate(() => {
+    window.__rkPieces = null; window.__rkTrail = 0;
+    const el = document.querySelector('#demo-img');
+    const mo = new MutationObserver(() => {
+      if (window.__rkPieces == null && el.hasAttribute('data-crs-broken')) { window.__rkPieces = window.__crashScreen.stats().lastBreakPieces; mo.disconnect(); }
+    });
+    mo.observe(el, { attributes: true, attributeFilter: ['data-crs-broken'] });
+    const mo2 = new MutationObserver(() => { window.__rkTrail = Math.max(window.__rkTrail, document.querySelectorAll('.crs-trail').length); });
+    mo2.observe(document.documentElement, { childList: true, subtree: true });
+    window.__rkStop = () => { try { mo.disconnect(); mo2.disconnect(); } catch (e) { /* ignore */ } };
+  });
+  await api.smashAt(page, rkImg.cx, rkImg.cy);
+  await poll(() => api.broken(page, '#demo-img'), 1500);
+  await sleep(120);
+  const rkPieces = await page.evaluate(() => window.__rkPieces);
+  const rkTrailPeak = await page.evaluate(() => window.__rkTrail);
+  const rkEmber = await page.evaluate(() => [...document.querySelectorAll('.crs-piece .crs-clip')].filter((n) => /brightness/.test(n.style.filter)).length);
+  await sleep(1000);
+  const rkTrailAfter = await api.count(page, '.crs-trail');
+  await page.evaluate(() => { if (window.__rkStop) window.__rkStop(); });
+  check('A.destr §B4: 로켓은 6~8 파편을 낸다 (§C4 타격점 편향 격자 + 터진 셀 한 번 더 분할)', rkPieces >= 6 && rkPieces <= 8, { rkPieces });
+  check('A.destr §B3: 로켓 조각에 ember 마감(brightness 필터)이 걸리고 .crs-trail 불꼬리를 만들었다가 1초 안에 치운다',
+    rkEmber >= 1 && rkTrailPeak >= 1 && rkTrailAfter === 0, { rkEmber, rkTrailPeak, rkTrailAfter });
+
+  // 폭탄: scorch 마감 (brightness 필터)
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'bomb');
+  const bmImg = await api.rect(page, '#demo-img');
+  await api.smashAt(page, bmImg.cx, bmImg.cy);
+  await poll(() => api.broken(page, '#demo-img'), 1500);
+  await sleep(60);
+  const bombFilters = await page.evaluate(() => [...document.querySelectorAll('.crs-piece .crs-clip')].map((n) => n.style.filter).filter(Boolean));
+  check('A.destr §B3: 폭탄 조각에 scorch 마감 brightness(.82) saturate(.75) 가 걸려 있다',
+    bombFilters.some((f) => /brightness\(\.?0?\.82\)/.test(f) && /saturate/.test(f)), bombFilters.slice(0, 4));
+
+  // 화염: 8~16px 잿조각 18~30개
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'flame');
+  const flImg = await api.rect(page, '#demo-img');
+  for (let i = 0; i < 12 && !(await api.broken(page, '#demo-img')); i++) { await api.smashAt(page, flImg.cx, flImg.cy); await sleep(40); }
+  await sleep(80);
+  const ashOut = await page.evaluate(() => {
+    const bs = window.__crashScreen.debug.pieceBoxes().filter((b) => b.ash);
+    return { n: bs.length, max: bs.reduce((m, b) => Math.max(m, b.w, b.h), 0), min: bs.reduce((m, b) => Math.min(m, b.w, b.h), 999) };
+  });
+  check('A.destr §B4: 화염방사기는 20px 미만 잿조각 18~30개를 남긴다 (ash · drop)',
+    ashOut.n >= 18 && ashOut.n <= 30 && ashOut.max < 20 && ashOut.min >= 7, ashOut);
+
+  // 붕괴: 1~2 덩어리
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'collapse');
+  const clPt = await api.rect(page, '#stack-2');
+  await api.smashAt(page, clPt.cx, clPt.cy);
+  await poll(async () => (await api.stats(page)).broken >= 2, 2500, 40);
+  const clPieces = (await api.stats(page)).lastBreakPieces;
+  check('A.destr §B4: 붕괴는 요소당 1~2 덩어리로 떨어진다 (slab · drop)', clPieces >= 1 && clPieces <= 2, { clPieces });
+
+  // ---- §B2 implode: 권총 조각은 120ms 안에 타격점 쪽으로 빨려든다 ----------------------------------
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'pistol');
+  const ipImg = await api.rect(page, '#demo-img');
+  // 마지막 한 발만 남기고 깎아 둔다 — 부서지는 그 발의 조각을 재야 한다
+  for (let i = 0; i < 12 && !(await api.broken(page, '#demo-img')); i++) {
+    const hp = await api.hpOf(page, '#demo-img');
+    if (hp.hp <= DMG14('pistol')) break;
+    await api.smashAt(page, ipImg.cx, ipImg.cy);
+    await sleep(40);
+  }
+  /* Measured INSIDE the page across requestAnimationFrame: a piece moves every frame, and a pair of CDP
+   * round trips would put tens of milliseconds of its flight between the two readings. */
+  const implode = await page.evaluate((x, y) => new Promise((resolve) => {
+    const a = window.__crashScreen;
+    const mean = () => {
+      const bs = a.debug.pieceBoxes().filter((b) => !b.chip && !b.ash);
+      if (!bs.length) return null;
+      let s = 0;
+      for (const b of bs) s += Math.hypot((b.l + b.r) / 2 - x, (b.top + b.bottom) / 2 - y);
+      return { n: bs.length, d: s / bs.length };
+    };
+    a.smashAt(x, y, 'pistol');
+    const d0 = mean(), t0 = performance.now();
+    const step = () => {
+      const dt = performance.now() - t0;
+      if (dt >= 120) { resolve({ d0, d1: mean(), dt }); return; }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }), ipImg.cx, ipImg.cy);
+  check('A.destr §B2 implode: 권총 조각은 120ms 안에 타격점까지의 평균 거리가 생성 시점보다 작아진다',
+    !!implode.d0 && !!implode.d1 && implode.d0.n >= 2 && implode.d1.d < implode.d0.d, implode);
+
+  // ---- §D2 slide: 카타나는 delayMs 동안 가만히 있다가 베기 각도 ±25도로 미끄러진다 ------------------
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'katana');
+  const slImg = await api.rect(page, '#demo-img');
+  await api.slash(page, slImg.left - 30, slImg.cy - 18, slImg.right + 30, slImg.cy + 18);   // wound it first
+  await sleep(300);
+  const slide = await page.evaluate((x1, y1, x2, y2) => new Promise((resolve) => {
+    const a = window.__crashScreen;
+    const snap = () => a.debug.pieceBoxes().filter((b) => !b.chip && !b.ash).map((b) => ({ pid: b.pid, x: (b.l + b.r) / 2, y: (b.top + b.bottom) / 2 }));
+    a.slash(x1, y1, x2, y2);
+    const p0 = snap(), t0 = performance.now();
+    let at100 = null;
+    const step = () => {
+      const dt = performance.now() - t0;
+      if (!at100 && dt >= 100) at100 = { dt, s: snap() };
+      if (dt >= 195) { resolve({ p0, at100, at200: { dt, s: snap() }, chordDeg: Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI }); return; }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }), slImg.left - 30, slImg.cy - 18, slImg.right + 30, slImg.cy + 18);
+  const slideMoved = (a, b) => {
+    const by = new Map(b.map((q) => [q.pid, q]));
+    return a.map((p) => { const q = by.get(p.pid); return q ? { dx: q.x - p.x, dy: q.y - p.y } : null; }).filter(Boolean);
+  };
+  const mv100 = slide.at100 ? slideMoved(slide.p0, slide.at100.s) : [];
+  const mv200 = slideMoved(slide.p0, slide.at200.s);
+  const offAxis = mv200.map((m) => angDist(Math.atan2(m.dy, m.dx) * 180 / Math.PI, slide.chordDeg)).map((d) => Math.min(d, 180 - d));
+  check('A.destr §D2: 카타나 두 조각은 delayMs(140ms) 동안 전혀 움직이지 않는다',
+    slide.p0.length === 2 && mv100.length === 2 && mv100.every((m) => Math.hypot(m.dx, m.dy) <= 1.5), { p0: slide.p0.length, at100: slide.at100 && slide.at100.dt, mv100 });
+  check('A.destr §D2: 그 뒤 절단면을 따라 베기 각도 ±25도 안으로 미끄러진다',
+    mv200.length === 2 && mv200.every((m) => Math.hypot(m.dx, m.dy) >= 3) && offAxis.every((d) => d <= 25), { mv200, offAxis, chordDeg: slide.chordDeg, dt: slide.at200.dt });
+
+  // ---- §D2 곡선 · 초승달 잔상 · 어두운 칼자국 -------------------------------------------------------
+  await api.restore(page);
+  await sleep(120);
+  const slashSeen = await page.evaluate((x1, y1, x2, y2) => new Promise((resolve) => {
+    const out = { crescent: 0, ticks: -1, curve: null, scarAt60: 0, scarAt300: 0 };
+    const a = window.__crashScreen;
+    const mo = new MutationObserver(() => {
+      const n = document.querySelectorAll('.crs-slash-fx').length;
+      if (n > out.crescent) {
+        out.crescent = n;
+        const fx = document.querySelector('.crs-slash-fx');
+        if (fx) out.ticks = fx.querySelectorAll('svg path').length;
+      }
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    a.slash(x1, y1, x2, y2);
+    out.curve = a.debug.slashCurve ? a.debug.slashCurve() : null;
+    const ink = () => {
+      const c = document.querySelector('.crs-decal');
+      if (!c) return 0;
+      try {
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++;
+        return n;
+      } catch (e) { return -1; }
+    };
+    setTimeout(() => { out.scarAt60 = ink(); }, 60);
+    setTimeout(() => { mo.disconnect(); out.scarAt300 = ink(); resolve(out); }, 320);
+  }), 0, 0, 0, 0);
+  // a zero-length "slash" is a stab, and a stab leaves a mark of its own — the scar timing below counts
+  // decal ink across the whole page, so that probe's own ink is cleared before the real slash runs
+  await api.restore(page);
+  await sleep(120);
+  const bcS = await api.rect(page, '#big-card');
+  const scS = await api.rectNoScroll(page, '#small-card');
+  const slashReal = await page.evaluate((x1, y1, x2, y2) => new Promise((resolve) => {
+    const a = window.__crashScreen;
+    const out = { crescent: 0, paths: -1, straightBars: 0, curve: null, scarAt60: 0, scarAt300: 0 };
+    const mo = new MutationObserver(() => {
+      const list = [...document.querySelectorAll('.crs-slash-fx')];
+      if (list.length > out.crescent) {
+        out.crescent = list.length;
+        out.paths = list[0].querySelectorAll('svg path').length;
+        out.straightBars += list.filter((n) => !n.querySelector('svg')).length;
+      }
+    });
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    a.slash(x1, y1, x2, y2);
+    out.curve = a.debug.slashCurve ? a.debug.slashCurve() : null;
+    const ink = () => {
+      let n = 0;
+      for (const c of document.querySelectorAll('.crs-decal')) {
+        try {
+          const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+          for (let i = 3; i < d.length; i += 4) if (d[i] > 8) n++;
+        } catch (e) { return -1; }
+      }
+      return n;
+    };
+    setTimeout(() => { out.scarAt60 = ink(); }, 60);
+    setTimeout(() => { mo.disconnect(); out.scarAt300 = ink(); resolve(out); }, 320);
+  }), bcS.left + 40, bcS.top + 60, scS.left + 40, scS.top + 120);
+  check('A.destr §D2: 베기 궤적은 직선 막대가 아니라 곡선을 따르는 초승달 잔상이다 (SVG path 1개, 수직 눈금 없음)',
+    slashReal.crescent >= 1 && slashReal.paths === 1 && slashReal.straightBars === 0, slashReal);
+  check('A.destr §D2: 베기 곡선은 2차 베지어이고 제어점이 현에서 벗어나 있다 (중간점을 수직으로 밀어 호를 만든다)',
+    !!slashReal.curve && (() => {
+      const c = slashReal.curve;
+      const mx = (c.x1 + c.x2) / 2, my = (c.y1 + c.y2) / 2;
+      return Math.hypot(c.cx - mx, c.cy - my) > 2;
+    })(), slashReal.curve);
+  check('A.destr §D2: 칼자국은 180ms 뒤에 나타난다 — 60ms 에는 데칼에 잉크가 없고 300ms 에는 있다',
+    slashReal.scarAt60 === 0 && slashReal.scarAt300 > 0, { at60: slashReal.scarAt60, at300: slashReal.scarAt300 });
+  check('A.destr §D2: 허공을 그은 베기(0 길이)는 찌르기로 처리되어 베기 잔상을 만들지 않는다', slashSeen.crescent === 0, slashSeen);
+
+  // ---- §C2 / §C3 타격 지점 ------------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'pistol');
+  const cImg = await api.rect(page, '#demo-img');
+  const zCorner = await zoneOf('#demo-img', cImg.left + 6, cImg.top + 6);
+  const zEdge = await zoneOf('#demo-img', cImg.cx, cImg.top + 6);
+  const zCentre = await zoneOf('#demo-img', cImg.cx, cImg.cy);
+  check('A.destr §C2: 타격 구역이 모서리 · 변 · 가운데로 갈린다', zCorner === 'corner' && zEdge === 'edge' && zCentre === 'center', { zCorner, zEdge, zCentre });
+
+  const debris0 = await api.count(page, '.crs-debris');
+  await api.smashAt(page, cImg.left + 6, cImg.top + 6);
+  await sleep(120);
+  const cutCorner = await page.evaluate(() => window.__crashScreen.debug.lastCut);
+  const stCorner = await api.stats(page);
+  const clipCorner = await clipOf('#demo-img');
+  const debrisCorner = await api.count(page, '.crs-debris');
+  check('A.destr §C3: 모서리 타격은 data-crs-broken 없이 인라인 clip-path 를 걸고 stats().partial === 1 이며 조각 면적이 원본의 45% 미만이다',
+    (await api.broken(page, '#demo-img')) === false && /^polygon\(/.test(clipCorner) && stCorner.partial === 1
+      && !!cutCorner && cutCorner.zone === 'corner' && cutCorner.fallen < 0.45 && debrisCorner === debris0 + 1,
+    { clipCorner: clipCorner.slice(0, 60), partial: stCorner.partial, cutCorner, debris0, debrisCorner });
+
+  await api.restore(page);
+  await sleep(120);
+  const cImg2 = await api.rect(page, '#demo-img');
+  const debrisC0 = await api.count(page, '.crs-debris');
+  await api.smashAt(page, cImg2.cx, cImg2.cy);
+  await sleep(120);
+  const stCentre = await api.stats(page);
+  const clipCentre = await clipOf('#demo-img');
+  check('A.destr §C3: 같은 요소라도 한가운데 타격은 조각도 clip-path 도 남기지 않는다 — 어디를 때리느냐가 결과를 가른다',
+    stCentre.partial === 0 && clipCentre === '' && (await api.count(page, '.crs-debris')) === debrisC0 && (await api.broken(page, '#demo-img')) === false,
+    { partial: stCentre.partial, clipCentre, debrisC0, now: await api.count(page, '.crs-debris') });
+
+  // 변 타격: 떨어진 판의 바운딩 박스가 그 변에 2px 이내로 접한다
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'hammer');
+  const eImg = await api.rect(page, '#demo-img');
+  const edgeOut = await page.evaluate((x, y, sel) => {
+    const a = window.__crashScreen;
+    const before = a.debug.pieceBoxes().length;
+    a.smashAt(x, y);
+    const made = a.debug.pieceBoxes().slice(before).filter((b) => !b.chip && !b.ash);
+    const r = document.querySelector(sel).getBoundingClientRect();
+    return { made, top: r.top, left: r.left, right: r.right, bottom: r.bottom, cut: a.debug.lastCut };
+  }, eImg.cx, eImg.top + 6, '#demo-img');
+  check('A.destr §C3: 변 타격은 그 변을 따라 판을 떨어뜨린다 — 조각 바운딩 박스가 그 변에 2px 이내로 접한다',
+    !!edgeOut.cut && edgeOut.cut.zone === 'edge' && edgeOut.made.length === 1 && Math.abs(edgeOut.made[0].top - edgeOut.top) <= 2,
+    { cut: edgeOut.cut, pieceTop: edgeOut.made[0] && edgeOut.made[0].top, elTop: edgeOut.top });
+
+  // 반복하면 remain 면적이 단조 감소하고 상한에서 전체 파괴로 전환된다
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'pistol');
+  const ratios = [];
+  let convertedAtHp = null, convertedCuts = null;
+  /* Walk around the four sides. A cut takes the near strip away AND stops hit-testing over it, so the next
+   * shot on that side has to land deeper in — which is exactly why each side is only good for a couple of
+   * cuts and why the 8-cut budget is spent by going round. */
+  for (const side of ['top', 'right', 'bottom', 'left', 'top', 'right', 'bottom', 'left']) {
+    const r = await api.rect(page, '#boss');   // scrolls it to the middle of the viewport: it lives far below the fold
+
+    const rm = await remainOf('#boss');
+    const b = (rm && rm.box) || { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+    const pad = 0.02;
+    let fx, fy;
+    if (side === 'top') { fx = 0.5; fy = b.minY + pad; }
+    else if (side === 'bottom') { fx = 0.5; fy = b.maxY - pad; }
+    else if (side === 'left') { fx = b.minX + pad; fy = 0.5; }
+    else { fx = b.maxX - pad; fy = 0.5; }
+    const hpBefore = (await api.hpOf(page, '#boss')).hp;
+    await api.smashAt(page, r.left + r.width * fx, r.top + r.height * fy);
+    await sleep(60);
+    if (await api.broken(page, '#boss')) { convertedAtHp = hpBefore; convertedCuts = (ratios.length + 1); break; }
+    const after = await remainOf('#boss');
+    if (after && typeof after.ratio === 'number') ratios.push(Number(after.ratio.toFixed(4)));
+  }
+  const strictlyDown = ratios.length >= 3 && ratios.every((v, i) => i === 0 ? v < 1 : v < ratios[i - 1]);
+  check('A.destr §C3: 같은 요소를 반복해 모서리·변으로 깎으면 remain 면적이 단조 감소한다', strictlyDown, ratios);
+  check('A.destr §C3: 절단 상한(8회)에 닿으면 체력이 남아 있어도 전체 파괴로 전환된다',
+    convertedAtHp !== null && convertedAtHp > 0 && convertedCuts <= 8 && (await api.stats(page)).partial === 0,
+    { ratios, convertedAtHp, convertedCuts, partial: (await api.stats(page)).partial });
+
+  // ---- §C4 폭발 격자: 터진 자리가 가장 잘게 부서진다 ------------------------------------------------
+  const grid = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    if (typeof d.gridCells !== 'function') return 'missing:gridCells';
+    const runs = [];
+    for (let k = 0; k < 24; k++) {
+      const cells = d.gridCells(600, 400, 3, 2, 60, 50);   // impact deep in the top-left cell
+      let near = null, far = null;
+      for (const c of cells) {
+        const dist = Math.hypot(c.cx - 60, c.cy - 50);
+        if (!near || dist < near.d) near = { d: dist, area: c.area };
+        if (!far || dist > far.d) far = { d: dist, area: c.area };
+      }
+      runs.push({ n: cells.length, near: near.area, far: far.area });
+    }
+    return { n: runs[0].n, worse: runs.filter((r) => !(r.near < r.far)).length, sample: runs[0] };
+  });
+  check('A.destr §C4: 폭발 격자가 타격점으로 당겨지고 터진 셀이 한 번 더 쪼개진다 — 24회 모두 타격점 셀 조각이 가장 먼 셀보다 작다',
+    !!grid && grid.worse === 0 && grid.n === 7, grid);
+  const gridPlain = await page.evaluate(() => window.__crashScreen.debug.gridCells(600, 400, 3, 2, NaN, NaN).length);
+  check('A.destr §C4: 타격점을 주지 않으면 격자는 예전 그대로 3 × 2 = 6칸이다', gridPlain === 6, gridPlain);
+
+  // ---- §C5 이음새를 따라 갈라지기 -------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'pistol');
+  const seamCard = await api.rect(page, '#big-card');
+  const seamKid = await page.evaluate(() => {
+    const k = document.querySelector('#big-card h2');
+    const r = k.getBoundingClientRect();
+    return { left: r.left, top: r.top, cy: r.top + r.height / 2 };
+  });
+  await api.smashAt(page, seamKid.left - 6, seamCard.cy);
+  await sleep(100);
+  const seamCut = await page.evaluate(() => window.__crashScreen.debug.lastCut);
+  check('A.destr §C5: 자식 요소의 왼쪽 경계 10px 이내를 치면 절단선이 그 경계로 스냅되고 각도가 25도 이내다',
+    !!seamCut && seamCut.snapped === true && Math.min(Math.abs(seamCut.angle - 90), Math.abs(180 - Math.abs(seamCut.angle - 90))) <= 25,
+    { seamCut, kidLeft: Math.round(seamKid.left), hitX: Math.round(seamKid.left - 6) });
+
+  // ---- 무흔적: 부분 파괴와 베기가 진행 중인 채로 Escape ---------------------------------------------
+  await api.restore(page);
+  await sleep(120);
+  await api.setWeapon(page, 'pistol');
+  const tcImg = await api.rect(page, '#demo-img');
+  const tcCard = await api.rectNoScroll(page, '#big-card');
+  await api.smashAt(page, tcImg.left + 6, tcImg.top + 6);                 // corner cut → clip-path on the image
+  await api.smashAt(page, tcCard.left + 10, tcCard.top + 10);             // a second element left half-cut
+  await sleep(80);
+  const clipLive = await clipOf('#demo-img');
+  await api.setWeapon(page, 'katana');
+  await api.slash(page, tcCard.left + 40, tcCard.top + 60, tcCard.left + 240, tcCard.top + 200);
+  await sleep(40);                                                         // mid-slash: the scar timer is still armed
+  await page.keyboard.press('Escape');
+  const offTrace = await poll(async () => !(await api.active(page)), 1500, 20);
+  const nodesTrace = await api.count(page, '[data-crs]');
+  const pendTrace = await api.pending(page);
+  await settleRaf(page);
+  const rafTrace = await api.pendingRaf(page);
+  const clipsLeft = await page.evaluate(() => [...document.querySelectorAll('body *')].filter((el) => el.style && el.style.getPropertyValue('clip-path')).length);
+  check('A.destr 무흔적: 부분 파괴와 베기가 진행 중인 채 Escape → [data-crs] 0개, 타이머 0, 프레임 0, 모든 페이지 요소의 인라인 clip-path 복원',
+    /^polygon\(/.test(clipLive) && offTrace === true && nodesTrace === 0 && pendTrace === 0 && rafTrace === 0 && clipsLeft === 0,
+    { clipLive: clipLive.slice(0, 40), offTrace, nodesTrace, pendTrace, rafTrace, clipsLeft });
+  const onTrace = await page.evaluate(contentJs);
+  check('A.destr 무흔적: 그 뒤 content.js 가 깨끗하게 다시 켜진다', onTrace === 'on', onTrace);
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true, noPartial: true });
   await api.restore(page);
   await sleep(80);
 
@@ -5678,7 +6176,7 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
   //     white at 70 % and barely reads; the imminent stage blinks on a 0.2 s cycle and may be caught dark;
   //   * the repair beam only lives 1.5 s (§3.1), so it is started inside that window, not before it.
   await setCombatMode('survival');
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true });   // §B escape hatch — see the block header
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true, noPartial: true });   // §B escape hatch — see the block header
   await api.restore(page);
   await sleep(80);
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -5960,7 +6458,7 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
   await page.evaluate(() => { document.querySelector('#big-card').style.removeProperty('transform'); });
   const reon8E = await page.evaluate(contentJs);
   check('A.§E 8: content.js 가 그 뒤 깨끗하게 다시 활성화된다', reon8E === 'on', reon8E);
-  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noDisplaceCollide: false });
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noDisplaceCollide: false, noPartial: true });
   await api.restore(page);
   await sleep(80);
 
@@ -6126,7 +6624,7 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   });
 
   await setCombatMode('survival');
-  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true, infiniteAmmo: false });
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true, infiniteAmmo: false, noPartial: true });
   await api.restore(page);
   await sleep(100);
   await api.setWeapon(page, 'hammer');
@@ -6355,7 +6853,7 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   });
 
   await setCombatMode('survival');
-  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true, infiniteAmmo: true });
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true, infiniteAmmo: true, noPartial: true });
   await api.restore(page);
   await sleep(120);
   await api.setWeapon(page, 'pistol');
@@ -6520,7 +7018,7 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   // =======================================================================================
   console.log('--- rules: SPEC-combat §B2 × §E3 — shoving a 무적 element into an enemy ---');
   await setCombatMode('survival');
-  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true });
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true, noPartial: true });
   await api.restore(page);
   await sleep(120);
   const srcP = await api.rect(page, '#fire-src');
@@ -6685,7 +7183,7 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   }, offX || 0);
 
   await setCombatMode('survival');
-  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: true, noRepair: true, noFalloff: true });
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: true, noRepair: true, noFalloff: true, noPartial: true });
   await api.restore(page);
   await page.evaluate(() => window.scrollTo(0, 0));
   const archLab = await archBuild(archImgSrc);
@@ -7150,7 +7648,7 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
     { archInactive, archNodes, archPend, archRaf, diff: archLab.ids.filter((id) => archStylesNow[id] !== archLab.styles[id]).map((id) => ({ id, was: archLab.styles[id], now: archStylesNow[id] })) });
   const archReOn = await page.evaluate(contentJs);
   check('A.§D/§F 무흔적: content.js 가 그 뒤 깨끗하게 다시 켜진다', archReOn === 'on', archReOn);
-  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true, noFalloff: true });
+  await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noInvuln: true, noFalloff: true, noPartial: true });
   await archDrop();
   await api.restore(page);
   await sleep(100);
@@ -7867,7 +8365,13 @@ async function suiteB(browser, origin, contentCss, contentJs) {
   await page.evaluate(chromeShim(EN_MESSAGES));   // English locale: the longer labels must fit the HUD (F9)
   const r1 = await page.evaluate(contentJs);
   check('B.inject: content.js returns "on" under strict CSP', r1 === 'on', r1);
-  try { await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true }); } catch (_) { /* reported by A.inject */ }
+  /* `noPartial` (SPEC-destruction §C3): this suite is about whether the CSSOM-heavy fx BUILD at all under a
+   * strict CSP, and it drives weapon after weapon at the same card corner to get there. With §C on, the
+   * first hit shears that corner off and the `clip-path` left behind also stops hit-testing there — the
+   * later shots then sail through a hole and the suite measures the wrong thing. §C's own behaviour is
+   * asserted in the destruction block, with the rule explicitly ON. */
+  await api.debug(page, { noPartial: true });
+  try { await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, noPartial: true }); } catch (_) { /* reported by A.inject */ }
   // SPEC-material §9.1: the viewport-fixed .crs-canvas is gone — damage marks are per-element .crs-decal
   // canvases created on demand. The overlay host (.crs-root) is what "injection worked" means now, and the
   // sheet of glass must NOT come back under a strict CSP either.
@@ -7945,7 +8449,9 @@ async function suiteB(browser, origin, contentCss, contentJs) {
     await sleep(250);
   }
   const sB1 = await api.stats(page);
-  check('B.weapons: smg hold, katana drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rockets)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots] });
+  // the detail carries what was actually measured: hp vs max, the §C partial count, and the magazine —
+  // "not broken" has three different causes and they are told apart here instead of by re-running by hand
+  check('B.weapons: smg hold, katana drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rockets)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots], hp: await api.hpOf(page, '#big-card'), partial: sB1.partial, ammo: await api.ammo(page), cracks: sB1.cracks });
   // v1.2 nodes whose CSSOM styling would be the next to trip style-src / Trusted Types: the scope overlay plus the
   // 2× body transform, the sniper tracer, a hostile aura + orb, the player HUD and the KO overlay
   await api.restore(page);

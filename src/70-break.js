@@ -62,16 +62,29 @@
     if (big) n = Math.min(n, 2);
     return n;
   }
+  /* SPEC-destruction §B: the shape the element comes apart in, the way the pieces leave, how they are
+   * finished and what they throw off are all read from WEAPONS[id].destruction (src/66-fracture.js). The v1
+   * machinery below — one cloneTree per piece, the replayed style plan, the GPU budget — is untouched. */
   function spawnGeometric(el, rect, ix, iy, mode, n, opts) {
+    const D = destructionOf(mode, opts);
+    if (D.shape === 'ash' && !opts.textTransparent) return spawnAshFlakes(el, rect, ix, iy, mode, n, D);
     const mp = matPieceProps(materialOf(el));   // SPEC-material §5: the debris falls as what it was made of
     const ow = (el.offsetWidth || rect.width) || 1, oh = (el.offsetHeight || rect.height) || 1;
     const sx = rect.width / ow || 1, sy = rect.height / oh || 1;
     const sl = opts.splitLine ? { angle: opts.splitLine.angle, cx: (opts.splitLine.cx - rect.left) / sx, cy: (opts.splitLine.cy - rect.top) / sy } : null;
-    const polys = splitRect(ow, oh, n, (ix - rect.left) / sx, (iy - rect.top) / sy, sl);
+    const hx = (ix - rect.left) / sx, hy = (iy - rect.top) / sy;
+    const curve = (D.separation === 'slide') ? fracGetCurve() : null;   // §D2: the katana cuts along its arc
+    let polys = null;
+    if (curve) polys = fracCurveSplit(ow, oh, curve, (p) => ({ x: (p.x - rect.left) / sx, y: (p.y - rect.top) / sy }));
+    if (!polys) polys = fracPolys(D.shape, ow, oh, hx, hy, n, sl, opts);
+    polys = fracClipToRemain(opts.remain, polys);
     const cap = cloneCapFor(opts.cloneCap || (n >= 4 ? 150 : 400));   // SPEC-settings §2.2: 400 descendants, 150 in performance mode
     // Every piece gets its own cloneTree (a deep DOM copy would carry style attributes,
     // which a strict style-src CSP rejects on insertion); the computed-style diff of the
     // first piece is replayed on its siblings.
+    const finish = finishFilter(D.finish);
+    const delay = scaleMs(D.delayMs || 0);
+    const tangent = curve ? fracCurveAngle(curve, 0.5) : (sl ? sl.angle : null);
     let plan = null, made = 0;
     const nodes = [];
     for (let i = 0; i < polys.length; i++) {
@@ -83,15 +96,115 @@
       plan = b.plan;
       if (opts.textTransparent) makeTextTransparent(b);
       if (opts.burnt) clip.style.filter = BURNT_FILTER;   // flame (A9): on the clip node, never the wrapper
+      else if (finish) clip.style.filter = finish;        // §B3 scorch / char / ember, same node for the same reason
       const cx = rect.left + poly.cx * sx, cy = rect.top + poly.cy * sy;
-      const v = velocityFor(mode, ix, iy, cx, cy, opts);
+      /* §B2: which side of the cut this piece is on — the cleave turns the two halves opposite ways and
+       * the katana slides them apart along the cut, so both need the sign and not just the position. */
+      const side = fracCutSide(poly, sl, curve, rect, sx, sy, hx, hy);
+      const v = velocityFor(mode, ix, iy, cx, cy, Object.assign({ sep: D.separation, side, tangent }, opts));
       const p = Object.assign({ ox: rect.left, oy: rect.top, w: rect.width, h: rect.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: poly.cx * sx, cy: poly.cy * sy,
         bb: { minX: poly.minX * sx, minY: poly.minY * sy, maxX: poly.maxX * sx, maxY: poly.maxY * sy } }, mp);
+      /* §B4 delayMs: the katana's two halves hang for 140 ms before anything moves — "벤 직후엔 아무 일도
+       * 없다가 뒤늦게 미끄러져 분리되는 게 칼이다" (§D1). §D2 then gives them 80 ms of pure slide before
+       * gravity joins in. */
+      if (delay > 0) p.launchAt = now() + delay;
+      if (D.separation === 'slide') p.noGravUntil = now() + delay + scaleMs(80);
       nodes.push([piece, p]); made++;
     }
     enforceCap(nodes.length, batchGpu(nodes));
     for (const [node, p] of nodes) addPiece(node, p);
+    fracFinishPieces(nodes, D);
     return made;
+  }
+  /* §B4 `vaporise` + §B3 `ember`: applied once the pieces are live, so the trail hangs where the shard
+   * actually is and the fade runs on a piece that is still being integrated. */
+  function fracFinishPieces(nodes, D) {
+    if (D.finish === 'ember') for (const [, p] of nodes) fracTrail(p.ox + p.cx, p.oy + p.cy);
+    // §D2: the cut face flashes white for a frame at the moment the two halves actually start to move
+    if (D.separation === 'slide') for (const [, p] of nodes) later(() => fracCutFlash(p), D.delayMs || 0);
+    if (!(D.vaporise > 0)) return;
+    for (const [, p] of nodes) if (Math.random() < D.vaporise) vaporisePiece(p);
+  }
+  /* §C3: once an element has already shed a corner, whatever is left of it is all there is to break — a
+   * piece generated outside the remaining polygon would be a corner that fell twice. */
+  function fracClipToRemain(remain, polys) {
+    if (!remain || remain.length < 3) return polys;
+    const out = [];
+    for (const poly of polys) {
+      let pts = poly.pts;
+      for (let i = 0; i < remain.length && pts.length >= 3; i++) {
+        const a = remain[i], b = remain[(i + 1) % remain.length];
+        let nx = -(b[1] - a[1]), ny = b[0] - a[0];
+        const L = Math.hypot(nx, ny); if (!(L > 1e-6)) continue;
+        nx /= L; ny /= L;
+        pts = fracClipHalf(pts, -nx, -ny, -(nx * a[0] + ny * a[1]));
+      }
+      if (pts.length >= 3 && fracArea(pts) > 4) out.push(polyInfo(pts));
+    }
+    return out.length ? out : polys;
+  }
+  /* Which side of the cut a piece's centroid is on: +1 / −1, or 0 when there is no single cut line. */
+  function fracCutSide(poly, sl, curve, rect, sx, sy, hx, hy) {
+    if (curve) {
+      const a = { x: (curve.x1 - rect.left) / sx, y: (curve.y1 - rect.top) / sy };
+      const b = { x: (curve.x2 - rect.left) / sx, y: (curve.y2 - rect.top) / sy };
+      return ((b.x - a.x) * (poly.cy - a.y) - (b.y - a.y) * (poly.cx - a.x)) >= 0 ? 1 : -1;
+    }
+    if (sl) {
+      const ux = Math.cos(sl.angle), uy = Math.sin(sl.angle);
+      return (ux * (poly.cy - sl.cy) - uy * (poly.cx - sl.cx)) >= 0 ? 1 : -1;
+    }
+    return (poly.cx - hx) >= 0 ? 1 : -1;
+  }
+  /* §B1 `ash`: "큰 조각 없이 8~16px 잿조각 18~30개". These are NOT clones — a charred flake has nothing
+   * left to read, and thirty cloneTrees of a card is a dropped frame. Plain jagged divs that fall, count as
+   * debris, and are swept by every path that sweeps debris. */
+  function spawnAshFlakes(el, rect, ix, iy, mode, n, D) {
+    const mp = matPieceProps(materialOf(el));
+    const made = [];
+    const count = clamp(n, 1, 30);
+    for (let i = 0; i < count; i++) {
+      const s = rand(8, 16);
+      const x = rect.left + rand(0, Math.max(1, rect.width - s));
+      const y = rect.top + rand(0, Math.max(1, rect.height - s));
+      const node = mk('div', 'crs-piece crs-debris crs-ash');
+      node.style.left = px(x); node.style.top = px(y);
+      node.style.width = px(s); node.style.height = px(s);
+      node.style.background = 'rgba(38,33,29,.92)';
+      node.style.clipPath = 'polygon(' + px(rand(0, s * 0.35)) + ' 0px, ' + px(s) + ' ' + px(rand(0, s * 0.4)) + ', ' + px(rand(s * 0.4, s)) + ' ' + px(s) + ', 0px ' + px(rand(s * 0.5, s)) + ')';
+      node.style.transformOrigin = px(s / 2) + ' ' + px(s / 2);
+      const v = velocityFor(mode, ix, iy, x + s / 2, y + s / 2, { sep: D.separation });
+      made.push([node, Object.assign({ ox: x, oy: y, w: s, h: s, vx: v.vx, vy: v.vy, vr: v.vr, cx: s / 2, cy: s / 2,
+        bb: { minX: 0, minY: 0, maxX: s, maxY: s }, ash: true }, mp)]);
+    }
+    if (!made.length) return 0;
+    enforceCap(made.length, batchGpu(made));
+    for (const [node, p] of made) addPiece(node, p);
+    fracFinishPieces(made, D);
+    return made.length;
+  }
+  /* §C3: the plate or corner that comes off a hit which did NOT destroy the element. One piece, cut to the
+   * polygon the half-plane took away, with the element itself left standing behind it. */
+  function spawnPartialPiece(el, rect, ow, oh, sx, sy, fallen, ix, iy, mode, opts) {
+    if (!root || fallen.length < 3) return 0;
+    const poly = polyInfo(fallen);
+    const mp = matPieceProps(materialOf(el));
+    const D = destructionOf(mode, opts);
+    const { piece, clip } = makeWrapper(rect, ow, oh, sx, sy, poly, true);
+    root.append(piece);
+    const b = buildStyledClone(el, ow, oh, cloneCapFor(300), clip, null);
+    if (!b) { try { piece.remove(); } catch (e) { /* ignore */ } return 0; }
+    const finish = finishFilter(D.finish);
+    if (finish) clip.style.filter = finish;
+    const cx = rect.left + poly.cx * sx, cy = rect.top + poly.cy * sy;
+    const v = velocityFor(mode, ix, iy, cx, cy, Object.assign({ sep: D.separation }, opts));
+    const p = Object.assign({ ox: rect.left, oy: rect.top, w: rect.width, h: rect.height, vx: v.vx, vy: v.vy, vr: v.vr, cx: poly.cx * sx, cy: poly.cy * sy,
+      bb: { minX: poly.minX * sx, minY: poly.minY * sy, maxX: poly.maxX * sx, maxY: poly.maxY * sy } }, mp);
+    enforceCap(1, batchGpu([[piece, p]]));
+    addPiece(piece, p);
+    try { matSfx(materialOf(el), { gain: 0.32 }); } catch (e) { /* ignore */ }
+    if (D.particles && D.particles !== 'none') fracParticles(D.particles, ix, iy);
+    return 1;
   }
 
   /* --- text shattering (§12.2 / A23) --- */
@@ -291,24 +404,33 @@
     const mode = opts.mode || WEAPONS[state.weapon].kind;
     if (!el || !el.isConnected || el.hasAttribute('data-crs-broken')) return false;
     cancelAnimsOf(el);
+    /* SPEC-destruction §C3: an element that had already shed a corner gets its own `clip-path` back BEFORE
+     * anything is cloned off it — otherwise every piece would carry the remaining shape as a second clip. */
+    const freed = releasePartial(el);
+    if (freed && freed.cuts > 0) opts.remain = freed.poly;
     const rect = rectOf(el);
     if (!rect || rect.width < 1 || rect.height < 1) return false;
     const t0 = now();
     const tag = tagOf(el);
     const descendants = countDescendants(el, textDescendantCap() + 1);   // SPEC-settings §2.2: 200, 120 in performance mode
     const wantText = opts.textSplit !== false && textDominant(el);
+    const D = destructionOf(mode, opts);
+    // §B1 `strip`: the bands run across the line the holes are strung along — §B5's hit direction
+    if (opts.markAngle == null) { const a = fracHitAngle(state.weapon, ix, iy); if (a != null) opts.markAngle = a; }
     let made = 0;
     if (tag === 'video') { try { opts.wasPlaying = !el.paused; el.pause(); } catch (e) { /* ignore */ } }
     if (wantText) {
       // box (background/border) falls as one piece underneath; words fall on top
       if (boxVisible(el)) made += spawnGeometric(el, rect, ix, iy, mode, 1, Object.assign({}, opts, { textTransparent: true }));
       const words = spawnWordPieces(el, rect, ix, iy, mode, opts);
-      if (!words && !made) made += spawnGeometric(el, rect, ix, iy, mode, pieceCount(el, mode, rect, descendants, opts.pieces), opts);
+      if (!words && !made) made += spawnGeometric(el, rect, ix, iy, mode, fracPieceCount(el, mode, rect, descendants, opts), opts);
       made += words;
     } else {
-      made += spawnGeometric(el, rect, ix, iy, mode, pieceCount(el, mode, rect, descendants, opts.pieces), opts);
+      made += spawnGeometric(el, rect, ix, iy, mode, fracPieceCount(el, mode, rect, descendants, opts), opts);
       if ((tag === 'input' || tag === 'textarea')) made += spawnFieldSpill(el, rect, ix, iy, mode, opts);
     }
+    // §B3: the puff the weapon itself throws off, on top of the material's own (matBurst below)
+    if (D.particles && D.particles !== 'none') fracParticles(D.particles, ix, iy);
     /* SPEC-material §5 / SPEC-destruction §1: the break SOUNDS and PUFFS like what it was made of, and the
      * element's damage decal dies with it — the marks are on the falling pieces now, not on a sheet of
      * glass left hanging in front of the hole. */

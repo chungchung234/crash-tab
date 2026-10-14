@@ -46,7 +46,9 @@
        * single profile (1 / 0.6 / 0.32 — `panel`), so an element whose material was never resolved behaves
        * exactly as it did before. `flutter` is the lateral sway of something light: it moves the piece
        * sideways without touching vx, so the resting test (|vx| and |vr| near zero) is unchanged. */
-      if (!p.grounded) p.vy += GRAVITY * (p.gMul || 1) * dt;
+      /* SPEC-destruction §D2: a katana half slides along the cut for 80 ms before gravity joins in
+       * ("140ms 두 조각이 접선 방향으로 미끄러짐 … → 220ms 중력"). Nothing else sets `noGravUntil`. */
+      if (!p.grounded && !(p.noGravUntil > t)) p.vy += GRAVITY * (p.gMul || 1) * dt;
       p.vx *= Math.pow(p.hdrag != null ? p.hdrag : 0.6, dt);
       p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
       if (p.flutter && !p.grounded) p.x += Math.sin(((t - p.bornAt) / p.flutter.period) * Math.PI * 2) * p.flutter.amp * dt;
