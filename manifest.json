@@ -23,6 +23,10 @@
   "background": {
     "service_worker": "background.js"
   },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
   "permissions": ["activeTab", "scripting", "storage"],
   "commands": {
     "_execute_action": {

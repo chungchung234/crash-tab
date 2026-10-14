@@ -522,7 +522,7 @@
   /* schema file is absent (build.js then only warns): the unresolved form   */
   /* is Object.freeze([].concat()) — a frozen empty schema.                  */
   /* ===================================================================== */
-  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","breach","combo","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"},{"key":"unlockAll","type":"bool","default":true,"labelKey":"setUnlockAll","group":"advanced"},{"key":"recordReplay","type":"bool","default":true,"labelKey":"setRecordReplay","group":"advanced"}])));
+  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","breach","combo","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"},{"key":"unlockAll","type":"bool","default":true,"labelKey":"setUnlockAll","group":"advanced"},{"key":"recordReplay","type":"bool","default":true,"labelKey":"setRecordReplay","group":"advanced"},{"key":"collectLocalStats","type":"bool","default":true,"labelKey":"setCollectLocalStats","group":"advanced"}])));
   const SETTING_GROUPS = ['general', 'combat', 'accessibility', 'advanced'];
   /* chrome.storage.sync keys are namespaced `crs.<key>` so they can never collide with the v1 flat keys
    * (crsWeapon, crsMuted, …) that §1.2 migrates away from. Only big things go to `local` — the one that
@@ -17227,6 +17227,616 @@
     koDialog: hudEls.ko ? hudEls.ko.getAttribute('role') : null
   });
 
+// ── 96-custom.js ──
+  /* =====================================================================
+   * SPEC-product §6 사용자 정의 무기
+   *
+   * `chrome.storage.local` 의 `crsCustomWeapons`(최대 10)를 읽어 **무기고 끝에** 붙인다.
+   * 검증은 §6 이 적은 그대로 엄격하다. 잘못된 항목은 버리고 첫 문제를 토스트로 알린다.
+   *
+   * 이 모듈의 가장 중요한 조항은 한 줄이다 — **망가진 저장값이 활성화를 막아서는 안 된다.**
+   * 그래서 (1) 읽기는 activate() 와 무관하게 비동기로 일어나고, (2) 모든 저장소 접근은
+   * safe()/safeThen() 안에 있고, (3) 검증은 항목 단위라 하나가 썩어도 나머지는 산다.
+   * 활성화 경로 어디에도 이 모듈을 기다리는 지점이 없다.
+   *
+   * 최상위 이름은 `CW` 하나로 모았다 (CLAUDE.md: 모듈은 한 클로저로 이어 붙고 겹친 이름은
+   * 조용히 뒤가 이긴다). 나머지는 전부 `cw*` 접두사의 함수 선언이다.
+   *
+   * 고른 해석 (명세가 말하지 않은 것, CLAUDE.md 가 적으라고 한 것):
+   *  - `kind` 는 엔진의 모드 어휘다. 허용값을 `hammer` · `gun` · `bomb` 셋으로 뒀다 —
+   *    `collapse` 는 피해가 Infinity 이고 radius 가 Infinity 인 특수기라 §6 의 수치 범위
+   *    (damage 1~999, radius 0~600)와 애초에 맞지 않는다.
+   *  - §6 의 필드 목록에 `hold` 가 없고 `tickMs` 는 있다. 그래서 **`kind === 'gun'` 이면
+   *    꾹 누르는 무기**이고 `tickMs` 가 그 틱이다. `hammer` · `bomb` 은 클릭이고 `tickMs` 는
+   *    검증만 하고 쓰지 않는다. 필드 목록을 늘리지 않는 가장 작은 규칙이다.
+   *  - `crack` 과 `sound` 의 허용값도 명세에 없다. 엔진이 실제로 그릴 수 있는 자국
+   *    (`hammer` · `gun`)과 실제로 낼 수 있는 소리(`hammer` · `thump` · `gun` · `bomb`)로
+   *    제한했다 — 모르는 값을 받아 조용히 아무 자국도 안 남기는 쪽이 더 나쁘다.
+   *  - 사용자 정의 무기는 **해금 대상이 아니다**(§4 의 `UNLOCK_AT` 에 없으므로 자동으로
+   *    열려 있다). **밸런스 밴드 대상도 아니다** — tools/balance.js 가 src/ 를 정적으로
+   *    읽기 때문에 구조적으로 보이지 않고, 그 사실을 그 파일이 명시적으로 적고 있다.
+   * ===================================================================== */
+  const CW_KEY = 'crsCustomWeapons';
+  const CW_MAX = 10;                       // §6 "최대 10"
+  const CW_ID_RE = /^cw_[a-z0-9_]{1,20}$/; // §6 그대로
+  const CW_KINDS = ['hammer', 'gun', 'bomb'];
+  const CW_CRACKS = ['hammer', 'gun'];
+  const CW_SOUNDS = ['hammer', 'thump', 'gun', 'bomb'];
+  const CW_NAME_MAX = 20;                  // §6 "이름 20자 이하"
+  const CW_EMOJI_MAX = 4;                  // §6 "이모지 4코드포인트 이하"
+  const CW = {
+    list: [],              // registered ids, in arsenal order
+    records: [],           // the validated records themselves
+    errors: [],            // what the last load threw away
+    names: Object.create(null),   // synthetic i18n key -> display name
+    loaded: false,
+    subscribed: false,
+    msgBase: msg           // see cwName(): custom names are NOT i18n keys, so msg() has to know them
+  };
+  /* The display name of a custom weapon is stored data, not a message key. Rather than teach every call
+   * site about that, msg() itself learns one table — the same binding-rewrite device src/99-api.js uses on
+   * setWeapon/setLoadout. Keys are synthetic (`cwName_<id>`) and can never collide with a real message. */
+  msg = function (key) {
+    const n = CW.names[key];
+    return n === undefined ? CW.msgBase(key) : n;
+  };
+  /* getUILanguage(), not getMessage('@@ui_locale'): the latter is a PREDEFINED message and would land in
+   * tools/validate.js R6's "this key is missing from _locales" list, which would be a false alarm. */
+  function cwLocaleKo() {
+    const l = safe(() => chrome.i18n.getUILanguage());
+    return typeof l !== 'string' || !l || /^ko/i.test(l);
+  }
+  function cwDisplayName(e) {
+    const ko = cwLocaleKo();
+    return (ko ? e.nameKo : e.nameEn) || e.nameKo || e.nameEn || e.id;
+  }
+
+  /* ---- §6 엄격 검증 ---------------------------------------------------------------
+   * 항목 하나가 틀리면 그 항목만 버린다. 반환값의 `bad` 는 순서를 지키므로 "첫 문제" 가
+   * 정말로 첫 문제다. `reason` 은 토스트와 옵션 페이지가 같이 읽는 기계어다. */
+  function cwInt(v, lo, hi) {
+    return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v >= lo && v <= hi;
+  }
+  function cwStr(v, max) {
+    return typeof v === 'string' && v.length >= 1 && v.length <= max;
+  }
+  function cwCodepoints(s) {
+    let n = 0;
+    try { for (const _ of String(s)) n++; } catch (e) { return CW_EMOJI_MAX + 1; }
+    return n;
+  }
+  function cwValidate(raw) {
+    const ok = [], bad = [];
+    if (raw == null) return { ok, bad };
+    if (!Array.isArray(raw)) return { ok, bad: [{ index: -1, id: null, field: 'root', reason: 'not-an-array' }] };
+    const seen = Object.create(null);
+    for (let i = 0; i < raw.length; i++) {
+      const e = raw[i];
+      const id = (e && typeof e.id === 'string') ? e.id : null;
+      const no = (field, reason) => { bad.push({ index: i, id, field, reason }); };
+      if (!e || typeof e !== 'object' || Array.isArray(e)) { no('entry', 'not-an-object'); continue; }
+      if (ok.length >= CW_MAX) { no('list', 'over-max'); continue; }
+      if (!CW_ID_RE.test(String(e.id))) { no('id', 'bad-id'); continue; }
+      if (WEAPON_IDS.indexOf(e.id) !== -1 && CW.list.indexOf(e.id) === -1) { no('id', 'builtin-collision'); continue; }
+      if (seen[e.id]) { no('id', 'duplicate'); continue; }
+      if (cwCodepoints(e.emoji) < 1 || cwCodepoints(e.emoji) > CW_EMOJI_MAX) { no('emoji', 'bad-emoji'); continue; }
+      if (!cwStr(e.nameKo, CW_NAME_MAX)) { no('nameKo', 'bad-name'); continue; }
+      if (!cwStr(e.nameEn, CW_NAME_MAX)) { no('nameEn', 'bad-name'); continue; }
+      if (CW_KINDS.indexOf(e.kind) === -1) { no('kind', 'bad-kind'); continue; }
+      if (!cwInt(e.damage, 1, 999)) { no('damage', 'out-of-range'); continue; }
+      if (!cwInt(e.cooldownMs, 0, 5000)) { no('cooldownMs', 'out-of-range'); continue; }
+      if (!(e.mag === null || cwInt(e.mag, 1, 200))) { no('mag', 'out-of-range'); continue; }
+      if (!cwInt(e.reloadMs, 0, 10000)) { no('reloadMs', 'out-of-range'); continue; }
+      if (!cwInt(e.radius, 0, 600)) { no('radius', 'out-of-range'); continue; }
+      if (!cwInt(e.tickMs, 20, 500)) { no('tickMs', 'out-of-range'); continue; }
+      if (CW_CRACKS.indexOf(e.crack) === -1) { no('crack', 'bad-crack'); continue; }
+      if (CW_SOUNDS.indexOf(e.sound) === -1) { no('sound', 'bad-sound'); continue; }
+      seen[e.id] = true;
+      ok.push({
+        id: e.id, emoji: String(e.emoji), nameKo: e.nameKo, nameEn: e.nameEn, kind: e.kind,
+        damage: e.damage, cooldownMs: e.cooldownMs, mag: e.mag, reloadMs: e.reloadMs,
+        radius: e.radius, tickMs: e.tickMs, crack: e.crack, sound: e.sound
+      });
+    }
+    return { ok, bad };
+  }
+
+  /* ---- fire(): §6 의 무기는 엔진의 1차 동작 셋 중 하나를 고른 것이다 ----
+   * 내장 무기의 fire() 를 복사하지 않고 같은 1차 함수를 부른다 — 피해·자국·소리만 그 무기의
+   * 것으로 바꿔 끼운다. 새로운 파괴 경로를 만들지 않는다는 것이 핵심이다. */
+  function cwFire(W) {
+    if (W.kind === 'bomb') {
+      return function (x, y) {
+        state.shots++;
+        const B = blastWeaponAt(x, y, W);
+        interceptOrbsWithin(x, y, B.radius);
+        sfx(W.sound);
+        blastFx(x, y, B.radius, 1, undefined, B);
+        aoeHit(x, y, B);
+        return null;
+      };
+    }
+    const melee = W.kind === 'hammer';
+    return function (x, y) {
+      state.shots++;
+      if (interceptOrb(x, y)) return null;   // v1.2 A9: an orb in front of the muzzle eats the blow
+      const el = pickTarget(x, y);
+      const crit = el ? rollCrit(W.id) : false;
+      const dmg = rollDamage(W.damage, crit, falloffMul(W.id, x, y));
+      sfx(W.sound, { crit });
+      flash(x, y, melee ? 'hammer' : 'gun');
+      shake(melee ? 'hammer' : 'gun');
+      drawCrack(x, y, W.crack, { ink: melee ? 1 : 0.25 });
+      if (!melee) spawnChips(x, y, randInt(3, 5));
+      if (el) applyHit(el, dmg, melee ? 'hammer' : 'gun', x, y, { crit });
+      return el;
+    };
+  }
+  /* The weapon-table row. Every field the engine reads has to be present with a sane value: a missing
+   * `swapMs` would make swapMsOf() fall back to SWAP_MS (fine) but a missing `critChance` would make
+   * critChanceOf() read undefined. They are written out rather than inherited. */
+  function cwRow(e) {
+    const gun = e.kind === 'gun';
+    const W = {
+      id: e.id, emoji: e.emoji, name: 'cwName_' + e.id, kind: e.kind,
+      damage: e.damage, cooldownMs: e.cooldownMs, radius: e.kind === 'bomb' ? e.radius : 0,
+      hold: gun, input: gun ? 'hold' : 'click', tickMs: e.tickMs,
+      mag: e.mag, reloadMs: e.mag == null ? null : e.reloadMs,
+      swapMs: SWAP_MS, recoil: gun ? 0.5 : 0.8, bloom: 0, critChance: 0.08,
+      knockback: 1, moveSpeed: 1, falloff: 0, pierce: 0,
+      cat: 'custom', role: 'custom', custom: true, crack: e.crack, sound: e.sound
+    };
+    if (e.kind === 'bomb') {
+      const R = Math.max(1, e.radius);
+      W.rings = [R * 0.3, R * 0.6, R];
+      W.maxTargets = 10;
+    }
+    W.fire = cwFire(W);
+    return W;
+  }
+  /* Registration is idempotent: it always removes what the previous load put in first, so an options-page
+   * edit that renames or drops a weapon cannot leave a ghost behind in 무기고. */
+  function cwUnregister() {
+    for (const id of CW.list) {
+      const i = WEAPON_IDS.indexOf(id);
+      if (i >= 0) WEAPON_IDS.splice(i, 1);
+      delete WEAPONS[id];
+      delete CW.names['cwName_' + id];
+      delete state.ammo[id];
+    }
+    CW.list = [];
+    CW.records = [];
+  }
+  function cwRegister(records) {
+    cwUnregister();
+    for (const e of records) {
+      const W = cwRow(e);
+      WEAPONS[e.id] = W;
+      WEAPON_IDS.push(e.id);           // §6 "무기고 끝에 붙고"
+      CW.names[W.name] = cwDisplayName(e);
+      state.ammo[e.id] = W.mag == null ? null : W.mag;
+      CW.list.push(e.id);
+      CW.records.push(e);
+    }
+    cwPruneLoadout();
+  }
+  /* A loadout stored while a custom weapon existed can name one that is gone now. isLoadout() would then
+   * refuse the whole array and the player would silently lose their slot order, so the dead ids are
+   * dropped instead and the rest keeps its position. */
+  function cwPruneLoadout() {
+    const live = state.loadout.filter((id) => WEAPON_IDS.indexOf(id) !== -1);
+    if (live.length === state.loadout.length) {
+      if (state.active) { try { reorderHud(); updateHud(); updateAmmoHud(); } catch (e) { /* ignore */ } }
+      return;
+    }
+    setLoadout(live.length ? live : PRESETS.default.slice(), { silent: true, preset: state.preset });
+  }
+  /* The OTHER half of the same race, and the one that actually bites: loadPrefs() (src/99-api.js) reads
+   * crsLoadout asynchronously too, and if it lands FIRST a stored loadout naming a custom weapon is not a
+   * valid loadout yet — isPermutation() refuses the whole array and the player silently gets the preset
+   * back. So once the custom weapons are registered, the stored order is offered again. `loadoutTouched`
+   * keeps this from overruling a choice the player made by hand during the session. */
+  function cwReapplyLoadout() {
+    if (!CW.list.length || state.loadoutTouched) return;
+    safeThen(() => chrome.storage.sync.get(['crsLoadout', 'crsLoadoutPreset']), (res) => {
+      if (!res || state.loadoutTouched) return;
+      const stored = migrateWeaponIds(res.crsLoadout);
+      if (!isLoadout(stored)) return;
+      if (stored.join(',') === state.loadout.join(',')) return;
+      const p = res.crsLoadoutPreset;
+      setLoadout(stored, { silent: true, preset: (p === 'custom' || PRESETS[p]) ? p : 'custom' });
+    });
+  }
+
+  /* ---- storage ---------------------------------------------------------------------
+   * §6 "잘못된 항목은 버리고 첫 문제를 토스트로 알린다." The toast only fires for a load the PLAYER can
+   * see — a boot-time read on an inactive page records the error and says it when the HUD exists. */
+  function cwApply(raw, announce) {
+    const res = cwValidate(raw);
+    CW.errors = res.bad;
+    CW.loaded = true;
+    cwRegister(res.ok);
+    cwReapplyLoadout();
+    if (announce && res.bad.length && state.active) cwToast();
+    return res;
+  }
+  function cwToast() {
+    const first = CW.errors[0];
+    if (!first) return false;
+    const where = first.index >= 0 ? ('#' + (first.index + 1) + (first.id ? ' ' + first.id : '')) : '';
+    toast('⚠ ' + msg('cwBad') + ' ' + where + ' · ' + first.field);
+    return true;
+  }
+  function cwRead(announce) {
+    safeThen(() => chrome.storage.local.get([CW_KEY]), (res) => {
+      /* Anything at all may be on disk here — an array of junk, an object, a string, null. cwValidate()
+       * answers for all of it and never throws, and this whole path runs AFTER activation. */
+      cwApply(res ? res[CW_KEY] : null, announce);
+    });
+  }
+  /* The options tab writes crsCustomWeapons and crsLoadout; both have to land on an open page without a
+   * re-activation (SPEC-settings §1.3 promises that for settings, and these are the same promise). The
+   * settings module's own listener only watches the `crs.` prefixed SYNC keys, so this is a second,
+   * separate listener rather than an edit to another workstream's file. */
+  function cwSubscribe() {
+    if (CW.subscribed) return;
+    const ok = safe(() => {
+      chrome.storage.onChanged.addListener(cwChanged);
+      return true;
+    });
+    CW.subscribed = !!ok;
+  }
+  function cwChanged(changes, area) {
+    if (!changes || typeof changes !== 'object') return;
+    if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, CW_KEY)) {
+      cwApply(changes[CW_KEY] ? changes[CW_KEY].newValue : null, true);
+    }
+    if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, 'crsLoadout')) {
+      const next = migrateWeaponIds(changes.crsLoadout ? changes.crsLoadout.newValue : null);
+      if (Array.isArray(next)) {
+        const live = next.filter((id) => WEAPON_IDS.indexOf(id) !== -1);
+        if (live.length) setLoadout(live, { silent: true, preset: 'custom' });
+      }
+    }
+  }
+  function cwSave(list) {
+    const res = cwValidate(list);
+    CW.errors = res.bad;
+    const patch = {}; patch[CW_KEY] = res.ok;
+    safe(() => chrome.storage.local.set(patch));
+    cwRegister(res.ok);
+    if (res.bad.length && state.active) cwToast();
+    return { saved: res.ok.length, rejected: res.bad.length, errors: res.bad.slice() };
+  }
+  function cwInfo() {
+    return {
+      max: CW_MAX, loaded: CW.loaded,
+      ids: CW.list.slice(),
+      weapons: CW.records.map((e) => Object.assign({}, e)),
+      errors: CW.errors.map((e) => Object.assign({}, e)),
+      kinds: CW_KINDS.slice(), cracks: CW_CRACKS.slice(), sounds: CW_SOUNDS.slice()
+    };
+  }
+  /* §6 "예시 추가" — the options page offers this shape as the starting point of a new weapon. */
+  function cwExample(n) {
+    const i = Math.max(1, Math.min(99, Math.floor(+n || 1)));
+    return {
+      id: 'cw_example' + i, emoji: '🧨', nameKo: '예시 무기 ' + i, nameEn: 'Example ' + i,
+      kind: 'gun', damage: 40, cooldownMs: 200, mag: 12, reloadMs: 1200,
+      radius: 0, tickMs: 120, crack: 'gun', sound: 'gun'
+    };
+  }
+  function cwBoot() {
+    cwSubscribe();
+    cwRead(false);
+  }
+
+// ── 96-stats.js ──
+  /* =====================================================================
+   * SPEC-product §2 누적 통계 — 기기 밖으로 나가지 않는다
+   *
+   * `chrome.storage.local` 의 `crsStats`:
+   *   { version, firstUse, lastUse, sessions, msPlayed, totalDamage, totalBroken, totalKills,
+   *     totalRestores, totalExits, bestScore, perOrigin: { origin: { bestScore, broken, plays, lastPlayed } } }
+   *
+   * 쓰기는 **읽고-고치고-쓰기**다. §3 (챌린지)가 같은 키의 `challenges` 를 쓰고 있고, 두 작업이
+   * 서로의 데이터를 잃지 않아야 한다 — src/97-challenge.js 가 먼저 그렇게 해 두었다. 그래서 이
+   * 모듈은 메모리에 **델타만** 쌓고, 플러시 때 디스크에 있는 레코드를 복사한 위에 더한다.
+   * 덕분에 다른 탭이 같은 키를 건드려도 그쪽이 쓴 필드가 사라지지 않는다.
+   *
+   * `collectLocalStats: false` 면 아무것도 읽지 않고 아무것도 쓰지 않는다 (§2).
+   *
+   * 고른 해석 (명세가 말하지 않은 것):
+   *  - §2 가 요구하는 파생 지표 중 **"최근 7일 사용 일수"** 는 명세의 필드 목록만으로는 계산할 수
+   *    없다 (lastUse 하나로는 며칠을 썼는지 알 수 없다). 그래서 `days` — `YYYY-MM-DD` 문자열의
+   *    배열, 최근 30개 — 를 하나 더 둔다. 명세의 필드는 하나도 빼지 않았고 이것만 더했다.
+   *  - **초기화는 §2 의 필드만 지운다.** `challenges`(§3)와 다른 작업물이 넣은 키는 그대로 둔다 —
+   *    "누적 통계 초기화" 버튼이 챌린지 기록까지 조용히 가져가면 안 된다.
+   *  - 출처(origin)는 `location.origin` 이다. `file://` · `data:` 처럼 origin 이 `"null"` 인
+   *    문서는 프로토콜로 센다.
+   * ===================================================================== */
+  const LIFE_KEY = 'crsStats';
+  const LIFE_VERSION = 1;
+  const LIFE_FLUSH_MS = 30000;      // §2 "활성 중 30초마다 기록(디바운스)"
+  const LIFE_ORIGIN_CAP = 200;      // §2 "출처 200개 상한, 가장 오래 안 쓴 것부터 퇴출"
+  const LIFE_DAY_KEEP = 30;
+  const LIFE = {
+    timer: 0,            // NOT a tracked timer: restore() clears the ledger and the 30 s debounce has to
+                         // survive a 복구. deactivate() below clears it explicitly instead.
+    startedAt: 0,
+    exiting: false,      // true while deactivate() is running, so its internal restore() is not a 복구
+    snap: null,          // last-sampled counter values (the product's counters reset on restore/activate)
+    d: null              // pending deltas
+  };
+  function lifeEnabled() { return settingsGet('collectLocalStats') === true; }
+  function lifeOrigin() {
+    let o = '';
+    try { o = String(location.origin || ''); } catch (e) { o = ''; }
+    if (!o || o === 'null') { try { o = String(location.protocol || 'unknown'); } catch (e) { o = 'unknown'; } }
+    return o.slice(0, 120);
+  }
+  function lifeDay(ms) {
+    const dt = new Date(ms);
+    const p = (n) => (n < 10 ? '0' + n : String(n));
+    return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate());
+  }
+  function lifeZero() {
+    return {
+      sessions: 0, msPlayed: 0, totalDamage: 0, totalBroken: 0, totalKills: 0,
+      totalRestores: 0, totalExits: 0, bestScore: 0,
+      origins: Object.create(null), days: []
+    };
+  }
+  function lifeDeltas() {
+    if (!LIFE.d) LIFE.d = lifeZero();
+    return LIFE.d;
+  }
+  function lifeOriginDelta(origin) {
+    const d = lifeDeltas();
+    if (!d.origins[origin]) d.origins[origin] = { bestScore: 0, broken: 0, plays: 0 };
+    return d.origins[origin];
+  }
+  /* The product's own counters are not monotone across a session: restore() empties state.broken and
+   * activate() resets the player. A sample that went DOWN means the counter was reset, so everything it
+   * currently holds is new. */
+  function lifeStep(cur, prev) { return cur >= prev ? cur - prev : cur; }
+  function lifeSample() {
+    if (!LIFE.snap) return;
+    const d = lifeDeltas();
+    const o = lifeOriginDelta(LIFE.snap.origin);
+    const dmg = Math.max(0, Math.round(state.damageDealt) || 0);
+    const br = state.broken.length;
+    const ki = Math.max(0, state.player.kills || 0);
+    const sc = Math.max(0, Math.round(state.player.score) || 0);
+    const addDmg = lifeStep(dmg, LIFE.snap.damage);
+    const addBr = lifeStep(br, LIFE.snap.broken);
+    const addKi = lifeStep(ki, LIFE.snap.kills);
+    d.totalDamage += addDmg;
+    d.totalBroken += addBr;
+    d.totalKills += addKi;
+    o.broken += addBr;
+    if (sc > d.bestScore) d.bestScore = sc;
+    if (sc > o.bestScore) o.bestScore = sc;
+    if (LIFE.startedAt) {
+      const t = Date.now();
+      d.msPlayed += Math.max(0, t - LIFE.startedAt);
+      LIFE.startedAt = t;
+    }
+    LIFE.snap.damage = dmg; LIFE.snap.broken = br; LIFE.snap.kills = ki;
+  }
+  function lifeHasDeltas() {
+    const d = LIFE.d;
+    if (!d) return false;
+    if (d.sessions || d.msPlayed || d.totalDamage || d.totalBroken || d.totalKills
+      || d.totalRestores || d.totalExits || d.bestScore || d.days.length) return true;
+    for (const k in d.origins) if (Object.prototype.hasOwnProperty.call(d.origins, k)) return true;
+    return false;
+  }
+  /* Read-modify-write. `stored` is COPIED first, so `challenges` (§3) and anything a later workstream
+   * puts under the same key survive untouched. */
+  function lifeMerge(stored, d) {
+    const s = (stored && typeof stored === 'object' && !Array.isArray(stored)) ? stored : {};
+    const n = Object.assign({}, s);
+    const now0 = Date.now();
+    const num = (v) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0);
+    n.version = LIFE_VERSION;
+    n.firstUse = num(s.firstUse) || now0;
+    n.lastUse = now0;
+    n.sessions = num(s.sessions) + d.sessions;
+    n.msPlayed = num(s.msPlayed) + d.msPlayed;
+    n.totalDamage = num(s.totalDamage) + d.totalDamage;
+    n.totalBroken = num(s.totalBroken) + d.totalBroken;
+    n.totalKills = num(s.totalKills) + d.totalKills;
+    n.totalRestores = num(s.totalRestores) + d.totalRestores;
+    n.totalExits = num(s.totalExits) + d.totalExits;
+    n.bestScore = Math.max(num(s.bestScore), d.bestScore);
+
+    const src = (s.perOrigin && typeof s.perOrigin === 'object' && !Array.isArray(s.perOrigin)) ? s.perOrigin : {};
+    const po = {};
+    for (const k of Object.keys(src)) {
+      const r = src[k];
+      if (!r || typeof r !== 'object') continue;
+      po[k] = { bestScore: num(r.bestScore), broken: num(r.broken), plays: num(r.plays), lastPlayed: num(r.lastPlayed) };
+    }
+    for (const k of Object.keys(d.origins)) {
+      const dd = d.origins[k];
+      const r = po[k] || { bestScore: 0, broken: 0, plays: 0, lastPlayed: 0 };
+      po[k] = {
+        bestScore: Math.max(r.bestScore, dd.bestScore),
+        broken: r.broken + dd.broken,
+        plays: r.plays + dd.plays,
+        lastPlayed: now0
+      };
+    }
+    /* §2 "출처 200개 상한, 가장 오래 안 쓴 것부터 퇴출" — LRU by lastPlayed. */
+    const keys = Object.keys(po);
+    if (keys.length > LIFE_ORIGIN_CAP) {
+      keys.sort((a, b) => po[b].lastPlayed - po[a].lastPlayed);
+      for (const k of keys.slice(LIFE_ORIGIN_CAP)) delete po[k];
+    }
+    n.perOrigin = po;
+
+    const days = (Array.isArray(s.days) ? s.days : []).filter((x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x));
+    for (const day of d.days) if (days.indexOf(day) === -1) days.push(day);
+    days.sort();
+    n.days = days.slice(Math.max(0, days.length - LIFE_DAY_KEEP));
+    return n;
+  }
+  function lifeFlush(cb) {
+    lifeSample();
+    if (LIFE.timer) { try { clearT(LIFE.timer); } catch (e) { /* ignore */ } LIFE.timer = 0; }
+    if (!lifeEnabled() || !lifeHasDeltas()) { if (cb) { try { cb(null); } catch (e) { /* ignore */ } } return false; }
+    const d = LIFE.d;
+    LIFE.d = null;
+    safeThen(() => chrome.storage.local.get([LIFE_KEY]), (res) => {
+      const merged = lifeMerge(res ? res[LIFE_KEY] : null, d);
+      const patch = {}; patch[LIFE_KEY] = merged;
+      safe(() => chrome.storage.local.set(patch));
+      if (cb) { try { cb(merged); } catch (e) { /* ignore */ } }
+    });
+    return true;
+  }
+  function lifeArm() {
+    if (LIFE.timer || !lifeEnabled() || !state.active) return;
+    /* setT, not later(): a 복구 clears the tracked-timer ledger and this debounce has to outlive it.
+     * deactivate() clears it by hand, so nothing of it survives the session either (CLAUDE.md 무흔적). */
+    LIFE.timer = setT(() => { LIFE.timer = 0; lifeFlush(); lifeArm(); }, LIFE_FLUSH_MS);
+  }
+  function lifeStart() {
+    if (!lifeEnabled()) { LIFE.snap = null; return; }
+    const origin = lifeOrigin();
+    const d = lifeDeltas();
+    d.sessions++;
+    lifeOriginDelta(origin).plays++;
+    const day = lifeDay(Date.now());
+    if (d.days.indexOf(day) === -1) d.days.push(day);
+    LIFE.startedAt = Date.now();
+    LIFE.snap = { origin, damage: Math.max(0, Math.round(state.damageDealt) || 0), broken: state.broken.length, kills: Math.max(0, state.player.kills || 0) };
+    lifeArm();
+  }
+  /* Called from the deactivate wrapper AFTER the product has torn itself down. The sample was already
+   * taken on the way in (the counters are zero by now), so this only books the exit and writes. */
+  function lifeStop() {
+    if (LIFE.timer) { try { clearT(LIFE.timer); } catch (e) { /* ignore */ } LIFE.timer = 0; }
+    if (!lifeEnabled()) { LIFE.snap = null; LIFE.startedAt = 0; return; }
+    lifeDeltas().totalExits++;
+    LIFE.snap = null;                  // nothing more to sample; lifeFlush()'s own lifeSample() no-ops
+    LIFE.startedAt = 0;
+    lifeFlush();                       // §2 "종료 시 … 기록"
+  }
+  /* §2 파생 지표 셋: 평균 세션 길이 · 복구 비율(복구/(복구+종료)) · 최근 7일 사용 일수.
+   * The options page computes the same three from the same record (it cannot call into the content
+   * script); the formulas are three lines and are written out in both places rather than shipped twice. */
+  function lifeDerive(rec) {
+    const r = rec || {};
+    const sessions = Number(r.sessions) || 0;
+    const restores = Number(r.totalRestores) || 0;
+    const exits = Number(r.totalExits) || 0;
+    const days = Array.isArray(r.days) ? r.days : [];
+    const cutoff = lifeDay(Date.now() - 6 * 86400000);
+    return {
+      avgSessionMs: sessions > 0 ? Math.round((Number(r.msPlayed) || 0) / sessions) : 0,
+      restoreRatio: (restores + exits) > 0 ? restores / (restores + exits) : 0,
+      activeDays7: days.filter((d) => d >= cutoff).length
+    };
+  }
+  function lifeTopOrigins(rec, n) {
+    const po = (rec && rec.perOrigin && typeof rec.perOrigin === 'object') ? rec.perOrigin : {};
+    return Object.keys(po)
+      .map((k) => Object.assign({ origin: k }, po[k]))
+      .sort((a, b) => (b.broken - a.broken) || (b.plays - a.plays))
+      .slice(0, n || 10);
+  }
+  /* §2 "api.lifetime() 으로 읽는다." Flushes first so the number a caller sees includes this session. */
+  function lifeNow() {
+    return new Promise((resolve) => {
+      if (!lifeEnabled()) { resolve({ enabled: false, version: LIFE_VERSION }); return; }
+      /* safeThen() swallows a storage area that is not there at all, so a bare await would hang on a page
+       * whose chrome.storage.local is missing. The guard timer answers instead — and is cleared the moment
+       * the real read lands, so it never lingers in the timer ledger (CLAUDE.md 무흔적). */
+      let guard = 0;
+      const done = (out) => { if (guard) { try { clearT(guard); } catch (e) { /* ignore */ } guard = 0; } resolve(out); };
+      guard = setT(() => { guard = 0; resolve({ enabled: true, version: LIFE_VERSION, derived: lifeDerive(null), topOrigins: [] }); }, 1500);
+      lifeFlush(() => {
+        safeThen(() => chrome.storage.local.get([LIFE_KEY]), (res) => {
+          const rec = (res && res[LIFE_KEY] && typeof res[LIFE_KEY] === 'object') ? res[LIFE_KEY] : {};
+          const out = Object.assign({ enabled: true }, rec);
+          out.derived = lifeDerive(rec);
+          out.topOrigins = lifeTopOrigins(rec, 10);
+          done(out);
+        });
+      });
+    });
+  }
+  /* §2 "초기화는 명시적 확인 후." The confirmation is the options page's; this is the act itself, and it
+   * keeps `challenges` (§3) and anything else stored under the key. */
+  function lifeReset() {
+    LIFE.d = null;
+    if (LIFE.snap) LIFE.snap = { origin: LIFE.snap.origin, damage: Math.max(0, Math.round(state.damageDealt) || 0), broken: state.broken.length, kills: Math.max(0, state.player.kills || 0) };
+    return new Promise((resolve) => {
+      let guard = setT(() => { guard = 0; resolve(false); }, 1500);
+      const done = (v) => { if (guard) { try { clearT(guard); } catch (e) { /* ignore */ } guard = 0; } resolve(v); };
+      safeThen(() => chrome.storage.local.get([LIFE_KEY]), (res) => {
+        const s = (res && res[LIFE_KEY] && typeof res[LIFE_KEY] === 'object') ? res[LIFE_KEY] : {};
+        const keep = Object.assign({}, s);
+        for (const k of ['firstUse', 'lastUse', 'sessions', 'msPlayed', 'totalDamage', 'totalBroken',
+          'totalKills', 'totalRestores', 'totalExits', 'bestScore', 'perOrigin', 'days']) delete keep[k];
+        keep.version = LIFE_VERSION;
+        keep.firstUse = Date.now();
+        keep.lastUse = Date.now();
+        keep.sessions = 0; keep.msPlayed = 0; keep.totalDamage = 0; keep.totalBroken = 0;
+        keep.totalKills = 0; keep.totalRestores = 0; keep.totalExits = 0; keep.bestScore = 0;
+        keep.perOrigin = {}; keep.days = [];
+        const patch = {}; patch[LIFE_KEY] = keep;
+        safe(() => chrome.storage.local.set(patch));
+        done(true);
+      });
+    });
+  }
+
+  /* ---- lifecycle wrappers ------------------------------------------------------------
+   * The same binding-rewrite device src/99-api.js uses: the bundle is one closure and a function
+   * declaration's binding is writable, so this layer nests INSIDE the wrappers src/97, src/98 and
+   * src/99 add later (they capture whatever `activate` / `restore` / `deactivate` are when they run). */
+  const LIFE_BASE = { activate, deactivate, restore };
+  activate = function () {
+    LIFE_BASE.activate();
+    try { lifeStart(); } catch (e) { /* 통계가 활성화를 막는 일은 없다 */ }
+  };
+  /* restore() ZEROES the product's counters (src/99-api.js: state.shots / damageDealt / cracks …), so the
+   * sample has to be taken BEFORE it runs. Taking it after was good for exactly one wrong answer: every
+   * session recorded 0 damage and 0 broken, because the only two moments §2 writes at — a 복구 and the
+   * 종료 (which calls restore() on its way out) — are both on the far side of that reset. */
+  deactivate = function (silent) {
+    const wasActive = state.active;
+    if (wasActive) { try { lifeSample(); } catch (e) { /* ignore */ } }
+    LIFE.exiting = true;
+    try {
+      return LIFE_BASE.deactivate(silent);
+    } finally {
+      LIFE.exiting = false;
+      if (wasActive) { try { lifeStop(); } catch (e) { /* ignore */ } }
+      else if (LIFE.timer) { try { clearT(LIFE.timer); } catch (e) { /* ignore */ } LIFE.timer = 0; }
+    }
+  };
+  restore = function () {
+    /* deactivate() calls restore() on its way out; that is an EXIT, not a 복구, and counting it would
+     * make §2's 복구 비율 (복구 / (복구 + 종료)) read 0.5 for someone who never pressed Z. */
+    const user = state.active && !LIFE.exiting;
+    if (user) { try { lifeSample(); } catch (e) { /* ignore */ } }
+    const r = LIFE_BASE.restore();
+    if (user && lifeEnabled()) {
+      try {
+        lifeDeltas().totalRestores++;
+        /* the counters are back at zero now; the snapshot has to follow them or the next sample would
+         * read the whole of the next 복구 as a decrease and add it twice */
+        if (LIFE.snap) { LIFE.snap.damage = 0; LIFE.snap.broken = 0; LIFE.snap.kills = Math.max(0, state.player.kills || 0); }
+        lifeArm();
+      } catch (e) { /* ignore */ }
+    }
+    return r;
+  };
+
 // ── 97-challenge.js ──
   /* ===================================================================== */
   /* 16. 챌린지 모드 · 무기 해금 (SPEC-product §3 / §4 해금)                   */
@@ -18645,6 +19255,15 @@
   api.replay = REPLAY_API;           // §5: export / import / play / stop / reset / save / list / state
   api.share = () => shareNow();      // §5: captureVisibleTab by message — no new permission
 
+  /* ---- SPEC-product §2 누적 통계 · §6 사용자 정의 무기 ----
+   * Same reason as the block above: `api` is a `const` of THIS file, so the two modules that build these
+   * (src/96-stats.js, src/96-custom.js) cannot reach it from inside their own bodies. */
+  api.lifetime = () => lifeNow();              // §2: 읽기 — 기기 밖으로 나가지 않는다
+  api.lifetimeReset = () => lifeReset();       // §2: "초기화는 명시적 확인 후" — 확인은 옵션 페이지가 받는다
+  api.customWeapons = () => cwInfo();          // §6: 등록된 것과 버려진 것, 둘 다
+  api.setCustomWeapons = (list) => cwSave(list);
+  api.customWeaponExample = (n) => cwExample(n);
+
   api.settings = () => settingsNow();
   api.setSetting = (key, value) => setSettingValue(key, value);
   api.settingsSchema = () => settingsSchema();
@@ -18748,6 +19367,10 @@
 
   /* One storage read and one chrome.storage.onChanged subscription per page, before the first activate(). */
   settingsBoot();
+  /* SPEC-product §6: the custom arsenal is read the same way — ONCE per page, asynchronously, and with
+   * every access inside safe(). Nothing in activate() waits for it, which is what makes "망가진 저장값이
+   * 활성화를 막아서는 안 된다" true by construction rather than by care. */
+  cwBoot();
 
   try {
     activate();

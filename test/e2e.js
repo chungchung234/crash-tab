@@ -336,8 +336,9 @@ const TIME_BUDGET_MS = Number(process.env.CRS_TIME_BUDGET_MS || 240000);
 // suite is still what gates a commit and what CI runs; a partial run says so in its summary and refuses to
 // report the runtime check, so a green partial run can never be mistaken for a green full run.
 const SUITE_ARG = (process.argv.find((a) => a.startsWith('--suite=')) || '').slice(8);
-const SUITES = String(process.env.CRS_SUITES || SUITE_ARG || 'ABC').toUpperCase();
-const PARTIAL = SUITES !== 'ABC';
+// SPEC-product §7 adds suite D (the options page in the real extension), so the full set is ABCD.
+const SUITES = String(process.env.CRS_SUITES || SUITE_ARG || 'ABCD').toUpperCase();
+const PARTIAL = SUITES !== 'ABCD';
 const WANT = (id) => SUITES.includes(id);
 
 // SPEC-test-speed §5 (block selection). Suite A is the long pole; it is cut into named blocks that each
@@ -4045,6 +4046,259 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
     await p.keyboard.press('Enter');
 
     await closeSettingsPage(h);
+  }
+
+  // =============================================================================================
+  // SPEC-product §2 누적 통계 · §6 사용자 정의 무기 — the CONTENT-SCRIPT half.
+  //
+  // The options page itself is suite D (it needs the real extension to exist at a
+  // chrome-extension:// URL). Everything here is what the injected code owes those two sections,
+  // and it lives in this block because it is all storage plumbing and runs in milliseconds.
+  //
+  // The harness chrome shim gives `storage.local` its own backing object, `window.__crsLocal`
+  // (`__crsStore` is still the SYNC area and nothing else), so a seed lands exactly where the
+  // product will look for it and the result can be read straight back out.
+  // =============================================================================================
+  {
+    const seedLocal = (data) => { Object.assign(window.__crsLocal, data); };
+    const readLocal = (p) => p.evaluate(() => JSON.parse(JSON.stringify(window.__crsLocal || {})));
+
+    // ---- §2.1 the default, one whole session, and the §2 field set -----------------------------
+    {
+      const h = await openSettingsPage();
+      const p = h.page;
+      check('A.stats (§2): collectLocalStats defaults to true (settings-schema.json carries the key)',
+        (await p.evaluate(() => window.__crashScreen.settings().collectLocalStats)) === true,
+        await p.evaluate(() => window.__crashScreen.settings().collectLocalStats));
+
+      // one real session: smash something, 복구 once, then 종료
+      await p.evaluate(() => { const r = document.querySelector('#cluster .leaf:first-child').getBoundingClientRect(); window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2); });
+      await sleep(120);
+      await p.evaluate(() => window.__crashScreen.restore());
+      await sleep(80);
+      const lifeLive = await p.evaluate(() => window.__crashScreen.lifetime());
+      check('A.stats (§2): api.lifetime() reads back the live session — 복구 1, 종료 0, 복구 비율 1',
+        !!lifeLive && lifeLive.enabled === true && lifeLive.totalRestores === 1 && lifeLive.totalExits === 0
+        && Math.abs(lifeLive.derived.restoreRatio - 1) < 1e-9, lifeLive && { restores: lifeLive.totalRestores, exits: lifeLive.totalExits, derived: lifeLive.derived });
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await sleep(150);
+      const rec = (await readLocal(p)).crsStats;
+      const FIELDS = ['version', 'firstUse', 'lastUse', 'sessions', 'msPlayed', 'totalDamage', 'totalBroken',
+        'totalKills', 'totalRestores', 'totalExits', 'bestScore', 'perOrigin'];
+      const missing = FIELDS.filter((k) => rec == null || rec[k] === undefined);
+      check('A.stats (§2): 종료 시 chrome.storage.local 의 crsStats 에 명세의 필드가 전부 있다',
+        missing.length === 0, { missing, rec: rec && Object.keys(rec) });
+      check('A.stats (§2): 한 세션이 sessions 1 · 종료 1 · 복구 1 · 피해 > 0 · 부순 요소 > 0 으로 기록된다',
+        !!rec && rec.sessions === 1 && rec.totalExits === 1 && rec.totalRestores === 1
+        && rec.totalDamage > 0 && rec.totalBroken > 0,
+        rec && { sessions: rec.sessions, exits: rec.totalExits, restores: rec.totalRestores, damage: rec.totalDamage, broken: rec.totalBroken });
+      const origins = rec && rec.perOrigin ? Object.keys(rec.perOrigin) : [];
+      const o0 = origins.length === 1 ? rec.perOrigin[origins[0]] : null;
+      check('A.stats (§2): perOrigin 이 이 출처 하나를 { bestScore, broken, plays, lastPlayed } 로 센다',
+        origins.length === 1 && origins[0] === origin && !!o0 && o0.plays === 1 && o0.broken > 0
+        && typeof o0.bestScore === 'number' && o0.lastPlayed > 0, { origins, o0 });
+      check('A.stats (§2): 파생 지표 — 복구 비율은 복구/(복구+종료) 이고 한 번씩이면 0.5 다',
+        !!rec && Math.abs((rec.totalRestores / (rec.totalRestores + rec.totalExits)) - 0.5) < 1e-9,
+        rec && { restores: rec.totalRestores, exits: rec.totalExits });
+      check('A.stats (§2): days 가 오늘 하루를 담고 있어 "최근 7일 사용 일수" 가 계산된다 (명세의 필드만으로는 셀 수 없다)',
+        !!rec && Array.isArray(rec.days) && rec.days.length === 1 && /^\d{4}-\d{2}-\d{2}$/.test(rec.days[0]), rec && rec.days);
+      await closeSettingsPage(h);
+    }
+
+    // ---- §2.2 the read-modify-write really preserves what §3 wrote ----------------------------
+    {
+      const h = await openSettingsPage(seedLocal, { crsStats: { challenges: { timeAttack: { plays: 3, bestScore: 777 } }, somethingElse: 42 } });
+      const p = h.page;
+      await p.evaluate(() => { const r = document.querySelector('#cluster .leaf:first-child').getBoundingClientRect(); window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2); });
+      await sleep(120);
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await sleep(150);
+      const rec = (await readLocal(p)).crsStats;
+      check('A.stats (§2): 읽고-고치고-쓰기가 §3 의 crsStats.challenges 와 모르는 필드를 그대로 둔다',
+        !!rec && !!rec.challenges && rec.challenges.timeAttack && rec.challenges.timeAttack.plays === 3
+        && rec.challenges.timeAttack.bestScore === 777 && rec.somethingElse === 42 && rec.sessions === 1,
+        rec && { challenges: rec.challenges, somethingElse: rec.somethingElse, sessions: rec.sessions });
+      await closeSettingsPage(h);
+    }
+
+    // ---- §2.3 출처 200개 상한 (LRU) ------------------------------------------------------------
+    {
+      const seeded = {};
+      for (let i = 0; i < 205; i++) seeded['https://seed' + i + '.example'] = { bestScore: i, broken: 1, plays: 1, lastPlayed: 1000 + i };
+      const h = await openSettingsPage(seedLocal, { crsStats: { perOrigin: seeded } });
+      const p = h.page;
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await sleep(150);
+      const rec = (await readLocal(p)).crsStats;
+      const keys = rec && rec.perOrigin ? Object.keys(rec.perOrigin) : [];
+      check('A.stats (§2): 출처가 200개를 넘으면 가장 오래 안 쓴 것부터 퇴출되어 정확히 200개가 남는다',
+        keys.length === 200, keys.length);
+      check('A.stats (§2): 퇴출된 것은 lastPlayed 가 가장 오래된 쪽이고, 이번에 쓴 출처는 반드시 남는다',
+        keys.indexOf('https://seed0.example') === -1 && keys.indexOf('https://seed4.example') === -1
+        && keys.indexOf('https://seed204.example') !== -1 && keys.indexOf(origin) !== -1,
+        { has0: keys.indexOf('https://seed0.example') !== -1, has204: keys.indexOf('https://seed204.example') !== -1, hasSelf: keys.indexOf(origin) !== -1 });
+      await closeSettingsPage(h);
+    }
+
+    // ---- §2.4 collectLocalStats: false 면 아예 쓰지 않는다 -------------------------------------
+    {
+      const h = await openSettingsPage((data) => { Object.assign(window.__crsStore, data); }, { 'crs.collectLocalStats': false });
+      const p = h.page;
+      await sleep(120);
+      await p.evaluate(() => { const r = document.querySelector('#cluster .leaf:first-child').getBoundingClientRect(); window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2); });
+      await sleep(120);
+      const life = await p.evaluate(() => window.__crashScreen.lifetime());
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await sleep(150);
+      const after = await readLocal(p);
+      check('A.stats (§2): collectLocalStats: false 면 api.lifetime() 이 { enabled: false } 를 돌려준다',
+        !!life && life.enabled === false, life);
+      check('A.stats (§2): collectLocalStats: false 면 crsStats 를 아예 쓰지 않는다 (종료 시에도)',
+        after.crsStats === undefined, Object.keys(after));
+      await closeSettingsPage(h);
+    }
+
+    // ---- §2.5 초기화 ----------------------------------------------------------------------------
+    {
+      const h = await openSettingsPage(seedLocal, { crsStats: { sessions: 9, totalDamage: 5000, bestScore: 42, perOrigin: { 'https://a.example': { plays: 2, broken: 3, bestScore: 1, lastPlayed: 5 } }, challenges: { survival: { plays: 1 } } } });
+      const p = h.page;
+      const okReset = await p.evaluate(() => window.__crashScreen.lifetimeReset());
+      await sleep(120);
+      const rec = (await readLocal(p)).crsStats;
+      check('A.stats (§2): api.lifetimeReset() 이 §2 의 수치를 0 으로 되돌리고 출처 표를 비운다',
+        okReset === true && !!rec && rec.sessions === 0 && rec.totalDamage === 0 && rec.bestScore === 0
+        && Object.keys(rec.perOrigin).length === 0, rec && { sessions: rec.sessions, damage: rec.totalDamage, origins: Object.keys(rec.perOrigin || {}) });
+      check('A.stats (§2): 초기화는 §3 의 challenges 를 가져가지 않는다',
+        !!rec && !!rec.challenges && rec.challenges.survival && rec.challenges.survival.plays === 1, rec && rec.challenges);
+      await closeSettingsPage(h);
+    }
+
+    // ---- §6.1 유효한 사용자 정의 무기가 무기고 끝에 붙고 실제로 부순다 ---------------------------
+    const CW_OK = {
+      id: 'cw_mallet', emoji: '🧷', nameKo: '시험 망치', nameEn: 'Test Mallet', kind: 'hammer',
+      damage: 120, cooldownMs: 300, mag: null, reloadMs: 0, radius: 0, tickMs: 120, crack: 'hammer', sound: 'hammer'
+    };
+    {
+      const h = await openSettingsPage(seedLocal, { crsCustomWeapons: [CW_OK] });
+      const p = h.page;
+      await sleep(150);
+      const info = await p.evaluate(() => window.__crashScreen.customWeapons());
+      const ids = await p.evaluate(() => window.__crashScreen.arsenalIds());
+      check('A.custom (§6): 유효한 사용자 정의 무기가 무기고의 **끝에** 붙는다',
+        ids.length === 24 && ids[ids.length - 1] === 'cw_mallet' && info.ids.length === 1 && info.errors.length === 0,
+        { n: ids.length, last: ids[ids.length - 1], errors: info.errors });
+      const named = await p.evaluate(() => window.__crashScreen.arsenal().find((w) => w.id === 'cw_mallet'));
+      check('A.custom (§6): 이름이 i18n 키가 아니라 저장된 이름으로 보인다 (메시지 키가 그대로 새지 않는다)',
+        !!named && named.name === '시험 망치' && named.emoji === '🧷' && named.damage === 120, named);
+      const inLoadout = await p.evaluate(() => window.__crashScreen.setLoadout(['cw_mallet', 'hammer', 'pistol']));
+      await p.evaluate(() => window.__crashScreen.setWeapon('cw_mallet'));
+      await sleep(400);   // v1.2 A5 교체 지연: 무기를 바꾼 직후의 공격은 거절된다 (swapMs 250)
+      const dealt = await p.evaluate(() => {
+        const el = document.querySelector('#cluster .leaf:first-child');
+        const r = el.getBoundingClientRect();
+        const before = window.__crashScreen.stats().damageDealt;
+        window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2);
+        return { before, after: window.__crashScreen.stats().damageDealt, weapon: window.__crashScreen.weapon, swapping: window.__crashScreen.stats().swapping };
+      });
+      check('A.custom (§6): 로드아웃에 넣을 수 있고, 그 무기로 쏘면 피해가 들어간다',
+        inLoadout === true && dealt.weapon === 'cw_mallet' && dealt.after > dealt.before, { inLoadout, ...dealt });
+      await sleep(150);
+      check('A.custom (§6): 사용자 정의 무기로 때린 요소도 실제로 부서진다 (조각이 생긴다)',
+        (await api.count(p, '.crs-debris')) > 0, await api.count(p, '.crs-debris'));
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await closeSettingsPage(h);
+    }
+
+    // ---- §6.2 엄격 검증: 필드마다 한 건씩 -------------------------------------------------------
+    {
+      const h = await openSettingsPage();
+      const p = h.page;
+      const bad = await p.evaluate((ok) => {
+        const out = {};
+        const mk = (patch) => Object.assign({}, ok, patch);
+        const cases = {
+          id: mk({ id: 'nope_mallet' }),
+          idChars: mk({ id: 'cw_Mallet' }),
+          idLong: mk({ id: 'cw_' + 'a'.repeat(21) }),
+          emoji: mk({ emoji: '🧷🧷🧷🧷🧷' }),
+          nameKo: mk({ nameKo: 'x'.repeat(21) }),
+          kind: mk({ kind: 'collapse' }),
+          damageLow: mk({ damage: 0 }),
+          damageHigh: mk({ damage: 1000 }),
+          cooldown: mk({ cooldownMs: 5001 }),
+          mag: mk({ mag: 201 }),
+          reload: mk({ reloadMs: 10001 }),
+          radius: mk({ radius: 601 }),
+          tickLow: mk({ tickMs: 19 }),
+          tickHigh: mk({ tickMs: 501 }),
+          crack: mk({ crack: 'spark' }),
+          sound: mk({ sound: 'kaboom' })
+        };
+        for (const k of Object.keys(cases)) out[k] = window.__crashScreen.setCustomWeapons([cases[k]]).rejected;
+        out.allowedNullMag = window.__crashScreen.setCustomWeapons([mk({ mag: null })]).saved;
+        out.allowedMag200 = window.__crashScreen.setCustomWeapons([mk({ mag: 200, reloadMs: 10000 })]).saved;
+        out.overMax = window.__crashScreen.setCustomWeapons(
+          Array.from({ length: 11 }, (_, i) => mk({ id: 'cw_x' + i })));
+        return out;
+      }, CW_OK);
+      const rejected = Object.keys(bad).filter((k) => k.indexOf('allowed') !== 0 && k !== 'overMax');
+      check('A.custom (§6): 엄격 검증 — 16가지 범위/형식 위반이 전부 거절된다',
+        rejected.every((k) => bad[k] === 1), bad);
+      check('A.custom (§6): mag 는 null 또는 1~200 이고 둘 다 통과한다',
+        bad.allowedNullMag === 1 && bad.allowedMag200 === 1, { nullMag: bad.allowedNullMag, mag200: bad.allowedMag200 });
+      check('A.custom (§6): 최대 10개 — 11번째는 저장되지 않는다',
+        bad.overMax.saved === 10 && bad.overMax.rejected === 1, bad.overMax);
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await closeSettingsPage(h);
+    }
+
+    // ---- §6.3 "망가진 저장값이 활성화를 막아서는 안 된다" ---------------------------------------
+    // §6 의 가장 중요한 조항이다. 저장소에 무엇이 들어 있든 — 배열이 아니거나, 항목이 객체가
+    // 아니거나, 필드가 전부 썩었거나 — 주입과 활성화는 끝까지 간다.
+    for (const [label, value] of [
+      ['배열이 아닌 값', { nope: true }],
+      ['문자열', 'not an array at all'],
+      ['null 섞인 배열', [null, 0, 'x']],
+      ['필드가 전부 썩은 항목', [{ id: 1, emoji: {}, nameKo: [], kind: 'nope', damage: 'x', cooldownMs: null, mag: 'y', reloadMs: -1, radius: 1e9, tickMs: 0, crack: 7, sound: false }]]
+    ]) {
+      const h = await openSettingsPage(seedLocal, { crsCustomWeapons: value });
+      const p = h.page;
+      await sleep(150);
+      const live = await p.evaluate(() => ({
+        on: window.__crashScreen.active,
+        root: !!document.querySelector('.crs-root'),
+        ids: window.__crashScreen.arsenalIds().length,
+        errors: window.__crashScreen.customWeapons().errors.length,
+        first: window.__crashScreen.customWeapons().errors[0] || null,
+        lastError: window.__crashScreen.stats().lastError
+      }));
+      check(`A.custom (§6): 망가진 crsCustomWeapons (${label}) 이 활성화를 막지 않는다 — 켜지고, 무기고는 내장 23종 그대로다`,
+        live.on === true && live.root === true && live.ids === 23, { label, ...live });
+      check(`A.custom (§6): 망가진 crsCustomWeapons (${label}) 의 첫 문제가 보고된다`,
+        live.errors >= 1 && !!live.first && typeof live.first.field === 'string', live.first);
+      const smashed = await p.evaluate(() => {
+        const el = document.querySelector('#cluster .leaf:first-child');
+        const r = el.getBoundingClientRect();
+        window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2);
+        return window.__crashScreen.stats().damageDealt;
+      });
+      check(`A.custom (§6): 망가진 저장값 뒤에도 제품이 정상으로 동작한다 (${label})`, smashed > 0, smashed);
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await closeSettingsPage(h);
+    }
+
+    // ---- §6.4 썩은 항목만 버리고 성한 것은 산다 --------------------------------------------------
+    {
+      const h = await openSettingsPage(seedLocal, { crsCustomWeapons: [{ id: 'nope' }, CW_OK, { id: 'cw_bad', damage: -1 }] });
+      const p = h.page;
+      await sleep(150);
+      const info = await p.evaluate(() => window.__crashScreen.customWeapons());
+      check('A.custom (§6): 잘못된 항목만 버리고 성한 것은 등록된다 — 첫 문제가 errors[0] 이다',
+        info.ids.length === 1 && info.ids[0] === 'cw_mallet' && info.errors.length === 2
+        && info.errors[0].index === 0 && info.errors[0].field === 'id', info);
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await closeSettingsPage(h);
+    }
   }
 
 }
@@ -11802,12 +12056,18 @@ async function suiteB(browser, origin, contentCss, contentJs) {
 // ---------------------------------------------------------------------------
 // Suite C — real extension wiring
 // ---------------------------------------------------------------------------
-function prepareExtensionCopy() {
-  const dst = path.join(OUT, 'ext');
+/* `name` keeps each suite's throwaway copy apart: suite C and suite D load the extension at the same
+ * time in different browsers, and one rm -rf'ing the other's directory mid-run looks exactly like a
+ * product bug. */
+function prepareExtensionCopy(name) {
+  const dst = path.join(OUT, name || 'ext');
   fs.rmSync(dst, { recursive: true, force: true });
   fs.mkdirSync(dst, { recursive: true });
   // SPEC-product §5: `share` joins the copy — the share page is part of the real extension's wiring now.
-  for (const name of ['manifest.json', 'background.js', 'content.js', 'content.css', 'icons', '_locales', 'share']) {
+  // SPEC-product §1: and so do `options` and `settings-schema.json`. They are not optional extras: the
+  // manifest's options_ui.page points at options/options.html, and Chrome REFUSES to load an extension
+  // whose options page is missing — leave them out and the service worker never appears at all.
+  for (const name of ['manifest.json', 'background.js', 'content.js', 'content.css', 'icons', '_locales', 'share', 'options', 'settings-schema.json']) {
     const src = path.join(ROOT, name);
     if (fs.existsSync(src)) fs.cpSync(src, path.join(dst, name), { recursive: true });
   }
@@ -12009,6 +12269,482 @@ async function suiteC(puppeteer, origin) {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Suite D — the options page, in the REAL extension (test/out/ext-d)
+// ---------------------------------------------------------------------------
+// SPEC-product §7: "옵션 페이지를 chrome-extension://<id>/options/options.html 로 여는 스위트 D 를
+// 추가한다: 설정 왕복, 통계 렌더, 무기고 편집기 드래그, 사용자 정의 무기 검증, 리플레이 가져오기의 거부."
+//
+// It has to be its own suite rather than a block of suite A: an options page only exists at a
+// chrome-extension:// URL, which means a loaded extension, which means its own browser. It shares that
+// shape with suite C and takes its OWN throwaway copy of the extension (prepareExtensionCopy('ext-d')),
+// because the two run at the same time and one rm -rf'ing the other's directory would look like a
+// product failure.
+//
+// The options page drives storage; the storage is the same storage the content script reads. So the last
+// block here closes the loop the other way round — a setting written from the options tab lands on an
+// ALREADY ACTIVE page without a re-activation (SPEC-settings §1.3), and a corrupt crsCustomWeapons does
+// not stop that page from coming up at all (SPEC-product §6, the completion criterion).
+async function suiteD(puppeteer, origin) {
+  console.log('\n=== Suite D: options page (SPEC-product §1 · §2 · §5 · §6) ===');
+  const ext = prepareExtensionCopy('ext-d');
+  const browser = await puppeteer.launch({
+    headless: true,
+    enableExtensions: true,
+    args: BASE_ARGS.concat([`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]),
+  });
+  try {
+    const swTarget = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('/background.js'), { timeout: 10000 });
+    const worker = await swTarget.worker();
+    const extId = new URL(swTarget.url()).host;
+    check('D.boot: the extension loads with options_ui declared (a missing options page stops Chrome dead)', !!worker && !!extId, extId);
+
+    /* §8 "새 권한이 하나도 늘지 않았을 것" — asserted against the SHIPPED manifest, not the copy under
+     * test (prepareExtensionCopy adds host_permissions to the copy for suite C's capture assertions). */
+    const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+    check('D.manifest: 권한이 늘지 않았다 — permissions 는 activeTab · scripting · storage 셋 그대로다',
+      Array.isArray(shipped.permissions) && shipped.permissions.length === 3
+      && ['activeTab', 'scripting', 'storage'].every((p) => shipped.permissions.indexOf(p) !== -1),
+      shipped.permissions);
+    check('D.manifest: host_permissions / optional_permissions 가 하나도 없다',
+      shipped.host_permissions === undefined && shipped.optional_host_permissions === undefined
+      && shipped.optional_permissions === undefined,
+      { host: shipped.host_permissions, optional: shipped.optional_permissions });
+    check('D.manifest: options_ui 는 권한이 아니다 — 페이지를 가리키고 탭으로 연다',
+      !!shipped.options_ui && shipped.options_ui.page === 'options/options.html' && shipped.options_ui.open_in_tab === true,
+      shipped.options_ui);
+
+    const OPTS = `chrome-extension://${extId}/options/options.html`;
+    const page = await browser.newPage();
+    await page.setViewport(VIEWPORT);
+    const log = hookPage(page);
+    /* §1 "외부 리소스를 전혀 쓰지 않는다" — every request the page makes is recorded and the list is
+     * asserted to contain nothing that is not the extension's own origin. */
+    const requests = [];
+    page.on('request', (r) => requests.push(r.url()));
+    page.on('dialog', (d) => { d.accept().catch(() => {}); });   // 기본값 되돌리기 / 통계 초기화의 확인창
+    await page.goto(OPTS, { waitUntil: 'load' });
+    const ready = await poll(() => page.evaluate(() => document.body.getAttribute('data-ready') === '1'), 8000, 60);
+    check('D.page: options.html 이 끝까지 렌더된다', ready === true, ready);
+
+    const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'settings-schema.json'), 'utf8'));
+    const shape = await page.evaluate(() => ({
+      title: document.title,
+      settings: [...document.querySelectorAll('[data-setting]')].map((n) => n.getAttribute('data-setting')),
+      groups: [...document.querySelectorAll('fieldset[data-group]')].map((n) => n.getAttribute('data-group')),
+      groupButtons: document.querySelectorAll('[data-reset-group]').length,
+      sections: [...document.querySelectorAll('main section')].map((n) => n.id),
+      headings: [...document.querySelectorAll('h2')].map((n) => (n.textContent || '').trim()),
+      labelled: [...document.querySelectorAll('[data-setting] > label')].map((n) => (n.textContent || '').trim()),
+      controls: [...document.querySelectorAll('[data-setting]')].every((n) => !!n.querySelector('input, select')),
+      links: [...document.querySelectorAll('link[rel="stylesheet"], script[src], img[src]')].map((n) => n.getAttribute('href') || n.getAttribute('src'))
+    }));
+    check('D.settings (§1): settings-schema.json 의 항목이 하나도 빠짐없이 렌더된다',
+      shape.settings.length === schema.length && schema.every((e) => shape.settings.indexOf(e.key) !== -1),
+      { rendered: shape.settings.length, schema: schema.length });
+    check('D.settings (§1): 네 그룹으로 나뉘고 그룹마다 "이 그룹 되돌리기" 가 있다',
+      shape.groups.join(',') === 'general,combat,accessibility,advanced' && shape.groupButtons === 4,
+      { groups: shape.groups, buttons: shape.groupButtons });
+    check('D.settings (§1): 항목마다 조작 가능한 컨트롤이 있고 라벨이 i18n 으로 채워져 있다 (키가 그대로 새지 않는다)',
+      shape.controls === true && shape.labelled.length === schema.length
+      && shape.labelled.every((s, i) => s.length > 0 && s !== schema[i].labelKey), shape.labelled.slice(0, 4));
+    check('D.page (§1): 일곱 구획이 전부 있다 — 설정 · 무기고 · 비교표 · 통계 · 사용자 정의 무기 · 리플레이 · 정보',
+      shape.sections.join(',') === 'sec-settings,sec-arsenal,sec-table,sec-stats,sec-custom,sec-replay,sec-about'
+      && shape.headings.length === 7 && shape.headings.every((h) => h.length > 0), shape.sections);
+    check('D.page (§1): 마크업이 가리키는 자원이 전부 상대 경로다 (절대 URL 이 하나도 없다)',
+      shape.links.every((h) => typeof h === 'string' && !/^[a-z]+:/i.test(h) && h.indexOf('//') !== 0), shape.links);
+
+    // ---- §1 설정 왕복: bool · enum · 범위 ------------------------------------------------------
+    const readSync = (keys) => worker.evaluate((k) => chrome.storage.sync.get(k), keys);
+    const before = await page.evaluate(() => document.getElementById('set-hitmarker').checked);
+    await page.evaluate(() => { document.getElementById('set-hitmarker').click(); });
+    await sleep(250);
+    const afterBool = await readSync(['crs.hitmarker']);
+    check('D.roundtrip (§1): 토글이 chrome.storage.sync 의 crs.<key> 로 간다',
+      afterBool['crs.hitmarker'] === !before, { before, stored: afterBool['crs.hitmarker'] });
+    await page.evaluate(() => {
+      const s = document.getElementById('set-mode');
+      s.value = JSON.stringify('arcade');
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await sleep(250);
+    await page.evaluate(() => {
+      const i = document.getElementById('set-soundVolume');
+      i.value = '55';
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+      i.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await sleep(250);
+    const afterRest = await readSync(['crs.mode', 'crs.soundVolume']);
+    const rangeShown = await page.evaluate(() => (document.querySelector('[data-setting="soundVolume"] output').textContent || '').trim());
+    check('D.roundtrip (§1): 선택(enum)과 범위(int)도 같은 자리에 저장된다',
+      afterRest['crs.mode'] === 'arcade' && afterRest['crs.soundVolume'] === 55, afterRest);
+    check('D.roundtrip (§1): 범위는 숫자를 병기한다 — 슬라이더 옆의 값이 저장된 값과 같다',
+      rangeShown === '55', rangeShown);
+    /* 재장전(reload)이 왕복의 나머지 반이다: 저장된 값이 다시 컨트롤에 들어와야 한다. */
+    await page.reload({ waitUntil: 'load' });
+    await poll(() => page.evaluate(() => document.body.getAttribute('data-ready') === '1'), 8000, 60);
+    const reloaded = await page.evaluate(() => ({
+      hitmarker: document.getElementById('set-hitmarker').checked,
+      mode: document.getElementById('set-mode').value,
+      vol: document.getElementById('set-soundVolume').value
+    }));
+    check('D.roundtrip (§1): 다시 열면 저장된 값이 컨트롤에 그대로 들어온다 (왕복이 닫힌다)',
+      reloaded.hitmarker === !before && reloaded.mode === JSON.stringify('arcade') && reloaded.vol === '55', reloaded);
+
+    // ---- §1 기본값으로 되돌리기 (그룹) ----------------------------------------------------------
+    await page.evaluate(() => { document.querySelector('[data-reset-group="combat"]').click(); });
+    await sleep(300);
+    const combatKeys = schema.filter((e) => e.group === 'combat');
+    const resetStored = await readSync(combatKeys.map((e) => 'crs.' + e.key));
+    check('D.reset (§1): 그룹 되돌리기가 그 그룹의 모든 키를 스키마 기본값으로 쓴다',
+      combatKeys.length > 0 && combatKeys.every((e) => resetStored['crs.' + e.key] === e.default), resetStored);
+    const untouched = await readSync(['crs.soundVolume']);
+    check('D.reset (§1): 다른 그룹은 건드리지 않는다',
+      untouched['crs.soundVolume'] === 55, untouched);
+
+    // ---- §1 무기고 편집기: 드래그로 넣는다 ------------------------------------------------------
+    const arsenalShape = await page.evaluate(() => ({
+      chips: document.querySelectorAll('#pool .chip').length,
+      cats: [...document.querySelectorAll('#pool .catrow')].map((n) => (n.textContent || '').trim()),
+      slots: document.querySelectorAll('#loadout .slot').length,
+      filled: [...document.querySelectorAll('#loadout .chip')].map((c) => c.getAttribute('data-id')),
+      keys: [...document.querySelectorAll('#loadout .key')].map((n) => (n.textContent || '').trim())
+    }));
+    check('D.arsenal (§1): 왼쪽에 무기고 23종이 실전·특수·예능 구획으로 나뉘어 있다',
+      arsenalShape.chips === 23 && arsenalShape.cats.length === 3, arsenalShape);
+    check('D.arsenal (§1): 오른쪽은 10칸이고 슬롯 키가 1…9,0 이다',
+      arsenalShape.slots === 10 && arsenalShape.keys.join('') === '1234567890', arsenalShape.keys);
+    const dragTo = async (poolId, slot) => {
+      const pts = await page.evaluate((pid, s) => {
+        const c = document.querySelector('#pool .chip[data-id="' + pid + '"]');
+        c.scrollIntoView({ block: 'center' });
+        const li = document.querySelector('#loadout .slot[data-slot="' + s + '"]');
+        const a = c.getBoundingClientRect(), b = li.getBoundingClientRect();
+        return { ax: a.x + a.width / 2, ay: a.y + a.height / 2, bx: b.x + b.width / 2, by: b.y + b.height / 2 };
+      }, poolId, String(slot));
+      await page.mouse.move(pts.ax, pts.ay);
+      await page.mouse.down();
+      await page.mouse.move(pts.ax + 14, pts.ay + 8, { steps: 3 });
+      await page.mouse.move(pts.bx, pts.by, { steps: 10 });
+      const mid = await page.evaluate(() => ({ over: document.querySelectorAll('.slot.over').length, ghost: document.querySelectorAll('.chip.ghost').length }));
+      await page.mouse.up();
+      await sleep(350);
+      return mid;
+    };
+    const mid = await dragTo('laser', 0);
+    const afterDrag = await page.evaluate(() => [...document.querySelectorAll('#loadout .chip')].map((c) => c.getAttribute('data-id')));
+    const storedLoadout = await readSync(['crsLoadout', 'crsLoadoutPreset']);
+    check('D.arsenal (§1): 끄는 동안 받을 칸이 표시되고 따라다니는 조각이 생긴다',
+      mid.over === 1 && mid.ghost === 1, mid);
+    check('D.arsenal (§1): 드래그로 넣은 무기가 그 칸에 들어가고 원래 있던 것이 밀려난다',
+      afterDrag[0] === 'laser' && afterDrag.indexOf('hammer') === -1 && afterDrag.length === 10, afterDrag);
+    check('D.arsenal (§1): 그 순서가 crsLoadout 으로 저장되고 프리셋이 custom 이 된다',
+      Array.isArray(storedLoadout.crsLoadout) && storedLoadout.crsLoadout[0] === 'laser'
+      && storedLoadout.crsLoadout.length === 10 && storedLoadout.crsLoadoutPreset === 'custom', storedLoadout);
+    const ghostGone = await page.evaluate(() => document.querySelectorAll('.chip.ghost').length + document.querySelectorAll('.slot.over').length);
+    check('D.arsenal (§1): 놓고 나면 따라다니던 조각도 표시도 남지 않는다', ghostGone === 0, ghostGone);
+    /* 순서 바꾸기: 로드아웃 안에서 끌면 두 칸이 맞바뀐다. */
+    const swapPts = await page.evaluate(() => {
+      const c = document.querySelector('#loadout .slot[data-slot="0"] .chip');
+      const li = document.querySelector('#loadout .slot[data-slot="3"]');
+      const a = c.getBoundingClientRect(), b = li.getBoundingClientRect();
+      return { ax: a.x + a.width / 2, ay: a.y + a.height / 2, bx: b.x + b.width / 2, by: b.y + b.height / 2, was: [...document.querySelectorAll('#loadout .chip')].map((x) => x.getAttribute('data-id')) };
+    });
+    await page.mouse.move(swapPts.ax, swapPts.ay);
+    await page.mouse.down();
+    await page.mouse.move(swapPts.ax + 10, swapPts.ay + 10, { steps: 3 });
+    await page.mouse.move(swapPts.bx, swapPts.by, { steps: 8 });
+    await page.mouse.up();
+    await sleep(350);
+    const afterSwap = await page.evaluate(() => [...document.querySelectorAll('#loadout .chip')].map((c) => c.getAttribute('data-id')));
+    check('D.arsenal (§1): 로드아웃 안에서 끌면 두 칸이 맞바뀐다 (순서를 바꿀 수 있다)',
+      afterSwap[3] === swapPts.was[0] && afterSwap[0] === swapPts.was[3], { was: swapPts.was, now: afterSwap });
+    /* 키보드로도 닿는다: 조각에 포커스를 주고 방향키로 옮긴다 (§1 "전부 키보드로 닿는다"). */
+    const kb = await page.evaluate(() => {
+      const c = document.querySelector('#loadout .slot[data-slot="0"] .chip');
+      c.focus();
+      return { id: c.getAttribute('data-id'), focused: document.activeElement === c };
+    });
+    await page.keyboard.press('ArrowDown');
+    await sleep(300);
+    const afterKb = await page.evaluate(() => [...document.querySelectorAll('#loadout .chip')].map((c) => c.getAttribute('data-id')));
+    check('D.arsenal (§1): 드래그 말고 키보드로도 순서를 바꿀 수 있다',
+      kb.focused === true && afterKb[1] === kb.id, { kb, afterKb });
+
+    // ---- §1 무기 비교표 ------------------------------------------------------------------------
+    const table = await page.evaluate(() => ({
+      cols: [...document.querySelectorAll('#cmp-head th button')].map((b) => (b.textContent || '').trim()),
+      rows: document.querySelectorAll('#cmp-body tr').length,
+      ids: [...document.querySelectorAll('#cmp-body tr')].map((r) => r.getAttribute('data-id')),
+      svgs: document.querySelectorAll('#cmp-body svg.art').length,
+      firstCells: [...document.querySelectorAll('#cmp-body tr:first-child td')].map((td) => (td.textContent || '').trim())
+    }));
+    check('D.table (§1): 무기고 전체가 한 줄씩, 스탯 열 전체와 함께 나온다',
+      table.rows === 23 && table.cols.length === 14 && table.cols.every((c) => c.length > 0), { rows: table.rows, cols: table.cols.length });
+    check('D.table (§1): 줄마다 SVG 그림이 있다 — 외부 이미지가 아니라 인라인 SVG 다',
+      table.svgs === 23, table.svgs);
+    const sortBy = async (key) => {
+      await page.evaluate((k) => { document.querySelector('#cmp-head th button[data-sort="' + k + '"]').click(); }, key);
+      await sleep(150);
+      return page.evaluate(() => [...document.querySelectorAll('#cmp-body tr')].map((r) => r.getAttribute('data-id')));
+    };
+    const byDamageAsc = await sortBy('damage');
+    const byDamageDesc = await sortBy('damage');
+    /* 붕괴는 피해가 Infinity 라 비교표에서 값이 없다(`—`). 값 없는 칸은 방향과 무관하게 **항상 끝**으로
+     * 가므로, "뒤집힌다" 는 그것을 뺀 나머지가 정확히 역순이라는 뜻이다. */
+    const noNull = (list) => list.filter((id) => id !== 'collapse');
+    check('D.table (§1): 열 제목을 누르면 정렬되고, 다시 누르면 방향이 뒤집힌다 (값 없는 칸은 양쪽 모두 끝에 남는다)',
+      byDamageAsc.length === 23 && byDamageDesc.length === 23
+      && byDamageAsc[0] === 'gravity' && byDamageDesc[0] === 'rocket'
+      && byDamageAsc[byDamageAsc.length - 1] === 'collapse' && byDamageDesc[byDamageDesc.length - 1] === 'collapse'
+      && noNull(byDamageAsc).join(',') === noNull(byDamageDesc).slice().reverse().join(','),
+      { asc: byDamageAsc.slice(0, 3), desc: byDamageDesc.slice(0, 3), ascLast: byDamageAsc[22], descLast: byDamageDesc[22] });
+
+    // ---- §2 통계 렌더 --------------------------------------------------------------------------
+    const SEED_STATS = {
+      version: 1, firstUse: Date.UTC(2025, 0, 2), lastUse: Date.now(),
+      sessions: 8, msPlayed: 8 * 60000, totalDamage: 12345, totalBroken: 321, totalKills: 17,
+      totalRestores: 3, totalExits: 9, bestScore: 4242,
+      perOrigin: {
+        'https://a.example': { bestScore: 100, broken: 50, plays: 4, lastPlayed: Date.now() },
+        'https://b.example': { bestScore: 200, broken: 90, plays: 2, lastPlayed: Date.now() }
+      },
+      days: [],
+      challenges: { timeAttack: { plays: 2 } }
+    };
+    await worker.evaluate((rec) => {
+      const today = new Date();
+      const p = (n) => (n < 10 ? '0' + n : String(n));
+      const day = (d) => d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+      rec.days = [day(new Date(Date.now() - 20 * 86400000)), day(new Date(Date.now() - 3 * 86400000)), day(today)];
+      return chrome.storage.local.set({ crsStats: rec });
+    }, SEED_STATS);
+    await page.reload({ waitUntil: 'load' });
+    await poll(() => page.evaluate(() => document.body.getAttribute('data-ready') === '1'), 8000, 60);
+    const stats = await page.evaluate(() => ({
+      hidden: document.getElementById('stats-off').hidden,
+      sessions: (document.getElementById('stat-sessions').textContent || '').trim(),
+      damage: (document.getElementById('stat-damage').textContent || '').trim(),
+      broken: (document.getElementById('stat-broken').textContent || '').trim(),
+      kills: (document.getElementById('stat-kills').textContent || '').trim(),
+      best: (document.getElementById('stat-best').textContent || '').trim(),
+      avg: (document.getElementById('stat-avg').textContent || '').trim(),
+      ratio: (document.getElementById('stat-ratio').textContent || '').trim(),
+      days7: (document.getElementById('stat-days7').textContent || '').trim(),
+      originRows: [...document.querySelectorAll('#origins-body tr')].map((r) => [...r.children].map((c) => (c.textContent || '').trim()))
+    }));
+    check('D.stats (§2): 통계 구획이 총계를 저장된 값 그대로 보여 준다',
+      stats.hidden === true && stats.sessions === '8' && stats.damage === '12345'
+      && stats.broken === '321' && stats.kills === '17' && stats.best === '4242', stats);
+    check('D.stats (§2): 파생 지표 셋 — 평균 세션 길이 · 복구 비율 3/(3+9)=25% · 최근 7일 사용 일수 2',
+      stats.avg.indexOf('1') === 0 && stats.ratio === '25%' && stats.days7 === '2',
+      { avg: stats.avg, ratio: stats.ratio, days7: stats.days7 });
+    check('D.stats (§2): 상위 출처가 부순 요소 순으로 줄 세워진다',
+      stats.originRows.length === 2 && stats.originRows[0][0] === 'https://b.example'
+      && stats.originRows[0][2] === '90' && stats.originRows[1][0] === 'https://a.example', stats.originRows);
+    /* §2 "collectLocalStats: false 면 아예 쓰지 않고 섹션도 숨긴다." */
+    await page.evaluate(() => { document.getElementById('set-collectLocalStats').click(); });
+    await sleep(350);
+    const off = await page.evaluate(() => ({
+      noticeShown: !document.getElementById('stats-off').hidden,
+      bodyHidden: document.getElementById('stats-body').hidden
+    }));
+    check('D.stats (§2): collectLocalStats 를 끄면 통계 구획이 숨고 안내만 남는다',
+      off.noticeShown === true && off.bodyHidden === true, off);
+    await page.evaluate(() => { document.getElementById('set-collectLocalStats').click(); });
+    await sleep(350);
+    /* 초기화 — 확인창은 위에서 수락하도록 걸어 두었다. §3 의 challenges 는 남아야 한다. */
+    await page.evaluate(() => { document.getElementById('stats-reset').click(); });
+    await sleep(400);
+    const afterReset = await worker.evaluate(() => chrome.storage.local.get(['crsStats']).then((r) => r.crsStats));
+    check('D.stats (§2): 명시적 확인 뒤의 초기화가 §2 의 수치만 지우고 §3 의 기록은 남긴다',
+      !!afterReset && afterReset.sessions === 0 && afterReset.totalDamage === 0
+      && Object.keys(afterReset.perOrigin || {}).length === 0
+      && !!afterReset.challenges && afterReset.challenges.timeAttack.plays === 2, afterReset);
+
+    // ---- §6 사용자 정의 무기: 검증 ---------------------------------------------------------------
+    const importCustom = async (value) => {
+      await page.evaluate((v) => {
+        document.getElementById('cw-json').value = v;
+        document.getElementById('cw-import').click();
+      }, typeof value === 'string' ? value : JSON.stringify(value));
+      await sleep(350);
+      return page.evaluate(() => ({
+        toast: (document.getElementById('toast').textContent || '').trim(),
+        rows: document.querySelectorAll('#cw-body tr').length
+      }));
+    };
+    const CW_GOOD = {
+      id: 'cw_probe', emoji: '🧪', nameKo: '시험 무기', nameEn: 'Probe', kind: 'hammer',
+      damage: 150, cooldownMs: 320, mag: null, reloadMs: 0, radius: 0, tickMs: 120, crack: 'hammer', sound: 'hammer'
+    };
+    const badJson = await importCustom('{ not json');
+    check('D.custom (§6): JSON 이 아니면 거절하고 아무것도 저장하지 않는다',
+      badJson.rows === 0 && badJson.toast.length > 0, badJson);
+    const badId = await importCustom([Object.assign({}, CW_GOOD, { id: 'probe' })]);
+    check('D.custom (§6): id 가 ^cw_[a-z0-9_]{1,20}$ 가 아니면 거절하고 무엇이 문제인지 말한다',
+      badId.rows === 0 && badId.toast.indexOf('id') !== -1, badId);
+    const badRange = await importCustom([Object.assign({}, CW_GOOD, { damage: 1000 })]);
+    check('D.custom (§6): 범위를 벗어난 수치(damage 1000)를 거절한다',
+      badRange.rows === 0 && badRange.toast.indexOf('damage') !== -1, badRange);
+    const badEmoji = await importCustom([Object.assign({}, CW_GOOD, { emoji: '🧪🧪🧪🧪🧪' })]);
+    check('D.custom (§6): 이모지가 4코드포인트를 넘으면 거절한다',
+      badEmoji.rows === 0 && badEmoji.toast.indexOf('emoji') !== -1, badEmoji);
+    const good = await importCustom([CW_GOOD]);
+    const afterGood = await page.evaluate(() => ({
+      rows: document.querySelectorAll('#cw-body tr').length,
+      poolChips: document.querySelectorAll('#pool .chip').length,
+      cmpRows: document.querySelectorAll('#cmp-body tr').length,
+      lastChip: (document.querySelector('#pool .chip:last-child') || {}).textContent,
+      customCat: document.querySelectorAll('#pool .catrow').length
+    }));
+    const storedCw = await worker.evaluate(() => chrome.storage.local.get(['crsCustomWeapons']).then((r) => r.crsCustomWeapons));
+    check('D.custom (§6): 유효한 무기는 저장되고 표·무기고·비교표에 한꺼번에 나타난다',
+      good.rows === 1 && afterGood.rows === 1 && afterGood.poolChips === 24 && afterGood.cmpRows === 24
+      && afterGood.customCat === 4, afterGood);
+    check('D.custom (§6): 저장된 모양이 §6 의 레코드 그대로다',
+      Array.isArray(storedCw) && storedCw.length === 1 && storedCw[0].id === 'cw_probe'
+      && storedCw[0].damage === 150 && storedCw[0].mag === null, storedCw);
+    /* 폼으로도 만든다 — §6 "옵션 페이지에 표·폼·JSON 가져오기/내보내기·예시 추가". */
+    const formed = await page.evaluate(() => {
+      document.getElementById('cw-new').click();
+      const idField = document.getElementById('cw-f-id');
+      idField.value = 'cw_formed';
+      document.getElementById('cw-f-damage').value = '77';
+      document.getElementById('cw-save').click();
+      return idField.value;
+    });
+    await sleep(350);
+    const formRows = await page.evaluate(() => [...document.querySelectorAll('#cw-body tr')].map((r) => r.getAttribute('data-id')));
+    check('D.custom (§6): 예시 추가 → 폼 수정 → 저장이 새 무기를 만든다',
+      formed === 'cw_formed' && formRows.length === 2 && formRows.indexOf('cw_formed') !== -1, formRows);
+    const deleted = await page.evaluate(() => {
+      document.querySelector('#cw-body [data-delete="cw_formed"]').click();
+      return true;
+    });
+    await sleep(350);
+    const afterDelete = await page.evaluate(() => [...document.querySelectorAll('#cw-body tr')].map((r) => r.getAttribute('data-id')));
+    check('D.custom (§6): 삭제하면 표와 무기고에서 같이 사라진다',
+      deleted === true && afterDelete.length === 1 && afterDelete[0] === 'cw_probe'
+      && (await page.evaluate(() => document.querySelectorAll('#pool .chip').length)) === 24, afterDelete);
+
+    // ---- §5 리플레이 가져오기의 거부 ------------------------------------------------------------
+    const importReplay = async (value) => {
+      await page.evaluate((v) => {
+        document.getElementById('rp-json').value = v;
+        document.getElementById('rp-import').click();
+      }, typeof value === 'string' ? value : JSON.stringify(value));
+      await sleep(350);
+      return page.evaluate(() => ({
+        toast: (document.getElementById('toast').textContent || '').trim(),
+        rows: document.querySelectorAll('#rp-body tr').length
+      }));
+    };
+    const vp = { w: 1280, h: 900 };
+    const rejections = [];
+    rejections.push(['JSON 이 아니다', await importReplay('{{{')]);
+    rejections.push(['v 가 1 이 아니다', await importReplay({ v: 2, startedAt: 0, viewport: vp, ops: [] })]);
+    rejections.push(['뷰포트가 없다', await importReplay({ v: 1, startedAt: 0, ops: [] })]);
+    rejections.push(['모르는 op', await importReplay({ v: 1, startedAt: 0, viewport: vp, ops: [{ t: 0, op: 'launchMissiles', args: [] }] })]);
+    rejections.push(['시간이 거꾸로 간다', await importReplay({ v: 1, startedAt: 0, viewport: vp, ops: [{ t: 10, op: 'restore', args: [] }, { t: 5, op: 'restore', args: [] }] })]);
+    rejections.push(['모르는 무기 id', await importReplay({ v: 1, startedAt: 0, viewport: vp, ops: [{ t: 0, op: 'weapon', args: ['railgun'] }] })]);
+    rejections.push(['smash 의 인자 수가 틀리다', await importReplay({ v: 1, startedAt: 0, viewport: vp, ops: [{ t: 0, op: 'smash', args: [1] }] })]);
+    rejections.push(['2000개를 넘는다', await importReplay({ v: 1, startedAt: 0, viewport: vp, ops: Array.from({ length: 2001 }, (_, i) => ({ t: i, op: 'restore', args: [] })) })]);
+    check('D.replay (§5): 엄격 검증 — 여덟 가지 잘못된 리플레이가 전부 거절되고 하나도 저장되지 않는다',
+      rejections.every(([, r]) => r.rows === 0 && r.toast.length > 0),
+      rejections.filter(([, r]) => r.rows !== 0).map(([n]) => n));
+    const bigOps = Array.from({ length: 1200 }, (_, i) => ({ t: i, op: 'smash', args: [1234.5678, 8765.4321] }));
+    const overSize = await importReplay({ v: 1, startedAt: 0, viewport: vp, ops: bigOps, pad: 'x'.repeat(1100000) });
+    check('D.replay (§5): 1MB 상한을 넘는 입력은 파싱도 하지 않고 거절한다',
+      overSize.rows === 0 && overSize.toast.length > 0, overSize);
+    const okReplay = await importReplay({ v: 1, startedAt: 0, viewport: vp, ops: [{ t: 0, op: 'weapon', args: ['cw_probe'] }, { t: 50, op: 'smash', args: [10, 20] }] });
+    const storedReplays = await worker.evaluate(() => chrome.storage.local.get(['crsReplays']).then((r) => r.crsReplays));
+    check('D.replay (§5): 올바른 리플레이는 받아들여 crsReplays 에 넣고 목록에 보인다 (사용자 정의 무기 id 도 안다)',
+      okReplay.rows === 1 && Array.isArray(storedReplays) && storedReplays.length === 1
+      && storedReplays[0].ops.length === 2, { rows: okReplay.rows, stored: storedReplays && storedReplays.length });
+
+    // ---- §1 정보 ---------------------------------------------------------------------------------
+    const about = await page.evaluate(() => ({
+      version: (document.getElementById('about-version').textContent || '').trim(),
+      repo: (document.querySelector('#about-grid a') || {}).href,
+      license: (document.getElementById('about-license').textContent || '').trim(),
+      perms: (document.getElementById('about-perms').textContent || '').trim(),
+      privacy: (document.getElementById('about-privacy').textContent || '').trim()
+    }));
+    check('D.about (§1): 버전 · 저장소 · 라이선스가 매니페스트와 저장소의 값과 맞는다',
+      about.version === shipped.version && /^https:\/\/github\.com\//.test(about.repo || '')
+      && about.license.length > 0, about);
+    check('D.about (§1): 네트워크 통신과 수집이 없다는 것을 명시한다',
+      about.privacy.length > 20 && about.perms.indexOf('activeTab') !== -1, about);
+
+    // ---- §1 외부 리소스 ---------------------------------------------------------------------------
+    const external = requests.filter((u) => !u.startsWith(`chrome-extension://${extId}/`) && u !== 'about:blank');
+    check('D.net (§1): 옵션 페이지가 외부 리소스를 하나도 쓰지 않는다 — 이 확장 자신 밖으로 나간 요청이 0 이다',
+      external.length === 0, external.slice(0, 5));
+    check('D.net (§1): 그 요청들은 전부 이 확장의 파일이다 (HTML · CSS · JS · 두 JSON 생성물)',
+      requests.length >= 4 && requests.every((u) => u.startsWith(`chrome-extension://${extId}/`) || u === 'about:blank'),
+      requests.slice(0, 8));
+
+    check('D.console: 옵션 페이지에 콘솔·페이지 오류가 없다',
+      log.pageErrors.length === 0 && log.consoleErrors.length === 0,
+      { pageErrors: log.pageErrors, consoleErrors: log.consoleErrors });
+
+    // ---- §6 완료 조건: 망가진 crsCustomWeapons 가 활성화를 막지 않는다 ---------------------------
+    // 옵션 페이지가 아니라 **제품**을 확인하는 단언이다. 저장소에 쓰레기를 넣고 진짜 확장을 진짜
+    // 페이지에 켠다. 콘텐츠 스크립트는 격리된 월드에 있으므로 (스위트 C 와 같은 이유로) 전부 DOM 으로 본다.
+    await worker.evaluate(() => chrome.storage.local.set({ crsCustomWeapons: 'this is not an array at all' }));
+    /* 블록은 자기 전제를 스스로 만든다 (CLAUDE.md). 이 스위트가 위에서 모드를 arcade 로 바꾸고 로드아웃
+     * 첫 칸을 레이저(꾹 누르는 무기, 틱 피해 11)로 바꿔 놓았으므로, 한 번의 클릭으로 25 체력짜리 조각이
+     * 부서지는지를 보려면 여기서 전제를 되돌려 놓아야 한다. 되돌리지 않으면 "망치 한 방" 단언이
+     * 제품의 결함이 아니라 앞 단언이 남긴 상태 때문에 진다. */
+    await worker.evaluate(() => chrome.storage.sync.set({
+      crsLoadout: ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'],
+      crsLoadoutPreset: 'default', crsWeapon: 'hammer', crsMode: 'rampage', 'crs.mode': 'rampage'
+    }));
+    const victim = await browser.newPage();
+    await victim.setViewport(VIEWPORT);
+    const vlog = hookPage(victim);
+    await victim.goto(`${origin}/`, { waitUntil: 'load' });
+    const vToggle = await worker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: 'http://127.0.0.1/*' });
+      if (!tab) return { id: null, res: 'no-tab' };
+      return { id: tab.id, res: await self.__crashScreenToggle(tab) };
+    });
+    check('D.custom (§6): 망가진 crsCustomWeapons 가 디스크에 있어도 토글이 "on" 이다',
+      vToggle.res === 'on', vToggle);
+    check('D.custom (§6): 망가진 저장값이 활성화를 막지 않는다 — .crs-root 가 올라온다',
+      (await poll(() => api.has(victim, '.crs-root'), 4000)) === true);
+    const VLEAF = '#cluster .leaf:first-child';
+    const vrect = await api.rect(victim, VLEAF);
+    await victim.mouse.click(vrect.cx, vrect.cy);
+    check('D.custom (§6): 그 뒤로도 제품이 정상으로 부순다 (조각이 생기고 요소가 부서진다)',
+      (await poll(async () => (await api.count(victim, '.crs-debris')) >= 1, 3000)) && (await api.broken(victim, VLEAF)));
+    /* §1.3 의 약속: 옵션 탭에서 바꾸면 열려 있는 페이지가 **재활성화 없이** 따라온다.
+     * highContrastMarkers 는 documentElement 에 `crs-hcm` 을 얹으므로 격리 월드 밖에서도 보인다. */
+    const hcBefore = await victim.evaluate(() => document.documentElement.classList.contains('crs-hcm'));
+    await page.bringToFront();
+    await page.evaluate(() => { document.getElementById('set-highContrastMarkers').click(); });
+    const hcAfter = await poll(() => victim.evaluate(() => document.documentElement.classList.contains('crs-hcm')), 4000, 80);
+    check('D.live (§1.3): 옵션 탭에서 바꾼 설정이 이미 열려 있는 페이지에 재활성화 없이 반영된다',
+      hcBefore === false && hcAfter === true, { before: hcBefore, after: hcAfter });
+    await worker.evaluate(async (id) => {
+      const tab = await chrome.tabs.get(id);
+      return self.__crashScreenToggle(tab);
+    }, vToggle.id);
+    check('D.custom (§6): 끄고 나면 흔적이 없다 ([data-crs] 0개)',
+      (await poll(async () => (await api.count(victim, '[data-crs]')) === 0, 3000)) === true);
+    check('D.console: 대상 페이지에 콘솔·페이지 오류가 없다',
+      vlog.pageErrors.length === 0 && vlog.consoleErrors.length === 0,
+      { pageErrors: vlog.pageErrors, consoleErrors: vlog.consoleErrors });
+    await victim.close();
+    await page.close();
+  } finally {
+    await browser.close();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -12083,18 +12819,26 @@ async function suiteC(puppeteer, origin) {
   /* Re-measured after SPEC-product (10단계) landed. §3 챌린지 · §4 보스와 해금 · §5 인스펙터·공유·리플레이
    * all went into `combat`, which grew 35 → 56 s and therefore moves ahead of `depth` in the queue. `ammo`
    * is untouched at ~107 s and is still the lane the wall clock is made of. */
+  /* Re-measured after SPEC-product §1 · §2 · §6 landed. `settings` took §2 (누적 통계) and §6
+   * (사용자 정의 무기)의 콘텐츠 스크립트 쪽 and went 7 → 17 s, and the brand new suite D (옵션 페이지,
+   * 진짜 확장) measures ~20 s. Nine lanes became ten while LANE_CAP stayed at four — the ceiling is frame
+   * starvation, not cores, so the right move is to re-cut the QUEUE rather than to widen it. D goes in
+   * ahead of `settings`: the four long blocks fill the slots at t=0, and D starts on the first free slot
+   * around t≈78 s, finishing inside the slack `ammo` already leaves. Putting it last instead (after B)
+   * would start it at ~96 s and push the wall clock out by its whole length. */
   const A_BLOCKS = [
-    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~107 s — 가장 긴 레인이고 벽시계가 곧 이 값이다
-    ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],       // ~76 s
+    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~106 s — 가장 긴 레인이고 벽시계가 곧 이 값이다
+    ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],       // ~78 s
     ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~60 s
-    ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],           // ~56 s — 10단계가 35 → 56 s 로 올렸다
-    ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~42 s
-    ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],     // ~38 s
-    ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],   // ~7 s
+    ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],           // ~55 s
+    ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~43 s
+    ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],     // ~37 s
+    ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],   // ~17 s — 10단계 §2 · §6 가 7 → 17 s 로 올렸다
   ];
   for (const [name, fn] of A_BLOCKS) {
+    if (name === 'settings' && WANT('D')) runLane('D', () => slot(() => suiteD(puppeteer, origin)));   // ~20 s
     if (WANT('A') && WANT_BLOCK(name)) runLane(name, () => ownBrowserQueued(fn));
-    if (name === 'settings') {   // the two short non-A suites go ahead of the shortest A block
+    if (name === 'settings') {   // the two short non-A suites go after the shortest A block
       if (WANT('C')) runLane('C', () => slot(() => suiteC(puppeteer, origin)));
       if (WANT('B')) runLane('B', () => ownBrowserQueued((b) => suiteB(b, origin, contentCss, contentJs)));
     }

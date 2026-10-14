@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>crash-tab</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <a class="skip" id="skip" href="#main"></a>
+
+  <header class="top">
+    <h1 class="title" id="title"></h1>
+    <nav class="nav" id="nav"></nav>
+  </header>
+
+  <main class="wrap" id="main">
+    <section class="card" id="sec-settings" aria-labelledby="h-settings">
+      <h2 id="h-settings"></h2>
+      <div id="groups"></div>
+      <div class="row">
+        <button class="btn danger" id="reset-all" type="button"></button>
+      </div>
+    </section>
+
+    <section class="card" id="sec-arsenal" aria-labelledby="h-arsenal">
+      <h2 id="h-arsenal"></h2>
+      <p class="hint" id="arsenal-hint"></p>
+      <div class="row">
+        <label class="inline" id="preset-label" for="preset"></label>
+        <select id="preset"></select>
+      </div>
+      <div class="two">
+        <div>
+          <h3 id="h-pool"></h3>
+          <div class="pool" id="pool" data-drop="pool"></div>
+        </div>
+        <div>
+          <h3 id="h-loadout"></h3>
+          <ol class="loadout" id="loadout"></ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="sec-table" aria-labelledby="h-table">
+      <h2 id="h-table"></h2>
+      <p class="hint" id="table-hint"></p>
+      <div class="scroll">
+        <table class="cmp" id="cmp">
+          <thead><tr id="cmp-head"></tr></thead>
+          <tbody id="cmp-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="sec-stats" aria-labelledby="h-stats">
+      <h2 id="h-stats"></h2>
+      <p class="hint" id="stats-local"></p>
+      <p class="empty" id="stats-off" hidden></p>
+      <div id="stats-body">
+        <dl class="grid" id="stats-grid"></dl>
+        <h3 id="h-origins"></h3>
+        <p class="empty" id="origins-empty" hidden></p>
+        <div class="scroll">
+          <table class="cmp" id="origins">
+            <thead><tr id="origins-head"></tr></thead>
+            <tbody id="origins-body"></tbody>
+          </table>
+        </div>
+        <div class="row">
+          <button class="btn danger" id="stats-reset" type="button"></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="sec-custom" aria-labelledby="h-custom">
+      <h2 id="h-custom"></h2>
+      <p class="hint" id="custom-hint"></p>
+      <p class="empty" id="custom-empty" hidden></p>
+      <div class="scroll">
+        <table class="cmp" id="cw-table">
+          <thead><tr id="cw-head"></tr></thead>
+          <tbody id="cw-body"></tbody>
+        </table>
+      </div>
+      <form class="form" id="cw-form"></form>
+      <div class="row">
+        <button class="btn" id="cw-new" type="button"></button>
+        <button class="btn" id="cw-export" type="button"></button>
+        <button class="btn" id="cw-import" type="button"></button>
+      </div>
+      <label class="inline" id="cw-json-label" for="cw-json"></label>
+      <textarea class="json" id="cw-json" spellcheck="false" rows="6"></textarea>
+    </section>
+
+    <section class="card" id="sec-replay" aria-labelledby="h-replay">
+      <h2 id="h-replay"></h2>
+      <p class="hint" id="replay-hint"></p>
+      <p class="empty" id="replay-empty" hidden></p>
+      <div class="scroll">
+        <table class="cmp" id="rp-table">
+          <thead><tr id="rp-head"></tr></thead>
+          <tbody id="rp-body"></tbody>
+        </table>
+      </div>
+      <div class="row">
+        <button class="btn" id="rp-import" type="button"></button>
+      </div>
+      <label class="inline" id="rp-json-label" for="rp-json"></label>
+      <textarea class="json" id="rp-json" spellcheck="false" rows="6"></textarea>
+    </section>
+
+    <section class="card" id="sec-about" aria-labelledby="h-about">
+      <h2 id="h-about"></h2>
+      <dl class="grid" id="about-grid"></dl>
+      <p class="privacy" id="about-privacy"></p>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="options.js"></script>
+</body>
+</html>

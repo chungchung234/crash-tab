@@ -686,5 +686,601 @@
   "replayBad": {
     "message": "That replay file is not valid",
     "description": "SPEC-product 5: strict import validation refused the object"
+  },
+  "setCollectLocalStats": {
+    "message": "Collect statistics on this device",
+    "description": "SPEC-product 2: settings-schema.json collectLocalStats label"
+  },
+  "cwBad": {
+    "message": "A custom weapon entry is not valid",
+    "description": "SPEC-product 6: first rejected custom weapon, announced as a toast"
+  },
+  "optTitle": {
+    "message": "Crash Tab options",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavSettings": {
+    "message": "Settings",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavArsenal": {
+    "message": "Arsenal",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavTable": {
+    "message": "Compare",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavStats": {
+    "message": "Statistics",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavCustom": {
+    "message": "Custom weapons",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavReplay": {
+    "message": "Replays",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optNavAbout": {
+    "message": "About",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupGeneral": {
+    "message": "General",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupCombat": {
+    "message": "Combat",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupAccessibility": {
+    "message": "Accessibility",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optGroupAdvanced": {
+    "message": "Advanced",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optResetGroup": {
+    "message": "Reset this group",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optResetAll": {
+    "message": "Reset everything to defaults",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optResetDone": {
+    "message": "Restored the defaults",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optConfirmResetAll": {
+    "message": "Reset every setting to its default?",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optSaved": {
+    "message": "Saved",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optInvalid": {
+    "message": "That value is not valid",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optArsenalTitle": {
+    "message": "Arsenal editor",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optArsenalHint": {
+    "message": "Drag weapons in and out of the loadout and reorder them. Empty slots are fine.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optArsenalAll": {
+    "message": "Every weapon",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optLoadoutTitle": {
+    "message": "Loadout",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optSlot": {
+    "message": "Slot",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optEmptySlot": {
+    "message": "Empty",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAdd": {
+    "message": "Add",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optRemove": {
+    "message": "Remove",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optLoadoutFull": {
+    "message": "The loadout is full",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatField": {
+    "message": "Field",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatSpecial": {
+    "message": "Special",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatFun": {
+    "message": "Fun",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCatCustom": {
+    "message": "Custom",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optTableTitle": {
+    "message": "Weapon comparison",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optSortHint": {
+    "message": "Click a column header to sort.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColWeapon": {
+    "message": "Weapon",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColCat": {
+    "message": "Band",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColRole": {
+    "message": "Role",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColKind": {
+    "message": "Action",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColDamage": {
+    "message": "Damage",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColInterval": {
+    "message": "Cooldown / tick",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColMag": {
+    "message": "Magazine",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColReload": {
+    "message": "Reload",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColRadius": {
+    "message": "Radius",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColSwap": {
+    "message": "Swap",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColDps": {
+    "message": "Burst DPS",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColUptime": {
+    "message": "Uptime",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColHandling": {
+    "message": "Handling",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColEffective": {
+    "message": "Effective",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindHammer": {
+    "message": "Melee",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindGun": {
+    "message": "Hitscan",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindBomb": {
+    "message": "Blast",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optKindCollapse": {
+    "message": "Collapse",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsTitle": {
+    "message": "Lifetime statistics",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsLocal": {
+    "message": "These numbers never leave this device.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsOff": {
+    "message": "Local statistics collection is off.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatSessions": {
+    "message": "Sessions",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatPlayed": {
+    "message": "Time played",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatDamage": {
+    "message": "Total damage",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatBroken": {
+    "message": "Elements broken",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatKills": {
+    "message": "Kills",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatRestores": {
+    "message": "Restores",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatExits": {
+    "message": "Exits",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatBest": {
+    "message": "Best score",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatFirstUse": {
+    "message": "First used",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatLastUse": {
+    "message": "Last used",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatAvgSession": {
+    "message": "Average session",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatRestoreRatio": {
+    "message": "Restore ratio",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatDays7": {
+    "message": "Active days (last 7)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatTopOrigins": {
+    "message": "Top 10 origins",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColOrigin": {
+    "message": "Origin",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColPlays": {
+    "message": "Plays",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColLast": {
+    "message": "Last",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsEmpty": {
+    "message": "Nothing recorded yet.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsReset": {
+    "message": "Reset statistics",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optConfirmStatsReset": {
+    "message": "Erase every lifetime statistic? Challenge records are kept.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatsResetDone": {
+    "message": "Statistics erased",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitDays": {
+    "message": "d",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitHours": {
+    "message": "h",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitMinutes": {
+    "message": "min",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optUnitSeconds": {
+    "message": "s",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomTitle": {
+    "message": "Custom weapons",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomHint": {
+    "message": "Up to ten. They join the end of the arsenal and can go into the loadout.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomNew": {
+    "message": "Add an example",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomSave": {
+    "message": "Save",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomDelete": {
+    "message": "Delete",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomExport": {
+    "message": "Export JSON",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomImport": {
+    "message": "Import JSON",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomSaved": {
+    "message": "Custom weapons saved",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomRejected": {
+    "message": "Some entries were rejected",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomEmpty": {
+    "message": "No custom weapons yet.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomFull": {
+    "message": "All ten slots are taken",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomBadJson": {
+    "message": "That JSON is not valid",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldId": {
+    "message": "Id",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldEmoji": {
+    "message": "Emoji",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldNameKo": {
+    "message": "Name (Korean)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldNameEn": {
+    "message": "Name (English)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldKind": {
+    "message": "Action",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldDamage": {
+    "message": "Damage",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldCooldown": {
+    "message": "Cooldown (ms)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldMag": {
+    "message": "Magazine (blank = none)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldReload": {
+    "message": "Reload (ms)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldRadius": {
+    "message": "Radius (px)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldTick": {
+    "message": "Tick (ms)",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldCrack": {
+    "message": "Crack mark",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optFieldSound": {
+    "message": "Sound",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayTitle": {
+    "message": "Replays",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayHint": {
+    "message": "Export a stored replay to a file and import it back. 1 MB cap, strict validation.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayExport": {
+    "message": "Export",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayImport": {
+    "message": "Import",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayEmpty": {
+    "message": "No stored replays.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayImported": {
+    "message": "Replay imported",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplayOps": {
+    "message": "Operations",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optReplaySavedAt": {
+    "message": "Saved",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutTitle": {
+    "message": "About",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutVersion": {
+    "message": "Version",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutRepo": {
+    "message": "Repository",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutLicense": {
+    "message": "License",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutPrivacy": {
+    "message": "No network traffic. Nothing is collected and nothing is sent anywhere. Settings, statistics, replays and custom weapons all stay inside this browser.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutPerms": {
+    "message": "Permissions",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optAboutPermsValue": {
+    "message": "activeTab, scripting, storage — those three and nothing else.",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvAuto": {
+    "message": "Auto",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvOn": {
+    "message": "On",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvOff": {
+    "message": "Off",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvDocument": {
+    "message": "Document",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvViewport": {
+    "message": "Viewport",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvSvg": {
+    "message": "SVG art",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvEmoji": {
+    "message": "Emoji",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvQuiet": {
+    "message": "Quiet",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvAlways": {
+    "message": "Always",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvBrackets": {
+    "message": "Brackets",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvFull": {
+    "message": "Full",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvCross": {
+    "message": "Cross",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvDot": {
+    "message": "Dot",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvCircle": {
+    "message": "Circle",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvWhite": {
+    "message": "White",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvGreen": {
+    "message": "Green",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvCyan": {
+    "message": "Cyan",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvMagenta": {
+    "message": "Magenta",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvEasy": {
+    "message": "Easy",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvNormal": {
+    "message": "Normal",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvHard": {
+    "message": "Hard",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvQuality": {
+    "message": "Quality",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvPerformance": {
+    "message": "Performance",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvUnlimited": {
+    "message": "Unlimited",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optvNone": {
+    "message": "None",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColBroken": {
+    "message": "Broken",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optColBest": {
+    "message": "Best",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optCustomEdit": {
+    "message": "Edit",
+    "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
   }
 }

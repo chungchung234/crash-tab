@@ -24,5 +24,6 @@
   { "key": "keyboardAim", "type": "bool", "default": false, "labelKey": "setKeyboardAim", "group": "accessibility" },
   { "key": "perfMode", "type": "enum", "default": "auto", "options": ["auto", "quality", "performance"], "labelKey": "setPerfMode", "group": "advanced" },
   { "key": "unlockAll", "type": "bool", "default": true, "labelKey": "setUnlockAll", "group": "advanced" },
-  { "key": "recordReplay", "type": "bool", "default": true, "labelKey": "setRecordReplay", "group": "advanced" }
+  { "key": "recordReplay", "type": "bool", "default": true, "labelKey": "setRecordReplay", "group": "advanced" },
+  { "key": "collectLocalStats", "type": "bool", "default": true, "labelKey": "setCollectLocalStats", "group": "advanced" }
 ]

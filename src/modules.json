@@ -46,6 +46,8 @@
     "94-repair.js",
     "95-events.js",
     "96-a11y.js",
+    "96-custom.js",
+    "96-stats.js",
     "97-challenge.js",
     "98-inspect.js",
     "99-api.js"
