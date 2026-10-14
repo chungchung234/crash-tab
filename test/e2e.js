@@ -5161,6 +5161,14 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   // the eviction by id rather than by a DOM index that shifts the moment a node is removed.
   // debug.expirePiece() retires just the supporting piece: at the default 6 s lifetime a whole freshly-rested
   // pile expires inside one sweep, which would take the piece above along with the one beneath it.
+  /* …and the whole of this check runs with the lifetime OFF. What is being measured is an eviction
+   * knocking a piece loose, not a clock: with the 6 s default running, the pile ages while the pair is
+   * being searched for (and the search may break more elements and settle them, which costs seconds), so
+   * the piece being followed can simply expire on its own. That shows up as `upAfter: null` — not "it did
+   * not fall" but "it is not there any more" — and it is the reason this assertion kept failing about one
+   * run in five. debug.expirePiece() sets expireAt by hand, so it still retires the one piece we mean to
+   * retire. The 6 s default goes back on right after the check. */
+  await api.call(page, 'setDebrisLife', 0);
   await api.setWeapon(page, 'hammer');
   const st1_944 = await api.rect(page, '#stack-1');
   const sx944 = st1_944.cx;
@@ -5245,6 +5253,7 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
     const floor944 = await page.evaluate(() => document.documentElement.clientHeight);
     check('A.v2 9.4.4: a piece resting on top of another re-falls once the piece underneath it despawns', expired944 === pairInfo944.lower && lowerGone944 === true && !!rose944, { pair: pairInfo944, expired944, lowerGone944, after: rose944, upAfter: upAfter944, floor: floor944 });
   }
+  await api.call(page, 'setDebrisLife', 6000);   // the lifetime goes back on for §9.4.5 below
 
   // ---- (5) in-flight pieces do not count toward the debris lifetime (§9.4.5) ----
   await api.restore(page);
