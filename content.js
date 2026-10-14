@@ -3486,10 +3486,10 @@
     if (el.hasAttribute('data-crs-broken')) return null;
     return el;
   }
-  /* Size-based max HP (v1.1 A1): base = 20 + 0.35·sqrt(area); media ×1.2, controls ×1, text-ish ×0.6 capped
-   * at 60 (a hammer always one-shots text), containers ×1; clamp [10, 400]. Computed once per element on
-   * first contact (hover or hit) and cached in the WeakMap by hpOf(). */
-  function hpMax(el) {
+  /* Size-based OWN max HP (v1.1 A1 / SPEC-combat §C2 `ownHp`): base = 20 + 0.35·sqrt(area); media ×1.2,
+   * controls ×1, text-ish ×0.6 capped at 60 (a hammer always one-shots text), containers ×1; clamp [10, 400].
+   * This is the element's own shell only — what it is worth with everything inside it already gone. */
+  function ownHp(el) {
     const tag = tagOf(el);
     const r = rectOf(el) || { width: 0, height: 0 };
     const m = scopeMag();   // page-space area: rects are 2× under the scope transform (v1.2 A3)
@@ -3504,10 +3504,127 @@
     else v = Math.round(base);
     return clamp(v, 10, 400);
   }
+
+  /* ── SPEC-combat §C: a container is worth what it HOLDS ──────────────────────
+   *   maxHp(el) = clamp(ownHp(el) + 0.6 × Σ maxHp(destructible direct descendants), 10, 2500)
+   * §C1: without this, a section holding 20 cards (317) is cheaper than two of those cards (184 each), so
+   * hitting the biggest thing in sight is always the right move and nothing smaller is ever worth a swing.
+   * The 0.6 keeps the shell slightly cheaper than its contents (§C2: 1.0 removes the choice, 0.3 restores
+   * the hole). Computed ONCE, on first contact, and cached in state.hp by hpOf() — the DOM may change
+   * afterwards and the number does not (§C4). */
+  const HP_AGG_MUL = 0.6;
+  const HP_AGG_MIN_AREA = 2000;    // §C2: a descendant under 2000 px² is not counted at all
+  const HP_AGG_CAP = 2500;         // §C2: past this, emptying the container IS the intended answer
+  const HP_WALK_NODES = 200, HP_WALK_DEPTH = 12;         // §C4 traversal budget
+  const HP_WALK_NODES_PERF = 100, HP_WALK_DEPTH_PERF = 8;   // §C4 in performance mode
+  /* §C4: REAL computations only — a cache hit never touches it. Read through stats().hpCalcs; reset with the
+   * WeakMap it counts for, in restore() (src/99-api.js). */
+  let hpCalcs = 0;
+
+  /* walkCandidates()'s eligibility rules (src/76-weapon-fire.js), with ONE deliberate omission: the
+   * viewport-intersection test. An aggregate is computed once and never recomputed (§C4), so letting the
+   * scroll position decide which children count would freeze a different number into the cache depending on
+   * where the page happened to be when the player first touched the element.
+   * 0 = not a descendant at all · 1 = no box of its own, look through it (walkCandidates' descend())
+   * · 2 = a real box, judge it by area. */
+  function hpQualify(el) {
+    if (!el || el.nodeType !== 1) return 0;
+    if (SKIP_WALK_TAGS.has(tagOf(el)) || isOurs(el)) return 0;
+    try { if (el.hasAttribute('data-crs-broken')) return 0; } catch (e) { return 0; }
+    const s = gcs(el);
+    if (!s || s.display === 'none' || parseFloat(s.opacity) < 0.05) return 0;
+    const r = rectOf(el);
+    if (!r) return 0;
+    if (r.width < 1 || r.height < 1 || s.display === 'contents' || s.visibility === 'hidden') return 1;
+    return 2;
+  }
+  function hpChildren(el) {
+    const out = [];
+    try { if (el.shadowRoot) for (const c of el.shadowRoot.children) out.push(c); } catch (e) { /* ignore */ }
+    try { for (const c of el.children) out.push(c); } catch (e) { /* ignore */ }
+    return out;
+  }
+  /* Σ maxHp of el's destructible direct descendants. `st` is the §C4 budget: `left` nodes and `depth` levels,
+   * and `over` once either runs out — an overrun is reported all the way up, never silently truncated. */
+  function hpSumBelow(el, st, depth) {
+    const kids = hpChildren(el);
+    if (!kids.length) return 0;
+    if (depth >= st.depth) { st.over = true; return 0; }
+    const m = scopeMag();
+    let sum = 0;
+    for (const c of kids) {
+      if (st.over) break;
+      if (--st.left < 0) { st.over = true; break; }
+      const q = hpQualify(c);
+      if (q === 0) continue;
+      if (q === 1) { sum += hpSumBelow(c, st, depth + 1); continue; }   // a wrapper with no box: its children are el's
+      const r = rectOf(c);
+      if ((r.width / m) * (r.height / m) < HP_AGG_MIN_AREA) continue;   // §C2
+      /* A descendant that has been contacted already carries the live number — including whatever IT has
+       * lost to §C3 — so the two views of the same subtree can never disagree. */
+      const cached = state.hp.get(c);
+      sum += cached ? cached.max : clamp(Math.round(ownHp(c) + HP_AGG_MUL * hpSumBelow(c, st, depth + 1)), 10, HP_AGG_CAP);
+    }
+    return sum;
+  }
+  /* The §C2 formula. Integer, so every downstream `hp === max − damage` stays exact. */
+  function hpCompute(el) {
+    hpCalcs++;
+    const own = ownHp(el);
+    const perf = perfOn();
+    const st = { left: perf ? HP_WALK_NODES_PERF : HP_WALK_NODES, depth: perf ? HP_WALK_DEPTH_PERF : HP_WALK_DEPTH, over: false };
+    const sum = hpSumBelow(el, st, 0);
+    // §C4: too big to walk honestly → ownHp × 3 and say so, rather than a number nobody can trust
+    if (st.over) return { own, max: clamp(own * 3, 10, HP_AGG_CAP), approx: true };
+    return { own, max: clamp(Math.round(own + HP_AGG_MUL * sum), 10, HP_AGG_CAP), approx: false };
+  }
+  function hpMax(el) { return hpCompute(el).max; }
   function hpOf(el) {
     let rec = state.hp.get(el);
-    if (!rec) { const m = hpMax(el); rec = { hp: m, max: m, lastFxAt: 0, side: 1 }; state.hp.set(el, rec); }
+    if (!rec) {
+      const c = hpCompute(el);
+      rec = { hp: c.max, max: c.max, own: c.own, approx: c.approx, aggLost: 0, lastFxAt: 0, side: 1 };
+      state.hp.set(el, rec);
+    }
     return rec;
+  }
+  /* §C3: `el` just broke — every ancestor that has a cached record loses 0.6 × el's max from BOTH max and hp,
+   * so emptying a container leaves nothing but its own shell, and an ancestor already hurt enough goes down
+   * with it. The amount taken is remembered on el's own record, so repair (src/94-repair.js) gives back
+   * exactly what was taken even if el's max changes meanwhile. */
+  function hpDescendantBroken(el, ix, iy, mode) {
+    const rec = state.hp.get(el);
+    if (!rec) return;
+    const d = Math.round(HP_AGG_MUL * rec.max);
+    rec.aggLost = d;
+    if (d <= 0) return;
+    const fell = [];
+    let p = parentOf(el);
+    for (let guard = 0; p && p.nodeType === 1 && p !== docEl && guard < 40; guard++, p = parentOf(p)) {
+      const a = state.hp.get(p);
+      if (!a) continue;   // never contacted: when it IS, it walks a tree el has already left
+      a.max = Math.max(a.own != null ? a.own : 10, a.max - d);
+      a.hp -= d;
+      if (a.hp <= 0) fell.push(p);
+    }
+    // nearest first: breaking it takes its own share off everything above, which those then see
+    for (const anc of fell) {
+      try { if (anc.isConnected && !anc.hasAttribute('data-crs-broken')) breakElement(anc, ix, iy, { mode: mode || 'collapse' }); } catch (e) { /* ignore */ }
+    }
+  }
+  /* §C3: …and repair puts it back. */
+  function hpDescendantRestored(el) {
+    const rec = state.hp.get(el);
+    const d = rec ? (rec.aggLost || 0) : 0;
+    if (d <= 0) return;
+    rec.aggLost = 0;
+    let p = parentOf(el);
+    for (let guard = 0; p && p.nodeType === 1 && p !== docEl && guard < 40; guard++, p = parentOf(p)) {
+      const a = state.hp.get(p);
+      if (!a) continue;
+      a.max = Math.min(HP_AGG_CAP, a.max + d);
+      a.hp = Math.min(a.max, a.hp + d);
+    }
   }
   function hpOfPublic(el) {
     if (!el || el.nodeType !== 1) return null;
@@ -3515,7 +3632,8 @@
     // v1.4 §10.5: depth comes from the live hostile record when there is one, else it is measured on the spot
     const h = state.hostiles.get(el);
     const depth = h ? h.depth : depthOf(el);
-    return { hp: Math.max(0, rec.hp), max: rec.max, depth, tier: h ? h.dtier : depthTier(depth) };
+    // SPEC-combat §C: `own` is the shell alone and `approx` says the §C4 budget ran out and max is ownHp × 3
+    return { hp: Math.max(0, rec.hp), max: rec.max, own: rec.own != null ? rec.own : rec.max, approx: !!rec.approx, depth, tier: h ? h.dtier : depthTier(depth) };
   }
   function fillColor(ratio) { return ratio > 0.6 ? '#3fb950' : (ratio > 0.3 ? '#e3b341' : '#e5484d'); }
   function showTarget(el) {
@@ -3530,7 +3648,10 @@
     const hp = Math.max(0, rec.hp), ratio = rec.max > 0 ? clamp(hp / rec.max, 0, 1) : 0;
     // v1.4 §10.4: when the thing under the cursor is COVER, say how much is hiding behind it
     const behind = modeHasEnemies() ? hostilesBehind(el) : 0;
-    targetLabel.textContent = tagOf(el).toUpperCase() + ' ' + hp + '/' + rec.max + (behind ? ' · ' + msg('hintEnemyBehind') + ' ' + behind : '');
+    /* SPEC-combat §C4: an approximated max wears a `~`. The bar itself carries no text (its LENGTH is the
+     * readout the §4 crosshair work will give it), so the tilde goes on the end of the number above it —
+     * the one place the max is actually spelled out today. */
+    targetLabel.textContent = tagOf(el).toUpperCase() + ' ' + hp + '/' + rec.max + (rec.approx ? '~' : '') + (behind ? ' · ' + msg('hintEnemyBehind') + ' ' + behind : '');
     if (targetFill) { targetFill.style.width = (100 * ratio).toFixed(1) + '%'; targetFill.style.background = fillColor(ratio); }
   }
   /* Crit landed on the hovered element: the fill flashes white for 80 ms (A4). */
@@ -4442,6 +4563,10 @@
       if (state.hostiles.has(el)) hostileKilled(el, max);
       else if (state.combat) { state.player.score += Math.round(max / 4); updatePlayerHud(); }
     } catch (e) { state.lastError = String((e && e.stack) || e); }
+    /* SPEC-combat §C3: everything above this element just got weaker by 0.6 × what it was worth — and an
+     * ancestor that was already hurt that much goes down with it. Runs AFTER hideOriginal(), so a recount
+     * started from up there can no longer see what has just left. */
+    try { hpDescendantBroken(el, ix, iy, mode); } catch (e) { state.lastError = String((e && e.stack) || e); }
     kick();
     return made > 0;
   }
@@ -8037,6 +8162,7 @@
     try { el.removeAttribute('data-crs-broken'); } catch (e) { /* ignore */ }
     const hrec = state.hp.get(el);
     if (hrec) hrec.hp = hrec.max;   // §3.1 item 4: it comes back whole
+    hpDescendantRestored(el);       // SPEC-combat §C3: and its ancestors get back the share they lost for it
     if (!mine.length) fadeInOriginal(el);
     return true;
   }
@@ -8834,6 +8960,7 @@
     }
     state.broken.length = 0;
     state.hp = new WeakMap(); state.tints = new WeakMap(); state.dmgAgg = new WeakMap();
+    hpCalcs = 0;   // SPEC-combat §C4: the counter belongs to the cache it measures (declared in src/50-target.js)
     state.dmgNodes.length = 0; state.fire.length = 0;
     state.cracks = 0; state.crackInk = 0; state.combo = 0; state.lastHitAt = 0; state.hintCollapse = false; state.lastBreakMs = 0;
     state.cooldownUntil = 0; state.shots = 0; state.damageDealt = 0; state.crits = 0; state.scorch = 0; state.lastBreakPieces = 0;
@@ -9006,6 +9133,7 @@
       cracks: state.cracks, debris: debrisCount(), broken: state.broken.length,
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
+      hpCalcs,   // SPEC-combat §C4: real max-HP computations — a cache hit never moves it
       lastBreakPieces: state.lastBreakPieces, lastError: state.lastError || null,
       // SPEC-material §4: `bottom` stays a VIEWPORT number — pieceBox() converts out of the anchor frame
       pieces: (readScroll(true), state.pieces.map((p) => ({ bottom: pieceBox(p).bottom, resting: p.resting }))),

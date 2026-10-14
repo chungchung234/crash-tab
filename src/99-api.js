@@ -59,6 +59,7 @@
     }
     state.broken.length = 0;
     state.hp = new WeakMap(); state.tints = new WeakMap(); state.dmgAgg = new WeakMap();
+    hpCalcs = 0;   // SPEC-combat §C4: the counter belongs to the cache it measures (declared in src/50-target.js)
     state.dmgNodes.length = 0; state.fire.length = 0;
     state.cracks = 0; state.crackInk = 0; state.combo = 0; state.lastHitAt = 0; state.hintCollapse = false; state.lastBreakMs = 0;
     state.cooldownUntil = 0; state.shots = 0; state.damageDealt = 0; state.crits = 0; state.scorch = 0; state.lastBreakPieces = 0;
@@ -231,6 +232,7 @@
       cracks: state.cracks, debris: debrisCount(), broken: state.broken.length,
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
+      hpCalcs,   // SPEC-combat §C4: real max-HP computations — a cache hit never moves it
       lastBreakPieces: state.lastBreakPieces, lastError: state.lastError || null,
       // SPEC-material §4: `bottom` stays a VIEWPORT number — pieceBox() converts out of the anchor frame
       pieces: (readScroll(true), state.pieces.map((p) => ({ bottom: pieceBox(p).bottom, resting: p.resting }))),

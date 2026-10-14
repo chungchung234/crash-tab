@@ -187,6 +187,7 @@
     try { el.removeAttribute('data-crs-broken'); } catch (e) { /* ignore */ }
     const hrec = state.hp.get(el);
     if (hrec) hrec.hp = hrec.max;   // §3.1 item 4: it comes back whole
+    hpDescendantRestored(el);       // SPEC-combat §C3: and its ancestors get back the share they lost for it
     if (!mine.length) fadeInOriginal(el);
     return true;
   }
