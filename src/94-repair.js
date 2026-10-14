@@ -184,6 +184,10 @@
     for (const s of brec.saved) {
       try { if (s.value) s.node.style.setProperty(s.prop, s.value, s.priority); else s.node.style.removeProperty(s.prop); } catch (e) { /* ignore */ }
     }
+    /* SPEC-combat §E4: the enemy's repair beam undoes a DISPLACEMENT as well as a break — putting a card
+     * back where it no longer is would be a worse lie than leaving it broken. The subtree goes too,
+     * because the thing you shoved may have been a button inside the card being repaired. */
+    undisplace(el);
     try { el.removeAttribute('data-crs-broken'); } catch (e) { /* ignore */ }
     const hrec = state.hp.get(el);
     if (hrec) hrec.hp = hrec.max;   // §3.1 item 4: it comes back whole

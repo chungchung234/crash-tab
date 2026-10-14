@@ -43,6 +43,10 @@
     // debris + fx nodes
     for (const p of state.pieces) { try { p.node.remove(); } catch (e) { /* ignore */ } }
     state.pieces.length = 0; state.gpuSum = 0;
+    /* SPEC-combat §E4: 복구(Z) undoes displacement too. Every borrowed `transform` goes back to the
+     * ORIGINAL inline value here, which is also what makes the Escape path traceless — deactivate()
+     * runs restore() before it drops the hosts. */
+    clearMoved();
     if (root) {
       let leftovers = [];
       try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce, .crs-lock, .crs-repair, .crs-repair-ghost, .crs-avatar, .crs-avatar-ghost, .crs-help'); } catch (e) { leftovers = []; }
@@ -239,6 +243,8 @@
       // SPEC-material §4: `bottom` stays a VIEWPORT number — pieceBox() converts out of the anchor frame
       pieces: (readScroll(true), state.pieces.map((p) => ({ bottom: pieceBox(p).bottom, resting: p.resting }))),
       pieceCount: state.pieces.length,
+      // SPEC-combat §E1: displaced page elements — `moved` excludes the ones already gliding home
+      moved: movedActive(), movedTotal: state.movedList.length, movedCap: movedCap(),
       // v1.2
       mag: WEAPONS[id].mag == null ? null : state.ammo[id], reloading: isReloading(id), swapping: swapActive(),
       scoped: state.scoped, magnified: !!(state.scoped && state.scope.magnified),

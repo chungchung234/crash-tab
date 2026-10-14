@@ -5161,6 +5161,14 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   // the eviction by id rather than by a DOM index that shifts the moment a node is removed.
   // debug.expirePiece() retires just the supporting piece: at the default 6 s lifetime a whole freshly-rested
   // pile expires inside one sweep, which would take the piece above along with the one beneath it.
+  /* …and the whole of this check runs with the lifetime OFF. What is being measured is an eviction
+   * knocking a piece loose, not a clock: with the 6 s default running, the pile ages while the pair is
+   * being searched for (and the search may break more elements and settle them, which costs seconds), so
+   * the piece being followed can simply expire on its own. That shows up as `upAfter: null` — not "it did
+   * not fall" but "it is not there any more" — and it is the reason this assertion kept failing about one
+   * run in five. debug.expirePiece() sets expireAt by hand, so it still retires the one piece we mean to
+   * retire. The 6 s default goes back on right after the check. */
+  await api.call(page, 'setDebrisLife', 0);
   await api.setWeapon(page, 'hammer');
   const st1_944 = await api.rect(page, '#stack-1');
   const sx944 = st1_944.cx;
@@ -5245,6 +5253,7 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
     const floor944 = await page.evaluate(() => document.documentElement.clientHeight);
     check('A.v2 9.4.4: a piece resting on top of another re-falls once the piece underneath it despawns', expired944 === pairInfo944.lower && lowerGone944 === true && !!rose944, { pair: pairInfo944, expired944, lowerGone944, after: rose944, upAfter: upAfter944, floor: floor944 });
   }
+  await api.call(page, 'setDebrisLife', 6000);   // the lifetime goes back on for §9.4.5 below
 
   // ---- (5) in-flight pieces do not count toward the debris lifetime (§9.4.5) ----
   await api.restore(page);
@@ -5600,6 +5609,233 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
   await api.restore(page);
   await sleep(80);
 
+  // =======================================================================================
+  // SPEC-combat §E — 변위 시스템 (feat/displace). 완료 기준: §F "변위" + "무흔적".
+  //   §F: `debug.displace` 로 민 요소의 인라인 `transform` 이 복구 후 정확히 원래 값으로 돌아온다.
+  //       페이지가 이미 쓰던 값이 보존된다. 같은 충격량에 큰 섹션이 버튼보다 적게 움직인다.
+  //       밀어서 둘을 부딪히면 양쪽에 피해 숫자가 뜬다. 25 개째를 밀면 가장 오래된 것이 복귀한다.
+  // Run in RAMPAGE: displacement is a page-wide state (§B2) and this section is about the PHYSICS, not
+  // about who is allowed to take the collision damage. The §B gate on that damage is asserted in the
+  // `rules` block, where §B's own rule is switched on.
+  // =======================================================================================
+  console.log('--- depth: SPEC-combat §E — displacement (transform round-trip / mass / collision / cap / traceless) ---');
+  await setCombatMode('rampage');
+  await sleep(150);
+  await api.restore(page);
+  await sleep(80);
+  const pushE = (sel, ix, iy) => page.evaluate((s, a, b) => {
+    const d = window.__crashScreen.debug;
+    if (typeof d.displace !== 'function') return 'missing:debug.displace';
+    return d.displace(document.querySelector(s), a, b);
+  }, sel, ix, iy);
+  const movedE = () => page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    return typeof d.moved === 'function' ? d.moved() : 'missing:debug.moved';
+  });
+  const movedOfE = (sel) => page.evaluate((s) => {
+    const d = window.__crashScreen.debug;
+    return typeof d.movedOf === 'function' ? d.movedOf(document.querySelector(s)) : 'missing:debug.movedOf';
+  }, sel);
+  // The whole §E1 contract is about the INLINE declaration, so read the value, its priority and the raw
+  // attribute: "원래 값" means an element that never had one must not end up carrying an empty `transform`.
+  const inlineTrE = (sel) => page.evaluate((s) => {
+    const el = document.querySelector(s);
+    return { value: el.style.getPropertyValue('transform'), priority: el.style.getPropertyPriority('transform'), attr: el.getAttribute('style') || '' };
+  }, sel);
+
+  // ---- (E1) the transform round-trip: pushed, then given back exactly as found (§E1 / §F) ----
+  await api.rect(page, '#small-card');
+  const trBefore1E = await inlineTrE('#small-card');
+  const push1E = await pushE('#small-card', 900, 0);
+  await sleep(200);
+  const tr1E = await inlineTrE('#small-card');
+  const body1E = await movedOfE('#small-card');
+  check('A.§E 1 (§E1/§F): debug.displace 가 요소에 인라인 transform 을 !important 로 걸고 state.moved 에 몸체를 만든다',
+    trBefore1E.value === '' && !!push1E && push1E !== 'missing:debug.displace'
+    && /translate\(/.test(tr1E.value) && tr1E.priority === 'important'
+    && !!body1E && body1E !== 'missing:debug.movedOf' && body1E.x > 20 && Math.abs(body1E.y) < 0.5,
+    { trBefore1E, push1E, tr1E, body1E });
+  await api.restore(page);
+  await sleep(140);
+  const tr1bE = await inlineTrE('#small-card');
+  check('A.§E 1 (§F): 복구 후 인라인 transform 이 정확히 원래 값으로 돌아온다 — 원래 없던 요소에는 선언 자체가 남지 않는다',
+    tr1bE.value === trBefore1E.value && !/transform/.test(tr1bE.attr) && (await movedOfE('#small-card')) === null,
+    { trBefore1E, tr1bE });
+
+  // ---- (E2) a transform the PAGE already wrote survives the whole round trip (§E1 / §F) ----
+  await page.evaluate(() => { document.querySelector('#stack-3').style.setProperty('transform', 'rotate(5deg)'); });
+  await api.rect(page, '#stack-3');
+  const push2E = await pushE('#stack-3', 900, 0);
+  await sleep(200);
+  const tr2E = await inlineTrE('#stack-3');
+  check('A.§E 2 (§E1/§F): 페이지가 이미 쓰던 값이 보존된다 — 저장한 값이 앞에 오고 우리 오프셋이 뒤에 이어 붙는다',
+    !!push2E && push2E !== 'missing:debug.displace' && /^rotate\(5deg\)\s+translate\(.+\)\s+rotate\(/.test(tr2E.value),
+    { push2E, tr2E });
+  await api.restore(page);
+  await sleep(140);
+  const tr2bE = await inlineTrE('#stack-3');
+  check('A.§E 2 (§F): 복구 후에도 그 값은 빈 문자열이 아니라 페이지가 쓰던 rotate(5deg) 그대로다',
+    tr2bE.value === 'rotate(5deg)', tr2bE);
+  await page.evaluate(() => { document.querySelector('#stack-3').style.removeProperty('transform'); });
+
+  // ---- (E3) mass clamp(sqrt(area)/18, 0.6, 6): the same impulse moves a big section less (§E2 / §F) ----
+  // Collisions off: §E2's numbers are a free-flight measurement, and a 1052 × 420 section pushed sideways
+  // would hit something in its first frame. Same escape hatch as noAttacks / noRepair / noFalloff.
+  await api.debug(page, { noDisplaceCollide: true });
+  const areaE = (sel) => page.evaluate((s) => { const r = document.querySelector(s).getBoundingClientRect(); return r.width * r.height; }, sel);
+  await api.rect(page, '#boss');
+  const bossArea3E = await areaE('#boss');
+  const btnArea3E = await areaE('#test-btn');
+  await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    d.displace(document.querySelector('#boss'), 1500, 0);
+    d.displace(document.querySelector('#test-btn'), 1500, 0);
+  });
+  await sleep(260);
+  const boss3E = await movedOfE('#boss');
+  const btn3E = await movedOfE('#test-btn');
+  const expMass = (a) => Math.min(6, Math.max(0.6, Math.sqrt(a) / 18));
+  check('A.§E 3 (§E2/§F): 질량은 clamp(sqrt(area)/18, 0.6, 6) 이고 속도는 충격량/질량 — 같은 충격량에 큰 섹션이 버튼보다 적게 움직인다',
+    !!boss3E && !!btn3E && near(boss3E.mass, expMass(bossArea3E), 0.02) && near(btn3E.mass, expMass(btnArea3E), 0.02)
+    && boss3E.x > 0 && btn3E.x > boss3E.x * 1.3,
+    { boss3E, btn3E, bossArea3E, btnArea3E, expBoss: expMass(bossArea3E), expBtn: expMass(btnArea3E) });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (E4) no gravity, the 400 px limit, and "정지하면 제자리로 돌아가지 않는다" (§E2) ----
+  const btnBox4aE = await api.rect(page, '#test-btn');
+  await pushE('#test-btn', 20000, 0);
+  const stopped4E = await poll(async () => { const b = await movedOfE('#test-btn'); return (b && b !== 'missing:debug.movedOf' && b.resting) ? b : null; }, 5000, 100);
+  const box4E = await page.evaluate(() => { const r = document.querySelector('#test-btn').getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, vw: window.innerWidth }; });
+  check('A.§E 4 (§E2): 뷰포트 밖 400 px 이상은 더 밀리지 않는다 — 충격량 2 만을 줘도 왼쪽 모서리가 뷰포트+400 에서 멈춘다',
+    !!stopped4E && near(box4E.left, box4E.vw + 400, 2), { stopped4E, box4E, btnBox4aE });
+  const rest4aE = await movedOfE('#test-btn');
+  await sleep(600);
+  const rest4bE = await movedOfE('#test-btn');
+  check('A.§E 4 (§E2): 중력이 없고(가로로만 민 요소의 y 오프셋 0) 정지한 뒤에도 제자리로 돌아가지 않는다 — 0.6 초 뒤 x 가 그대로',
+    !!rest4aE && Math.abs(rest4aE.y) < 0.5 && !!rest4bE && near(rest4bE.x, rest4aE.x, 0.01) && rest4bE.x > 100,
+    { rest4aE, rest4bE });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (E5) §E3 collision: push two into each other and BOTH take a damage number ----
+  await api.debug(page, { noDisplaceCollide: false });
+  await api.rect(page, '#stack-2');
+  const hp1a5E = await api.hpOf(page, '#stack-1');
+  const hp2a5E = await api.hpOf(page, '#stack-2');
+  await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    d.displace(document.querySelector('#stack-1'), 0, 900);    // 아래로
+    d.displace(document.querySelector('#stack-2'), 0, -900);   // 위로 — 10 px 틈을 사이에 두고 마주 본다
+  });
+  await sleep(220);
+  const hp1b5E = await api.hpOf(page, '#stack-1');
+  const hp2b5E = await api.hpOf(page, '#stack-2');
+  const dmg5E = await api.dmgTexts(page);
+  const d1_5E = hp1a5E.hp - hp1b5E.hp, d2_5E = hp2a5E.hp - hp2b5E.hp;
+  check('A.§E 5 (§E3/§F): 밀어서 둘을 부딪히면 양쪽에 피해 숫자가 뜬다 — AABB 충돌이 양쪽에 clamp(round(상대속도/14), 1, 60) 을 먹인다',
+    d1_5E >= 1 && d1_5E <= 60 && d2_5E >= 1 && d2_5E <= 60 && d1_5E === d2_5E
+    && dmg5E.filter((s) => /^-\d+$/.test(s)).length >= 2,
+    { d1_5E, d2_5E, hp1a5E, hp1b5E, hp2a5E, hp2b5E, dmg5E });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (E6) §E1 cap: 24 live (12 in performance mode); the 25th sends the OLDEST home over 0.4 s ----
+  await api.debug(page, { noDisplaceCollide: true });
+  const cap6E = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    const out = { pushed: 0, ids: [] };
+    for (const el of document.querySelectorAll('body *')) {
+      if (out.pushed >= 25) break;
+      if (el.closest('[data-crs]')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 24 || r.height < 14) continue;
+      if (!d.displace(el, 12, 0)) continue;              // a nudge: no collision, no travel worth measuring
+      if (!out.pushed) window.__crsE6First = el;
+      out.pushed++;
+      out.ids.push(el.id || el.localName);
+    }
+    out.list = d.moved();
+    return out;
+  });
+  const stats6E = await api.stats(page);
+  check('A.§E 6 (§E1/§F): 상한 24 개 — 25 개째를 밀면 가장 오래된 것(목록의 첫 몸체)이 제자리로 복귀하기 시작한다',
+    cap6E.pushed === 25 && Array.isArray(cap6E.list) && cap6E.list.length === 25
+    && cap6E.list[0].returning === true && cap6E.list.filter((b) => b.returning).length === 1
+    && stats6E.moved === 24 && stats6E.movedTotal === 25 && stats6E.movedCap === 24,
+    { pushed: cap6E.pushed, ids: cap6E.ids, returning: Array.isArray(cap6E.list) ? cap6E.list.map((b) => b.returning) : cap6E.list, stats: { moved: stats6E.moved, movedTotal: stats6E.movedTotal, movedCap: stats6E.movedCap } });
+  await sleep(700);
+  const after6E = await movedE();
+  const first6E = await page.evaluate(() => {
+    const el = window.__crsE6First;
+    return el ? { id: el.id || el.localName, value: el.style.getPropertyValue('transform'), attr: el.getAttribute('style') || '' } : null;
+  });
+  const stats6bE = await api.stats(page);
+  check('A.§E 6 (§E1): 0.4 초 뒤 그 몸체는 목록에서 사라지고 그 요소의 인라인 transform 은 원래대로 비어 있다 — 남은 건 정확히 24 개',
+    Array.isArray(after6E) && after6E.length === 24 && stats6bE.moved === 24
+    && !!first6E && first6E.value === '' && !/transform/.test(first6E.attr),
+    { len: Array.isArray(after6E) ? after6E.length : after6E, first6E, moved: stats6bE.moved });
+  await api.restore(page);
+  await sleep(120);
+  await page.evaluate(() => { try { delete window.__crsE6First; } catch (e) { window.__crsE6First = null; } });
+
+  // ---- (E7) §E4: an SPA that takes the transform back wins on the fourth try ----
+  await api.rect(page, '#stack-2');
+  await pushE('#stack-2', 900, 0);
+  await sleep(80);
+  const spa7E = [];
+  for (let i = 0; i < 4; i++) {
+    await page.evaluate(() => { document.querySelector('#stack-2').style.setProperty('transform', 'none'); });
+    await sleep(90);
+    spa7E.push(await movedOfE('#stack-2'));
+  }
+  const reject7E = await pushE('#stack-2', 900, 0);
+  check('A.§E 7 (§E4): SPA 가 transform 을 덮어쓰면 3 회까지 재적용하고(1→2→3) 4 회째에 변위 대상에서 영구 제외된다',
+    spa7E.length === 4 && !!spa7E[0] && spa7E[0].reapplied === 1 && !!spa7E[1] && spa7E[1].reapplied === 2
+    && !!spa7E[2] && spa7E[2].reapplied === 3 && spa7E[3] === null && reject7E === null,
+    { spa7E, reject7E });
+  await page.evaluate(() => { document.querySelector('#stack-2').style.removeProperty('transform'); });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (E8) §F 무흔적: Escape with displacement live leaves the page exactly as it was found ----
+  await page.evaluate(() => { document.querySelector('#big-card').style.setProperty('transform', 'translateY(3px)'); });
+  await api.rect(page, '#big-card');
+  await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    d.displace(document.querySelector('#big-card'), 1500, 0);
+    d.displace(document.querySelector('#small-card'), 1500, 0);
+  });
+  await sleep(200);
+  const before8E = await page.evaluate(() => ({
+    big: document.querySelector('#big-card').style.getPropertyValue('transform'),
+    small: document.querySelector('#small-card').style.getPropertyValue('transform'),
+    moved: window.__crashScreen.stats().moved,
+  }));
+  check('A.§E 8 (§F 무흔적): Escape 직전에 변위 2 개가 실제로 걸려 있다 — 하나는 페이지가 쓰던 transform 위에',
+    before8E.moved === 2 && /^translateY\(3px\)\s+translate\(/.test(before8E.big) && /^translate\(/.test(before8E.small), before8E);
+  await page.keyboard.press('Escape');
+  const inactive8E = await poll(async () => !(await api.active(page)), 1500, 20);
+  const nodes8E = await api.count(page, '[data-crs]');
+  const pend8E = await api.pending(page);
+  await settleRaf(page);
+  const raf8E = await api.pendingRaf(page);
+  const after8E = await page.evaluate(() => ({
+    big: document.querySelector('#big-card').style.getPropertyValue('transform'),
+    small: document.querySelector('#small-card').style.getPropertyValue('transform'),
+    smallAttr: document.querySelector('#small-card').getAttribute('style') || '',
+  }));
+  check('A.§E 8 (§F 무흔적): 변위가 걸린 채 Escape → [data-crs] 0 개, 타이머 0, 프레임 0, 그리고 모든 페이지 요소의 인라인 transform 이 원래 값으로',
+    inactive8E === true && nodes8E === 0 && pend8E === 0 && raf8E === 0
+    && after8E.big === 'translateY(3px)' && after8E.small === '' && !/transform/.test(after8E.smallAttr),
+    { inactive8E, nodes8E, pend8E, raf8E, after8E });
+  await page.evaluate(() => { document.querySelector('#big-card').style.removeProperty('transform'); });
+  const reon8E = await page.evaluate(contentJs);
+  check('A.§E 8: content.js 가 그 뒤 깨끗하게 다시 활성화된다', reon8E === 'on', reon8E);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noDisplaceCollide: false });
+  await api.restore(page);
+  await sleep(80);
+
   await combatTeardown(ctx);
 }
 
@@ -5726,8 +5962,9 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   //   §F "적만 피해": 전투 모드에서 비적대 요소를 때리면 체력이 변하지 않고 조각도 없다.
   //   `.crs-deflect` 와 `무적` 이 뜨고 탄약은 1발 준다. 폭탄을 섞인 군집에 터뜨리면 적만 피해를 받는다.
   //   불이 무적 요소 위로 번져 적에게 닿으면 적의 체력이 준다.
-  //   (§F 의 마지막 한 줄 — "무적 요소를 밀어 적에게 박으면" — 은 §E 변위 시스템이 이 빌드에 아직
-  //    없으므로 단언하지 않는다. 걸릴 자리는 collisionHit() (src/73-hit-resolution.js) 에 있다.)
+  //   (§F 의 마지막 한 줄 — "무적 요소를 밀어 적에게 박으면 적만 피해를 받는다" — 은 §E 변위 시스템이
+  //    들어온 지금 이 블록의 맨 끝 (B-밀기) 에서 단언한다. 충돌 피해는 collisionHit()
+  //    (src/73-hit-resolution.js) 을 거쳐 아래 §B 게이트 하나로 걸러진다.)
   // The whole section runs with debug.noInvuln explicitly OFF — the rule under test is the real one.
   // =======================================================================================
   console.log('--- combat: SPEC-combat §B — only the enemy breaks (deflect / fire spread / enemy supply / meter) ---');
@@ -6129,6 +6366,61 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   check('A.§D1 9 (§D1): 깊이 힌트는 그대로다 — 앞 적을 포커싱한 괄호가 `뒤에 적 N` 을 계속 말한다',
     tierFrontD === 'shooter' && tierMidD === 'shooter' && !!hintD && /뒤에 적\s*\d+/.test(hintD.label),
     { tierFrontD, tierMidD, hintD: hintD || await focusAt(depthPtD.cx, depthPtD.cy) });
+  await api.restore(page);
+  await sleep(100);
+
+  // =======================================================================================
+  // SPEC-combat §B2 × §E3 — "무적 요소를 밀어 적에게 박으면 적만 피해를 받는다" (§F "적만 피해")
+  //   §B2 is the half of the rule that is NOT the invulnerability itself: 변위 is applied to every
+  //   element, and the collision it causes carries damage into whatever it reaches. The §E3 impact bills
+  //   BOTH sides through collisionHit() — one call each — and the §B gate inside applyHit() is what
+  //   turns that into "the enemy loses HP, the shield that hit it does not". The rule has to be ON for
+  //   this (noInvuln: false), which is why it lives here and not beside §E's physics in the depth block.
+  //   Fixture: #fire-src (200 × 80, never a hostile) sits 10 px to the left of #fire-enemy (300 × 180).
+  // =======================================================================================
+  console.log('--- rules: SPEC-combat §B2 × §E3 — shoving a 무적 element into an enemy ---');
+  await setCombatMode('survival');
+  await api.debug(page, { noInvuln: false, noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, noRepair: true, noFalloff: true });
+  await api.restore(page);
+  await sleep(120);
+  const srcP = await api.rect(page, '#fire-src');
+  const tierP = await force('#fire-enemy', 'forceAttack');      // #fire-enemy 를 적대 요소로 만든다
+  await sleep(120);
+  const hostileP = await page.evaluate(() => {
+    const a = window.__crashScreen;
+    return { enemy: !!a.stats().hostiles, n: a.stats().hostiles };
+  });
+  const srcHpAP = await api.hpOf(page, '#fire-src');
+  const enemyHpAP = await api.hpOf(page, '#fire-enemy');
+  const pushP = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    return typeof d.displace === 'function' ? d.displace(document.querySelector('#fire-src'), 1800, 0) : 'missing:debug.displace';
+  });
+  /* The impact is polled for, not slept on: §E3's in-place candidate list is behind a 300 ms cache, so
+   * WHEN the 10 px gap is closed depends on where in that window the shove landed. `.crs-deflect` only
+   * lives 180 ms (§B1), so the whole frame — both damage texts, the deflect arc and the debris count —
+   * is snapshotted in ONE evaluate rather than read back one api call at a time. */
+  const markP = await poll(async () => {
+    const q = await page.evaluate(() => ({
+      texts: [...document.querySelectorAll('.crs-dmg')].map((n) => (n.textContent || '').trim()),
+      deflect: document.querySelectorAll('.crs-deflect').length,
+      debris: document.querySelectorAll('.crs-debris').length,
+    }));
+    return (q.texts.indexOf('무적') >= 0 && q.texts.some((s) => /^-\d+$/.test(s))) ? q : null;
+  }, 3000, 40);
+  const srcHpBP = await api.hpOf(page, '#fire-src');
+  const enemyHpBP = await api.hpOf(page, '#fire-enemy');
+  const movedP = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    return typeof d.movedOf === 'function' ? d.movedOf(document.querySelector('#fire-src')) : null;
+  });
+  check('A.§B2/§E3 (§F): 무적 요소를 밀어 적에게 박으면 적만 피해를 받는다 — 적의 체력은 줄고, 민 쪽(비적대)은 그대로다',
+    tierP === 'shooter' && hostileP.n >= 1 && !!pushP && pushP !== 'missing:debug.displace' && pushP.vx > 0
+    && !!movedP && enemyHpBP.hp < enemyHpAP.hp && srcHpBP.hp === srcHpAP.hp && srcHpBP.max === srcHpAP.max,
+    { tierP, hostileP, pushP, movedP, srcHp: [srcHpAP, srcHpBP], enemyHp: [enemyHpAP, enemyHpBP], srcP });
+  check('A.§B2/§E3 (§F/§B1): 그 충돌에서 민 쪽은 §B1 그대로 튕겨 나온다 — `무적` 과 `.crs-deflect` 가 같은 프레임에 뜨고 조각은 하나도 생기지 않는다',
+    !!markP && markP.deflect >= 1 && markP.debris === 0 && markP.texts.indexOf('무적') >= 0 && markP.texts.some((s) => /^-\d+$/.test(s)),
+    markP || 'no deflect frame seen within 3 s');
   await api.restore(page);
   await sleep(100);
 

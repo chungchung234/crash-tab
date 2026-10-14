@@ -175,13 +175,13 @@
   }
   function damageable(el) { return !modeHasEnemies() || debug.noInvuln || hostileUnit(el); }
 
-  /* ── SPEC-combat §B2 / §E: 변위 충돌 피해가 걸릴 자리 ──────────────────────────────────
-   * §E (변위 시스템, 로드맵 3.5) is NOT in this build. When it arrives, its AABB collision step must
-   * route damage through HERE instead of calling applyHit() itself: §B2 says displacement applies to
-   * EVERY element while the collision damage only lands on hostiles, and the gate above is already the
-   * single place that answers that question. The number is §E3's own — clamp(round(상대속도/14), 1, 60).
-   * Nothing calls this yet and there is deliberately no assertion for it; it is the seam, written down
-   * next to the rule it belongs to rather than rediscovered later. */
+  /* ── SPEC-combat §B2 / §E: 변위 충돌 피해 ───────────────────────────────────────────
+   * §E (변위 시스템, 로드맵 3.5) is in this build now, and its AABB collision step (movedCollide(),
+   * src/67-displace.js) routes damage through HERE rather than calling applyHit() itself: §B2 says
+   * displacement applies to EVERY element while the collision damage only lands on hostiles, and the
+   * gate above is the single place that answers that question. The number is §E3's own —
+   * clamp(round(상대속도/14), 1, 60). Both sides of an impact are billed through this one call, so
+   * pushing an invulnerable element into an enemy hurts the enemy and nothing else. */
   function collisionHit(el, relSpeed, ix, iy) {
     return applyHit(el, clamp(Math.round(relSpeed / 14), 1, 60), 'hammer', ix, iy, { aoe: true, toward: { x: ix, y: iy } });
   }

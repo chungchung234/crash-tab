@@ -19,7 +19,7 @@
     catch (e) {
       state.lastError = String((e && e.stack) || e);
       state.tickErrors++;
-      busy = state.tickErrors < 120 && !!(state.pieces.length || state.orbs.length || state.beams.length || state.fxQueue.length || state.scoped || state.avatar || state.locks.length || state.repairs.length);
+      busy = state.tickErrors < 120 && !!(state.pieces.length || state.movedList.length || state.orbs.length || state.beams.length || state.fxQueue.length || state.scoped || state.avatar || state.locks.length || state.repairs.length);
     }
     if (busy && state.active) state.rafId = raf(tick); else state.animating = false;
   }
@@ -84,6 +84,11 @@
       if (t - p.bornAt > 6000 && Math.abs(p.vy) < 60 && Math.abs(p.vx) < 20) { restPiece(p); resting.push(p); continue; }
       applyTransform(p);
     }
+    /* SPEC-combat §E2: the displaced PAGE ELEMENTS are a second body set on this very loop — no second
+     * RAF. They are integrated after the pieces so a frame's collision pass sees every body's final
+     * position for that frame, and before the fx queue so a damage number spawned by an impact is drawn
+     * in the same frame it happened. */
+    if (state.movedList.length) { if (stepMoved(t, dt)) busy = true; }
     if (state.fxQueue.length) { runFx(); busy = busy || state.fxQueue.length > 0; }
     // v1.2 A8: continuous combat / scope motion is folded into this single loop (no extra RAF handles)
     if (state.orbs.length) { orbStep(t, dt); busy = busy || state.orbs.length > 0; }
