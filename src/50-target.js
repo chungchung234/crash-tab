@@ -309,21 +309,29 @@
   function fillColor(ratio) { return ratio > 0.6 ? '#3fb950' : (ratio > 0.3 ? '#e3b341' : '#e5484d'); }
   function showTarget(el) {
     state.hoverEl = el || null;
-    if (!el || !targetBox) { if (targetBox) targetBox.style.display = 'none'; return; }
+    if (!el || !targetBox) { if (targetBox) targetBox.style.display = 'none'; chSetHp(null); return; }
     const r = rectOf(el);
-    if (!r) { targetBox.style.display = 'none'; return; }
+    if (!r) { targetBox.style.display = 'none'; chSetHp(null); return; }
     targetBox.style.display = 'block';
     targetBox.style.left = px(r.left); targetBox.style.top = px(r.top);
     targetBox.style.width = px(r.width); targetBox.style.height = px(r.height);
+    syncTargetMarker();   // SPEC-crosshair §B2 / §B4: brackets (default) · full · off
     const rec = hpOf(el);
-    const hp = Math.max(0, rec.hp), ratio = rec.max > 0 ? clamp(hp / rec.max, 0, 1) : 0;
     // v1.4 §10.4: when the thing under the cursor is COVER, say how much is hiding behind it
     const behind = modeHasEnemies() ? hostilesBehind(el) : 0;
-    /* SPEC-combat §C4: an approximated max wears a `~`. The bar itself carries no text (its LENGTH is the
-     * readout the §4 crosshair work will give it), so the tilde goes on the end of the number above it —
-     * the one place the max is actually spelled out today. */
-    targetLabel.textContent = tagOf(el).toUpperCase() + ' ' + hp + '/' + rec.max + (rec.approx ? '~' : '') + (behind ? ' · ' + msg('hintEnemyBehind') + ' ' + behind : '');
-    if (targetFill) { targetFill.style.width = (100 * ratio).toFixed(1) + '%'; targetFill.style.background = fillColor(ratio); }
+    /* ── SPEC-crosshair §B2: 체력 표시를 요소에서 떼어 조준점 아래로 옮기고 숫자를 없앤다 ──────────
+     * The bar (and, with it, SPEC-combat §C4's `~` for an approximated max) now lives under the
+     * crosshair, where the eye already is — chSetHp(), src/51-crosshair.js. What stays on the element
+     * is the §B1 "약" level: a small label, and nothing else.
+     *
+     * The numbers are not deleted, they are made OPTIONAL: `showHpNumber` (§A9, default false) puts
+     * `hp/max` back on this label and under the bar at once. That one switch is what lets every
+     * pre-§B assertion written against the old `TAG hp/max` readout keep asserting exactly what it
+     * asserted — it just has to say out loud that it wants the numbers. */
+    targetLabel.textContent = tagOf(el).toUpperCase()
+      + (chHpNumberOn() ? ' ' + Math.max(0, rec.hp) + '/' + rec.max + (rec.approx ? '~' : '') : '')
+      + (behind ? ' · ' + msg('hintEnemyBehind') + ' ' + behind : '');
+    chSetHp(rec);
   }
   /* Crit landed on the hovered element: the fill flashes white for 80 ms (A4). */
   function critFlashFill() {
@@ -332,20 +340,26 @@
   }
   function refreshHover() {
     if (!state.active) return;
-    if (state.overHud || state.hoverX < 0) { showTarget(null); return; }
+    if (state.overHud || state.hoverX < 0) { showTarget(null); crosshairHover(); return; }
     // SPEC-combat §D1: the hover bracket is the FOCUS answer — an enemy, or nothing at all
     showTarget(pickTarget(state.hoverX, state.hoverY, null, { focus: true }));
+    crosshairHover();   // SPEC-crosshair §A2: the drawn crosshair rides the frame the hover already owns
   }
   function scheduleHover() {
     if (state.moveRaf) return;
     // v1.3 §3.1: the player ring is repositioned on the frame the pointer move already schedules
     // v1.4: and the drone's nose, which tracks the crosshair even while the drone itself is parked
+    // SPEC-crosshair §A2: …and the crosshair itself, through refreshHover() — never a loop of its own
     state.moveRaf = raf(() => { state.moveRaf = 0; refreshHover(); if (state.self) selfStep(); if (state.avatar) placeAvatar(); });
   }
+  /* SPEC-crosshair §B2: the background tint is gone with the solid outline, so a hit no longer flashes the
+   * whole element — the four brackets blink white for 200 ms instead and settle back to their own 55 %
+   * (fill: none, so the resting colour is never filled in). The label keeps its pop. */
   function pulseTarget() {
     if (!targetBox || targetBox.style.display === 'none') return;
     try {
-      trackAnim(targetBox.animate([{ backgroundColor: 'rgba(229,72,77,.35)' }, { backgroundColor: 'rgba(229,72,77,.06)' }], { duration: 200 }));
+      const list = (targetBox.__crsBrackets || []);
+      for (const b of list) trackAnim(b.animate([{ borderColor: 'rgba(255,255,255,1)' }, { borderColor: 'rgba(255,255,255,.55)' }], { duration: 200, easing: 'ease-out' }));
       trackAnim(targetLabel.animate([{ transform: 'scale(1.4)' }, { transform: 'scale(1)' }], { duration: 150, easing: 'ease-out' }));
     } catch (e) { /* ignore */ }
   }

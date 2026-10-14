@@ -129,18 +129,18 @@
   /* ── SPEC-combat §B1 item 4: 조준점이 미리 알려준다 ────────────────────────────────────
    * "무적 대상 위에서 흐린 회색, 중심 점 없음."
    *
-   * AMBIGUITY, reading chosen. The drawn 조준점 of SPEC-crosshair §A does not exist yet (roadmap step 4 —
-   * today the aim point still IS the operating-system cursor image, which content.js cannot restyle). The
-   * one aim-side marker this build owns is the player marker: a 44 px ring with a centre dot, drawn at
-   * state.player.x/y — i.e. ON THE CURSOR in arcade, where §A says "커서가 곧 캐릭터". So the two things
-   * §B1 asks for are applied to it: the gauge goes flat dim grey and the centre dot is taken away, both
-   * driven by what the POINTER is over (state.hoverEl), in both combat modes. In survival the ring rides
-   * the drone rather than the cursor, so there the warning reads as "what you are aiming at is immune"
-   * next to the drone instead of under the crosshair — the information is the same and it is the same one
-   * line of code; step 4 moves it onto the real crosshair.
+   * MOVED (SPEC-crosshair §A5, roadmap step 4). When §B1 was written the drawn 조준점 did not exist —
+   * the aim point WAS the operating-system cursor image, which content.js cannot restyle — so the
+   * warning was parked on the one aim-side marker this build owned, the player ring, with a note saying
+   * step 4 should move it onto the real crosshair. Step 4 is here: `.crs-crosshair` now wears §A5's
+   * "부술 수 없는 곳: rgba(255,255,255,.35), 중심 점 없음" itself (chStateNow() / chApplyState(),
+   * src/51-crosshair.js), driven by the very same question this function asks.
    *
-   * The dot is hidden by a CLASS, never by an inline style: `.crs-self-dot { display: block !important }`
-   * is USER-origin, and an inline `display:none` would lose to it (CLAUDE.md, the USER-origin trap). */
+   * The ring goes back to being ONE thing: the health gauge. Two markers saying the same sentence in
+   * two places is exactly the noise SPEC-crosshair §B exists to remove — and the grey it had to paint
+   * on itself to say it was hiding the health reading that is the ring's only job.
+   *
+   * aimInvulnerable() stays here, where §B's invulnerability rule lives, and is read by the crosshair. */
   const SELF_INVUL_COLOR = 'rgba(168, 176, 190, .72)';
   /* SPEC-combat §D1 ("조준점은 적 위에서 붉고 활성, 그 외 흐린 회색에 중심 점 없음") folds the empty page
    * into the same grey as an invulnerable element: both are "nothing you can shoot". state.hoverEl is now
@@ -150,11 +150,13 @@
     if (!modeHasEnemies() || debug.noInvuln) return false;
     return !hostileUnit(state.hoverEl);
   }
+  /* SPEC-crosshair §A5: the aim-side warning moved to the crosshair (see the note above), so the ring is
+   * never repainted grey any more. The flag is kept on the record — and cleared here if an earlier build
+   * left it set — so paintSelfRing() has one unconditional answer and SELF_INVUL_COLOR has one caller. */
   function syncSelfInvul(s) {
-    const dim = aimInvulnerable();
-    if (dim === s.invul) return;
-    s.invul = dim;
-    try { s.box.classList.toggle('crs-invul', dim); } catch (e) { /* ignore */ }
+    if (!s.invul) return;
+    s.invul = false;
+    try { s.box.classList.remove('crs-invul'); } catch (e) { /* ignore */ }
     paintSelfRing(s, clamp(state.player.hp / state.player.max, 0, 1));
   }
   /* The ring rides the pointer from the frames that already exist — scheduleHover()'s one-shot RAF on every

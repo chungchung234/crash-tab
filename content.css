@@ -22,6 +22,16 @@ html.crs-active.crs-scoped *:not(crs-hud) {
   cursor: none !important;
 }
 
+/* SPEC-crosshair §A1/§A2: with a crosshair DRAWN (`crs-aim`, added by ensureCrosshair()) the operating
+   system cursor is turned off — it is the thing that could never animate, never say which weapon is in
+   hand and never answer "did that hit?". `crs-hud` is excluded, exactly as above, so the panel keeps a
+   real pointer; and §A9's `crosshair: 'off'` simply never adds the class, which brings the OS cursor
+   back for accessibility and for taste. */
+html.crs-active.crs-aim,
+html.crs-active.crs-aim *:not(crs-hud) {
+  cursor: none !important;
+}
+
 /* ---- top-level hosts (appended to <html>, shown as manual popovers) ---- */
 .crs-shield,
 .crs-shield:popover-open {
@@ -90,11 +100,45 @@ crs-hud::backdrop,
   padding: 0 !important;
   border: 0 !important;
   box-sizing: border-box !important;
-  outline: 2px solid rgba(229, 72, 77, .9) !important;
+  /* SPEC-crosshair §B2: 전체를 두르는 2px 실선을 없앤다 · 배경 틴트도 없앤다.
+     The loudest thing on screen was the least important one (a plain hover); what is left is the §B1
+     "중" level, four corner brackets (`.crs-tb` below). `targetMarker: 'full'` brings the line back. */
+  outline: 0 solid rgba(229, 72, 77, .9) !important;
   outline-offset: 2px !important;
   border-radius: 4px !important;
-  background: rgba(229, 72, 77, .06);
+  background: transparent;
   transition: left 60ms linear, top 60ms linear, width 60ms linear, height 60ms linear;
+}
+/* §B2: 네 모서리에 10px 'ㄱ'자 괄호 4개만, 흰색 55%, 바깥으로 2px. They are MOVED, never re-played:
+   "이동할 때 괄호는 위치만 옮기고 다시 나타나는 애니메이션을 하지 않는다. 깜빡임이 피로의 원인이다." */
+.crs-tb {
+  position: absolute !important;
+  width: 10px !important;
+  height: 10px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-style: solid !important;
+  border-width: 0 !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: none !important;
+  /* NOT !important: pulseTarget() blinks the border white on a hit, and a user-origin !important would
+     outrank that Web Animation (CLAUDE.md). Only the COLOUR is left open — the widths and the style
+     above stay !important, so a hostile page cannot restyle the bracket itself. */
+  border-color: rgba(255, 255, 255, .55);
+  opacity: 1;
+}
+.crs-target-brackets .crs-tb,
+.crs-target-full .crs-tb { display: block !important; }
+.crs-tb-0 { left: -2px !important; top: -2px !important; border-top-width: 2px !important; border-left-width: 2px !important; }
+.crs-tb-1 { right: -2px !important; top: -2px !important; border-top-width: 2px !important; border-right-width: 2px !important; }
+.crs-tb-2 { left: -2px !important; bottom: -2px !important; border-bottom-width: 2px !important; border-left-width: 2px !important; }
+.crs-tb-3 { right: -2px !important; bottom: -2px !important; border-bottom-width: 2px !important; border-right-width: 2px !important; }
+/* §B4 `targetMarker: 'full'`: the v1.1 solid box, for anyone who wants it back (and for high contrast). */
+.crs-target-full {
+  outline-width: 2px !important;
+  background: rgba(229, 72, 77, .06) !important;
 }
 .crs-target-label {
   position: absolute !important;
@@ -113,12 +157,16 @@ crs-hud::backdrop,
   text-transform: none !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .3) !important;
 }
-/* health bar under the label (v1.1 A11): fill width / colour are set via CSSOM */
+/* health bar under the label (v1.1 A11): fill width / colour are set via CSSOM.
+   SPEC-crosshair §B2 re-parents this very node under `.crs-crosshair` and gives it `.crs-ch-hp`, whose
+   rules (at the end of this file) own its geometry from then on. `width` lost its !important here
+   because the bar's LENGTH is now the max-HP readout and is written from JS — a user-origin !important
+   would pin every target's bar at 46 px (CLAUDE.md, the USER-origin trap). */
 .crs-target-bar {
   position: absolute !important;
   left: 0 !important;
   top: 18px !important;
-  width: 46px !important;
+  width: 46px;
   height: 3px !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -276,14 +324,27 @@ crs-hud::backdrop,
   box-sizing: border-box !important;
   display: block !important;
 }
+/* SPEC-crosshair §B3: 평상시 실선 테두리를 없앤다 — inset glow + the small label, and nothing else.
+   단단한 실선은 "지금 나를 해치려는 것"에만 쓴다: the four classes below (a wind-up aim line, an imminent
+   lock, a §D5 charge, a repair beam) are the only states that get one, and they get the pulse with it.
+   The inset is §B3's combat strength (.42): an aura only ever exists in a combat mode, so the quieter
+   .30 it gives for "평상시" outside combat can never actually be observed (see auraLoud(), src/51). */
 .crs-hostile {
   z-index: 1 !important;
-  outline: 2px solid rgba(255, 60, 60, .9) !important;
+  outline: 0 solid rgba(255, 60, 60, .9) !important;
   outline-offset: 0 !important;
   border-radius: 4px !important;
-  box-shadow: inset 0 0 24px rgba(255, 60, 60, .45) !important;
+  box-shadow: inset 0 0 26px rgba(229, 72, 77, .42) !important;
   background: transparent !important;
 }
+.crs-hostile.crs-aimed,
+.crs-hostile.crs-lock-imminent,
+.crs-hostile.crs-lunging,
+.crs-hostile.crs-repairing { outline-width: 2px !important; }
+/* §B4 `hostileMarker: 'off'`: no aura at all. The label goes with it — the enemy is still an enemy, it
+   simply is not drawn on. (The record, its attacks and its hit box are untouched.) */
+.crs-hostile.crs-hostile-off { box-shadow: none !important; outline-width: 0 !important; }
+.crs-hostile.crs-hostile-off .crs-hostile-label { display: none !important; }
 .crs-hostile-label {
   position: absolute !important;
   right: 0 !important;
@@ -541,14 +602,17 @@ crs-hud:popover-open {
  *      styles and Web Animations. `transform` and `opacity` on .crs-viewmodel / .crs-viewmodel-mag
  *      are therefore declared WITHOUT !important — the draw, recoil, swing, reload and ADS fade all
  *      animate exactly those two properties. ---- */
+/* SPEC-crosshair §C: the four geometry numbers are viewport-proportional now and written from JS
+   (vmPlace(), src/46-viewmodel.js), so right / bottom / width / height lost their !important — a
+   user-origin !important would pin the layer back into the corner it is being moved out of. */
 .crs-viewmodel {
   position: fixed !important;
-  right: 8px !important;
-  bottom: -8px !important;
+  right: 64px;
+  bottom: -26px;
   left: auto !important;
   top: auto !important;
-  width: 200px !important;
-  height: 100px !important;
+  width: 384px;
+  height: 215px;
   margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
@@ -557,7 +621,9 @@ crs-hud:popover-open {
   box-sizing: border-box !important;
   display: block !important;
   z-index: 3 !important;
-  transform-origin: 85% 110% !important;
+  /* §C: 80% 100% — the pivot sits at the grip, so the draw/recoil swing rotates the weapon about the
+     hand instead of about a point off the bottom of the screen. */
+  transform-origin: 80% 100% !important;
   filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .55)) !important;
   transform: translate(0px, 0px) rotate(0deg);
   opacity: 1;
@@ -578,8 +644,10 @@ crs-hud:popover-open {
   align-items: flex-end !important;
   justify-content: center !important;
   transform-origin: 50% 70% !important;
-  /* the art faces right; mirror it, then tilt so the muzzle points up into the screen */
-  transform: rotate(-14deg) scaleX(-1) !important;
+  /* the art faces right; mirror it, then tilt so the muzzle points up into the screen.
+     SPEC-crosshair §C: −8° (was −14°) — the layer is nearly twice as tall now, and the old tilt threw
+     the muzzle off the top of it. */
+  transform: rotate(-8deg) scaleX(-1) !important;
 }
 .crs-viewmodel-art .crs-art {
   display: block !important;
@@ -802,9 +870,9 @@ crs-hud:popover-open {
 }
 
 /* ---- §10.4 depth, read off the aura ---- */
+/* SPEC-crosshair §B3: "깊이 back 의 흐림은 유지하되 점선 테두리는 뺀다. 라벨의 ▲▲▲ 로 충분하다." */
 .crs-hostile.crs-depth-back {
   filter: blur(0.6px) saturate(.75);
-  outline-style: dashed !important;
 }
 /* a back-rank enemy that is actively repairing drops the blur and brightens: it has to be worth the trip */
 .crs-hostile.crs-repairing {
@@ -1043,8 +1111,12 @@ crs-hud:popover-open {
 /* §3.2 highContrastMarkers: <html> carries .crs-hcm while the setting is on.
    The hostile aura gets a 45° stripe pattern on top of the red (so the marker is
    not colour alone) and both markers go to a thicker, fully opaque solid line. */
+/* SPEC-crosshair §B4: 고대비가 켜지면 두 표식이 자동으로 full + always 로 올라간다 — so the quiet
+   outline of §B3 comes back here as the thickest, most opaque line in the file. `outline-style` has to
+   be restated: §B3 left the base rule at `0 solid`, and a width alone draws nothing. */
 .crs-hcm .crs-hostile {
   outline-width: 3px !important;
+  outline-style: solid !important;
   outline-color: rgba(255, 255, 255, 1) !important;
   background-image: repeating-linear-gradient(
     45deg,
@@ -1233,3 +1305,273 @@ crs-hud:popover-open {
   outline-color: rgba(255, 80, 80, 1) !important;
   box-shadow: inset 0 0 34px rgba(255, 60, 60, .7) !important;
 }
+
+/* =====================================================================
+ * SPEC-crosshair §A — the drawn crosshair
+ *
+ * CASCADE NOTE (CLAUDE.md, the USER-origin trap): this sheet is injected
+ * at USER origin, where !important outranks inline styles AND Web
+ * Animations. The crosshair is the worst possible place to get that
+ * wrong — it writes `transform` every frame. So, declared WITHOUT
+ * !important here and owned by JS: the root's `transform`, each arm's
+ * `transform` / `height`, every shape child's `transform` / `width` /
+ * `height`, the ring's `background-image`, the health bar's `width` /
+ * `margin-left` / `opacity`, and every `opacity` a hit marker animates.
+ *
+ * The COLOUR goes the other way round. `--crs-ch-c` is published from JS
+ * (chApplyState()) and read by the !important declarations below, which
+ * is safe: an !important on `background` is not fighting a custom
+ * property that was set inline.
+ *
+ * 가시성 원칙 (§A2): 모든 선은 흰 채움 + 1px 검은 외곽(drop-shadow) —
+ * 흰 페이지에서도 검은 페이지에서도 보여야 한다.
+ * ===================================================================== */
+.crs-crosshair {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  /* §A2: glass root, 조준경 레이어(z-index 7) 아래 */
+  z-index: 6 !important;
+  will-change: transform !important;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, .95)) !important;
+  /* NOT !important: translate3d() per pointer frame, and the §A5 lock pulse animates opacity */
+  transform: translate3d(-9999px, -9999px, 0);
+  opacity: 1;
+}
+.crs-crosshair.crs-ch-hidden { display: none !important; }
+.crs-ch-arm,
+.crs-ch-dot,
+.crs-ch-ring,
+.crs-ch-dash,
+.crs-ch-shape,
+.crs-ch-hit,
+.crs-ch-hint,
+.crs-ch-hpnum {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+}
+/* §A3: the four arms. Their distance from the centre IS the live spread. */
+.crs-ch-arm {
+  width: 2px !important;
+  border-radius: 1px !important;
+  background: var(--crs-ch-c, #fff) !important;
+  /* NOT !important: chPlaceArms() writes both every time the gap moves */
+  height: 6px;
+  transform: translate(-50%, -50%);
+}
+.crs-ch-thin .crs-ch-arm { width: 1px !important; }
+.crs-ch-dot {
+  width: 3px !important;
+  height: 3px !important;
+  border-radius: 50% !important;
+  background: var(--crs-ch-c, #fff) !important;
+  transform: translate(-50%, -50%) !important;
+}
+/* §A5: 부술 수 없는 곳에서는 중심 점이 없다 — hidden by a CLASS, because an inline display:none would
+   lose to the user-origin !important above (the same trap `.crs-self-dot` documents). */
+.crs-ch-nodot .crs-ch-dot { display: none !important; }
+.crs-ch-shape { width: 0 !important; height: 0 !important; overflow: visible !important; }
+.crs-ch-shape > * {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  /* NOT !important: chSyncShape() / chPlaceCone() write these three */
+  transform: translate(-50%, -50%);
+}
+/* §A4 망치·도끼: 휘두르는 궤적의 호 하나 (border-top only, rotated) */
+.crs-ch-arc {
+  border: 2px solid transparent !important;
+  border-top-color: var(--crs-ch-c, #fff) !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+}
+.crs-ch-arc-fat { border-width: 4px !important; }
+/* §A4 카타나: 비스듬한 선분 */
+.crs-ch-slash {
+  border-radius: 1px !important;
+  background: var(--crs-ch-c, #fff) !important;
+}
+/* §A9 circle */
+.crs-ch-circle {
+  border: 2px solid var(--crs-ch-c, #fff) !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+}
+/* §A4 폭탄·로켓: 점선 원, 반지름 = 실제 폭발 반경. .35 — 커서를 따라다니므로 진하면 거슬린다. */
+.crs-ch-blast {
+  border: 1px dashed var(--crs-ch-c, #fff) !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  opacity: .35 !important;
+}
+/* §A4 로켓의 모서리 괄호 / 붕괴의 큰 모서리 괄호 4개 */
+.crs-ch-corner {
+  border: 0 solid var(--crs-ch-c, #fff) !important;
+  background: transparent !important;
+  opacity: .8 !important;
+}
+.crs-ch-corner-0 { border-top-width: 2px !important; border-left-width: 2px !important; }
+.crs-ch-corner-1 { border-top-width: 2px !important; border-right-width: 2px !important; }
+.crs-ch-corner-2 { border-bottom-width: 2px !important; border-left-width: 2px !important; }
+.crs-ch-corner-3 { border-bottom-width: 2px !important; border-right-width: 2px !important; }
+/* §A4 화염방사기: 벌어진 원뿔 2선 — the angle follows bloom (chPlaceCone) */
+.crs-ch-cone {
+  border-radius: 1px !important;
+  background: var(--crs-ch-c, #fff) !important;
+  transform-origin: 0 50% !important;
+}
+/* §A7 준비 상태 링: 지름 26px, conic-gradient 로 진행도 */
+.crs-ch-ring {
+  width: 26px !important;
+  height: 26px !important;
+  border-radius: 50% !important;
+  background-color: transparent !important;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 9px, #000 10px) !important;
+  mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 9px, #000 10px) !important;
+  transform: translate(-50%, -50%) !important;
+  display: none !important;
+  /* NOT !important: chSyncRing() writes the gradient every frame it moves */
+  background-image: none;
+}
+.crs-ch-ring.crs-ch-ring-on { display: block !important; }
+/* §A7: 대시 쿨다운(서바이벌)은 링 바깥의 작은 점 */
+.crs-ch-dash {
+  width: 5px !important;
+  height: 5px !important;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, .22) !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55) !important;
+  transform: translate(-50%, -50%) translateY(19px) !important;
+  display: none !important;
+}
+.crs-ch-dash.crs-ch-dash-on { display: block !important; }
+.crs-ch-dash.crs-ch-dash-ready { background: #58a6ff !important; box-shadow: 0 0 5px 1px rgba(88, 166, 255, .8) !important; }
+/* §A6 히트마커: 대각선 4선(X) + 바깥 테두리 / 수축하는 원. 같은 노드를 재사용한다. */
+.crs-ch-hit {
+  width: 0 !important;
+  height: 0 !important;
+  overflow: visible !important;
+  /* NOT !important: every marker animates exactly this, and rests at 0 */
+  opacity: 0;
+}
+.crs-ch-hit-line {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 2px !important;
+  height: 8px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 1px !important;
+  background: var(--crs-ch-hit-c, #fff) !important;
+  pointer-events: none !important;
+  display: block !important;
+  /* NOT !important: the 락온 차단 burst throws these outward */
+  transform: translate(-50%, -50%) translateY(-9px);
+}
+.crs-ch-hit-line:nth-child(1) { transform: translate(-50%, -50%) rotate(45deg) translateY(-9px); }
+.crs-ch-hit-line:nth-child(2) { transform: translate(-50%, -50%) rotate(135deg) translateY(-9px); }
+.crs-ch-hit-line:nth-child(3) { transform: translate(-50%, -50%) rotate(225deg) translateY(-9px); }
+.crs-ch-hit-line:nth-child(4) { transform: translate(-50%, -50%) rotate(315deg) translateY(-9px); }
+.crs-ch-hit-ring {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 30px !important;
+  height: 30px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 2px solid var(--crs-ch-hit-c, #fff) !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: none !important;
+  /* NOT !important: animated by the 치명타 / 파괴 markers */
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+.crs-ch-hit-crit .crs-ch-hit-ring,
+.crs-ch-hit-kill .crs-ch-hit-ring { display: block !important; }
+/* §A8 깊이·관통 힌트: 조준점 아래 10px */
+.crs-ch-hint {
+  font: 700 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  color: var(--crs-ch-c, #fff) !important;
+  background: transparent !important;
+  white-space: nowrap !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .95) !important;
+  transform: translate(-50%, 0) translateY(10px) !important;
+  opacity: .45 !important;
+  display: none !important;
+}
+.crs-ch-hint.crs-ch-hint-on { display: block !important; }
+.crs-ch-hint.crs-ch-hint-bright { opacity: 1 !important; }
+/* =====================================================================
+ * SPEC-crosshair §B2 — 체력 바는 조준점 아래 14px, 가운데 정렬
+ * 바의 가로 길이 자체가 최대 체력을 나타낸다: 큰 걸 겨누면 바도 길다.
+ * ===================================================================== */
+.crs-crosshair .crs-ch-hp {
+  position: absolute !important;
+  left: 0 !important;
+  top: 14px !important;
+  right: auto !important;
+  bottom: auto !important;
+  height: 4px !important;
+  border-radius: 2px !important;
+  background: rgba(0, 0, 0, .45) !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55) !important;
+  overflow: hidden !important;
+  display: none !important;
+  /* NOT !important: chSetHp() writes all three — the length IS the max-HP readout, and §B2 asks for
+     no transition on it ("대상을 옮길 때마다 늘었다 줄었다 하면 거슬린다"). */
+  width: 46px;
+  margin-left: -23px;
+  opacity: 1;
+}
+.crs-crosshair .crs-ch-hp.crs-ch-hp-on { display: block !important; }
+/* SPEC-combat §C4: an approximated max is an estimate, and the estimate is at the far end of the bar. */
+.crs-crosshair .crs-ch-hp.crs-ch-hp-approx {
+  border-right: 2px dashed rgba(255, 255, 255, .85) !important;
+  overflow: visible !important;
+}
+.crs-crosshair .crs-ch-hp-fill {
+  border-radius: 2px !important;
+  transition: none !important;
+}
+/* §A9 showHpNumber: the number comes back, under the bar, for anyone who wants it. */
+.crs-ch-hpnum {
+  font: 700 10px/1 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  color: #fff !important;
+  background: transparent !important;
+  white-space: nowrap !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .95) !important;
+  transform: translate(-50%, 0) translateY(21px) !important;
+  display: none !important;
+}
+.crs-ch-hpnum.crs-ch-hpnum-on { display: block !important; }
+/* §B4 `targetMarker: 'off'`: no hover marker at all — the bracket nodes are removed (syncTargetMarker)
+   and the box they lived in stops being drawn. showTarget() writes `display: block` inline, so this has
+   to be the user-origin !important that outranks it. */
+.crs-target.crs-target-off { display: none !important; }
