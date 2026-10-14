@@ -12,7 +12,7 @@
   const gcsRaw = win.getComputedStyle.bind(win);
   const now = () => win.performance.now();
 
-  const VERSION = '1.2.0';
+  const VERSION = '2.0.0';
   /* Weapon table (SPEC-v2 A2 numbers + v1.2 A1 ammo fields). `kind` is the v1 mode vocabulary every primitive
    * consumes (CRACK / flash / shake / sfx / velocityFor / pieceCount / breakElement opts.mode — A10).
    * `mag` = magazine size (null = ∞ / melee), `reloadMs` (null for melee); the slot KEY is no longer a table
