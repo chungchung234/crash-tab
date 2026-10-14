@@ -7367,7 +7367,7 @@
       el, x: 0, y: 0, rot: 0, vx: 0, vy: 0, vr: 0, resting: false, bornAt: now(),
       wet: false, bouncy: false,
       mass: movedMass(rect), saved, savedPriority: priority, want: '', wrote: '', reapplied: 0,
-      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0, retMs: 0, floored: false,
+      mo: null, released: false, returning: false, retAt: 0, retX: 0, retY: 0, retRot: 0, retMs: 0, floored: false, clampWait: 0,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
       hitAt: new WeakMap()
     };
@@ -7571,6 +7571,22 @@
       if (overT > 0) { b.y += overT; box.top += overT; box.bottom += overT; if (b.vy < 0) b.vy = 0; }
       b.floored = overB > 0;
       if (overB > 0) { b.y -= overB; box.top -= overB; box.bottom -= overB; if (b.vy > 0) b.vy = 0; }
+      /* `r` is read BEFORE this frame's corrected b.x reaches the DOM, so every correction above is computed
+       * from a rect one frame old and lands one frame late. That is harmless while the loop keeps running —
+       * and wrong the moment it stops, because the loop only runs while something is `busy`. A body that
+       * overshoots the margin on one long frame (a loaded CI runner integrates a much larger dt) would park
+       * 90 px outside it and stay there, since nothing would ask again. So: a body with a correction still
+       * owed is not at rest, and keeps the loop alive until the clamp has actually converged. */
+      /* …but bounded. If the live rect keeps reporting the element outside the margin for a reason the
+       * offset cannot fix — the page itself positions it there, a transformed ancestor, a reflow that
+       * undoes us — then "not at rest while a correction is owed" would spin the loop forever, burn a core
+       * and break the contract that zero frames are live after Escape. Two frames is all a converging
+       * clamp needs (the correction lands on the next one); after that the body parks where it is. */
+      const over = overL > 0 || overR > 0 || overT > 0 || overB > 0;
+      if (!over) b.clampWait = 0;
+      else if ((b.clampWait = (b.clampWait || 0) + 1) > 2) { /* give up: park it */ }
+      const clamped = over && b.clampWait <= 2;
+      if (clamped) { busy = true; b.resting = false; }
       rects.set(b, box);
       // §E2: 정지하면 제자리로 돌아가지 않는다 — it parks where it stopped; only 복구 brings it back.
       /* ── SPEC-arsenal §C / §D (8단계) ──
@@ -7582,7 +7598,7 @@
        * 26 frames of y === 0. A falling body is at rest only once the §E2 viewport floor has stopped it,
        * which is what `floored` says. */
       const gravOn = !!(b.wet || b.bouncy);
-      if (!b.resting && (!gravOn || b.floored) && Math.abs(b.vx) < MOVED_SLEEP_V && Math.abs(b.vy) < MOVED_SLEEP_V && Math.abs(b.vr) < MOVED_SLEEP_R) {
+      if (!b.resting && !clamped && (!gravOn || b.floored) && Math.abs(b.vx) < MOVED_SLEEP_V && Math.abs(b.vy) < MOVED_SLEEP_V && Math.abs(b.vr) < MOVED_SLEEP_R) {
         b.vx = 0; b.vy = 0; b.vr = 0; b.resting = true;
       }
       writeMoved(b);
