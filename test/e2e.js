@@ -5102,16 +5102,27 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   // that has nothing to do with eviction. Demand actual contact — the gap decides whether the lower piece
   // is really the support — and the pair that gets picked is then the pair the assertion is about.
   const CONTACT944 = 4;
+  // evictPieces()'s own wake test, read straight off src/65-pieces.js: ≥ 40 % overlap with the narrower of
+  // the two, and a bottom edge at or above the other piece's top.
+  const supports944 = (lower, upper) => {
+    const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
+    return ov >= 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l) && upper.bottom <= lower.top + 1;
+  };
   const findPair944 = (boxes) => {
     if (!Array.isArray(boxes)) return null;
     for (const lower of boxes) {
       if (!lower.resting) continue;
       for (const upper of boxes) {
         if (upper === lower || !upper.resting) continue;
-        const ov = Math.min(lower.r, upper.r) - Math.max(lower.l, upper.l);
-        if (ov < 0.4 * Math.min(lower.r - lower.l, upper.r - upper.l)) continue;
+        if (!supports944(lower, upper)) continue;
         const gap = lower.top - upper.bottom;
-        if (gap >= -1 && gap <= CONTACT944) return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
+        if (gap < -1 || gap > CONTACT944) continue;   // actually touching, not merely somewhere above
+        // …and `lower` must be its ONLY support. A chip can come to rest across two neighbours; retiring
+        // one of them leaves the other holding it up, and the piece correctly does not move — which the
+        // assertion below would read as "re-falling is broken". Demand a pair where the eviction really
+        // does remove the last thing underneath.
+        if (boxes.some((o) => o !== lower && o !== upper && o.resting && supports944(o, upper))) continue;
+        return { lower: lower.pid, upper: upper.pid, upperTop: upper.top, gap };
       }
     }
     return null;
