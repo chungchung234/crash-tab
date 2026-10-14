@@ -14,6 +14,9 @@
     state.fxQueue.length = 0;
     clearDecals();
     clearMatFx();
+    clearFracFx();     // SPEC-destruction §B3: the shared particle pool and the ember trails
+    clearPartials();   // SPEC-destruction §C3: every borrowed `clip-path` goes back to its original value
+    fracSetCurve(null);
   }
 
   /* Per-WEAPON profile: how big the mark is and how many strands it has (unchanged from v1). */
@@ -270,6 +273,11 @@
         bx: lx + tile.minX, by: ly + tile.minY, bw: tile.bw, bh: tile.bh,
         radii: [tile.maxLen * 0.4, tile.maxLen * 0.75, Infinity], stage: 0
       });
+      /* SPEC-destruction §A: the material's crack web says what the SURFACE did; this says what the WEAPON
+       * did — the hole, the spall cone, the axe's cut, the soot. It is painted straight into the decal (not
+       * through the staged fx queue) because it is the part of the mark the shot is actually aimed at, and
+       * it ACCUMULATES: four shots leave four holes. */
+      weaponMark(rec, lx, ly, x, y, opts);
       pushed++;
     }
     if (!pushed) return;
@@ -298,50 +306,57 @@
       if (f.stage >= f.radii.length) state.fxQueue.splice(i, 1);
     }
   }
-  /* Sword slash (A8): the cut is drawn into every decal it crosses, each in that element's own local space,
-   * so one drag across three cards leaves three cuts that stop at the cards' edges. */
+  /* Katana cut (A8 + SPEC-destruction §A / §D2): the cut is drawn into every decal it crosses, each in that
+   * element's own local space, so one drag across three cards leaves three cuts that stop at the cards'
+   * edges. §D2 changed WHAT is drawn and WHEN:
+   *   · one DARK arc that follows the blade's curve — rgba(18,20,26,.55), 1.2 px tapering to 0.4 px at the
+   *     tips. No bright line: "실제로는 번쩍인 뒤 어두운 칼자국이 남는다" (§D1).
+   *   · no perpendicular ticks at all — they read as a saw, not a blade (§D1).
+   *   · it appears at 180 ms, once the crescent afterimage has gone, and then stays.
+   * `state.cracks` still moves in the same synchronous task as the swing, so the counter means "this swing
+   * drew a mark" exactly as it did before. */
+  const SLASH_SCAR_MS = 180;
   function drawSlash(x1, y1, x2, y2) {
     state.cracks++; state.crackInk += 0.5;
     if (!root) return;
-    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
-    const seen = new Set(), recs = [];
-    const steps = Math.max(2, Math.min(12, Math.round(len / 40) + 2));
-    for (let i = 0; i <= steps; i++) {
-      const f = i / steps;
-      const el = decalTargetAt(x1 + dx * f, y1 + dy * f);
+    const cu = fracGetCurve() || fracMakeCurve(x1, y1, x2, y2, null);
+    const samples = fracCurveSamples(cu, 18);
+    const seen = new Set(), els = [];
+    for (const s of samples) {
+      const el = decalTargetAt(s.x, s.y);
       if (!el || seen.has(el)) continue;
-      seen.add(el);
-      const rec = ensureDecal(el);
-      if (rec) recs.push(rec);
-      if (recs.length >= 6) break;
+      seen.add(el); els.push(el);
+      if (els.length >= 6) break;
     }
-    if (!recs.length) return;
-    const ticks = [];
-    const nt = randInt(6, 14);
-    for (let i = 0; i < nt; i++) {
-      const f = rand(0.04, 0.96), L = rand(4, 10), s = Math.random() < 0.5 ? -1 : 1;
-      const bx = x1 + dx * f, by = y1 + dy * f;
-      ticks.push([bx, by, bx + nx * L * s, by + ny * L * s]);
-    }
-    for (const rec of recs) {
-      const ink = matOf(materialOf(rec.el));
-      const ox = rec.left, oy = rec.top;
-      try {
-        const c = rec.ctx;
-        c.save();
-        c.lineCap = 'round';
-        const pass = (color, w) => {
-          c.strokeStyle = color; c.lineWidth = w;
-          c.beginPath(); c.moveTo(x1 - ox, y1 - oy); c.lineTo(x2 - ox, y2 - oy);
-          for (const t of ticks) { c.moveTo(t[0] - ox, t[1] - oy); c.lineTo(t[2] - ox, t[3] - oy); }
-          c.stroke();
-        };
-        pass(ink.light, 2.4);
-        pass(ink.ink, 1.0);
-        c.restore();
-      } catch (e) { /* ignore */ }
-    }
-    kick();
+    if (!els.length) return;
+    const paint = () => {
+      if (!state.active || !root) return;
+      for (const el of els) {
+        const rec = ensureDecal(el);
+        if (!rec || !rec.ctx) continue;
+        const ox = rec.left, oy = rec.top;
+        try {
+          const c = rec.ctx;
+          c.save();
+          c.lineCap = 'round'; c.lineJoin = 'round';
+          c.strokeStyle = 'rgba(18,20,26,.55)';
+          // tapered: the belly of the arc is 1.2 px, both tips 0.4 px — three passes over the same curve
+          for (const [a, b, w] of [[0, 1, 0.4], [0.12, 0.88, 0.8], [0.3, 0.7, 1.2]]) {
+            c.lineWidth = w;
+            c.beginPath();
+            const n = 24;
+            for (let i = 0; i <= n; i++) {
+              const p = fracCurveAt(cu, a + (b - a) * (i / n));
+              if (i === 0) c.moveTo(p.x - ox, p.y - oy); else c.lineTo(p.x - ox, p.y - oy);
+            }
+            c.stroke();
+          }
+          c.restore();
+        } catch (e) { /* ignore */ }
+      }
+      kick();
+    };
+    later(paint, SLASH_SCAR_MS);
   }
   /* Scorch dab (flame every 4th tick r 24 / rocket impact r 140, A7 / A9) — burnt into the elements it
    * touches, never onto the page behind them. */

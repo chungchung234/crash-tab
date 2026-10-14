@@ -49,7 +49,7 @@
     clearMoved();
     if (root) {
       let leftovers = [];
-      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce, .crs-lock, .crs-repair, .crs-repair-ghost, .crs-avatar, .crs-avatar-ghost, .crs-help'); } catch (e) { leftovers = []; }
+      try { leftovers = root.querySelectorAll('.crs-piece, .crs-word, .crs-fading, .crs-fx-flash, .crs-fx-ring, .crs-dmg, .crs-hit, .crs-fire, .crs-rocket, .crs-slash-preview, .crs-slash-fx, .crs-scope, .crs-tracer, .crs-hostile, .crs-orb, .crs-orb-trail, .crs-orb-ring, .crs-warn, .crs-beam, .crs-beam-mark, .crs-vignette, .crs-self, .crs-selfbox, .crs-aimline, .crs-viewmodel, .crs-pierce, .crs-lock, .crs-repair, .crs-repair-ghost, .crs-avatar, .crs-avatar-ghost, .crs-help, .crs-frag, .crs-trail'); } catch (e) { leftovers = []; }
       for (const n of leftovers) { try { n.remove(); } catch (e) { /* ignore */ } }
     }
     // originals
@@ -236,6 +236,8 @@
     return {
       active: state.active, weapon: state.weapon,
       cracks: state.cracks, debris: debrisCount(), broken: state.broken.length,
+      // SPEC-destruction §C3: elements that have been CUT (a corner / plate sheared off) but are still standing
+      partial: partialCount(),
       animating: state.animating, cap: CAP, combo: state.combo, holding: !!state.hold,
       shots: state.shots, damageDealt: state.damageDealt, crits: state.crits, scorch: state.scorch,
       hpCalcs,   // SPEC-combat §C4: real max-HP computations — a cache hit never moves it

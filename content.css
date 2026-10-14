@@ -1575,3 +1575,25 @@ crs-hud:popover-open {
    and the box they lived in stops being drawn. showTarget() writes `display: block` inline, so this has
    to be the user-origin !important that outranks it. */
 .crs-target.crs-target-off { display: none !important; }
+
+/* ---- SPEC-destruction §B3: the shared break-particle pool, the ember trail, and the ash flakes ----
+   fracParticles() / fracTrail() (src/66-fracture.js) write the box, the colour and the shape and then
+   animate `transform` / `opacity`, and spawnAshFlakes() animates a flake's transform every frame — so
+   NONE of those properties may carry !important here (CLAUDE.md: USER 오리진 함정). */
+.crs-frag,
+.crs-trail {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  z-index: 4 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 0;
+  height: 0;
+  opacity: 1;
+}
+.crs-ash {
+  border-radius: 1px !important;
+}

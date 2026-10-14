@@ -55,36 +55,63 @@
     }
     return out;
   }
-  function gridSplit(w, h, cols, rows) {
+  /* SPEC-destruction §C4: the blast grid now takes the impact point. Every interior grid line leans up to
+   * 30 % of a cell TOWARD it, so the cell the blast went off in is the smallest one on the sheet, and that
+   * cell is split once more — "터진 자리가 가장 잘게 부서진다". (hx, hy) may be omitted, and then this is
+   * bit-for-bit the pre-§C grid.
+   * INTERPRETATION (reported): §C4 asks for the impact cell AND its 8 neighbours to be halved. On a 3 × 2
+   * grid every cell is a neighbour, so that rule would double the whole sheet and contradict §B1's "불규칙한
+   * 6~8 파편" — the neighbours are therefore only split once the grid is fine enough for "neighbour" to mean
+   * anything (4 columns × 3 rows and up). */
+  function quadHalve(q) {
+    const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const wq = Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]);
+    const hq = Math.hypot(q[3][0] - q[0][0], q[3][1] - q[0][1]);
+    if (wq >= hq) { const a = mid(q[0], q[1]), b = mid(q[3], q[2]); return [[q[0], a, b, q[3]], [a, q[1], q[2], b]]; }
+    const a = mid(q[0], q[3]), b = mid(q[1], q[2]);
+    return [[q[0], q[1], b, a], [a, b, q[2], q[3]]];
+  }
+  function gridSplit(w, h, cols, rows, hx, hy) {
     const cw = w / cols, ch = h / rows, V = [];
+    const aimed = isFinite(hx) && isFinite(hy);
     for (let j = 0; j <= rows; j++) {
       V.push([]);
       for (let i = 0; i <= cols; i++) {
         let x = i * cw, y = j * ch;
         const ex = i === 0 || i === cols, ey = j === 0 || j === rows;
-        if (!ex) x += rand(-0.12, 0.12) * cw;
-        if (!ey) y += rand(-0.12, 0.12) * ch;
+        if (!ex) { if (aimed) x += clamp(hx - x, -0.3 * cw, 0.3 * cw); x += rand(-0.12, 0.12) * cw; }
+        if (!ey) { if (aimed) y += clamp(hy - y, -0.3 * ch, 0.3 * ch); y += rand(-0.12, 0.12) * ch; }
         V[j].push([x, y]);
       }
     }
+    const hi = aimed ? clamp(Math.floor(hx / cw), 0, cols - 1) : -1;
+    const hj = aimed ? clamp(Math.floor(hy / ch), 0, rows - 1) : -1;
+    const wide = cols >= 4 && rows >= 3;
     const out = [];
-    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) out.push(polyInfo([V[j][i], V[j][i + 1], V[j + 1][i + 1], V[j + 1][i]]));
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      const quad = [V[j][i], V[j][i + 1], V[j + 1][i + 1], V[j + 1][i]];
+      const near = aimed && (wide ? (Math.abs(i - hi) <= 1 && Math.abs(j - hj) <= 1) : (i === hi && j === hj));
+      if (near) { for (const q of quadHalve(quad)) out.push(polyInfo(q)); }
+      else out.push(polyInfo(quad));
+    }
     return out;
   }
+  /* SPEC-destruction §C4: "splitRect 의 가운데 보정 클램프를 제거한다. 피벗은 실제 타격점이며 상자 안에
+   * 4px 여유만." The pivot used to be dragged into the middle 50 % of the box, which is exactly why a corner
+   * hit used to break a card the same way a centre hit did. */
+  function splitPivot(v, size) { return clamp(v, Math.min(4, size / 2), Math.max(size - 4, size / 2)); }
   function splitRect(w, h, n, ix, iy, splitLine) {
     if (n <= 1 || w < 2 || h < 2) return [polyInfo([[0, 0], [w, 0], [w, h], [0, h]])];
-    if (n === 2 && splitLine) {   // axe / sword (A8): forced angle, pivot clamped to [2, w−2] × [2, h−2]
+    if (n === 2 && splitLine) {   // axe / katana (A8): forced angle, pivot at the real impact
       const a = splitLine.angle;
-      const cx = clamp(splitLine.cx, Math.min(2, w / 2), Math.max(w - 2, w / 2));
-      const cy = clamp(splitLine.cy, Math.min(2, h / 2), Math.max(h - 2, h / 2));
-      return pieSplit(w, h, cx, cy, [a, a + Math.PI]);
+      return pieSplit(w, h, splitPivot(splitLine.cx, w), splitPivot(splitLine.cy, h), [a, a + Math.PI]);
     }
-    if (n === 6) return gridSplit(w, h, 3, 2);
-    if (n === 8) return gridSplit(w, h, 4, 2);
+    if (n === 6) return gridSplit(w, h, 3, 2, ix, iy);
+    if (n === 8) return gridSplit(w, h, 4, 2, ix, iy);
     if (n === 4) {
-      return pieSplit(w, h, clamp(ix, w * 0.25, w * 0.75), clamp(iy, h * 0.25, h * 0.75), [0, 90, 180, 270].map((d) => (d + rand(-25, 25)) * DEG));
+      return pieSplit(w, h, splitPivot(ix, w), splitPivot(iy, h), [0, 90, 180, 270].map((d) => (d + rand(-25, 25)) * DEG));
     }
     const a = rand(0, Math.PI * 2);
-    return pieSplit(w, h, clamp(ix + rand(-0.1, 0.1) * w, w * 0.3, w * 0.7), clamp(iy + rand(-0.1, 0.1) * h, h * 0.3, h * 0.7), [a + rand(-8, 8) * DEG, a + Math.PI + rand(-8, 8) * DEG]);
+    return pieSplit(w, h, splitPivot(ix + rand(-0.1, 0.1) * w, w), splitPivot(iy + rand(-0.1, 0.1) * h, h), [a + rand(-8, 8) * DEG, a + Math.PI + rand(-8, 8) * DEG]);
   }
   function polyToClip(poly) { return 'polygon(' + poly.pts.map((p) => px(p[0]) + ' ' + px(p[1])).join(',') + ')'; }

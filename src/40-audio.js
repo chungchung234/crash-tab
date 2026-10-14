@@ -104,7 +104,13 @@
         }
         if (kind === 'bomb') { tinks(3, 0.03, 0.1 * gm); glass(); }
       }
-      else if (kind === 'swish') { noiseSweep(t, 0.09, 'highpass', 2000, 6000, 0.5 * gm); tinks(1, 0, 0.08 * gm); }   // katana
+      else if (kind === 'swish') { noiseSweep(t, 0.09, 'highpass', 2000, 6000, 0.5 * gm); tinks(1, 0, 0.08 * gm); }   // katana stab
+      /* SPEC-destruction §D2, the katana's three layers. Composed from the voices already here, so there is
+       * still no new audio graph: the DRAW is metal sliding on air, the AIR is the blade's own wake, and the
+       * RING only ever plays when something was really cut — "허공을 그으면 울림이 없다". */
+      else if (kind === 'katanaDraw') { noiseSweep(t, 0.07, 'highpass', 2000, 6000, 0.55 * gm); if (crit) tinks(1, 0, 0.08 * gm); }
+      else if (kind === 'katanaAir') { noiseBurst(t, 0.12, { type: 'bandpass', freq: 1200, Q: 1.4 }, 0.34 * gm, 0.12); }
+      else if (kind === 'katanaRing') { tone(t, 'triangle', 2600, 2500, 0.14, 0.17 * gm, 0.14); tone(t + 0.008, 'triangle', 3900, 3750, 0.14, 0.12 * gm, 0.14); }
       else if (kind === 'whoosh') { noiseSweep(t, 0.15, 'bandpass', 200, 1200, 0.6 * gm); }                            // rocket travel
       else if (kind === 'puff') { noiseBurst(t, 0.09, { type: 'lowpass', freq: 900, Q: 0.8 }, 0.3 * gm, 0.09); if (crit) tinks(1, 0, 0.06 * gm); }      // single flame tick
       else if (kind === 'clack') { tone(t, 'square', 320, 300, 0.03, 0.15, 0.03); }                                   // cooldown reject (A3) / bolt clicks

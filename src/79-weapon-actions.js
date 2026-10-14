@@ -42,8 +42,10 @@
     });
     return r !== undefined;
   }
-  /* Katana segment (pointer release or api.slash): < 12 px → stab, else slash. Returns elements damaged. */
-  function slashSegment(x1, y1, x2, y2) {
+  /* Katana segment (pointer release or api.slash): < 12 px → stab, else slash. Returns elements damaged.
+   * SPEC-destruction §D2: `mid` is the MIDDLE of the drag path, the third point of the quadratic Bézier the
+   * blade really travelled; api.slash() passes none and the curve is then bowed off the straight chord. */
+  function slashSegment(x1, y1, x2, y2, mid) {
     if (!state.active) return 0;
     x1 = +x1; y1 = +y1; x2 = +x2; y2 = +y2;
     if (!(isFinite(x1) && isFinite(y1) && isFinite(x2) && isFinite(y2))) return 0;
@@ -51,7 +53,7 @@
       const r = action('katana', x1, y1, () => { const hit = fireStab(x1, y1); startCooldown('katana', WEAPONS.katana.stabCooldownMs); return hit; });
       return r ? 1 : 0;
     }
-    const n = action('katana', x2, y2, () => doSlash(x1, y1, x2, y2));
+    const n = action('katana', x2, y2, () => doSlash(x1, y1, x2, y2, mid));
     return n || 0;
   }
 
@@ -131,13 +133,22 @@
     n.style.boxShadow = '0 0 0 1px rgba(15,25,35,.55), 0 0 4px rgba(255,255,255,.5)';   // dark halo: readable on white pages too (same dark pass as drawSlash)
     n.style.transformOrigin = '0 50%'; n.style.transform = 'translateY(-1px) rotate(0rad)';
     root.append(n);
-    state.slash = { x1: x, y1: y, x2: x, y2: y, node: n, pointerId: pointerId == null ? null : pointerId };
+    /* SPEC-destruction §D2: the path is recorded, not just its two ends — `path` keeps a handful of samples
+     * so the middle of the real drag can become the Bézier's third point on release. Capped at 32: a drag
+     * across a page can fire hundreds of pointermove events and only the middle one is ever read. */
+    state.slash = { x1: x, y1: y, x2: x, y2: y, node: n, pointerId: pointerId == null ? null : pointerId, path: [{ x, y }] };
     return true;
+  }
+  function slashMid(s) {
+    if (!s || !s.path || s.path.length < 3) return null;
+    return s.path[Math.floor(s.path.length / 2)];
   }
   function updateSlash(x, y) {
     const s = state.slash;
     if (!s) return;
     s.x2 = x; s.y2 = y;
+    if (s.path.length < 32) s.path.push({ x, y });
+    else s.path[31] = { x, y };
     const dx = x - s.x1, dy = y - s.y1;
     s.node.style.width = px(Math.hypot(dx, dy));
     s.node.style.transform = 'translateY(-1px) rotate(' + Math.atan2(dy, dx).toFixed(4) + 'rad)';
@@ -154,5 +165,5 @@
     const s = cancelSlash();
     if (!s) return 0;
     if (isFinite(x) && isFinite(y)) { s.x2 = x; s.y2 = y; }
-    return slashSegment(s.x1, s.y1, s.x2, s.y2);
+    return slashSegment(s.x1, s.y1, s.x2, s.y2, slashMid(s));
   }
