@@ -63,10 +63,10 @@ CSS 를 병합할 때는 규칙 본문 안에서 충돌이 나면 중괄호가 �
 ## 테스트
 
 ```bash
-node test/e2e.js                      # 전체, 77초, 869 단언
+node test/e2e.js                      # 전체, 87초, 919 단언
+CRS_BLOCKS=ammo node test/e2e.js      # 87초 — 탄창·저격경·로드아웃·가독성·보조 공격(§A)·레이저·미니건(§B)
 CRS_BLOCKS=rules node test/e2e.js     # 75초 — 모드·적만 피해·적만 포커싱·아키타입·투사체·연소(§F)
 CRS_BLOCKS=core node test/e2e.js      # 62초 — 픽스처·주입·HP·무기 아트·재질·조준점·파괴·폭발(§E)
-CRS_BLOCKS=ammo node test/e2e.js      # 42초 — 탄창·저격경·로드아웃·가독성
 CRS_BLOCKS=debris node test/e2e.js    # 39초 — 파편 수명·누적 자국·무기별 분해·타격 지점
 CRS_BLOCKS=combat node test/e2e.js    # 34초 — 드론·락온·복구
 CRS_BLOCKS=depth node test/e2e.js     # 28초 — 깊이·관통·변위

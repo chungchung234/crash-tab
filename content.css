@@ -1636,3 +1636,95 @@ crs-hud:popover-open {
   z-index: 3 !important;
   filter: blur(3px);
 }
+
+/* ---- SPEC-arsenal §A 충전 피드백 · §B2 레이저 빔과 절단선 · §A2 범위 지정 ------------------------
+   USER-ORIGIN TRAP (CLAUDE.md): every one of these nodes is POSITIONED, SIZED and in most cases ANIMATED
+   by JS — lzBeamOn() writes left/top/width/height/transform/background every tick, lzCutPoint() animates
+   background and box-shadow from white to a black scar, altChargeFxStep() grows the radius circle and
+   altLockStep() moves the brackets with their element, altMarqueeMove() writes the whole box. So NONE of
+   left / top / width / height / transform / background / box-shadow / opacity carries !important here. A
+   USER-origin !important on any of them would freeze the effect at the value it was created with, exactly
+   the way it has silently killed animations in this file before. Only what JS never touches is forced. */
+.crs-laser-glow,
+.crs-laser-core,
+.crs-laser-cut,
+.crs-charge-r,
+.crs-charge-lock,
+.crs-marquee,
+.crs-rocket-guided {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 1;
+}
+/* §B2 빔: 중심 3px 흰색, 바깥 9px 글로우 마젠타. The glow is drawn UNDER the core (lower z-index), and
+   both sit above the page but below the crosshair layer. */
+.crs-laser-glow {
+  z-index: 4 !important;
+  border-radius: 5px;
+  filter: blur(2px);
+}
+.crs-laser-core {
+  z-index: 5 !important;
+  border-radius: 2px;
+}
+/* §B2 절단선: 갓 지난 부분은 흰 고열, 뒤로 갈수록 주황 → 검은 흉터. The scar STAYS — it is what the
+   누적 절단선 is made of — so there is no fade-out here, only the cool-down the JS animates. */
+.crs-laser-cut {
+  z-index: 3 !important;
+  border-radius: 2px;
+}
+/* §A3 범위형: 타격 반경 원이 충전과 함께 커진다. */
+.crs-charge-r {
+  z-index: 3 !important;
+  border: 1px dashed rgba(138, 180, 255, .85) !important;
+  border-radius: 50% !important;
+  background: rgba(138, 180, 255, .07);
+  transform: translate(-50%, -50%);
+}
+/* §A3 유도: 지정 요소에 괄호가 붙는다. */
+.crs-charge-lock {
+  z-index: 5 !important;
+  background: transparent;
+}
+.crs-charge-lock-c {
+  position: absolute !important;
+  width: 14px !important;
+  height: 14px !important;
+  border: 0 solid #8ab4ff !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+}
+.crs-charge-lock-c0 { left: -2px; top: -2px; border-top-width: 2px !important; border-left-width: 2px !important; }
+.crs-charge-lock-c1 { right: -2px; top: -2px; border-top-width: 2px !important; border-right-width: 2px !important; }
+.crs-charge-lock-c2 { left: -2px; bottom: -2px; border-bottom-width: 2px !important; border-left-width: 2px !important; }
+.crs-charge-lock-c3 { right: -2px; bottom: -2px; border-bottom-width: 2px !important; border-right-width: 2px !important; }
+/* §A2 붕괴 범위 지정: 사각형이 점선으로 그려지고 포함된 요소 수가 표시된다. */
+.crs-marquee {
+  z-index: 5 !important;
+  border: 2px dashed #8ab4ff !important;
+  background: rgba(138, 180, 255, .08);
+}
+.crs-marquee-n {
+  position: absolute !important;
+  right: 2px !important;
+  top: -20px !important;
+  font: 700 13px/18px ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  color: #8ab4ff !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .95) !important;
+  pointer-events: none !important;
+}
+/* §A3 다 차면 링이 2px 굵어진다 — the mask's inner radius moves in, which is what "thicker" means for a
+   ring drawn as a masked conic gradient. Higher specificity than the base .crs-ch-ring rule, so it wins. */
+.crs-ch-ring.crs-ch-ring-full {
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 7px, #000 8px) !important;
+  mask-image: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0) 0 7px, #000 8px) !important;
+}

@@ -52,10 +52,11 @@
     if (e.type === 'pointerdown' || e.type === 'pointerup') { ensureAudio(); trackPlayer(e); rmbSync(e); }
     if (e.type === 'pointerdown' && e.button === 0 && e.isPrimary !== false) {
       if (state.ko) return;   // KO screen: holds / slashes / shots disabled
-      const W = WEAPONS[state.weapon];
-      if (W.hold) startHold(state.weapon, e.clientX, e.clientY, e.pointerId);
-      else if (W.input === 'drag') startSlash(e.clientX, e.clientY, e.pointerId);
-      else smashAt(e.clientX, e.clientY);
+      /* SPEC-arsenal §A1: the three-way branch that used to live here (hold / drag / click) IS the problem
+       * §A sets out to fix — "지금은 무기마다 누르는 의미가 다르다". Every press now goes to ONE entry point
+       * which starts a charge, a hold or a marquee as the weapon asks, and the RELEASE decides what comes
+       * out. The old branch still exists, unchanged, inside altPressDown() (src/78-altfire.js). */
+      altPressDown(state.weapon, e.clientX, e.clientY, e.pointerId);
     }
   }
   /* Hold stop / slash resolve (A6). Registered BEFORE the swallow listeners so it runs ahead of their
@@ -170,6 +171,10 @@
     if (action === 'move') { state.keys[arg] = true; kick(); return; }   // v1.4: a held key is simply a held key
     if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash')) return;
     if (action === 'escape') {   // layered (A2): scope-out if scoped, else exit (stops holds and the KO screen)
+      /* SPEC-arsenal §A5 lists Escape among the 중단 조건 (전부 취소 + 환불). It is layered like the rest:
+       * a charge in progress is the innermost layer, so the first Escape gives the rounds back rather than
+       * tearing the whole overlay down under the player's hand. */
+      if (altEscape()) return;
       if (state.scoped) { scopeOff(); return; }
       stopHold(); cancelSlash(); deactivate();
     }

@@ -42,7 +42,7 @@
    * window shrinks the drawing instead of cropping it. */
   function vmArtW() { return Math.round(vmLayerW() * VM_ART_RATIO); }
   const vm = {
-    node: null, holder: null, mag: null, shot: null,
+    node: null, holder: null, mag: null, shot: null, charge: null, shiver: null,
     weapon: null, want: null, phase: 'hidden', phaseUntil: 0, idle: null, seq: 0, timer: 0, hidden: false, lastFireAt: 0
   };
   const VM_BASE = 'translate(0px, 0px) rotate(0deg)';
@@ -76,6 +76,7 @@
   }
   function vmCancel() {
     vmCancelShot();
+    for (const k of ['charge', 'shiver']) { const a = vm[k]; vm[k] = null; if (a) { try { a.cancel(); } catch (e) { /* ignore */ } state.anims.delete(a); } }
     if (vm.idle) { try { vm.idle.cancel(); } catch (e) { /* ignore */ } state.anims.delete(vm.idle); vm.idle = null; }
     if (vm.node) cancelAnimsOf(vm.node);
   }
@@ -88,10 +89,10 @@
   function clearViewmodel() {
     untrack(vm.timer); vm.timer = 0;
     vm.seq++;
-    vmCancel();
+    vmCancel();   // also drops the §A3 charge pose and its tremble
     vmDropMag();
     const n = vm.node;
-    vm.node = null; vm.holder = null; vm.weapon = null; vm.want = null; vm.shot = null; vm.phase = 'hidden'; vm.phaseUntil = 0; vm.hidden = false; vm.lastFireAt = 0; vm.artW = null;
+    vm.node = null; vm.holder = null; vm.weapon = null; vm.want = null; vm.shot = null; vm.charge = null; vm.shiver = null; vm.phase = 'hidden'; vm.phaseUntil = 0; vm.hidden = false; vm.lastFireAt = 0; vm.artW = null;
     if (n) { try { n.remove(); } catch (e) { /* ignore */ } }
     if (hudEls.ammo) { try { hudEls.ammo.style.bottom = ''; } catch (e) { /* ignore */ } }
   }
@@ -266,6 +267,40 @@
       ], { duration: total, easing: 'ease-in-out', fill: 'none' }));
     } catch (e) { /* ignore */ }
     later(() => { if (vm.mag === m) vmDropMag(); }, total + 60);
+  }
+  /* ── SPEC-arsenal §A3 충전 ─────────────────────────────────────────────────
+   * "뷰모델이 뒤로 당겨지거나 위로 들린다. 최대에서 미세하게 떨린다." The pull-back runs for the whole charge
+   * window as ONE animation (fill: 'forwards' — it has to STAY pulled back once it is full, which is exactly
+   * what the tremble then sits on top of), and vmChargeEnd() hands the pose back to the idle bob.
+   *
+   * The phase stays 'idle': a charge is not a one-shot and a caller polling for 'idle' is asking "is the
+   * weapon between actions?", which a drawn-back weapon still is. §3.1 모션 축소: the tremble is dropped
+   * (vmChargeMax does nothing) but the pull-back stays — it is information, not flourish. */
+  function vmCharge(ms) {
+    if (!vm.node || vm.hidden) return;
+    vmChargeEnd();
+    const amp = vmAmp(), total = Math.max(60, ms || 400);
+    const back = 'translate(' + px(26 * amp) + ', ' + px(-18 * amp) + ') rotate(' + (-11 * amp).toFixed(2) + 'deg)';
+    try { vm.charge = trackAnim(vm.node.animate([{ transform: VM_BASE }, { transform: back }], { duration: total, easing: 'ease-out', fill: 'forwards' })); } catch (e) { vm.charge = null; }
+  }
+  function vmChargeMax() {
+    if (!vm.node || vm.hidden || reducedMotion()) return;
+    const d = 2.2 * vmAmp();
+    try {
+      vm.shiver = trackAnim(vm.node.animate([
+        { transform: 'translate(' + px(26 - d) + ', ' + px(-18) + ') rotate(-11deg)' },
+        { transform: 'translate(' + px(26 + d) + ', ' + px(-18 + d) + ') rotate(-10.4deg)' },
+        { transform: 'translate(' + px(26 - d) + ', ' + px(-18) + ') rotate(-11deg)' }
+      ], { duration: 90, iterations: Infinity, easing: 'linear' }));
+    } catch (e) { vm.shiver = null; }
+  }
+  function vmChargeEnd() {
+    for (const k of ['charge', 'shiver']) {
+      const a = vm[k];
+      vm[k] = null;
+      if (a) { try { a.cancel(); } catch (e) { /* ignore */ } state.anims.delete(a); }
+    }
+    if (vm.node && !vm.hidden) vmIdle();
   }
   /* 빈 탄창 격발 (§2.1): two short sideways shakes, no phase change — the weapon is still "idle", it just refused. */
   function vmDry() {

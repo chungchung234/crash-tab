@@ -654,6 +654,120 @@
         artRect(5, 38, 38, 4, c.mat('dark', 'v'), 1.5, { 'data-part': 'feet' }),
         artCircle(5, 23, 3, c.mat('brass', 'd'), { 'data-part': 'terminal' })
       ]
+    },
+
+    /* ───────── 레이저 커터 · SPEC-arsenal §B2 ─────────
+     * Not a gun: a cutting instrument. A squat battery block at the back, cooling fins along the top (the
+     * heat is the resource, so the fins are the silhouette's one memorable feature), a stubby body and a
+     * focusing lens ring at the muzzle with the magenta #ff4d9d emitter sitting inside it — the same colour
+     * the beam is drawn in, so the picture and the effect agree. */
+    laser: {
+      detail: (c) => [
+        artRect(18, 52, 58, 44, c.mat('dark', 'd'), 6, { 'data-part': 'battery' }),
+        artRect(18, 53.5, 58, 3.2, RIM2, 1.6),
+        artRect(24, 60, 46, 10, c.mat('brass', 'h'), 2, { 'data-part': 'cell' }),
+        artRect(24, 76, 46, 6, 'rgba(255,77,157,.35)', 2),
+        /* cooling fins: six across the top of the body (§B2 열 관리) */
+        artRect(84, 34, 8, 20, c.cyl('metal', 'h'), 2, { 'data-part': 'fin' }),
+        artRect(98, 34, 8, 20, c.cyl('metal', 'h'), 2, { 'data-part': 'fin' }),
+        artRect(112, 34, 8, 20, c.cyl('metal', 'h'), 2, { 'data-part': 'fin' }),
+        artRect(126, 34, 8, 20, c.cyl('metal', 'h'), 2, { 'data-part': 'fin' }),
+        artRect(140, 34, 8, 20, c.cyl('metal', 'h'), 2, { 'data-part': 'fin' }),
+        artRect(154, 34, 8, 20, c.cyl('metal', 'h'), 2, { 'data-part': 'fin' }),
+        artRect(76, 52, 98, 36, c.mat('metal', 'd'), 5, { 'data-part': 'body' }),
+        artRect(76, 53.4, 98, 3, RIM, 1.5),
+        artRect(76, 84, 98, 4, SEAM),
+        artRect(84, 60, 70, 9, c.mat('dark', 'v'), 2, { 'data-part': 'vent' }),
+        poly([[92, 88], [126, 88], [118, 126], [88, 126]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        poly([[92, 88], [126, 88], [125.2, 91.8], [91.4, 91.8]], RIM2),
+        poly([[128, 88], [142, 88], [138, 104], [128, 100]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
+        artRect(174, 56, 26, 28, c.cyl('metal', 'v'), 4, { 'data-part': 'collar' }),
+        artRect(175.4, 57.4, 3, 25, RIM2, 1.5),
+        artCircle(206, 70, 17, c.cyl('metal', 'd'), { 'data-part': 'lens-ring' }),
+        artCircle(206, 70, 11, ART.dark[2]),
+        artCircle(206, 70, 8, c.glow('accent'), { 'data-part': 'emitter' }),
+        artCircle(203, 66, 3.2, ART.gloss[0]),
+        artRect(200, 66, 36, 8, 'rgba(255,77,157,.55)', 4, { 'data-part': 'beam' }),
+        artRect(206, 68.2, 32, 3.4, ART.gloss[1], 1.7),
+        artRect(84, 54, 4, 34, 'rgba(255,255,255,.1)', 2),
+        artRect(166, 54, 6, 34, SEAM2, 2),
+        artRect(30, 88, 34, 6, c.mat('dark', 'v'), 2, { 'data-part': 'latch' }),
+        artRect(30, 88.6, 34, 1.8, RIM2, 0.9)
+      ],
+      icon: (c) => [
+        artRect(3, 17, 12, 14, c.mat('dark', 'd'), 3, { 'data-part': 'battery' }),
+        artRect(16, 11, 4, 7, c.cyl('metal', 'h'), 1, { 'data-part': 'fin' }),
+        artRect(22, 11, 4, 7, c.cyl('metal', 'h'), 1, { 'data-part': 'fin' }),
+        artRect(28, 11, 4, 7, c.cyl('metal', 'h'), 1, { 'data-part': 'fin' }),
+        artRect(14, 17, 22, 12, c.mat('metal', 'd'), 2, { 'data-part': 'body' }),
+        poly([[18, 29], [26, 29], [24, 42], [17, 42]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
+        artCircle(40, 23, 6, c.cyl('metal', 'd'), { 'data-part': 'lens-ring' }),
+        artCircle(40, 23, 3, c.glow('accent'), { 'data-part': 'emitter' }),
+        artRect(14, 18, 20, 1.6, RIM2, 0.8)
+      ]
+    },
+
+    /* ───────── 미니건 · SPEC-arsenal §B3 ─────────
+     * The six barrels are their OWN <g data-part="barrels">, because §B3 asks for them to turn: the group is
+     * rotated about (150, 70) by src/78-altfire.js while the weapon is spinning, and nothing else in the
+     * drawing moves. Everything else — receiver, drum, spade grip — is what the barrels are bolted to. */
+    minigun: {
+      detail: (c) => {
+        const barrels = svgNode('g', { 'data-part': 'barrels' });
+        /* six tubes, 60° apart around the axis at (150, 70); the two at the back are drawn first so the
+         * front pair overlaps them and the cluster reads as a cylinder rather than a flower */
+        const order = [3, 2, 4, 1, 5, 0];
+        for (const k of order) {
+          const a = k * 60 * DEG;
+          const off = Math.round(Math.sin(a) * 15 * 10) / 10;
+          const depth = Math.cos(a);
+          const shade = depth > 0.3 ? 'metal' : 'dark';
+          barrels.append(artRect(150, 64.5 + off, 82, 11, c.cyl(shade, 'h'), 5, { 'data-part': 'barrel' }));
+          barrels.append(artRect(226, 65.5 + off, 8, 9, ART.dark[2], 4));
+        }
+        return [
+          artRect(26, 44, 44, 52, c.mat('dark', 'd'), 6, { 'data-part': 'drum' }),
+          artRect(26, 45.5, 44, 3, RIM2, 1.5),
+          artCircle(48, 70, 15, c.cyl('metal', 'd'), { 'data-part': 'drum-hub' }),
+          artCircle(48, 70, 5, ART.dark[2]),
+          poly([[66, 58], [96, 52], [96, 64], [66, 70]], c.mat('brass', 'h'), { 'data-part': 'belt' }),
+          poly([[66, 58], [96, 52], [96, 55], [66, 61]], RIM2),
+          artRect(84, 40, 76, 60, c.mat('metal', 'd'), 7, { 'data-part': 'receiver' }),
+          artRect(84, 41.6, 76, 3.4, RIM, 1.7),
+          artRect(84, 96, 76, 4, SEAM),
+          artRect(92, 50, 58, 12, c.mat('dark', 'v'), 3, { 'data-part': 'motor' }),
+          artRect(92, 51, 58, 2.2, RIM2, 1.1),
+          barrels,
+          artCircle(150, 70, 19, c.cyl('metal', 'v'), { 'data-part': 'hub' }),
+          artCircle(150, 70, 6.5, ART.dark[2]),
+          artPath('M133,58 A19,19 0 0 1 162,55 L158,59 A14,14 0 0 0 136,61 Z', RIM),
+          artRect(96, 100, 14, 30, c.mat('rubber', 'd'), 4, { 'data-part': 'grip' }),
+          artRect(134, 100, 14, 30, c.mat('rubber', 'd'), 4, { 'data-part': 'grip' }),
+          artRect(92, 98, 60, 10, c.mat('dark', 'v'), 3, { 'data-part': 'spade' }),
+          artRect(92, 99, 60, 2.2, RIM2, 1.1),
+          artRect(112, 104, 20, 8, c.mat('accent', 'd'), 3, { 'data-part': 'trigger' })
+        ];
+      },
+      /* §2: the icon is DRAWN FRESH, not a small detail drawing. Six barrels are six grey smudges at 24 px,
+       * so three survive instead — and the budget (≤ 12 drawn nodes, the <g> included) is what forces the
+       * choice, which is exactly the point of having two LODs. */
+      icon: (c) => {
+        const barrels = svgNode('g', { 'data-part': 'barrels' });
+        for (const k of [1, 2, 0]) {
+          const off = (k - 1) * 5;
+          barrels.append(artRect(28, 21.5 + off, 18, 4, c.cyl(k === 0 ? 'metal' : 'dark', 'h'), 2, { 'data-part': 'barrel' }));
+        }
+        return [
+          artRect(3, 14, 12, 17, c.mat('dark', 'd'), 3, { 'data-part': 'drum' }),
+          artCircle(9, 22, 4, c.cyl('metal', 'd'), { 'data-part': 'drum-hub' }),
+          artRect(14, 13, 16, 19, c.mat('metal', 'd'), 3, { 'data-part': 'receiver' }),
+          artRect(14, 14, 16, 2, RIM, 1),
+          barrels,
+          artCircle(29, 23, 6.5, c.cyl('metal', 'v'), { 'data-part': 'hub' }),
+          artCircle(29, 23, 2.4, ART.dark[2]),
+          artRect(20, 32, 6, 11, c.mat('rubber', 'd'), 2, { 'data-part': 'grip' })
+        ];
+      }
     }
   };
 

@@ -401,11 +401,15 @@
     const targets = pierceTargets(x, y, front, n);
     const fall = falloffMul(wid, x, y);
     const mode = kind || W.kind;
+    /* SPEC-arsenal §B2: 레이저 커터 is "관통 무제한, 층마다 ×0.75" — a different per-layer attenuation from
+     * the ×0.6 every other piercing weapon uses. One table field rather than a weapon-id special case here;
+     * every weapon without it keeps 0.6 exactly. (MINIMAL EDIT to a file this workstream only reads.) */
+    const layerMul = (W.pierceFalloff > 0 && W.pierceFalloff < 1) ? W.pierceFalloff : 0.6;
     let k = 0;
     for (const el of targets) {
       k++;
       const crit = rollCrit(wid);
-      const dmg = rollDamage(W.damage, crit, Math.pow(0.6, k) * fall);
+      const dmg = rollDamage(W.damage, crit, Math.pow(layerMul, k) * fall);
       pierceMark(el, y);
       applyHit(el, dmg, mode, x, y, { crit, pierce: k });
     }

@@ -181,5 +181,22 @@
        * thump, no glass: nothing it shares with 'gun' / 'hammer' / 'sniper', so "that did nothing" is told
        * apart from "that hit" by ear alone, which is the whole point of the cue. */
       else if (kind === 'deflect') { tone(t, 'triangle', 2200, 2050, 0.06, 0.3 * gm, 0.07); }
+      /* ── SPEC-arsenal §A3 / §B: the charge, its ceiling, and the two new weapons ──
+       * §A3 names the charge tone exactly: "음정이 올라가는 톤(사인 180→420Hz), 최대에서 짧은 클릭". The tone
+       * is a single oscillator whose frequency ramps across the WHOLE charge window, so the ear tracks the
+       * ring without looking at it — `opts.ms` is that window, scaled like every other time constant so a
+       * fast-clock test does not hear a two-second drone over a 60 ms charge. */
+      else if (kind === 'charge') {
+        const dur = clamp(scaleMs((opts && opts.ms) || 600) / 1000, 0.05, 2);
+        tone(t, 'sine', 180, 420, dur, 0.17 * gm, dur);
+      }
+      else if (kind === 'chargeMax') { tone(t, 'square', 1500, 1400, 0.018, 0.2 * gm, 0.02); tinks(1, 0, 0.06 * gm); }
+      /* §B2 레이저: the loop tick is a thin bright buzz, the pulse a short bright stab, and 과열 a falling
+       * hiss that can only be the sound of something being shut down. */
+      else if (kind === 'laserLoop') { tone(t, 'sawtooth', 1750, 1700, 0.07, 0.07 * gm, 0.07); noiseBurst(t, 0.05, { type: 'highpass', freq: 6000, Q: 0.8 }, 0.07 * gm, 0.05); }
+      else if (kind === 'laserPulse') { noiseSweep(t, 0.12, 'bandpass', 5200, 1400, 0.5 * gm); tone(t, 'sawtooth', 900, 2400, 0.1, 0.22 * gm, 0.12); }
+      else if (kind === 'overheat') { noiseSweep(t, 0.5, 'lowpass', 3200, 300, 0.45 * gm); tone(t, 'sine', 300, 70, 0.45, 0.3 * gm, 0.5); }
+      /* §B3 미니건 예열: 총열이 돌기 시작하는 0.8초. A rising motor whine with a noise bed under it. */
+      else if (kind === 'spinup') { tone(t, 'sawtooth', 70, 230, 0.75, 0.2 * gm, 0.8); noiseSweep(t, 0.75, 'bandpass', 180, 900, 0.3 * gm); }
     } catch (e) { /* ignore */ }
   }

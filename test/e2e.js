@@ -38,7 +38,16 @@ const T0 = Date.now();
 
 // v1.2 weapon table (SPEC-v3 A1 / A6) — WEAPON_IDS is the DEFAULT PRESET order (slots 1–10 → keys 1…9, 0);
 // damages / cooldowns / magazines are cross-checked against api.weapons()
+/* SPEC-arsenal §B1 (7단계): the arsenal and the loadout are no longer the same list. WEAPON_IDS keeps its
+ * name and its meaning for every slot/key assertion below — it is the DEFAULT LOADOUT, the ten weapons that
+ * map onto keys 1…9, 0 — and ARSENAL_IDS is the twelve weapons that now EXIST. Assertions that mean "every
+ * weapon has art / a stat block / a destruction profile" were rewritten onto ARSENAL_IDS (they used to say
+ * "all 10" when 10 was all there was); assertions about slots, keys and the HUD grid stay on WEAPON_IDS,
+ * because a weapon outside the loadout has no slot and no key by design. */
 const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse'];
+const ARSENAL_IDS = WEAPON_IDS.concat(['laser', 'minigun']);
+// §B: the four weapons whose long press SUSTAINS (and whose SHORT press is therefore the 보조 공격, §A2)
+const HOLD_IDS = new Set(['smg', 'flame', 'laser', 'minigun']);
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 const SPEC_DMG = { hammer: 65, pistol: 25, smg: 22, sniper: 200, axe: 130, katana: 60, bomb: 190, rocket: 260, flame: 15 };
 const SPEC_COOLDOWN = { hammer: 0, pistol: 0, sniper: 600, axe: 550, bomb: 700, rocket: 1200, collapse: 2000 };
@@ -46,9 +55,9 @@ const SPEC_COOLDOWN = { hammer: 0, pistol: 0, sniper: 600, axe: 550, bomb: 700, 
 const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [5, 2000], bomb: [3, 1800], rocket: [2, 1500], flame: [100, 2500], collapse: [1, 5000] };
 const PRESETS = {
   default: WEAPON_IDS,
-  assault: ['smg', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'katana', 'collapse'],
+  assault: ['smg', 'minigun', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'collapse'],
 };
-const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: '저격총', axe: '도끼', katana: '카타나', bomb: '폭탄', rocket: '로켓', flame: '화염', collapse: '붕괴' };
+const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: '저격총', axe: '도끼', katana: '카타나', bomb: '폭탄', rocket: '로켓', flame: '화염', collapse: '붕괴', laser: '레이저', minigun: '미니건' };
 
 // v1.5 per-weapon stats (SPEC-weapons §3.1) read back from api.weapons(); sniper critChance is the
 // UNSCOPED base value (0.10 — the 0.25-while-aiming bonus is behavioural, not a static field, and is not
@@ -903,9 +912,31 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const DMG = W.dmg;
   check('A.weapons: api.weapons() lists the 10 ids in default-loadout order with slot 1–10 and keys 1–9, 0', W.list.map((w) => w.id).join(',') === WEAPON_IDS.join(',') && W.list.every((w, i) => String(w.key) === KEYS[i] && w.slot === i + 1), W.list.map((w) => `${w && w.id}:${w && w.slot}:${w && w.key}`));
   check('A.weapons: damages match the A1/A2 table (65/25/22/200/130/60/190/260/15)', Object.keys(SPEC_DMG).every((id) => W.byId[id] && W.byId[id].damage === SPEC_DMG[id]), Object.keys(SPEC_DMG).map((id) => `${id}=${W.byId[id] && W.byId[id].damage}`));
-  check('A.weapons: cooldownMs hammer 0 / pistol 0 / sniper 600 / axe 550 / bomb 700 / rocket 1200 / collapse 2000; smg & flame are hold weapons', Object.keys(SPEC_COOLDOWN).every((id) => W.byId[id] && W.byId[id].cooldownMs === SPEC_COOLDOWN[id]) && !!(W.byId.smg && W.byId.smg.hold) && !!(W.byId.flame && W.byId.flame.hold) && WEAPON_IDS.filter((id) => id !== 'smg' && id !== 'flame').every((id) => !(W.byId[id] && W.byId[id].hold)), Object.keys(SPEC_COOLDOWN).map((id) => `${id}=${W.byId[id] && W.byId[id].cooldownMs}`));
+  check('A.weapons: cooldownMs hammer 0 / pistol 0 / sniper 600 / axe 550 / bomb 700 / rocket 1200 / collapse 2000; smg & flame are hold weapons', Object.keys(SPEC_COOLDOWN).every((id) => W.byId[id] && W.byId[id].cooldownMs === SPEC_COOLDOWN[id]) && !!(W.byId.smg && W.byId.smg.hold) && !!(W.byId.flame && W.byId.flame.hold) && WEAPON_IDS.filter((id) => !HOLD_IDS.has(id)).every((id) => !(W.byId[id] && W.byId[id].hold)), Object.keys(SPEC_COOLDOWN).map((id) => `${id}=${W.byId[id] && W.byId[id].cooldownMs}`));
   check('A.weapons: mag / reloadMs per weapon (pistol 12/900, smg 30/1400, sniper 5/2000, bomb 3/1800, rocket 2/1500, flame 100/2500, collapse 1/5000; melee null/null)', Object.keys(SPEC_MAG).every((id) => W.byId[id] && W.byId[id].mag === SPEC_MAG[id][0] && W.byId[id].reloadMs === SPEC_MAG[id][1]), Object.keys(SPEC_MAG).map((id) => `${id}=${W.byId[id] && W.byId[id].mag}/${W.byId[id] && W.byId[id].reloadMs}`));
   check('A.weapons: sniper { kind: "gun", spread: 25, scope: true, emoji 🎯, name 저격총 }; every other weapon spread null / scope false', !!W.byId.sniper && W.byId.sniper.kind === 'gun' && W.byId.sniper.spread === 25 && W.byId.sniper.scope === true && W.byId.sniper.emoji === '🎯' && W.byId.sniper.name === '저격총' && WEAPON_IDS.filter((id) => id !== 'sniper').every((id) => W.byId[id] && W.byId[id].spread === null && W.byId[id].scope === false), W.byId.sniper);
+  /* SPEC-arsenal §B: 레이저 커터 and 미니건 are hold weapons too, so the "everything else is a click weapon"
+   * sweep above reads HOLD_IDS rather than the two literals it used to name. They are not in the DEFAULT
+   * loadout (§B1 — every preset leaves two of the twelve out), so api.weapons() does not list them; the
+   * arsenal surface is what answers for them. */
+  const arsenalNow = await page.evaluate(() => window.__crashScreen.arsenal());
+  const arsById = {};
+  for (const w of arsenalNow) arsById[w.id] = w;
+  check('A.arsenal B1: api.arsenal() lists all 12 weapons; the 10 in the default loadout carry slot/key, the two outside it carry neither',
+    Array.isArray(arsenalNow) && arsenalNow.length === 12 && arsenalNow.map((w) => w.id).join(',') === ARSENAL_IDS.join(',')
+    && WEAPON_IDS.every((id, i) => arsById[id].inLoadout === true && arsById[id].slot === i + 1 && String(arsById[id].key) === KEYS[i])
+    && ['laser', 'minigun'].every((id) => arsById[id].inLoadout === false && arsById[id].slot === null && arsById[id].key === null),
+    arsenalNow.map((w) => `${w.id}:${w.slot}:${w.key}`));
+  check('A.arsenal B2/B3: 레이저 커터 is a hold weapon with NO magazine and a heat resource (틱 11 / 50ms); 미니건 is a hold weapon with a 200-round belt, a 0.8 s spin-up and 26 / 60ms',
+    arsById.laser && arsById.laser.hold === true && arsById.laser.mag === null && arsById.laser.heat === true && arsById.laser.damage === 11
+    && arsById.minigun && arsById.minigun.hold === true && arsById.minigun.mag === 200 && arsById.minigun.reloadMs === 4000
+    && arsById.minigun.spinUpMs === 800 && arsById.minigun.damage === 26,
+    { laser: arsById.laser, minigun: arsById.minigun });
+  check('A.arsenal B2/B3: the two new weapons pay for their power in handling — 레이저 교체 320ms / 이동 0.88, 미니건 교체 560ms / 이동 0.55 (the slowest in the arsenal)',
+    arsById.laser.swapMs === 320 && Math.abs(arsById.laser.moveSpeed - 0.88) < 0.005
+    && arsById.minigun.swapMs === 560 && Math.abs(arsById.minigun.moveSpeed - 0.55) < 0.005
+    && arsenalNow.every((w) => w.moveSpeed >= arsById.minigun.moveSpeed) && arsenalNow.every((w) => w.swapMs <= arsById.minigun.swapMs),
+    arsenalNow.map((w) => `${w.id}: swap ${w.swapMs}, move ${w.moveSpeed}`));
   const hud = await page.evaluate(() => {
     const h = document.querySelector('crs-hud, .crs-hud-host');
     if (!h || !h.shadowRoot) return null;
@@ -1860,13 +1891,14 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const DMG = W.dmg;
 
     // ---- (1) weaponArt(id, size): an <svg> per weapon, 10 distinct silhouettes, no innerHTML anywhere ----
-    const WEAPON_SVG_IDS = WEAPON_IDS;   // the same 10 ids, default-preset order
+    // SPEC-arsenal §B: art is a property of a WEAPON, not of a loadout slot — all twelve are drawn.
+    const WEAPON_SVG_IDS = ARSENAL_IDS;
     const artInfos = {};
     for (const id of WEAPON_SVG_IDS) artInfos[id] = await api.weaponArtInfo(page, id, 120);
     const artOk = WEAPON_SVG_IDS.every((id) => artInfos[id] && artInfos[id].ok === true && artInfos[id].childCount >= 3);
-    check('A.weapons 1: weaponArt(id, 120) returns an <svg> with ≥ 3 child nodes for all 10 weapons', artOk, artInfos);
+    check('A.weapons 1: weaponArt(id, 120) returns an <svg> with ≥ 3 child nodes for all 12 arsenal weapons', artOk, artInfos);
     const sigs = WEAPON_SVG_IDS.map((id) => artInfos[id] && artInfos[id].pathSig).filter((s) => typeof s === 'string' && s.length);
-    check('A.weapons 1: all 10 weapons render a distinct set of path shapes (silhouettes differ)', artOk && new Set(sigs).size === WEAPON_SVG_IDS.length, sigs.map((s) => s.length));
+    check('A.weapons 1: all 12 arsenal weapons render a distinct set of path shapes (silhouettes differ)', artOk && new Set(sigs).size === WEAPON_SVG_IDS.length, sigs.map((s) => s.length));
     // static grep (SPEC §6 item 1): the weapon-art/viewmodel/weapon modules never use innerHTML / outerHTML /
     // insertAdjacentHTML / document.write / eval( / new Function / setAttribute('style' — same patterns
     // tools/validate.js's FORBIDDEN_INJECTED rule enforces repo-wide; re-checked here, scoped to the modules
@@ -1986,17 +2018,17 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const diag = (b) => Math.hypot(b.w, b.h);
 
     const det = {}, ico = {};
-    for (const id of WEAPON_IDS) {
+    for (const id of ARSENAL_IDS) {
       det[id] = await api.weaponArtProbe(page, id, 200);
       ico[id] = await api.weaponArtProbe(page, id, 24);
     }
-    const allProbed = WEAPON_IDS.every((id) => det[id] && det[id].ok && ico[id] && ico[id].ok);
-    check('A.art 9.1: weaponArt(id, 200) is the `detail` LOD (viewBox 0 0 240 140) and weaponArt(id, 24) the `icon` LOD (0 0 48 48) for all 10 weapons',
-      allProbed && WEAPON_IDS.every((id) => det[id].lod === 'detail' && det[id].viewBox === '0 0 240 140' && ico[id].lod === 'icon' && ico[id].viewBox === '0 0 48 48'),
-      WEAPON_IDS.map((id) => `${id}: ${det[id] && det[id].lod}/${det[id] && det[id].viewBox} | ${ico[id] && ico[id].lod}/${ico[id] && ico[id].viewBox}`));
+    const allProbed = ARSENAL_IDS.every((id) => det[id] && det[id].ok && ico[id] && ico[id].ok);
+    check('A.art 9.1: weaponArt(id, 200) is the `detail` LOD (viewBox 0 0 240 140) and weaponArt(id, 24) the `icon` LOD (0 0 48 48) for all 12 arsenal weapons',
+      allProbed && ARSENAL_IDS.every((id) => det[id].lod === 'detail' && det[id].viewBox === '0 0 240 140' && ico[id].lod === 'icon' && ico[id].viewBox === '0 0 48 48'),
+      ARSENAL_IDS.map((id) => `${id}: ${det[id] && det[id].lod}/${det[id] && det[id].viewBox} | ${ico[id] && ico[id].lod}/${ico[id] && ico[id].viewBox}`));
     check('A.art 9.1: element counts — detail ≥ 25 drawn nodes, icon ≤ 12 (defs excluded)',
-      allProbed && WEAPON_IDS.every((id) => det[id].drawn >= 25 && ico[id].drawn <= 12 && ico[id].drawn >= 5),
-      WEAPON_IDS.map((id) => `${id}: detail ${det[id] && det[id].drawn}, icon ${ico[id] && ico[id].drawn}`));
+      allProbed && ARSENAL_IDS.every((id) => det[id].drawn >= 25 && ico[id].drawn <= 12 && ico[id].drawn >= 5),
+      ARSENAL_IDS.map((id) => `${id}: detail ${det[id] && det[id].drawn}, icon ${ico[id] && ico[id].drawn}`));
     check('A.art 9.1: an explicit lod argument overrides the size rule (weaponArt(id, 200, "icon") → icon, weaponArt(id, 24, "detail") → detail)',
       await (async () => {
         const a = await api.weaponArtProbe(page, 'hammer', 200, 'icon');
@@ -2004,13 +2036,13 @@ async function suiteA(browser, origin, contentCss, contentJs) {
         return !!(a && a.ok && a.lod === 'icon' && b && b.ok && b.lod === 'detail');
       })());
     check('A.art 9.2: every detail drawing uses at least 2 gradients (§1 — no flat fill on a big surface)',
-      allProbed && WEAPON_IDS.every((id) => det[id].grads >= 2),
-      WEAPON_IDS.map((id) => `${id}: ${det[id] && det[id].grads}`));
+      allProbed && ARSENAL_IDS.every((id) => det[id].grads >= 2),
+      ARSENAL_IDS.map((id) => `${id}: ${det[id] && det[id].grads}`));
     check('A.art 9.3: no contour stroke — zero stroked elements, so nothing can carry an outline covering > 90 % of the drawing (§1 외곽선 없음)',
-      allProbed && WEAPON_IDS.every((id) => det[id].strokeCount === 0 && ico[id].strokeCount === 0 && det[id].strokeMax < 0.9),
-      WEAPON_IDS.map((id) => `${id}: ${det[id] && det[id].strokeCount} stroked`));
-    const sigSet = new Set(WEAPON_IDS.map((id) => det[id] && det[id].pathSig));
-    check('A.art 9.4: all 10 detail drawings ship distinct path data', allProbed && sigSet.size === WEAPON_IDS.length, sigSet.size);
+      allProbed && ARSENAL_IDS.every((id) => det[id].strokeCount === 0 && ico[id].strokeCount === 0 && det[id].strokeMax < 0.9),
+      ARSENAL_IDS.map((id) => `${id}: ${det[id] && det[id].strokeCount} stroked`));
+    const sigSet = new Set(ARSENAL_IDS.map((id) => det[id] && det[id].pathSig));
+    check('A.art 9.4: all 12 detail drawings ship distinct path data', allProbed && sigSet.size === ARSENAL_IDS.length, sigSet.size);
     // §9.4 second half: literal fills come only from the shared ART palette (everything else is a gradient
     // url(#…) or one of the rgba() rim/seam helpers §1 defines).
     const PALETTE = new Set(['#d4dae4', '#8e97a6', '#3f4654', '#e8edf5', '#b9c2d0', '#6d7788',
@@ -2018,7 +2050,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
       '#ff7a7d', '#e5484d', '#86232a', '#ffe08a', '#ffb224', '#3a4049', '#262a31', '#14171c',
       '#f6fafe', '#f2f6fd', '#ffe9b0']);
     const offPalette = [];
-    for (const id of WEAPON_IDS) {
+    for (const id of ARSENAL_IDS) {
       for (const f of (det[id] && det[id].fills) || []) {
         if (/^url\(#/.test(f) || /^rgba?\(/.test(f) || f === 'none') continue;
         if (!PALETTE.has(String(f).toLowerCase())) offPalette.push(`${id}: ${f}`);
@@ -2050,9 +2082,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
         }
       }
       return { bad: bad.slice(0, 6), styled: styled.slice(0, 6), nodes, sizedByCssom };
-    }, WEAPON_IDS);
+    }, ARSENAL_IDS);
     check('A.art 9.7: every node of every drawing is built in the SVG namespace (createElementNS), no child carries inline style, and the root is sized through node.style/CSSOM',
-      nsProbe.bad.length === 0 && nsProbe.styled.length === 0 && nsProbe.nodes > 300 && nsProbe.sizedByCssom === WEAPON_IDS.length * 2, nsProbe);
+      nsProbe.bad.length === 0 && nsProbe.styled.length === 0 && nsProbe.nodes > 300 && nsProbe.sizedByCssom === ARSENAL_IDS.length * 2, nsProbe);
 
     // ---- §7.2 the hammer: a split claw with a deep V notch ------------------------------------------------
     const hc = det.hammer.parts.claw, hn = det.hammer.parts.notch;
@@ -2116,8 +2148,16 @@ async function suiteA(browser, origin, contentCss, contentJs) {
       !!koMsgs.weaponKatana && koMsgs.weaponKatana.message === '카타나' && !koMsgs.weaponSword &&
       !!EN_MESSAGES.weaponKatana && EN_MESSAGES.weaponKatana.message === 'Katana' && !EN_MESSAGES.weaponSword,
       { ko: koMsgs.weaponKatana && koMsgs.weaponKatana.message, en: EN_MESSAGES.weaponKatana && EN_MESSAGES.weaponKatana.message, koOld: !!koMsgs.weaponSword, enOld: !!EN_MESSAGES.weaponSword });
-    check('A.art 9.14 (§8.1): every preset is a permutation over the new id set (no preset still names `sword`)',
-      Object.keys(PRESETS).every((k) => PRESETS[k].includes('katana') && !PRESETS[k].includes('sword')), PRESETS);
+    /* CHANGED by SPEC-arsenal §B1 (7단계): a preset used to be a PERMUTATION of the ten weapons, so every
+     * preset necessarily contained every weapon and "every preset names katana" was the same statement as
+     * "the rename reached the presets". With twelve weapons and ten slots each preset now LEAVES TWO OUT —
+     * 돌격 is one of the two that leaves the katana out — so the assertion is rewritten to the thing §8.1
+     * actually cares about: no preset anywhere still says `sword`, and the rename did reach the ones that
+     * do carry the weapon. (§B1's own "서로 다른 10개 조합" contract is asserted in the ammo block.) */
+    check('A.art 9.14 (§8.1 / §B1): no preset still names `sword`, and the presets that carry the weapon name it `katana`',
+      Object.keys(PRESETS).every((k) => !PRESETS[k].includes('sword'))
+      && Object.keys(PRESETS).some((k) => PRESETS[k].includes('katana'))
+      && PRESETS.default.includes('katana'), PRESETS);
     // a stored legacy loadout must MIGRATE, not be discarded: an unmigrated array is not a permutation of
     // WEAPON_IDS any more, so without §8.1's alias the player would silently lose their slot order.
     const legacyBoot = await (async () => {
@@ -2250,13 +2290,13 @@ async function suiteA(browser, origin, contentCss, contentJs) {
           grid.appendChild(cell);
         }
         return { w: Math.ceil(document.body.getBoundingClientRect().width), h: Math.ceil(document.body.scrollHeight) };
-      }, WEAPON_IDS);
+      }, ARSENAL_IDS);
       await p4.setViewport({ width: Math.max(320, box.w), height: Math.max(120, box.h), deviceScaleFactor: 1 });
       await p4.screenshot({ path: path.join(OUT, 'weapons.png') });
       // sheet 2: icon LOD rasterised at a TRUE 24 px, then magnified 400 % with nearest-neighbour, so a
       // detail that collapses into one grey pixel collapses here too.
       const CELL = 34, PAD = 6;
-      await p4.setViewport({ width: WEAPON_IDS.length * CELL + PAD * 2, height: CELL + PAD * 2, deviceScaleFactor: 1 });
+      await p4.setViewport({ width: ARSENAL_IDS.length * CELL + PAD * 2, height: CELL + PAD * 2, deviceScaleFactor: 1 });
       await p4.evaluate((ids, cell, pad) => {
         const a = window.__crashScreen;
         document.body.replaceChildren();
@@ -2271,10 +2311,10 @@ async function suiteA(browser, origin, contentCss, contentJs) {
           c.appendChild(a.weaponArt(id, 24, 'icon'));
           row.appendChild(c);
         }
-      }, WEAPON_IDS, CELL, PAD);
+      }, ARSENAL_IDS, CELL, PAD);
       const raw = await p4.screenshot({ encoding: 'base64' });
       const Z = 4;
-      await p4.setViewport({ width: (WEAPON_IDS.length * CELL + PAD * 2) * Z, height: (CELL + PAD * 2) * Z + 26, deviceScaleFactor: 1 });
+      await p4.setViewport({ width: (ARSENAL_IDS.length * CELL + PAD * 2) * Z, height: (CELL + PAD * 2) * Z + 26, deviceScaleFactor: 1 });
       await p4.evaluate((b64, ids, cell, pad, z) => new Promise((done) => {
         document.body.replaceChildren();
         document.body.style.background = '#191d25';
@@ -2297,7 +2337,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
           done();
         };
         img.src = 'data:image/png;base64,' + b64;
-      }), raw, WEAPON_IDS, CELL, PAD, Z);
+      }), raw, ARSENAL_IDS, CELL, PAD, Z);
       await p4.screenshot({ path: path.join(OUT, 'weapons-icon.png') });
       await p4.close();
       return [path.join(OUT, 'weapons.png'), path.join(OUT, 'weapons-icon.png')].map((f) => fs.existsSync(f) && fs.statSync(f).size > 2000);
@@ -4317,8 +4357,28 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.loadout 4: applyPreset("assault") → true, key "1" → smg', okAssault === true && assaultSel === true, { ret: okAssault, weapon: await api.weapon(page) });
   check('A.loadout 4: assault order (smg, pistol, sniper, bomb, rocket, flame, hammer, axe, katana, collapse); api.weapons() follows it with slot 1–10 / key 1…9,0', (await api.loadout(page)).join(',') === PRESETS.assault.join(',') && wAssault.map((w) => w.id).join(',') === PRESETS.assault.join(',') && wAssault.every((w, i) => w.slot === i + 1 && String(w.key) === KEYS[i]), { lo: await api.loadout(page), w: wAssault.map((w) => `${w.id}:${w.slot}:${w.key}`) });
   check('A.loadout 4: crsLoadout / crsLoadoutPreset ("assault") persisted in the shim storage', (await api.store(page)).crsLoadoutPreset === 'assault' && JSON.stringify((await api.store(page)).crsLoadout) === JSON.stringify(PRESETS.assault), await api.store(page));
-  const badLo = await page.evaluate((ids) => { const a = window.__crashScreen; return { dup: a.setLoadout(ids.map(() => 'hammer')), short: a.setLoadout(ids.slice(0, 9)), junk: a.setLoadout('hammer'), after: a.loadout() }; }, WEAPON_IDS);
-  check('A.loadout 4: setLoadout with a non-permutation (duplicates / 9 ids / non-array) → false, loadout unchanged', badLo.dup === false && badLo.short === false && badLo.junk === false && badLo.after.join(',') === PRESETS.assault.join(','), badLo);
+  /* CHANGED by SPEC-arsenal §B1 (7단계): a loadout used to have to be a PERMUTATION of the whole weapon
+   * table, so a 9-id array was rejected. With 12 weapons and 10 keys it cannot be one — §B1 defines it as
+   * "무기고에서 고른 최대 10개의 순서 있는 목록": a SUBSET, no duplicates, length 1–10. The old
+   * `short: setLoadout(9 ids) === false` assertion was therefore wrong about the product, not about the
+   * test, so it is REWRITTEN rather than deleted: 9 ids now succeed, and the three things that must still
+   * fail (duplicates, a non-array, 11 ids) are each asserted in its place. */
+  const badLo = await page.evaluate((ids, all) => {
+    const a = window.__crashScreen;
+    const before = a.loadout();
+    const dup = a.setLoadout(ids.map(() => 'hammer'));
+    const junk = a.setLoadout('hammer');
+    const tooMany = a.setLoadout(all.concat(['hammer']).slice(0, 11));
+    const empty = a.setLoadout([]);
+    const unknown = a.setLoadout(['hammer', 'railgun']);
+    const afterBad = a.loadout();
+    const short = a.setLoadout(ids.slice(0, 9));
+    const afterShort = a.loadout();
+    a.setLoadout(before);
+    return { dup, junk, tooMany, empty, unknown, afterBad, short, afterShort };
+  }, WEAPON_IDS, ARSENAL_IDS);
+  check('A.loadout 4 / §B1: setLoadout rejects duplicates, a non-array, 11 ids, an empty list and an unknown id — and the loadout is unchanged after all five', badLo.dup === false && badLo.junk === false && badLo.tooMany === false && badLo.empty === false && badLo.unknown === false && badLo.afterBad.join(',') === PRESETS.assault.join(','), badLo);
+  check('A.loadout 4 / §B1: a 9-weapon SUBSET is a valid loadout now (최대 10개, 중복 없음) and is accepted exactly as given', badLo.short === true && badLo.afterShort.join(',') === WEAPON_IDS.slice(0, 9).join(','), { short: badLo.short, after: badLo.afterShort });
   check('A.loadout 4: applyPreset("nope") → false', (await api.applyPreset(page, 'nope')) === false);
   // Shift+3 moves the current weapon into slot 3 (the old slot-3 weapon takes the current weapon's slot)
   await api.applyPreset(page, 'default');
@@ -5060,6 +5120,587 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.setWeapon(page, 'hammer');
   await api.restore(page);
   await sleep(100);
+
+  /* ═══════════════════════════════════════════════════════════════════════════════════════════════════
+   * SPEC-arsenal §A 보조 공격 · §B 무기고 확장 (로드맵 7단계)
+   *
+   * Everything here is about TIME — a charge is 120 ms of grace and then a ramp — so the ramp itself is
+   * never polled across CDP: a round trip is 25–40 ms and would measure the protocol. debug.altSamples(ms)
+   * runs the sampler INSIDE the page on real animation frames and hands the whole series back in one hop,
+   * and every failure message carries that series, so a failure says what was read and how many samples it
+   * was read from. Every rect is re-measured immediately before it is used, because api.rect() SCROLLS the
+   * element into view — a point captured before an unrelated scroll is a point somewhere else.
+   * ═══════════════════════════════════════════════════════════════════════════════════════════════════ */
+  const dbgA = (fn, ...args) => page.evaluate((f, a) => {
+    const d = window.__crashScreen && window.__crashScreen.debug;
+    return (d && typeof d[f] === 'function') ? d[f](...a) : 'missing:' + f;
+  }, fn, args);
+  const altDbg = () => dbgA('alt');
+  const altSamples = (ms) => page.evaluate((n) => window.__crashScreen.debug.altSamples(n), ms);
+  const pressFor = async (pt, ms) => {
+    await page.mouse.move(pt.x, pt.y);
+    await page.mouse.down();
+    const out = await altSamples(ms);
+    await page.mouse.up();
+    return out;
+  };
+  const leafState = () => page.evaluate(() => [...document.querySelectorAll('#cluster .leaf')].map((el) => ({ hp: window.__crashScreen.hpOf(el).hp, gone: el.hasAttribute('data-crs-broken') })));
+  const leafHurt = (before, after) => after.filter((l, i) => l.gone || l.hp < before[i].hp).length;
+
+  await api.debug(page, { noCrit: true, forceCrit: false, noCooldown: true, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noPartial: true });
+  /* The block's §12 exit section leaves the page in a COMBAT mode, and SPEC-combat §B makes every ordinary
+   * page element invulnerable there — "전투 중에는 적만 부서진다". Every damage number below is about the
+   * PAGE, so rampage is set explicitly rather than inherited. Without this the whole section reads as "the
+   * alt fire does nothing", which is exactly how it first failed. */
+  await api.call(page, 'setCombatMode', 'rampage');
+  await api.applyPreset(page, 'default');
+  await api.restore(page);
+  await sleep(80);
+
+  // ---- §A1 문법 하나로 통일: the table itself ---------------------------------------------------------
+  const altTable = await dbgA('altTable');
+  check('A.alt §A1/§A2: 무기고 12종 전부가 보조 공격을 갖고 유형이 명세 표와 같다 (charge / steady / burst / lock / marquee)',
+    !!altTable && ARSENAL_IDS.every((id) => altTable[id] && typeof altTable[id].type === 'string')
+    && altTable.hammer.type === 'charge' && altTable.hammer.ms === 600
+    && altTable.pistol.type === 'steady' && altTable.pistol.ms === 350
+    && altTable.smg.type === 'burst' && altTable.flame.type === 'burst'
+    && altTable.sniper.type === 'steady' && altTable.axe.type === 'charge' && altTable.axe.ms === 800
+    && altTable.katana.type === 'charge' && altTable.katana.ms === 600
+    && altTable.bomb.type === 'charge' && altTable.bomb.ms === 900
+    && altTable.rocket.type === 'lock' && altTable.rocket.ms === 700
+    && altTable.collapse.type === 'marquee'
+    && altTable.laser.type === 'burst' && altTable.minigun.type === 'burst', altTable);
+
+  // ---- §A1 안전 규칙 1: 120ms 미만으로 떼면 평소의 일반 공격 ------------------------------------------
+  await api.setWeapon(page, 'hammer');
+  await sleep(240);
+  const bigA1 = await api.rect(page, '#demo-img');
+  const hpA0 = await api.hpOf(page, '#demo-img');
+  await page.mouse.click(bigA1.cx, bigA1.cy);
+  await sleep(160);
+  const hpA1 = await api.hpOf(page, '#demo-img');
+  check('A.alt §A1 안전 규칙 1: 120 ms 미만으로 떼면 평소의 일반 공격 — 평범한 클릭은 여전히 망치 65 하나뿐이다',
+    hpA1.hp === hpA0.hp - DMG('hammer'), { before: hpA0, after: hpA1, want: hpA0.hp - DMG('hammer') });
+
+  // ---- §A1 안전 규칙 2 + §A3 충전 피드백: the ramp, the ceiling, the ring and the arms ------------------
+  await api.restore(page);
+  await sleep(100);
+  const leafRamp = await api.rect(page, '#cluster .leaf:nth-child(2)');
+  const ramp = await pressFor({ x: leafRamp.cx, y: leafRamp.cy }, 1100);   // 600 ms charge, sampled to 1100
+  await sleep(200);
+  const rampP = ramp.map((s) => s.p);
+  const firstFull = ramp.find((s) => s.p >= 1);
+  const tailFull = ramp.filter((s) => s.t >= 780);
+  const monoRamp = rampP.every((v, i) => i === 0 || v >= rampP[i - 1] - 1e-9);
+  check(`A.alt §A1/§A3: 충전은 0→1 로 단조 증가하고 600 ms 에 가득 찬다 (표본 ${ramp.length}개 / ${ramp.length ? ramp[ramp.length - 1].t : 0} ms)`,
+    ramp.length >= 20 && monoRamp && !!firstFull && firstFull.t >= 540 && firstFull.t <= 780,
+    { n: ramp.length, firstFullAt: firstFull && firstFull.t, series: rampP.filter((_, i) => i % 4 === 0) });
+  check(`A.alt §A1 안전 규칙 2: 최대 충전 이후에는 좋아지지 않는다 — 창이 지난 표본 ${tailFull.length}개 전부 p === 1 이고 maxed 가 한 번 걸린 뒤 유지된다`,
+    tailFull.length >= 5 && tailFull.every((s) => s.p === 1 && s.maxed === true),
+    { tail: tailFull.map((s) => `${s.t}:${s.p}:${s.maxed}`).slice(0, 10) });
+  check('A.alt §A3: 조준점 준비 링을 재사용하되 색이 다르다 (#8ab4ff) — 누르는 내내 링은 charge 이고 채워지는 양이 충전량과 같다',
+    ramp.length > 0 && ramp.every((s) => s.ring === 'charge' && s.ringColor === '#8ab4ff')
+    && ramp.every((s) => Math.abs(s.ringP - s.p) < 0.02),
+    { kinds: Array.from(new Set(ramp.map((s) => s.ring))), colors: Array.from(new Set(ramp.map((s) => s.ringColor))) });
+  const gapAt0 = ramp.length ? ramp[0].gap : 0, gapAtFull = ramp.length ? ramp[ramp.length - 1].gap : 0;
+  check('A.alt §A3: 충전 중 조준점 팔이 안쪽으로 모인다 — gap 최대 40% 축소 (산포 연동은 그대로, 그 위에 곱해진다)',
+    gapAt0 > 0 && Math.abs(gapAtFull - gapAt0 * 0.6) <= 0.25,
+    { gapAt0, gapAtFull, want: +(gapAt0 * 0.6).toFixed(2) });
+
+  // ---- §A2 망치 내려치기: 반경 120px 범위 --------------------------------------------------------------
+  await api.restore(page);
+  await sleep(120);
+  const leafSmash = await api.rect(page, '#cluster .leaf:nth-child(2)');
+  const smashBefore = await leafState();
+  const smashSamples = await pressFor({ x: leafSmash.cx, y: leafSmash.cy }, 740);
+  await sleep(320);
+  const smashAfter = await leafState();
+  check('A.alt §A2 망치 내려치기: 0.6초를 모으고 떼면 타격점 하나가 아니라 반경 안의 여러 요소가 함께 맞는다',
+    leafHurt(smashBefore, smashAfter) >= 3,
+    { hurt: leafHurt(smashBefore, smashAfter), before: smashBefore.map((l) => l.hp), after: smashAfter.map((l) => (l.gone ? 'gone' : l.hp)) });
+  check(`A.alt §A3: 범위형은 타격 반경 원이 충전과 함께 커진다 — 충전 내내 미리보기 원이 살아 있다 (표본 ${smashSamples.length}개)`,
+    smashSamples.length >= 15 && smashSamples.every((s) => s.ring === 'charge'), { n: smashSamples.length });
+
+  // ---- §A4 자원: 보조 공격은 탄약 2발 ------------------------------------------------------------------
+  await api.restore(page);
+  await api.debug(page, { infiniteAmmo: false });
+  await api.setWeapon(page, 'pistol');
+  await sleep(260);
+  const bigA2 = await api.rect(page, '#demo-img');
+  const magP0 = (await api.ammo(page)).mag;
+  await page.mouse.click(bigA2.cx, bigA2.cy);
+  await sleep(160);
+  const magP1 = (await api.ammo(page)).mag;
+  await pressFor({ x: bigA2.cx, y: bigA2.cy }, 520);   // past the 350 ms 정조준 window
+  await sleep(200);
+  const magP2 = (await api.ammo(page)).mag;
+  check('A.alt §A4: 보조 공격은 탄약 2발 — 평소 권총 한 발은 1, 정조준은 정확히 2를 쓴다',
+    magP0 - magP1 === 1 && magP1 - magP2 === 2, { magP0, magP1, magP2 });
+
+  // ---- §A1 안전 규칙 3 / §A5: 충전 중 교체하면 취소되고 탄약 환불 ---------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  await api.setWeapon(page, 'pistol');
+  await sleep(260);
+  const bigA3 = await api.rect(page, '#demo-img');
+  const magC0 = (await api.ammo(page)).mag;
+  await page.mouse.move(bigA3.cx, bigA3.cy);
+  await page.mouse.down();
+  await sleep(230);
+  const midCharge = await altDbg();
+  const magMid = (await api.ammo(page)).mag;
+  await api.setWeapon(page, 'smg');     // §A5 중단 조건: 무기 교체
+  await sleep(140);
+  const afterCancel = await altDbg();
+  await page.mouse.up();
+  await sleep(160);
+  await api.setWeapon(page, 'pistol');
+  await sleep(260);
+  const magC1 = (await api.ammo(page)).mag;
+  check('A.alt §A1 안전 규칙 3 / §A4: 충전은 탄약 2발을 미리 잡아두고, 충전 중 교체하면 취소되고 탄약도 환불된다',
+    midCharge.reserved === 2 && magMid === magC0 - 2 && magC1 === magC0
+    && afterCancel.on === false && afterCancel.lastCancel === 'swap',
+    { magC0, magMid, magC1, midCharge, afterCancel });
+
+  // ---- §A5: steady 는 완충이 아니면 일반 공격으로 떨어진다 ---------------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  const bigA4 = await api.rect(page, '#demo-img');
+  const hpS0 = await api.hpOf(page, '#demo-img');
+  const magS0 = (await api.ammo(page)).mag;
+  await pressFor({ x: bigA4.cx, y: bigA4.cy }, 215);    // past 120 ms, well short of the 350 ms 정조준
+  await sleep(200);
+  const hpS1 = await api.hpOf(page, '#demo-img');
+  const magS1 = (await api.ammo(page)).mag;
+  check('A.alt §A5: 어중간한 정조준은 의미가 없다 — 완충 전에 떼면 평소의 한 발(25·1발)이지 싸구려 1.4배가 아니다',
+    hpS0.hp - hpS1.hp === DMG('pistol') && magS0 - magS1 === 1, { hpS0, hpS1, magS0, magS1 });
+
+  // ---- §A2 권총 정조준: 피해 ×1.4 ----------------------------------------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  const bigA5 = await api.rect(page, '#demo-img');
+  const hpAim0 = await api.hpOf(page, '#demo-img');
+  await pressFor({ x: bigA5.cx, y: bigA5.cy }, 520);
+  await sleep(220);
+  const hpAim1 = await api.hpOf(page, '#demo-img');
+  check('A.alt §A2 권총 정조준: 완충하고 떼면 피해 ×1.4 (25 → 35) 가 그 한 요소에 들어간다',
+    hpAim0.hp - hpAim1.hp === Math.round(DMG('pistol') * 1.4), { before: hpAim0, after: hpAim1, want: Math.round(DMG('pistol') * 1.4) });
+
+  // ---- §A4 근접은 탄약이 없으므로 쿨다운으로 값을 치른다 ------------------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  await api.debug(page, { noCooldown: false });
+  await api.setWeapon(page, 'axe');
+  await sleep(500);
+  const leafAxe = await api.rect(page, '#cluster .leaf:nth-child(1)');
+  await pressFor({ x: leafAxe.cx, y: leafAxe.cy }, 900);   // the axe's 0.8 s 회전 베기
+  await sleep(80);
+  const bigA6 = await api.rectNoScroll(page, '#cluster .leaf:nth-child(4)');
+  const cdBlocked = await api.smashAt(page, bigA6.cx, bigA6.cy);
+  await sleep(1200);
+  const cdFree = await api.smashAt(page, bigA6.cx, bigA6.cy);
+  check('A.alt §A4: 근접 무기는 탄약이 없으므로 쿨다운 ×1.8 로 값을 치른다 — 회전 베기 뒤 도끼는 잠기고 스스로 풀린다',
+    cdBlocked === false && cdFree === true, { cdBlocked, cdFree });
+  await api.debug(page, { noCooldown: true });
+
+  // ---- §A5: 카타나는 드래그 12px 이상이면 발도가 취소되고 평소 베기가 된다 -------------------------------
+  await api.restore(page);
+  await sleep(140);
+  await api.setWeapon(page, 'katana');
+  await sleep(300);
+  const kBig = await api.rect(page, '#big-card');
+  const kSmall = await api.rectNoScroll(page, '#small-card');
+  await page.mouse.move(kBig.left + 14, kBig.top + 14);
+  await page.mouse.down();
+  await sleep(320);                                   // long enough to be a 발도 if the drag did not cancel it
+  await page.mouse.move(kSmall.left + 14, kSmall.top + 14, { steps: 8 });
+  await page.mouse.up();
+  await sleep(260);
+  const kDrag = await altDbg();
+  const kBigHp = await api.hpOf(page, '#big-card');
+  const kSmallHp = await api.hpOf(page, '#small-card');
+  check('A.alt §A5: 카타나는 드래그 12px 이상이면 발도가 취소되고 평소 베기가 된다 — 두 카드 모두 평소의 60 을 받고 취소 사유가 drag 로 남는다',
+    kDrag.lastCancel === 'drag' && kBigHp.hp === kBigHp.max - DMG('katana') && kSmallHp.hp === kSmallHp.max - DMG('katana'),
+    { kDrag, big: kBigHp, small: kSmallHp });
+
+  // ---- §A2 카타나 발도: 수평 호가 그 줄 전체를 지나간다 -------------------------------------------------
+  await api.restore(page);
+  await sleep(160);
+  const leafIaido = await api.rect(page, '#cluster .leaf:nth-child(2)');
+  const iaidoBefore = await leafState();
+  await pressFor({ x: leafIaido.cx, y: leafIaido.cy }, 780);   // the katana's 0.6 s 발도, held past full
+  await sleep(320);
+  const iaidoAfter = await leafState();
+  check('A.alt §A2 카타나 발도: 한 번 모았다 떼면 수평 호가 그 줄 전체를 지나간다 (제자리 베기 하나보다 넓다)',
+    leafHurt(iaidoBefore, iaidoAfter) >= 2,
+    { hurt: leafHurt(iaidoBefore, iaidoAfter), before: iaidoBefore.map((l) => l.hp), after: iaidoAfter.map((l) => (l.gone ? 'gone' : l.hp)) });
+
+  // ---- §A2 기관총 3점사 (burst: 짧게 누르면 절제된 공격) ----------------------------------------------
+  await api.restore(page);
+  await sleep(160);
+  await api.setWeapon(page, 'smg');
+  await sleep(320);
+  const bigA7 = await api.rect(page, '#demo-img');
+  const smgMag0 = (await api.ammo(page)).mag;
+  const smgShots0 = (await api.stats(page)).shots;
+  await page.mouse.move(bigA7.cx, bigA7.cy);
+  await page.mouse.down();
+  await sleep(40);                                    // well inside the 120 ms window
+  await page.mouse.up();
+  const burst = await poll(async () => { const s = await api.stats(page); return s.shots - smgShots0 >= 4 ? s : null; }, 900, 25);
+  const smgMag1 = (await api.ammo(page)).mag;
+  check('A.alt §A2 기관총: 짧게 누르면 3점사가 나간다 — 누르는 순간의 틱 한 발에 조준된 세 발이 더해지고 탄창도 네 발만큼 준다',
+    !!burst && (burst.shots - smgShots0) === 4 && (smgMag0 - smgMag1) === 4,
+    { shots: burst && burst.shots - smgShots0, mag: [smgMag0, smgMag1] });
+
+  // ---- §B1 로드아웃: 무기고에서 고른 최대 10개 ---------------------------------------------------------
+  const presetSets = {};
+  for (const name of ['default', 'assault', 'sniper', 'explosive', 'melee']) {
+    await api.applyPreset(page, name);
+    await sleep(100);
+    presetSets[name] = await api.loadout(page);
+  }
+  const setKeys = Object.keys(presetSets).map((k) => presetSets[k].slice().sort().join(','));
+  check('A.alt §B1: 프리셋 다섯 개가 서로 다른 10개 조합이다 — 각각 12 중 10, 중복 없음, 어느 둘도 같은 열 개를 고르지 않는다',
+    Object.keys(presetSets).every((k) => presetSets[k].length === 10 && new Set(presetSets[k]).size === 10 && presetSets[k].every((id) => ARSENAL_IDS.includes(id)))
+    && new Set(setKeys).size === 5, presetSets);
+  // a three-weapon loadout: the digits past slot 3, and Q/E, must stay inside it
+  const shortLo = await page.evaluate(() => {
+    const a = window.__crashScreen;
+    const ok = a.setLoadout(['hammer', 'pistol', 'laser']);
+    const press = (k) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k === '0' ? 'Digit0' : 'Digit' + k, bubbles: true }));
+    a.setWeapon('hammer');
+    const after = [];
+    for (const k of ['4', '7', '0', '9']) { press(k); after.push(a.weapon); }
+    press('3');
+    const slot3 = a.weapon;
+    const cycle = [];
+    a.setWeapon('hammer');
+    for (let i = 0; i < 4; i++) { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', code: 'KeyE', bubbles: true })); cycle.push(a.weapon); }
+    return { ok, loadout: a.loadout(), after, slot3, cycle };
+  });
+  check('A.alt §B1: 로드아웃에 없는 무기는 숫자키로 선택되지 않는다 — 3칸짜리 로드아웃에서 4·7·0·9 는 아무것도 바꾸지 않고 3 은 세 번째를 고른다',
+    shortLo.ok === true && shortLo.loadout.join(',') === 'hammer,pistol,laser'
+    && shortLo.after.every((w) => w === 'hammer') && shortLo.slot3 === 'laser', shortLo);
+  check('A.alt §B1: Q/E 도 로드아웃 안에서만 순환한다 — 세 자루짜리 로드아웃은 그 셋만 돌고 되감긴다',
+    shortLo.cycle.join(',') === 'pistol,laser,hammer,pistol', shortLo.cycle);
+  const hudShort = await api.hudLoadout(page);
+  check('A.alt §B1: HUD 그리드는 무기고가 아니라 로드아웃이다 — 3칸 로드아웃이면 버튼도 셋뿐이고 순서가 같다',
+    !!hudShort && hudShort.ids.length === 3 && hudShort.ids.join(',') === 'hammer,pistol,laser', hudShort && hudShort.ids);
+  await api.applyPreset(page, 'default');
+  await sleep(100);
+  const hudBack = await api.hudLoadout(page);
+  check('A.alt §B1: 프리셋으로 돌아오면 버튼 열 개가 다시 붙는다 (로드아웃 밖의 버튼은 숨긴 게 아니라 떼어둔 것이다)',
+    !!hudBack && hudBack.ids.length === 10 && hudBack.ids.join(',') === WEAPON_IDS.join(','), hudBack && hudBack.ids);
+
+  // ---- §A2 저격총 호흡 정지: 조준 중 흔들림 0 ----------------------------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  await api.debug(page, { noSpread: false });
+  await api.setWeapon(page, 'sniper');
+  await sleep(520);
+  const bigB1 = await api.rect(page, '#demo-img');
+  await page.mouse.move(bigB1.cx, bigB1.cy);
+  await page.mouse.down();
+  await sleep(480);                                   // past the 350 ms 호흡 정지 window
+  const breath = await altDbg();
+  const breathSpread = (await api.stats(page)).spreadNow;
+  await page.mouse.up();
+  await sleep(200);
+  check('A.alt §A2 저격총 호흡 정지: 완충하면 흔들림이 0 이 된다',
+    breath.breathHeld === true && breathSpread === 0, { breath, breathSpread });
+  /* 2초 제한: 숨을 더 참을 수 없으면 평소의 볼트액션 한 발로 떨어진다. The discriminator is the AMMO, not
+   * the damage: the sniper's 200 breaks anything on this page outright (so a damage reading is a floor, not
+   * a number) and the alt's only other difference is a crit CHANCE, which no single shot can prove. §A4's
+   * bill — 보조 2발, 평소 1발 — is exact, so that is what is read. */
+  await api.restore(page);
+  await sleep(140);
+  const bigB2 = await api.rect(page, '#demo-img');
+  await api.debug(page, { fastReload: true });
+  const magB2 = (await api.ammo(page)).mag;
+  await page.mouse.move(bigB2.cx, bigB2.cy);
+  await page.mouse.down();
+  await sleep(2600);                                  // 0.35 s 충전 + 2 s 제한을 모두 넘긴다
+  const expired = await altDbg();
+  await page.mouse.up();
+  await sleep(240);
+  const magB3 = (await api.ammo(page)).mag;
+  check('A.alt §A2 저격총 호흡 정지: 2초 제한 — 더 참으면 흔들림이 돌아오고 떼었을 때 평소의 한 발(탄약 1)이 나간다',
+    expired.breathHeld === false && (magB2 - magB3) === 1,
+    { expired, mag: [magB2, magB3] });
+  await api.debug(page, { noSpread: true });
+
+  // ---- §A2 폭탄 심지 조절: 반경 160 → 340 --------------------------------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  await api.setWeapon(page, 'bomb');
+  await sleep(360);
+  const leafBomb = await api.rect(page, '#cluster .leaf:nth-child(2)');
+  const fuse = await pressFor({ x: leafBomb.cx, y: leafBomb.cy }, 1000);   // the bomb's 0.9 s 심지 조절
+  await sleep(400);
+  const fuseEarly = fuse.find((s) => s.t >= 60 && s.radius != null);
+  const fuseLate = fuse.filter((s) => s.radius != null).pop();
+  check(`A.alt §A2/§A3 폭탄 심지 조절: 반경 미리보기가 160 에서 시작해 340 까지 커진다 (표본 ${fuse.length}개)`,
+    !!fuseEarly && !!fuseLate && fuseEarly.radius >= 155 && fuseEarly.radius <= 200
+    && fuseLate.radius >= 330 && fuseLate.radius <= 345,
+    { early: fuseEarly && { t: fuseEarly.t, r: fuseEarly.radius }, late: fuseLate && { t: fuseLate.t, r: fuseLate.radius }, n: fuse.length });
+
+  // ---- §A2 로켓 유도 조준: 지정한 요소로 휘어 날아간다 --------------------------------------------------
+  await api.restore(page);
+  await sleep(160);
+  await api.setWeapon(page, 'rocket');
+  await sleep(540);
+  const lockTarget = await api.rect(page, '#small-card');
+  const lockHp0 = await api.hpOf(page, '#small-card');
+  await page.mouse.move(lockTarget.cx, lockTarget.cy);
+  await page.mouse.down();
+  await sleep(820);                                   // past the 0.7 s 유도 조준
+  const rktLocked = await altDbg();
+  await page.mouse.move(8, 8, { steps: 4 });          // the pointer leaves the element entirely
+  await sleep(60);
+  await page.mouse.up();
+  const guided = await poll(async () => { const h2 = await api.hpOf(page, '#small-card'); return (h2.hp < lockHp0.hp || await api.broken(page, '#small-card')) ? h2 : null; }, 1600, 40);
+  check('A.alt §A2/§A3 로켓 유도 조준: 완충하면 지정 요소에 괄호가 붙고, 조준을 떼어 놓고 쏴도 그 요소로 휘어 날아간다',
+    rktLocked.lock === true && rktLocked.lockNode === true && !!guided,
+    { locked: rktLocked, hp0: lockHp0, after: guided || await api.hpOf(page, '#small-card') });
+
+  // ---- §A2 붕괴 범위 지정: 드래그한 사각형 안만 ---------------------------------------------------------
+  await api.restore(page);
+  await sleep(160);
+  await api.setWeapon(page, 'collapse');
+  await sleep(620);
+  /* The box is drawn around the WHOLE #cluster. 붕괴's candidate walk stops at the first container small
+   * enough to collect and never descends into it (collapseCandidates / walkCandidates), so a rectangle over
+   * one corner of the cluster contains no candidate at all — the thing inside the box has to be a thing the
+   * collapse itself would have picked. The §A2 claim is unchanged and still tested: what the rectangle does
+   * NOT cover stays standing. */
+  const clusterBox = await api.rect(page, '#cluster');
+  await page.mouse.move(clusterBox.left - 10, clusterBox.top - 10);
+  await page.mouse.down();
+  await page.mouse.move(clusterBox.right + 10, clusterBox.bottom + 10, { steps: 10 });
+  await sleep(180);
+  const marqLive = await altDbg();
+  const marqNodes = await api.count(page, '.crs-marquee');
+  await page.mouse.up();
+  const marqBroke = await poll(async () => (await api.broken(page, '#cluster')) ? true : null, 1600, 40);
+  const outsideSafe = !(await api.broken(page, '#long-para')) && !(await api.broken(page, '#big-card'));
+  check('A.alt §A2/§A3 붕괴 범위 지정: 사각형이 점선으로 그려지고 포함된 요소 수가 표시된다',
+    marqNodes === 1 && !!marqLive.marquee && marqLive.marquee.count >= 1 && marqLive.marquee.width > 200,
+    { marqNodes, marquee: marqLive.marquee });
+  check('A.alt §A2 붕괴 범위 지정: 드래그한 사각형 안만 내려앉는다 — 밖에 있는 것은 그대로 서 있다',
+    marqBroke === true && outsideSafe === true && (await api.count(page, '.crs-marquee')) === 0,
+    { marqBroke, outsideSafe });
+
+  /* ═══ §B2 레이저 커터 — 열 관리와 절단선 ══════════════════════════════════════════════════════════ */
+  await api.restore(page);
+  await sleep(160);
+  await api.applyPreset(page, 'explosive');   // the one preset that carries BOTH new weapons
+  await sleep(120);
+  const expLo = await api.loadout(page);
+  check('A.alt §B1: 폭발 프리셋이 레이저와 미니건을 둘 다 들고 나온다 — 새 무기가 실제로 손에 잡히는 경로가 있다',
+    expLo.includes('laser') && expLo.includes('minigun'), expLo);
+  await api.setWeapon(page, 'laser');
+  await sleep(380);
+  const heatHud = await api.hudQ(page, '.crs-ammo .aheat');
+  check('A.alt §B2: 탄약 패널이 열 게이지로 바뀐다 — 레이저를 들면 탄창 핍 대신 열 막대가 보인다',
+    !!heatHud && heatHud.visible === true, heatHud);
+  const bigL = await api.rect(page, '#big-card');
+  await page.mouse.move(bigL.cx, bigL.cy);
+  await page.mouse.down();
+  const heatRamp = await altSamples(1000);
+  await page.mouse.up();
+  await sleep(120);
+  const heatSeries = heatRamp.map((s) => s.heat);
+  const heatEnd = heatSeries[heatSeries.length - 1];
+  check(`A.alt §B2: 열은 틱당 2.2 씩 오른다 — 1초를 쏘면 20 틱 언저리, 즉 40~55 (표본 ${heatRamp.length}개, 끝 ${heatEnd})`,
+    heatRamp.length >= 20 && heatSeries.every((v, i) => i === 0 || v >= heatSeries[i - 1] - 1e-9)
+    && heatEnd >= 35 && heatEnd <= 60,
+    { n: heatRamp.length, end: heatEnd, series: heatSeries.filter((_, i) => i % 5 === 0) });
+  check('A.alt §B2: 조준점 준비 링이 열 게이지로 동작한다 — 쏘는 내내 링은 heat 이고 채워지는 양이 열과 같다',
+    heatRamp.every((s) => s.ring === 'heat') && heatRamp.every((s) => Math.abs(s.ringP * 100 - s.heat) < 1.5),
+    { kinds: Array.from(new Set(heatRamp.map((s) => s.ring))) });
+  check('A.alt §B2: 빔은 div 를 회전·신축해 그린다 — 쏘는 동안 .crs-laser-core / .crs-laser-glow 가 살아 있다',
+    heatRamp.filter((s) => s.beam).length >= heatRamp.length - 2, { beamFrames: heatRamp.filter((s) => s.beam).length, n: heatRamp.length });
+  // 냉각: 정지 0.4초 뒤 초당 28
+  const heatAfterStop = await poll(async () => { const d = await dbgA('laser'); return d.heat < heatEnd - 20 ? d : null; }, 2500, 60);
+  check('A.alt §B2: 냉각 — 정지 0.4초 뒤 초당 28 로 식는다 (끊어 쏘면 과열하지 않는다는 리듬의 근거)',
+    !!heatAfterStop, heatAfterStop || await dbgA('laser'));
+
+  // 과열: 100 에서 끊기고 2.5초 강제 냉각
+  await api.restore(page);
+  await sleep(160);
+  await api.setWeapon(page, 'laser');
+  await sleep(380);
+  const bigL2 = await api.rect(page, '#long-para');
+  await page.mouse.move(bigL2.cx, bigL2.cy);
+  await page.mouse.down();
+  const overRamp = await altSamples(3000);
+  await page.mouse.up();
+  const overSample = overRamp.find((s) => s.overheated);
+  const stoppedAt = overRamp.find((s) => s.holding === false);
+  /* The top of the gauge is an INSTANT: the forced cool starts draining it in the same breath, so no
+   * sampler — not at 16 ms, not at 1 ms — can be relied on to catch 100 exactly. Two earlier versions of
+   * this assertion polled for it and read 96 and then 99.88. The product keeps its own high-water mark
+   * (debug.laser().peak) and that is what is asked here; the sampled series is still what proves the
+   * firing STOPPED at that moment, which is a state and not an instant. */
+  const heatPeak = (await dbgA('laser')).peak;
+  check(`A.alt §B2: 열 100 에서 끊긴다 — 과열하는 순간 사격이 멈춘다 (표본 ${overRamp.length}개, 최고 열 ${heatPeak}, 과열 ${overSample ? overSample.t : '—'} ms)`,
+    !!overSample && heatPeak >= 99.99 && !!stoppedAt && stoppedAt.t <= overSample.t + 120
+    && overSample.t >= 1900 && overSample.t <= 2900,
+    { overheatAt: overSample && overSample.t, stoppedAt: stoppedAt && stoppedAt.t, heatPeak, n: overRamp.length });
+  const stillHot = await dbgA('laser');
+  const cooled = await poll(async () => { const d = await dbgA('laser'); return d.overheated === false ? d : null; }, 3200, 60);
+  check('A.alt §B2: 과열은 2.5초 강제 냉각이다 — 그 동안은 쏠 수 없고, 끝나면 스스로 풀린다',
+    stillHot.overheated === true && stillHot.overheatMs === 2500 && !!cooled, { stillHot, cooled });
+
+  // 단발 펄스 (보조, 짧게)
+  await api.restore(page);
+  await sleep(200);
+  await api.setWeapon(page, 'laser');
+  await sleep(380);
+  const pulseTarget = await api.rect(page, '#big-card');
+  const pulseHp0 = await api.hpOf(page, '#big-card');
+  await page.mouse.move(pulseTarget.left + 20, pulseTarget.top + 14);   // the card's own padding band: the card is the target, not a child of it
+  await page.mouse.down();
+  await sleep(35);
+  await page.mouse.up();
+  await sleep(220);
+  const pulseHp1 = await api.hpOf(page, '#big-card');
+  const pulseHeat = await dbgA('laser');
+  check('A.alt §B2: 보조는 짧게 눌러 단발 펄스 90, 즉발 — 그리고 열을 25 먹는다 (지속 빔 한 틱 11 과 완전히 다른 한 방이다)',
+    (pulseHp0.hp - pulseHp1.hp) >= 90 && (pulseHp0.hp - pulseHp1.hp) <= 90 + 11 * 2
+    && pulseHeat.heat >= 25 && pulseHeat.heat <= 25 + 2.2 * 3,
+    { before: pulseHp0, after: pulseHp1, heat: pulseHeat.heat });
+
+  // 절단선: 궤적을 기록하고, 누적 절단선이 요소를 가로지르면 그 궤적을 따라 나뉜다
+  await api.restore(page);
+  await sleep(220);
+  await api.setWeapon(page, 'laser');
+  await sleep(380);
+  /* The beam ticks every 50 ms and puppeteer's mouse.move is effectively instantaneous, so a sweep with no
+   * waits in it records two contact points, not twelve. The drag is walked in paced hops instead — that is
+   * also what a hand doing this would look like — and it stays zig-zagged so the cut is a real curve. */
+  const cutCard = await api.rect(page, '#big-card');
+  const band = cutCard.top + 14;        // inside the card's 32 px padding: pickTarget answers the card itself
+  await page.mouse.move(cutCard.left - 50, band);
+  await page.mouse.down();
+  for (const hop of [[cutCard.left + 60, band - 6], [cutCard.cx, band + 8], [cutCard.right - 60, band - 4], [cutCard.right + 50, band + 6]]) {
+    await page.mouse.move(hop[0], hop[1], { steps: 4 });
+    await sleep(120);
+  }
+  await page.mouse.up();
+  const severed = await poll(async () => (await api.broken(page, '#big-card')) ? await api.stats(page) : null, 1200, 30);
+  const cutInfo = await dbgA('laser');
+  const cutNodes = await api.count(page, '.crs-laser-cut');
+  check('A.alt §B2 절단선: 충돌 지점의 궤적이 기록되고 지나간 자리마다 절단선 조각이 그려진다',
+    cutNodes >= 4 && cutInfo.cutNodes >= 4, { cutNodes, laser: cutInfo });
+  check('A.alt §B2 절단선: 누적 절단선이 요소를 가로지르면 피해가 다 들어가기 전에 그 궤적을 따라 나뉜다 (184 짜리 카드가 틱 피해로는 불가능한 횟수 안에 잘린다)',
+    !!severed && severed.shots * 11 < 184, { shots: severed && severed.shots, maxTickDamage: severed && severed.shots * 11 });
+
+  /* ═══ §B3 미니건 — 예열 · 공회전 유예 · 고정 사격 ════════════════════════════════════════════════ */
+  await api.restore(page);
+  await sleep(200);
+  await api.setWeapon(page, 'minigun');
+  await sleep(700);                                   // the longest swap in the arsenal: 560 ms
+  const mgTarget = await api.rect(page, '#long-para');
+  await page.mouse.move(mgTarget.cx, mgTarget.cy);
+  const mgShots0 = (await api.stats(page)).shots;
+  await page.mouse.down();
+  const spinRamp = await altSamples(1500);
+  await page.mouse.up();
+  await sleep(120);
+  const early = spinRamp.filter((s) => s.t <= 700);
+  const late = spinRamp.filter((s) => s.t >= 950);
+  check(`A.alt §B3: 발사 시작이 즉발이 아니라 0.8초 예열이다 — 700 ms 까지 표본 ${early.length}개 전부 탄이 안 나가고, 950 ms 뒤에는 나간다`,
+    early.length >= 10 && early.every((s) => s.shots === mgShots0)
+    && late.length >= 5 && late[late.length - 1].shots > mgShots0 + 3,
+    { early: early.length, firstShotAt: (spinRamp.find((s) => s.shots > mgShots0) || {}).t, lateShots: late.length ? late[late.length - 1].shots - mgShots0 : 0 });
+  check('A.alt §B3: 총열이 실제로 돈다 — 예열 중에도 회전각이 계속 바뀌고 조준점 팔이 그 각을 따라간다',
+    spinRamp.filter((s) => s.spin).length >= spinRamp.length - 2
+    && new Set(spinRamp.slice(0, 20).map((s) => s.rot)).size >= 5,
+    { spinFrames: spinRamp.filter((s) => s.spin).length, rots: spinRamp.slice(0, 12).map((s) => s.rot) });
+  // 공회전 유예 0.6초: 손을 떼도 총열이 계속 돌아 그 안에 다시 누르면 예열 없이 나간다
+  const regrip = await (async () => {
+    await sleep(160);                                 // well inside the 600 ms grace
+    const before = (await api.stats(page)).shots;
+    await page.mouse.down();
+    const s2 = await altSamples(420);
+    await page.mouse.up();
+    return { before, s2 };
+  })();
+  const regripFirst = regrip.s2.find((s) => s.shots > regrip.before);
+  check('A.alt §B3: 공회전 유예 0.6초 — 손을 떼고 그 안에 다시 누르면 예열 없이 바로 나간다',
+    !!regripFirst && regripFirst.t <= 220 && regrip.s2[0].spinLeft === 0,
+    { firstShotAt: regripFirst && regripFirst.t, spinLeft: regrip.s2[0] && regrip.s2[0].spinLeft });
+  // 보조(짧게): 예열 후 20발을 자동으로 쏘고 멈춘다
+  await api.restore(page);
+  await sleep(900);                                   // let the 600 ms grace lapse so the 고정 사격 pays its own 예열
+  await api.setWeapon(page, 'minigun');
+  await sleep(700);
+  const fixedTarget = await api.rect(page, '#long-para');
+  const fixedShots0 = (await api.stats(page)).shots;
+  const fixedMag0 = (await api.ammo(page)).mag;
+  await page.mouse.move(fixedTarget.cx, fixedTarget.cy);
+  await page.mouse.down();
+  await sleep(35);
+  await page.mouse.up();
+  const fixedDone = await poll(async () => { const s = await api.stats(page); return s.shots - fixedShots0 >= 20 ? s : null; }, 3500, 60);
+  await sleep(400);
+  const fixedAfter = await api.stats(page);
+  const fixedMag1 = (await api.ammo(page)).mag;
+  check('A.alt §B3: 보조(짧게)는 고정 사격 — 예열 후 20발을 자동으로 쏘고 스스로 멈춘다 (더도 덜도 아니다)',
+    !!fixedDone && (fixedAfter.shots - fixedShots0) === 20 && (fixedMag0 - fixedMag1) === 21,
+    { fired: fixedAfter.shots - fixedShots0, mag: [fixedMag0, fixedMag1] });
+
+  /* ═══ 흔적을 남기지 않는다 (CLAUDE.md) — 충전 중 · 절단 중 · 예열 중의 Escape ═════════════════════ */
+  const inlineBefore = await page.evaluate(() => {
+    const el = document.querySelector('#big-card');
+    return { style: el.getAttribute('style'), cssText: el.style.cssText };
+  });
+  const traceless = [];
+  for (const scenario of ['charge', 'laser', 'minigun']) {
+    await page.evaluate(contentJs);                   // re-activate (the previous loop turn exited)
+    await sleep(140);
+    await api.debug(page, { noCrit: true, noCooldown: true, noSpread: true, noAttacks: true, infiniteAmmo: false, noPartial: true });
+    await api.applyPreset(page, 'explosive');
+    await api.setWeapon(page, scenario === 'charge' ? 'bomb' : scenario);
+    await sleep(700);
+    const pt = await api.rect(page, '#long-para');
+    await page.mouse.move(pt.cx, pt.cy);
+    await page.mouse.down();
+    if (scenario === 'laser') { await sleep(240); await page.mouse.move(pt.cx + 160, pt.cy + 12, { steps: 6 }); }
+    else await sleep(scenario === 'minigun' ? 300 : 400);   // mid-charge / mid-spin-up, never past it
+    const mid = await altDbg();
+    await page.keyboard.press('Escape');               // §A5: Escape cancels and refunds
+    const escaped = await poll(async () => !(await api.active(page)), 1500, 20);
+    await page.mouse.up();
+    await sleep(260);
+    await settleRaf(page);
+    traceless.push({
+      scenario, mid: { on: mid.on, p: mid.p }, escaped,
+      nodes: await api.count(page, '[data-crs]'),
+      ours: await api.count(page, '.crs-laser-core, .crs-laser-glow, .crs-laser-cut, .crs-charge-r, .crs-charge-lock, .crs-marquee'),
+      timers: await api.pending(page),
+      raf: await api.pendingRaf(page),
+      inline: await page.evaluate(() => { const el = document.querySelector('#big-card'); return { style: el.getAttribute('style'), cssText: el.style.cssText }; })
+    });
+  }
+  check('A.alt 흔적 없음: 충전 중 · 레이저 절단 중 · 미니건 예열 중에 Escape → [data-crs] 0개, 우리 노드 0개',
+    traceless.length === 3 && traceless.every((t) => t.escaped === true && t.nodes === 0 && t.ours === 0),
+    traceless.map((t) => ({ scenario: t.scenario, escaped: t.escaped, nodes: t.nodes, ours: t.ours })));
+  check('A.alt 흔적 없음: 같은 Escape 뒤에 살아있는 타이머·프레임이 0 이고 페이지 요소의 인라인 스타일이 원래 값 그대로다',
+    traceless.every((t) => t.timers === 0 && t.raf === 0 && t.inline.style === inlineBefore.style && t.inline.cssText === inlineBefore.cssText),
+    traceless.map((t) => ({ scenario: t.scenario, timers: t.timers, raf: t.raf, inline: t.inline.cssText })));
+
+  // back on its feet for whatever follows in this block
+  const altBackOn = await page.evaluate(contentJs);
+  check('A.alt: content.js re-evaluates to "on" after the traceless-exit sweep', altBackOn === 'on', altBackOn);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noPartial: true });
+  await api.applyPreset(page, 'default');
+  await api.setWeapon(page, 'hammer');
+  await api.restore(page);
+  await sleep(120);
+
   await closeBlockPage('A.ammo', h);
 }
 
@@ -5861,7 +6502,7 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
     const d = window.__crashScreen.debug;
     if (typeof d.destructionOf !== 'function') return 'missing:destructionOf';
     const out = {};
-    for (const id of ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse']) out[id] = d.destructionOf(id);
+    for (const id of ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse', 'laser', 'minigun']) out[id] = d.destructionOf(id);
     return out;
   });
   check('A.destr §B4: WEAPONS[id].destruction 이 명세의 표 그대로다 (모양 · 분리 · 마감 · 입자 · 지연 · 소멸)',
@@ -5872,6 +6513,14 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
       && destr.rocket.shape === 'shard' && destr.rocket.finish === 'ember' && Math.abs(destr.rocket.vaporise - 0.30) < 1e-9
       && destr.flame.shape === 'ash' && destr.flame.finish === 'char' && Math.abs(destr.flame.vaporise - 0.25) < 1e-9
       && destr.collapse.shape === 'slab' && destr.collapse.separation === 'drop', destr);
+  /* SPEC-arsenal §B: the two new weapons had to fill the SAME table — the profile is what every break is cut
+   * from, and a weapon without one would silently fall back to another weapon's. 레이저 cuts, so it slides
+   * apart along the cut and leaves a scorched edge; 미니건 shreds in strips like the smg and throws a little
+   * of it away. (The two rows themselves are an INTERPRETATION — §B names no profile, only that it be filled.) */
+  check('A.arsenal §B: 레이저 커터와 미니건도 분해 표를 채운다 (레이저는 slide + scorch 절단, 미니건은 strip 파쇄)',
+    !!destr && destr.laser && destr.laser.shape === 'half' && destr.laser.separation === 'slide' && destr.laser.finish === 'scorch'
+      && destr.minigun && destr.minigun.shape === 'strip' && destr.minigun.separation === 'radial' && destr.minigun.particles === 'spark',
+    { laser: destr && destr.laser, minigun: destr && destr.minigun });
 
   // 도끼 2조각 · 회전 부호가 서로 반대
   await api.setWeapon(page, 'axe');
@@ -9477,10 +10126,13 @@ async function suiteC(puppeteer, origin) {
    * the makespan: a 57 s lane queued last starts only once a slot frees and then adds its whole length to
    * the wall clock on its own. This list is ordered by measured cost, longest to shortest — the classic
    * longest-processing-time rule. Re-measure and reorder when a block grows: `CRS_BLOCKS=<name>` prints it. */
+  /* Re-measured after SPEC-arsenal §A/§B landed: `ammo` took the 보조 공격 · 레이저 · 미니건 section and is
+   * now the longest lane by a wide margin (42 s → 85 s), so it is queued first. Leaving it where it was
+   * would have added its whole length to the wall clock on its own. */
   const A_BLOCKS = [
+    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~85 s
+    ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~60 s
     ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],       // ~57 s
-    ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~56 s
-    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~42 s
     ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],           // ~34 s
     ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],     // ~30 s
     ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~28 s
