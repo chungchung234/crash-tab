@@ -303,10 +303,19 @@ const WANT_BLOCK = (name) => !BLOCKS_PICKED || BLOCKS_PICKED.includes(name);
 const PARTIAL_BLOCKS = !!BLOCKS_PICKED;
 // How many browsers may be alive at once. Each block lane owns one. The default leaves room for the
 // machine itself; CRS_LANES=1 serialises them when a loaded box starts dropping targets.
-// Measured on this 12-core box with nine lanes in flight: 4 → 84 s, 5 → 61 s, 6 → 59 s, 8 → 61 s. Six is
-// where it flattens (past that the wall clock is just the longest single lane), so six is the ceiling. A
-// 4-core CI runner still resolves to 3, exactly as before. CRS_LANES=1 serialises when the box is busy.
-const LANE_CAP = Math.max(1, Number(process.env.CRS_LANES || Math.min(6, Math.max(1, require('os').cpus().length - 1))));
+/* How many browsers may be alive at once. The ceiling is NOT the core count — it is frame starvation.
+ *
+ * Six lanes measured fastest (59 s vs 84 s at four) on a suite of 797 assertions, and that number did not
+ * survive the next phase: with 826 assertions and heavier per-hit rendering, six lanes failed three runs out
+ * of three while main passed three out of three at the same machine load, and five lanes failed one in two.
+ * The assertions that go are the ones that need the page to actually get frames — a drone that does not move
+ * at all through a 450 ms key hold, a viewmodel swing sampled below its peak, a 600 ms damage budget missed
+ * by 17 ms. That is the product being starved, not a wrong measurement, and it will come back every time the
+ * suite grows. Four lanes is 71 s and has not failed.
+ *
+ * So: four, and re-measure rather than re-guess when the suite grows again. A 4-core CI runner resolves to 3.
+ * CRS_LANES=1 serialises completely; CRS_LANES=6 is there for a genuinely idle machine. */
+const LANE_CAP = Math.max(1, Number(process.env.CRS_LANES || Math.min(4, Math.max(1, require('os').cpus().length - 1))));
 
 
 function hookPage(page) {
