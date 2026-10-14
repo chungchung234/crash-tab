@@ -183,6 +183,7 @@
    * clamp(round(상대속도/14), 1, 60). Both sides of an impact are billed through this one call, so
    * pushing an invulnerable element into an enemy hurts the enemy and nothing else. */
   function collisionHit(el, relSpeed, ix, iy) {
+    if (lungeImmune(el)) return 'none';   // SPEC-combat §D5: the charger pushes, it does not crash (see 88-archetypes.js)
     return applyHit(el, clamp(Math.round(relSpeed / 14), 1, 60), 'hammer', ix, iy, { aoe: true, toward: { x: ix, y: iy } });
   }
 
@@ -193,6 +194,10 @@
     if (!el) return 'none';
     try { if (el.hasAttribute('data-crs-broken')) return 'none'; } catch (e) { return 'none'; }   // broken meanwhile (staggered AoE, hold tick, collapse chain)
     if (!damageable(el)) { deflectHit(el, ix, iy, opts); return 'none'; }   // SPEC-combat §B / §B1
+    /* SPEC-combat §D3 (지원형 보호막): the shield a support enemy casts on an ally lives at the ONE damage
+     * sink, exactly like the §B gate above — so every weapon obeys it with no special case in weapon code.
+     * A plain pass-through whenever nothing on the page is shielded (src/88-archetypes.js). */
+    dmg = guardedDamage(el, dmg);
     const rec = hpOf(el);
     rec.hp -= dmg;
     state.damageDealt += dmg;

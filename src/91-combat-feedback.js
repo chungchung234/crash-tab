@@ -339,13 +339,23 @@
   /* ===================================================================== */
   /* Each orb gets an arrival ring that shrinks onto it and six afterimages behind it. The ring's radius is driven
    * by elapsed/predicted flight time, so it falls monotonically and reaches orb size at the predicted impact. */
+  /* SPEC-combat §D4: "모양으로 구분한다" — 직사=꽉 찬 원, 유도=꼬리 깃 3개, 산탄=작은 마름모,
+   * 포물선=긴 캡슐. Everything but the seeker's fins is one class in content.css; the fins are real child
+   * nodes so they inherit the bullet's own transform (and its hit/miss scale) for free.
+   * The ARRIVAL RING is no longer built here: §D4 draws it only over the last 40 % of the flight, so
+   * orbReadability() creates it at that moment and a bullet earlier than that has no ring node at all. */
   function orbVisuals(o) {
     if (!root) return;
-    const ring = mk('div', 'crs-orb-ring');
-    root.append(ring);
-    o.ring = ring;
+    o.ring = null;
     o.trail = [];
     o.hist = [];
+    if (o.kind === 'seeker') {
+      for (let i = 0; i < 3; i++) {
+        const f = mk('span', 'crs-orb-fin');
+        f.style.transform = 'rotate(' + (i * 120) + 'deg)';
+        try { o.node.append(f); } catch (e) { /* ignore */ }
+      }
+    }
     if (reducedMotion()) return;
     for (let i = 0; i < ORB_TRAIL; i++) {
       const n = mk('div', 'crs-orb-trail');
@@ -360,6 +370,7 @@
   function orbVisualsRemove(o) {
     if (!o) return;
     if (o.ring) { try { cancelAnimsOf(o.ring); o.ring.remove(); } catch (e) { /* ignore */ } o.ring = null; }
+    if (o.mark) { try { cancelAnimsOf(o.mark); o.mark.remove(); } catch (e) { /* ignore */ } o.mark = null; }
     if (o.trail) { for (const n of o.trail) { try { n.remove(); } catch (e) { /* ignore */ } } o.trail.length = 0; }
   }
   /* Will this orb, on its current heading, reach the player? The answer is what decides bright vs. dim, and it is
@@ -367,15 +378,35 @@
   function orbWillHit(o) {
     const p = state.player;
     if (!p.alive || !p.inWindow) return false;
+    // §D4 포물선탄 lands on a point fixed at launch: "will it hit" is whether the player is in that circle
+    if (o.kind === 'mortar') return Math.hypot(p.x - o.tx, p.y - o.ty) <= MORTAR_R;
     const q = nearestOnSegment(o.x, o.y, o.x + o.vx * 3, o.y + o.vy * 3, p.x, p.y);
     return Math.hypot(q.x - p.x, q.y - p.y) < ORB_HIT_R;
   }
+  /* SPEC-combat §D4: the will-hit / will-miss difference is carried by the BULLET — 1.0 opacity at 22 px
+   * against 0.55 at 18 px — and no longer by the arrival ring's colour. The size is applied as a scale on the
+   * node's own transform (not its width) so every §D4 shape shrinks by the same ratio and stays centred. */
+  function orbPlace(o) {
+    const hit = orbWillHit(o);
+    const k = hit ? 1 : ORB_MISS_PX / ORB_HIT_PX;
+    try {
+      o.node.style.opacity = String(hit ? ORB_HIT_ALPHA : ORB_MISS_ALPHA);
+      o.node.style.transform = 'translate(' + px(o.x - o.x0) + ', ' + px(o.y - o.y0) + ') scale(' + k.toFixed(4) + ')';
+    } catch (e) { /* ignore */ }
+    return hit;
+  }
   function orbReadability(o, t) {
     const p = state.player;
-    const hit = orbWillHit(o);
-    try { o.node.style.opacity = hit ? '1' : '0.4'; } catch (e) { /* ignore */ }
+    const hit = orbPlace(o);
+    /* §D4: 도착 예상 링은 비행의 마지막 40% 구간에만. Before that there is no ring NODE, so "링이 60%
+     * 지점까지 없다" is a count, not an opacity. 포물선탄 has its floor mark instead and never gets one. */
+    const prog = o.flightMs > 0 ? clamp((t - o.launchAt) / o.flightMs, 0, 1) : 0;
+    if (!o.ring && root && o.kind !== 'mortar' && prog >= ORB_RING_FROM) {
+      o.ring = mk('div', 'crs-orb-ring');
+      root.append(o.ring);
+    }
     if (o.ring) {
-      const k = o.flightMs > 0 ? clamp(1 - (t - o.launchAt) / o.flightMs, 0, 1) : 0;
+      const k = clamp(1 - prog, 0, 1);
       const R = ORB_R + 34 * k;
       const s = o.ring.style;
       s.left = px(o.x - R); s.top = px(o.y - R); s.width = px(2 * R); s.height = px(2 * R);

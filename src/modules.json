@@ -30,6 +30,7 @@
     "85-loadout.js",
     "86-modes.js",
     "87-depth.js",
+    "88-archetypes.js",
     "88-toast.js",
     "89-beams.js",
     "90-combat.js",

@@ -55,7 +55,11 @@
     if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null;
     const m = scopeMag();
     const area = (r.width / m) * (r.height / m);
-    if (area < hostileFloor || area > 0.7 * vw * vh) return null;
+    /* SPEC-combat §D2: 요소 종류가 적을 정한다. An element the §D3 table NAMES — a button, a link, a
+     * paragraph, a table — is an enemy for WHAT IT IS, so it clears a much lower floor (archMinArea,
+     * src/88-archetypes.js); 범용형 ("그 외") has no identity of its own and still answers to §B3's.
+     * Only forceAttack() and makeBoss() read this; the §B3 SELECTION ladder is in selectOne() below. */
+    if (area < Math.min(hostileFloor, archMinArea(el)) || area > 0.7 * vw * vh) return null;
     return area;
   }
   function armCombat() {
@@ -104,6 +108,13 @@
     let floor = HOSTILE_AREA;
     let cands = hostileWalk(p.x, p.y, floor);
     if (!cands.length) { floor = HOSTILE_AREA_LOW; cands = hostileWalk(p.x, p.y, floor); }
+    /* SPEC-combat §D2, last rung of §B3's ladder: a page whose biggest box is a button still has to have
+     * enemies, and §D3 says a button IS one. Only elements the table NAMES qualify down here — 범용형 keeps
+     * the 20 000 px² floor above — so this can never fire on a page that has anything big to shoot. */
+    if (!cands.length) {
+      floor = ARCH_MIN_AREA;
+      cands = hostileWalk(p.x, p.y, floor).filter((c) => archetypeOf(c.el) !== 'generic');
+    }
     if (!cands.length) return false;
     let total = 0;
     for (const c of cands) { c.w = Math.sqrt(c.area); total += c.w; }
@@ -147,11 +158,15 @@
         else rec.offscreenSince = 0;
         placeAura(rec);
       }
+      placeGuards();   // SPEC-combat §D3: 지원형's shield follows the ally it is on
     });
   }
   function markHostile(el, area) {
     if (!root || state.hostiles.has(el)) return state.hostiles.get(el) || null;
-    const tier = tierFor(area);
+    /* §D2: the tier is now the SIZE axis only (attack interval, damage, HP). An element that got here under
+     * §D3's lowered floor is below every tier boundary, and "no tier" must not mean "not an enemy" any more —
+     * it is the smallest kind of enemy there is. */
+    const tier = tierFor(area) || (area >= archMinArea(el) ? 'shooter' : null);
     if (!tier) return null;
     const aura = mk('div', 'crs-hostile');
     const label = mk('span', 'crs-hostile-label');
@@ -160,7 +175,10 @@
     root.append(aura);
     const rec = { el, tier, area, aura, label, phase: 'idle', timer: 0, nodes: [], pulse: null, beam: null, aim: null, offscreenSince: 0, nextAttackAt: 0, markedAt: now(),
       // v1.4: depth role (§10), the lock frame it owns (§2) and its repair schedule (§3)
-      depth: 0, dtier: 'mid', depthAt: 0, lock: null, lockReadyAt: 0, repairTimer: 0 };
+      depth: 0, dtier: 'mid', depthAt: 0, lock: null, lockReadyAt: 0, repairTimer: 0,
+      /* SPEC-combat §D2/§D3: WHAT this enemy does, decided once from the tag. `archSeq` is 범용형's
+       * 직사탄 ↔ 돌격 alternation counter and `lunge` the §D5 charge it currently owns. */
+      arch: archetypeOf(el), archSeq: 0, lunge: null };
     state.hostiles.set(el, rec);
     measureDepth(rec);           // v1.4 §10.1: once on selection, then every 2 s
     applyDepthLook(rec);
@@ -187,6 +205,7 @@
   function clearPhase(rec) {   // telegraph / beam / warn / lock-mark nodes of this hostile; pulse back to idle
     dropAimLine(rec);   // v1.3 §3.2: the "aiming at you" line never outlives the wind-up it belongs to
     dropLock(rec);      // v1.4 §2: so does the lock frame
+    cancelLunge(rec);   // SPEC-combat §D5: nor does a charge — the element goes back where it was standing
     for (const n of rec.nodes) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } const i = state.warns.indexOf(n); if (i >= 0) state.warns.splice(i, 1); }
     rec.nodes.length = 0;
     if (rec.beam) { removeBeam(rec.beam); rec.beam = null; }
@@ -229,6 +248,10 @@
      * clean up from here rather than from a class sweep: the deflect marks (§B1) and everything still
      * burning (§B2). hostileFloor goes back to the strict value with them (§B3). */
     clearDeflects(); clearBurning();
+    /* SPEC-combat §D5: a charge in flight, a shield still up and the row flashes of a volley. clearLunges()
+     * puts every borrowed `transform` back through undisplace() (§E), so the Escape path stays traceless with
+     * an enemy frozen mid-lunge. */
+    clearArchetypes();
     hostileFloor = HOSTILE_AREA;
   }
   /* Returns the attack that actually started ('shooter' | 'charger' | 'lock') or false; debug.forceAttack
@@ -264,11 +287,11 @@
       if (Math.random() < 0.6) { attackShooter(rec, r, forced); return 'shooter'; }
       return startLock(rec, forced) ? 'lock' : false;
     }
-    // §A1: both combat modes get the same repertoire; only rampage has none. Every T3 draws a lock (§4).
-    if (!modeHasProjectiles() || rec.tier === 'laser') return startLock(rec, forced) ? 'lock' : false;
-    if (rec.tier === 'shooter') attackShooter(rec, r, forced);
-    else attackCharger(rec, r);
-    return rec.tier;
+    /* SPEC-combat §D2/§D3: from here the ATTACK comes from the element's kind, not from its size tier. The
+     * dispatcher lives in src/88-archetypes.js; 범용형 ("그 외") is the one archetype that still falls back to
+     * the tier ladder this line used to BE — see reading 1 in that file. §A1's "both combat modes get the
+     * same repertoire" is unchanged: only the timing differs, and that is attackInterval()'s business. */
+    return archetypeAttack(rec, r, forced);
   }
   /* T1 shooter: wind-up 250 ms at the element centre (forced: none), then an orb toward the player at
    * orbSpeed() px/s — 520 in survival, ×0.8 in arcade (§A1). */
@@ -276,18 +299,26 @@
     spawnOrb(rec, r.left + r.width / 2, r.top + r.height / 2, forced ? 0 : 250);
     scheduleAttack(rec, attackInterval(rec));
   }
-  function spawnOrb(rec, x, y, windup) {
+  /* SPEC-combat §D4: one projectile record covers all four kinds. `opts` — { kind, dmg, baseSpeed, angleOff,
+   * row } — defaults to exactly the v1.3 직사탄, so every existing caller is unchanged. */
+  function spawnOrb(rec, x, y, windup, opts) {
     if (!root) return null;
-    const n = mk('div', 'crs-orb');
+    opts = opts || {};
+    if (state.orbs.length >= projCap()) return null;   // §D4: 동시 상한 18개 (성능 모드 10)
+    const kind = opts.kind || 'orb';
+    const n = mk('div', 'crs-orb' + (kind === 'orb' ? '' : ' crs-orb-' + kind));
     n.style.left = px(x - ORB_R); n.style.top = px(y - ORB_R);   // v1.3 §3.3: 22 px, so it can be seen coming
     root.append(n);
     const t = now();
-    const o = { node: n, rec, x, y, x0: x, y0: y, vx: 0, vy: 0, bornAt: t, launchAt: t + windup, launched: false, dmg: 8 + Math.round(Math.sqrt(rec.area) / 60),
+    const o = { node: n, rec, kind, x, y, x0: x, y0: y, vx: 0, vy: 0, bornAt: t, launchAt: t + windup, launched: false,
+      dmg: opts.dmg != null ? opts.dmg : 8 + Math.round(Math.sqrt(rec.area) / 60),
+      baseSpeed: opts.baseSpeed || 0, angleOff: opts.angleOff || 0, row: opts.row || null,
+      sx: x, sy: y, tx: x, ty: y, arc: 0, mark: null,
       ring: null, trail: null, hist: null, flightMs: 0, minD: Infinity, minAt: null, nearDone: false };
     state.orbs.push(o);
     orbVisuals(o);
     addAimLine(rec);   // §3.2 — also for a forced (zero wind-up) shot, which the min hold time keeps visible
-    if (windup > 0) { rec.phase = 'windup'; n.style.transform = 'scale(.3)'; } else launchOrb(o);
+    if (windup > 0) { if (rec.phase === 'idle') rec.phase = 'windup'; n.style.transform = 'scale(.3)'; } else launchOrb(o);
     kick();
     return o;
   }
@@ -295,10 +326,22 @@
     const p = state.player;
     const dx = p.x - o.x, dy = p.y - o.y, L = Math.hypot(dx, dy) || 1;
     /* §A1: the speed is read HERE, at launch, not baked into the orb at spawn — so a mode switch mid-wind-up
-     * launches at the new mode's speed rather than at the one the enemy was aiming with. */
-    const sp = orbSpeed();
-    o.vx = dx / L * sp; o.vy = dy / L * sp; o.launched = true; o.launchAt = now();
-    o.flightMs = Math.max(1, L / sp * 1000);   // the arrival ring shrinks over exactly this long (§3.3)
+     * launches at the new mode's speed rather than at the one the enemy was aiming with. §D4 adds a per-kind
+     * base speed (속사형 700) and a per-pellet fan angle (산탄 25도); both ride the same mode multiplier. */
+    const sp = orbSpeedOf(o);
+    o.launched = true; o.launchAt = now();
+    if (o.kind === 'mortar') {
+      // 포물선탄: 1.1초 비행 — the landing point is where the player stands AT LAUNCH, and the floor mark says so
+      o.sx = o.x; o.sy = o.y; o.tx = p.x; o.ty = p.y;
+      o.arc = Math.max(60, L * 0.35);
+      o.flightMs = scaleMs(MORTAR_MS);
+      o.vx = (o.tx - o.sx) / (o.flightMs / 1000); o.vy = (o.ty - o.sy) / (o.flightMs / 1000);
+      mortarMark(o);
+    } else {
+      const a = Math.atan2(dy, dx) + (o.angleOff || 0);
+      o.vx = Math.cos(a) * sp; o.vy = Math.sin(a) * sp;
+      o.flightMs = Math.max(1, L / sp * 1000);   // the arrival ring closes over exactly this long (§3.3)
+    }
     o.node.style.transform = 'translate(0px, 0px)';
     if (o.rec && o.rec.phase === 'windup') o.rec.phase = 'idle';
     dropAimLine(o.rec);   // the line goes with the shot
@@ -306,6 +349,9 @@
   /* A10: the clutch bonus reads rec.phase, and only launchOrb() clears 'windup' — an orb that is removed before it
    * ever launches (interception, KO, restore) must put its hostile back to idle. */
   function orbGone(o) { if (!o) return; orbVisualsRemove(o); if (o.rec && !o.launched && o.rec.phase === 'windup') o.rec.phase = 'idle'; }
+  /* §D4 "폭발 무기의 범위 안에 든 투사체는 소멸한다" and "전부 요격 가능하다" both come down to one radius per
+   * kind — 유도탄's is 1.3× (src/88-archetypes.js), everything else keeps the 18 px this build shipped. */
+  function orbHitRadius(o) { return orbInterceptR(o); }
   function removeOrbAt(i) { const o = state.orbs[i]; state.orbs.splice(i, 1); orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } }
   function clearOrbs() { for (const o of state.orbs) { orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } } state.orbs.length = 0; }
   function orbStep(t, dt) {
@@ -317,6 +363,30 @@
         if (t < o.launchAt) { const k = 0.3 + 0.7 * clamp((t - o.bornAt) / Math.max(1, o.launchAt - o.bornAt), 0, 1); o.node.style.transform = 'scale(' + k.toFixed(3) + ')'; continue; }
         launchOrb(o);
       }
+      /* §D4 "중력탄은 빨아들인다": a projectile caught by 붕괴 stops obeying its own kind and is dragged to
+       * the singularity, where it is swallowed exactly as an interception swallows it. */
+      if (o.sucked) {
+        if (stepSucked(o, dt)) { popOrb(o); if (!state.orbs.length) return; continue; }
+        o.node.style.transform = 'translate(' + px(o.x - o.x0) + ', ' + px(o.y - o.y0) + ')';
+        orbReadability(o, t);
+        continue;
+      }
+      /* §D4 포물선탄: a parabola to a point fixed at launch, not a straight line. Its damage is the 90 px
+       * blast at the landing mark, so it has no swept-segment test of its own. */
+      if (o.kind === 'mortar') {
+        const q = mortarAt(o, t);
+        o.x = q.x; o.y = q.y;
+        if (q.k >= 1) {
+          removeOrbAt(i);
+          const koed = mortarLand(o);
+          if (koed && (state.ko || !state.orbs.length)) return;
+          continue;
+        }
+        o.node.style.transform = 'translate(' + px(o.x - o.x0) + ', ' + px(o.y - o.y0) + ')';
+        orbReadability(o, t);
+        continue;
+      }
+      if (o.kind === 'seeker') steerSeeker(o, t, dt);   // §D4: 0.8초만 최대 90°/s
       const nx = o.x + o.vx * dt, ny = o.y + o.vy * dt;
       if (p.alive && !state.ko) {   // swept segment hit (no tunnelling at low frame rates)
         const q = nearestOnSegment(o.x, o.y, nx, ny, p.x, p.y);
@@ -337,11 +407,12 @@
     state.player.score += 5;
     sfx('pop');
     flash(o.x, o.y, 'gun', { size: 44, dur: 120 });
+    if (o.row) flashRow(o.row);   // §D5 연발: 요격하면 그 행이 깜빡인다
     updatePlayerHud(); scheduleHud();
   }
   function interceptOrb(x, y) {
     hitRepairBeams(x, y, 14);   // v1.4 §3.1: a shot across a repair beam delays it 0.4 s — it never absorbs the shot
-    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= 18) { popOrb(o); return true; } }
+    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= orbHitRadius(o)) { popOrb(o); return true; } }
     schedulePierce(x, y);       // v1.4 §10.3: the shot reaches the page, so it can also go THROUGH it
     return false;
   }
@@ -349,13 +420,13 @@
     hitRepairBeamsWithin(x, y, R);      // v1.4 §3.1
     scheduleBlastThroughCover(x, y, R); // v1.4 §10.3: a blast reaches what is hiding behind cover
     let n = 0;
-    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R) { popOrb(o); n++; } }
+    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R + (orbHitRadius(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
     return n;
   }
   function interceptOrbsAlong(x1, y1, x2, y2, R) {
     hitRepairBeamsAlong(x1, y1, x2, y2, R);   // v1.4 §3.1
     let n = 0;
-    for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R) { popOrb(o); n++; } }
+    for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R + (orbHitRadius(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
     return n;
   }
   /* T2 charger: 700 ms telegraph (aura pulse 150 ms + expanding warn ring), then SLAM (rect + 60 px). */
@@ -479,6 +550,7 @@
     for (const rec of state.hostiles.values()) { untrack(rec.timer); rec.timer = 0; untrack(rec.repairTimer); rec.repairTimer = 0; clearPhase(rec); }
     clearOrbs(); clearBeams(); clearWarns(); clearAimLines();
     clearLocks(); clearRepairs();   // v1.4 §2 / §3
+    clearArchetypes();              // SPEC-combat §D5: a pause drops a charge in flight like every other attack
   }
   function resumeCombat() {
     if (!state.paused) return;
