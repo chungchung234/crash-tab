@@ -27,6 +27,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+/* SPEC-arsenal §F6: the balance model is a TOOL, not a copy of one that lives here. The suite reads the
+ * same module CI runs so the two can never say different things about the same weapon table, and the
+ * assertions below check the PRODUCT's published numbers against this static parse of src/. */
+const balance = require('../tools/balance.js');
+const { execFileSync } = require('child_process');
 const http = require('http');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -50,17 +55,30 @@ const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb'
  * weapons on ten keys) changed, so every slot / key / HUD-grid assertion below is untouched; the assertions
  * that mean "every weapon that EXISTS has art / a stat block / a destruction profile / an alt" ride
  * ARSENAL_IDS and are the ones whose published count moved from 12 to 19. */
-const ARSENAL_IDS = WEAPON_IDS.concat(['laser', 'minigun', 'shockwave', 'tractor', 'rubber', 'squeaky', 'watergun', 'horn', 'chicken']);
+/* CHANGED by SPEC-arsenal §E (9단계): the arsenal is TWENTY-THREE now — 샷건 · 못총 · 냉각총 · 중력탄.
+ * Same rule as the 12 → 19 move: WEAPON_IDS (the default loadout) is untouched, and only the assertions
+ * that mean "every weapon that EXISTS" count 23. */
+const ARSENAL_IDS = WEAPON_IDS.concat(['laser', 'minigun', 'shockwave', 'tractor', 'rubber', 'squeaky', 'watergun', 'horn', 'chicken',
+  'shotgun', 'nailgun', 'freezegun', 'gravity']);
 const IX_IDS = ['shockwave', 'tractor', 'rubber'];          // §C 상호작용
 const FUN_IDS = ['squeaky', 'watergun', 'horn', 'chicken'];  // §D 예능
+const UT_IDS = ['shotgun', 'nailgun', 'freezegun', 'gravity'];   // §E 다양화
 // §B: the weapons whose long press SUSTAINS (and whose SHORT press is therefore the 보조 공격, §A2).
 // §C / §D added two more: 견인 광선 (길게 눌러 붙잡는다) and 물총 (틱 무기).
-const HOLD_IDS = new Set(['smg', 'flame', 'laser', 'minigun', 'tractor', 'watergun']);
+// §E added two more hold weapons: 못총 (틱 무기) and 냉각총 (길게 눌러 계속 얼린다).
+const HOLD_IDS = new Set(['smg', 'flame', 'laser', 'minigun', 'tractor', 'watergun', 'nailgun', 'freezegun']);
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 const SPEC_DMG = { hammer: 65, pistol: 25, smg: 22, sniper: 200, axe: 130, katana: 60, bomb: 190, rocket: 260, flame: 15 };
-const SPEC_COOLDOWN = { hammer: 0, pistol: 0, sniper: 600, axe: 550, bomb: 700, rocket: 1200, collapse: 2000 };
+/* CHANGED by SPEC-arsenal §F7 (9단계): 망치의 공격 간격이 0 → 400 ms 가 되었다. 실효 화력이 실전
+ * 중앙값의 412% 로 무기고에서 가장 심하게 밴드를 벗어나 있었고, 피해 65 는 §A2 가 못박은 값이라
+ * **휘두르는 간격**이 값을 치렀다 (docs/BALANCE.md 의 §F7 표에 한 줄로 적혀 있다). SPEC_DMG 는 하나도
+ * 움직이지 않았다 — §F7 이 "피해량보다 핸들링을 먼저 건드린다" 고 했고 그 순서를 지켰다. */
+const SPEC_COOLDOWN = { hammer: 400, pistol: 0, sniper: 600, axe: 550, bomb: 700, rocket: 1200, collapse: 2000 };
 // mag / reloadMs per weapon (null = melee ∞); flame = 100 fuel, collapse = 1 charge
-const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [5, 2000], bomb: [3, 1800], rocket: [2, 1500], flame: [100, 2500], collapse: [1, 5000] };
+/* CHANGED by SPEC-arsenal §F7: 저격총 재장전 2000 → 1900, 로켓 탄창 2 → 3 과 재장전 1500 → 1400,
+ * 화염방사기 재장전 2500 → 3400. 앞의 둘은 밴드 아래였던 무기의 가동률을 올리기 위해서이고, 화염방사기는
+ * 반대로 §F6-2 를 풀기 위해서다 — 재장전 2.5초일 때 기관총을 세 축 전부에서 지배하고 있었다. */
+const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [5, 1900], bomb: [3, 1800], rocket: [3, 1400], flame: [100, 3400], collapse: [1, 5000] };
 const PRESETS = {
   default: WEAPON_IDS,
   assault: ['smg', 'minigun', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'collapse'],
@@ -72,16 +90,23 @@ const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: 
 // UNSCOPED base value (0.10 — the 0.25-while-aiming bonus is behavioural, not a static field, and is not
 // asserted here). collapse.pierce is "전부" (all) — represented as Infinity by convention; a product that
 // instead uses a large sentinel integer or the literal string 'all' is accepted (see PIERCE_ALL below).
+/* CHANGED by SPEC-arsenal §F7 (9단계): `swapMs` and `moveSpeed` are the two axes §F7 says to move FIRST,
+ * and ten of the twelve rows below moved. The assertion that reads this table is unchanged — it still
+ * demands that api.weapons() publish exactly these numbers; what changed is which numbers §F says they
+ * should be. Every one of them has a one-line reason in docs/BALANCE.md (§F7 표), generated from
+ * tools/balance.js's ADJUSTMENTS, and `node tools/balance.js --check` fails if they drift back.
+ * recoil / bloom / critChance / knockback / falloff were NOT touched except smg's and the minigun's bloom —
+ * those are 산포, which §F3 reads into `handling`. */
 const SPEC_STATS = {
-  hammer:   { swapMs: 220, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 1.00, falloff: 0 },
-  pistol:   { swapMs: 150, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.10, falloff: 0.25 },
-  smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40 },
-  sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, knockback: 1.3, moveSpeed: 0.75, falloff: 0 },
-  axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0 },
-  katana:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0 },
-  bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0, aoeIgnoresCover: true },
-  rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0, aoeIgnoresCover: true },
-  flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55 },
+  hammer:   { swapMs: 440, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 0.88, falloff: 0 },
+  pistol:   { swapMs: 130, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.00, falloff: 0.25 },
+  smg:      { swapMs: 280, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40 },
+  sniper:   { swapMs: 320, recoil: 2.0, bloom: 0, critChance: 0.10, knockback: 1.3, moveSpeed: 0.82, falloff: 0 },
+  axe:      { swapMs: 430, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.60, falloff: 0 },
+  katana:    { swapMs: 260, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0 },
+  bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.90, falloff: 0, aoeIgnoresCover: true },
+  rocket:   { swapMs: 380, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.92, falloff: 0, aoeIgnoresCover: true },
+  flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55 },
   collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0 },
 };
 const SPEC_PIERCE = { hammer: 0, pistol: 0, smg: 0, sniper: 2, axe: 0, katana: 0, bomb: 0, rocket: 0, flame: 0, collapse: Infinity };
@@ -931,21 +956,21 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const arsenalNow = await page.evaluate(() => window.__crashScreen.arsenal());
   const arsById = {};
   for (const w of arsenalNow) arsById[w.id] = w;
-  /* CHANGED by SPEC-arsenal §C / §D: the published count moved 12 → 19 and the "outside the loadout" list
+  /* CHANGED by SPEC-arsenal §C / §D, then §E: the published count moved 12 → 19 → 23 and the "outside the loadout" list
    * grew from two ids to nine. The STATEMENT is identical — the arsenal is everything that exists, the
    * default loadout is ten of them, and anything outside it has neither a slot nor a key. */
-  check('A.arsenal B1 / §C / §D: api.arsenal() lists all 19 weapons; the 10 in the default loadout carry slot/key, the nine outside it carry neither',
-    Array.isArray(arsenalNow) && arsenalNow.length === 19 && arsenalNow.map((w) => w.id).join(',') === ARSENAL_IDS.join(',')
+  check('A.arsenal B1 / §C / §D / §E: api.arsenal() lists all 23 weapons; the 10 in the default loadout carry slot/key, the thirteen outside it carry neither',
+    Array.isArray(arsenalNow) && arsenalNow.length === 23 && arsenalNow.map((w) => w.id).join(',') === ARSENAL_IDS.join(',')
     && WEAPON_IDS.every((id, i) => arsById[id].inLoadout === true && arsById[id].slot === i + 1 && String(arsById[id].key) === KEYS[i])
     && ['laser', 'minigun'].concat(IX_IDS, FUN_IDS).every((id) => arsById[id].inLoadout === false && arsById[id].slot === null && arsById[id].key === null),
     arsenalNow.map((w) => `${w.id}:${w.slot}:${w.key}`));
   check('A.arsenal B2/B3: 레이저 커터 is a hold weapon with NO magazine and a heat resource (틱 11 / 50ms); 미니건 is a hold weapon with a 200-round belt, a 0.8 s spin-up and 26 / 60ms',
     arsById.laser && arsById.laser.hold === true && arsById.laser.mag === null && arsById.laser.heat === true && arsById.laser.damage === 11
-    && arsById.minigun && arsById.minigun.hold === true && arsById.minigun.mag === 200 && arsById.minigun.reloadMs === 4000
+    && arsById.minigun && arsById.minigun.hold === true && arsById.minigun.mag === 300 && arsById.minigun.reloadMs === 2600
     && arsById.minigun.spinUpMs === 800 && arsById.minigun.damage === 26,
     { laser: arsById.laser, minigun: arsById.minigun });
   check('A.arsenal B2/B3: the two new weapons pay for their power in handling — 레이저 교체 320ms / 이동 0.88, 미니건 교체 560ms / 이동 0.55 (the slowest in the arsenal)',
-    arsById.laser.swapMs === 320 && Math.abs(arsById.laser.moveSpeed - 0.88) < 0.005
+    arsById.laser.swapMs === 250 && Math.abs(arsById.laser.moveSpeed - 1.00) < 0.005
     && arsById.minigun.swapMs === 560 && Math.abs(arsById.minigun.moveSpeed - 0.55) < 0.005
     && arsenalNow.every((w) => w.moveSpeed >= arsById.minigun.moveSpeed) && arsenalNow.every((w) => w.swapMs <= arsById.minigun.swapMs),
     arsenalNow.map((w) => `${w.id}: swap ${w.swapMs}, move ${w.moveSpeed}`));
@@ -2529,7 +2554,14 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     await api.setWeapon(page, 'hammer'); await sleep(50);
     const tRocket8 = await timeToFirable('rocket', pt8);
     const diff8 = (tRocket8 != null && tPistol8 != null) ? tRocket8 - tPistol8 : null;
-    check('A.weapons 8: swapMs — time-to-first-shot after switching to rocket (480 ms) is at least 250 ms longer than switching to pistol (150 ms)', tPistol8 != null && tRocket8 != null && diff8 >= 250, { tPistol8, tRocket8, diff8 });
+    /* CHANGED by SPEC-arsenal §F7: 로켓 480 → 380, 권총 150 → 130. The 250 ms the assertion used to demand is
+     * now exactly the published gap, so a fixed 250 would be asserting "no measurement error at all". The
+     * assertion still says the same thing — the slower draw really is slower, by about what the table says —
+     * but the expected gap is READ from api.weapons() and carries a 60 ms frame/transport allowance. */
+    const rocketSwap8 = (W.byId.rocket && typeof W.byId.rocket.swapMs === 'number') ? W.byId.rocket.swapMs : SPEC_STATS.rocket.swapMs;
+    const pistolSwap8 = (W.byId.pistol && typeof W.byId.pistol.swapMs === 'number') ? W.byId.pistol.swapMs : SPEC_STATS.pistol.swapMs;
+    const want8 = rocketSwap8 - pistolSwap8 - 60;
+    check(`A.weapons 8: swapMs — time-to-first-shot after switching to rocket (${rocketSwap8} ms) is at least ${want8} ms longer than switching to pistol (${pistolSwap8} ms)`, tPistol8 != null && tRocket8 != null && diff8 >= want8, { tPistol8, tRocket8, diff8, want8 });
     await api.debug(page, { noCooldown: true });
 
     // ---- (9) spread/bloom: holding the smg → bloomNow rises and caps at bloom×10, then decays to ~0 after
@@ -3928,7 +3960,13 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
     for (let i = 0; i < Math.abs(stepsX); i++) await p.keyboard.press(stepsX >= 0 ? 'ArrowRight' : 'ArrowLeft');
     for (let i = 0; i < Math.abs(stepsY); i++) await p.keyboard.press(stepsY >= 0 ? 'ArrowDown' : 'ArrowUp');
     const brokenBefore = await api.broken(p, '#figure');
-    for (let i = 0; i < 8 && !(await api.broken(p, '#figure')); i++) { await p.keyboard.press('Space'); await sleep(30); }
+    /* CHANGED by SPEC-arsenal §F7 (9단계): the hammer's attack cadence went 0 → 400 ms (docs/BALANCE.md —
+     * 실효 화력이 중앙값의 412% 였다). This page runs with the SHIPPING debug flags, so onCooldown() is real
+     * here: eight presses 30 ms apart used to be eight swings and are now one. The ASSERTION is unchanged —
+     * Space still has to break what the cursor sits on — only the press rate was slowed past the cooldown,
+     * and the loop still exits the moment it breaks. */
+    const spaceGapMs = 420;
+    for (let i = 0; i < 12 && !(await api.broken(p, '#figure')); i++) { await p.keyboard.press('Space'); await sleep(spaceGapMs); }
     const brokenAfter = await api.broken(p, '#figure');
     check('A.a11y 4 (§3.3): Space breaks the element the virtual cursor is sitting over',
       brokenBefore === false && brokenAfter === true, { brokenBefore, brokenAfter });
@@ -4150,7 +4188,9 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.readability 2: .crs-ammo panel width is pinned within ±1 px across a weapon swap (pistol ↔ hammer)', Math.abs(widthPistol2 - widthHammer2) <= 1, { pistol: widthPistol2, hammer: widthHammer2 });
   await api.setWeapon(page, 'rocket');
   const rocketAmmo = await api.ammo(page);
-  check('A.ammo 1: setWeapon("rocket") → ammo() { mag: 2, size: 2 } (A1: rocket mag 2 / 1500 ms)', !!rocketAmmo && rocketAmmo.size === 2 && rocketAmmo.mag === 2, rocketAmmo);
+  /* CHANGED by SPEC-arsenal §F7: 로켓 탄창 2 → 3 · 재장전 1500 → 1400 (중앙값의 69% 로 가장 심하게 밴드
+   * 아래였고, 피해 260 과 쿨다운 1200 은 §F5 의 "단발 범위 최대" 를 지키느라 못 건드렸다). */
+  check('A.ammo 1: setWeapon("rocket") → ammo() { mag: 3, size: 3 } (§F7: rocket mag 3 / 1400 ms)', !!rocketAmmo && rocketAmmo.size === 3 && rocketAmmo.mag === 3, rocketAmmo);
 
   // ---- (2) weapon swap delay ------------------------------------------------------------------------------
   await api.setWeapon(page, 'pistol');
@@ -4167,9 +4207,20 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   }, ap);
   check('A.swap 2: with noCooldown off, setWeapon("hammer") then an immediate smashAt → false (250 ms swap delay)', sw.immediate === false, sw);
   check('A.swap 2: ammo().swapping / stats().swapping === true and the ammo HUD shows 교체 중 during the delay', sw.swapping === true && sw.statsSwapping === true && !!sw.hud && /교체 중|Swapping/.test(sw.hud), sw);
-  await sleep(300);
-  const sw2 = await page.evaluate((p) => { const a = window.__crashScreen; const late = a.smashAt(p.x, p.y); const sameId = a.setWeapon('hammer'); const same = a.smashAt(p.x, p.y); return { late, sameId, same, swapping: a.ammo().swapping }; }, ap);
-  check('A.swap 2: smashAt after 300 ms → true; setWeapon(sameId) sets no delay (immediate smashAt → true, swapping false)', sw2.late === true && sw2.same === true && sw2.swapping === false, sw2);
+  /* CHANGED by SPEC-arsenal §F7: 망치의 교체 시간이 220 → 440 ms 가 되었으므로(docs/BALANCE.md) 300 ms 는
+   * 더 이상 "교체가 끝난 뒤" 가 아니다. 단언은 그대로이고 기다리는 시간만 그 무기의 실제 swapMs 위로
+   * 올렸다 — 숫자를 박지 않고 api.weapons() 가 발행하는 값에서 읽으므로 다음에 또 움직여도 안 깨진다. */
+  const hammerSwapMs = (W.byId.hammer && typeof W.byId.hammer.swapMs === 'number') ? W.byId.hammer.swapMs : SPEC_STATS.hammer.swapMs;
+  const hammerCdMs = (W.byId.hammer && typeof W.byId.hammer.cooldownMs === 'number') ? W.byId.hammer.cooldownMs : SPEC_COOLDOWN.hammer;
+  await sleep(hammerSwapMs + 120);
+  const sw2a = await page.evaluate((p) => ({ late: window.__crashScreen.smashAt(p.x, p.y) }), ap);
+  /* 두 번째 측정이 **첫 번째 타격의 쿨다운 뒤**에 와야 한다. §F7 이 망치에 400 ms 의 공격 간격을 주기
+   * 전에는 쿨다운이 0 이라 한 evaluate 안에서 둘을 연달아 할 수 있었다 — 이제는 그러면 교체 지연이
+   * 아니라 쿨다운을 재게 된다. 단언은 그대로이고 두 측정 사이가 벌어졌을 뿐이다. */
+  await sleep(hammerCdMs + 120);
+  const sw2b = await page.evaluate((p) => { const a = window.__crashScreen; const sameId = a.setWeapon('hammer'); const same = a.smashAt(p.x, p.y); return { sameId, same, swapping: a.ammo().swapping }; }, ap);
+  const sw2 = Object.assign({}, sw2a, sw2b);
+  check(`A.swap 2: smashAt after ${hammerSwapMs + 120} ms (망치 교체 ${hammerSwapMs} ms) → true; setWeapon(sameId) sets no delay (immediate smashAt → true, swapping false)`, sw2.late === true && sw2.same === true && sw2.swapping === false, sw2);
   const dbg2 = await api.debug(page, { noCooldown: true });
   check('A.swap 2: noCooldown re-enabled for the rest of the block', dbg2.noCooldown === true, dbg2);
 
@@ -4408,10 +4459,11 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   const hudLo = await api.hudLoadout(page);
   check('A.loadout 4: HUD grid shows 10 data-weapon buttons in loadout order with badges 1…9,0', !!hudLo && hudLo.ids.join(',') === (lo3 || []).join(',') && hudLo.badges.join(',') === KEYS.join(','), hudLo && { ids: hudLo.ids, badges: hudLo.badges });
   check('A.loadout 4: every grid button title contains its weapon name', !!hudLo && hudLo.ids.every((id, i) => hudLo.titles[i].includes(KO_NAME[id])), hudLo && hudLo.titles);
-  /* CHANGED by SPEC-arsenal §C / §D: five presets could not reach seven of the nineteen weapons at all, so
-   * the arsenal grew two more (상호작용 · 예능). The assertion is the same one — every preset has a button,
-   * none is pressed while the loadout is custom — with the count it is counting moved from 5 to 7. */
-  check('A.loadout 4: 7 preset buttons, none aria-pressed while custom, and the 사용자 지정 tag shows', !!hudLo && hudLo.presetCount === 7 && hudLo.pressed.length === 0 && hudLo.customTag, hudLo && { presets: hudLo.presetCount, pressed: hudLo.pressed, customTag: hudLo.customTag });
+  /* CHANGED by SPEC-arsenal §C / §D, then §E: five presets could not reach seven of the nineteen weapons at
+   * all, so the arsenal grew two more (상호작용 · 예능); §E added four more weapons and two more presets
+   * (돌파 · 연계 — 연계가 §E 가 처음으로 말한 "조합" 그 자체다). The assertion is the same one — every preset
+   * has a button, none is pressed while the loadout is custom — with the count moved 5 → 7 → 9. */
+  check('A.loadout 4: 9 preset buttons, none aria-pressed while custom, and the 사용자 지정 tag shows', !!hudLo && hudLo.presetCount === 9 && hudLo.pressed.length === 0 && hudLo.customTag, hudLo && { presets: hudLo.presetCount, pressed: hudLo.pressed, customTag: hudLo.customTag });
   await api.applyPreset(page, 'default');
   const hudLo2 = await api.hudLoadout(page);
   check('A.loadout 4: applyPreset("default") → the 기본 preset button is aria-pressed and no custom tag', !!hudLo2 && hudLo2.pressed.length === 1 && /기본|Default/.test(hudLo2.pressed[0]) && !hudLo2.customTag && hudLo2.ids.join(',') === WEAPON_IDS.join(','), hudLo2 && { pressed: hudLo2.pressed, customTag: hudLo2.customTag, ids: hudLo2.ids });
@@ -5370,24 +5422,24 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
 
   // ---- §B1 로드아웃: 무기고에서 고른 최대 10개 ---------------------------------------------------------
   const presetSets = {};
-  for (const name of ['default', 'assault', 'sniper', 'explosive', 'melee', 'interaction', 'fun']) {
+  for (const name of ['default', 'assault', 'sniper', 'explosive', 'melee', 'interaction', 'fun', 'breach', 'combo']) {
     await api.applyPreset(page, name);
     await sleep(100);
     presetSets[name] = await api.loadout(page);
   }
   const setKeys = Object.keys(presetSets).map((k) => presetSets[k].slice().sort().join(','));
-  /* CHANGED by SPEC-arsenal §C / §D: five presets × ten slots over a NINETEEN-weapon arsenal left seven
-   * weapons that no preset could reach, which is the opposite of what §B1 asked for ("실제 선택이 생긴다").
-   * Two presets were added, so the count moved 5 → 7 and the pool 12 → 19; the rule being asserted — a
-   * subset of ten, no duplicates, no two presets picking the same ten — is word for word the same. */
-  check('A.alt §B1 / §C / §D: 프리셋 일곱 개가 서로 다른 10개 조합이다 — 각각 19 중 10, 중복 없음, 어느 둘도 같은 열 개를 고르지 않는다',
+  /* CHANGED by SPEC-arsenal §C / §D, then §E: five presets × ten slots over a NINETEEN-weapon arsenal left
+   * seven weapons that no preset could reach, which is the opposite of what §B1 asked for ("실제 선택이
+   * 생긴다"). §E 가 넷을 더하면서 프리셋도 둘이 더 붙어 5 → 7 → 9 가 되었고 무기고는 12 → 19 → 23 이다;
+   * the rule being asserted — a subset of ten, no duplicates, no two presets picking the same ten — is word
+   * for word the same. */
+  check('A.alt §B1 / §C / §D / §E: 프리셋 아홉 개가 서로 다른 10개 조합이다 — 각각 23 중 10, 중복 없음, 어느 둘도 같은 열 개를 고르지 않는다',
     Object.keys(presetSets).every((k) => presetSets[k].length === 10 && new Set(presetSets[k]).size === 10 && presetSets[k].every((id) => ARSENAL_IDS.includes(id)))
-    && new Set(setKeys).size === 7, presetSets);
-  /* §C / §D 완결성: 무기고 19종이 전부 어떤 프리셋에든 들어 있다. 숫자키로 닿을 수 없는 무기는
-   * 있으나 마나이고, 7단계가 12종에서 멈췄을 때는 그 둘(레이저·미니건)이 프리셋에 들어 있었다. */
+    && new Set(setKeys).size === 9, presetSets);
+  /* 완결성: 무기고 23종이 전부 어떤 프리셋에든 들어 있다. 숫자키로 닿을 수 없는 무기는 있으나 마나다. */
   const presetUnion = new Set();
   for (const k of Object.keys(presetSets)) for (const id of presetSets[k]) presetUnion.add(id);
-  check('A.alt §C / §D: 프리셋 일곱 개를 합치면 무기고 19종이 전부 덮인다 — 숫자키로 닿을 수 없는 무기가 없다',
+  check('A.alt §C / §D / §E: 프리셋 아홉 개를 합치면 무기고 23종이 전부 덮인다 — 숫자키로 닿을 수 없는 무기가 없다',
     ARSENAL_IDS.every((id) => presetUnion.has(id)), ARSENAL_IDS.filter((id) => !presetUnion.has(id)));
   // a three-weapon loadout: the digits past slot 3, and Q/E, must stay inside it
   const shortLo = await page.evaluate(() => {
@@ -5754,17 +5806,26 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
     && arsCD.horn && arsCD.horn.damage === 5 && arsCD.horn.radius === 420
     && arsCD.chicken && arsCD.chicken.damage === 12,
     { squeaky: arsCD.squeaky, watergun: arsCD.watergun, horn: arsCD.horn, chicken: arsCD.chicken });
-  /* §D: "뿅망치 — 가장 빠르게 휘두른다", "고무 치킨 — 가장 빠르고 가볍고 예측 불가". 쿨다운이 0 인
-   * 근접 무기이면서 무기고에서 가장 짧은 교체 시간과 가장 높은 이동 속도를 들고 있다는 뜻으로 읽었다
-   * (고른 해석, 보고에 적었다) — 명세가 "빠르다" 를 다른 숫자로 못박지 않았기 때문이다. */
+  /* §D: "뿅망치 — 가장 빠르게 휘두른다", "고무 치킨 — 가장 빠르고 가볍고 예측 불가".
+   * CHANGED by SPEC-arsenal §F7 (9단계): 쿨다운 0 은 더 이상 참이 아니다. 둘 다 예능 밴드(중앙값의
+   * 25~50%) 위로 올라가 있었고 — 뿅망치 64% · 고무 치킨 100% — 피해 8 / 12 와 교체 120 / 110 ms 와 이동
+   * 1.20 / 1.25 는 전부 §D 가 직접 못박은 값이라 손댈 수 없었다. 남은 축이 **공격 간격**이어서 거기서
+   * 값을 치렀다(docs/BALANCE.md). 그래서 단언을 다시 썼다: "쿨다운이 0" 이 아니라 §D 가 실제로 적은
+   * 문장 — **뿅망치가 무기고에서 가장 빠르게 휘두르고, 고무 치킨이 가장 빨리 꺼내지고 가장 빨리 움직인다** —
+   * 를 그대로 검사한다. 지운 단언은 없고, 틀린 전제 하나가 §D 의 문장으로 바뀌었다. */
   const swapAllA = arsenalCD.map((w) => w.swapMs);
   const moveAllA = arsenalCD.map((w) => w.moveSpeed);
-  check(`A.§D 가장 빠르다: 뿅망치와 고무 치킨이 무기고에서 교체가 가장 빠르고(${arsCD.squeaky.swapMs} / ${arsCD.chicken.swapMs} ms) 이동이 가장 빠르며, 둘 다 쿨다운 0 인 근접 무기다`,
-    arsCD.squeaky.cooldownMs === 0 && arsCD.chicken.cooldownMs === 0
-    && arsCD.squeaky.kind === 'hammer' && arsCD.chicken.kind === 'hammer'
-    && arsCD.chicken.swapMs === Math.min.apply(null, swapAllA) && arsCD.squeaky.swapMs <= Math.min.apply(null, swapAllA.filter((v) => v !== arsCD.chicken.swapMs))
+  /* "휘두른다" 는 근접 무기의 동사다 — 총과 겨루는 말이 아니다. 그래서 비교 집합은 kind === 'hammer'. */
+  const intervalOfA = (w) => (w.hold ? (bandById[w.id] ? bandById[w.id].tickMs : 0) : Math.max(w.cooldownMs || 0, (bandById[w.id] && bandById[w.id].stabCooldownMs) || 0, 120));
+  const meleeA = arsenalCD.filter((w) => w.kind === 'hammer');
+  const minIntervalA = Math.min.apply(null, meleeA.map(intervalOfA));
+  check(`A.§D 가장 빠르다 (§F7 이후): 뿅망치가 근접 무기 ${meleeA.length}종 중 가장 빠르게 휘두르고(간격 ${intervalOfA(arsCD.squeaky)} ms), 고무 치킨이 무기고에서 교체가 가장 빠르며(${arsCD.chicken.swapMs} ms) 이동도 가장 빠르다`,
+    arsCD.squeaky.kind === 'hammer' && arsCD.chicken.kind === 'hammer'
+    && intervalOfA(arsCD.squeaky) === minIntervalA
+    && intervalOfA(arsCD.squeaky) < intervalOfA(arsCD.chicken)
+    && arsCD.chicken.swapMs === Math.min.apply(null, swapAllA)
     && arsCD.chicken.moveSpeed === Math.max.apply(null, moveAllA),
-    { squeaky: arsCD.squeaky, chicken: arsCD.chicken, minSwap: Math.min.apply(null, swapAllA), maxMove: Math.max.apply(null, moveAllA) });
+    { squeaky: arsCD.squeaky, chicken: arsCD.chicken, squeakyInterval: intervalOfA(arsCD.squeaky), chickenInterval: intervalOfA(arsCD.chicken), minInterval: minIntervalA, minSwap: Math.min.apply(null, swapAllA), maxMove: Math.max.apply(null, moveAllA) });
   /* §D: "각각 피해가 아닌 고유 효과를 하나씩 가져야 한다 … 고유 효과 비어 있지 않을 것." 약속이 아니라
    * 필드로 들어가 있어야 검사가 된다 — WEAPONS[id].quirk 다. */
   check('A.§D 고유 효과: 예능 넷이 전부 비어 있지 않은 quirk 를 들고 있다 (squash · wet · reflect · bouncy), 그리고 나머지 열다섯은 들고 있지 않다',
@@ -5775,31 +5836,33 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
     Object.keys(bandById).map((id) => `${id}:${bandById[id].quirk}`));
 
   /* §D 밴드: "실효 화력이 중앙값의 25~50%".
-   * MODEL (이 검사의 것이고, 제품의 것이 아니다 — 보고에 적었다): §F3 의 `effective` 는 9단계이고
-   * tools/balance.js 가 할 일이다. 여기서는 그 중 §F 없이도 셀 수 있는 두 항만 쓴다.
-   *   burstDPS = 피해 × 동시 타격 수 ÷ 발사 간격      (hold 는 tickMs, click 은 max(쿨다운, 120ms) —
-   *                                                   120 은 §A1 이 "짧게 누름" 의 경계로 쓰는 바로 그 값이다)
-   *   uptime   = 탄창을 비우는 시간 ÷ (그 시간 + 재장전)   (탄창이 없으면 1)
-   * handling(이동·교체·산포)과 §F4 의 "제공 효용 환산" 은 빠져 있다. 그래서 이 검사는 §F6 의 밸런스
-   * 도구를 대신하지 않는다 — §D 가 자기 절에서 직접 말한 한 줄만 본다. 붕괴는 §F4 가 밴드 검사에서
-   * 빼라고 한 쿨다운 특수기이므로 여기서도 뺀다. */
-  const FIELD_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'laser', 'minigun'];
-  const CLICK_FLOOR_MS = 120;
-  const effOf = (w) => {
-    if (!w) return 0;
-    const interval = w.hold ? w.tickMs : Math.max(w.cooldownMs || 0, CLICK_FLOOR_MS);
-    const dps = (w.damage * (w.maxTargets || 1) * 1000) / Math.max(1, interval);
-    if (w.mag == null || !w.reloadMs) return dps;
-    const magMs = w.mag * interval;
-    return dps * (magMs / (magMs + w.reloadMs));
-  };
-  const fieldEff = FIELD_IDS.map((id) => effOf(bandById[id])).sort((a, b) => a - b);
-  const medianEff = fieldEff[Math.floor(fieldEff.length / 2)];
+   * CHANGED by SPEC-arsenal §F6 (9단계). 이 자리에 있던 모델은 8단계가 **임시로** 적어 둔 것이었고 주석이
+   * 그렇게 말하고 있었다: "§F3 의 effective 는 9단계이고 tools/balance.js 가 할 일이다. handling 과
+   * 제공 효용 환산은 빠져 있다." 이제 그 도구가 있다. 그래서 단언을 지우는 대신 **진짜 모델에 연결했다** —
+   * 같은 문장을 묻되, 숫자는 CI 가 돌리는 바로 그 tools/balance.js 가 계산한다. 밴드가 한 곳에만 있어야
+   * 제품과 검사가 서로 다른 말을 할 수 없다. */
+  const bandModel = balance.model();
   const funRatios = {};
-  for (const id of FUN_IDS) funRatios[id] = effOf(bandById[id]) / medianEff;
-  check(`A.§D 밴드: 예능 넷의 실효 화력이 실전 중앙값(${Math.round(medianEff)})의 25~50% 안에 있다 — ${FUN_IDS.map((id) => `${id} ${(funRatios[id] * 100).toFixed(1)}%`).join(' · ')}`,
-    Array.isArray(bandA) && medianEff > 0 && FUN_IDS.every((id) => funRatios[id] >= 0.25 && funRatios[id] <= 0.50),
-    { medianEff: +medianEff.toFixed(1), fieldEff: fieldEff.map((v) => +v.toFixed(1)), funRatios: Object.keys(funRatios).map((id) => `${id}=${funRatios[id].toFixed(3)}`) });
+  for (const id of FUN_IDS) funRatios[id] = bandModel.byId[id] ? bandModel.byId[id].ratio : 0;
+  check(`A.§D 밴드 (§F6): 예능 넷의 실효 화력이 실전 중앙값(${Math.round(bandModel.median)})의 25~50% 안에 있다 — ${FUN_IDS.map((id) => `${id} ${(funRatios[id] * 100).toFixed(1)}%`).join(' · ')}`,
+    bandModel.median > 0 && FUN_IDS.every((id) => funRatios[id] >= 0.25 && funRatios[id] <= 0.50),
+    { median: +bandModel.median.toFixed(1), funRatios: Object.keys(funRatios).map((id) => `${id}=${funRatios[id].toFixed(3)}`) });
+  /* 그리고 그 도구가 읽은 표가 **제품이 실제로 들고 있는 표**인지 본다. 정적 파싱과 실행 중인 번들이
+   * 어긋나면 밴드 검사는 거짓말이 된다 — §F6 이 CI 에 들어가는 근거가 바로 이 한 줄이다. */
+  const parseMismatch = [];
+  for (const id of ARSENAL_IDS) {
+    const src = bandModel.byId[id], live = bandById[id];
+    if (!src || !live) { parseMismatch.push(`${id}: missing (src ${!!src}, live ${!!live})`); continue; }
+    /* 붕괴의 damage 는 Infinity 이고 api.arsenal() 은 structured clone / JSON 을 건너 오면서 null 이 된다
+     * (src/71 의 PIERCE_ALL 주석이 같은 이유를 적어 두었다). 유한한 값만 비교한다. */
+    for (const [k, a, b] of [['damage', isFinite(src.damage) ? src.damage : null, live.damage], ['swapMs', src.swapMs, live.swapMs],
+      ['moveSpeed', src.moveSpeed, live.moveSpeed], ['mag', src.mag, live.mag], ['reloadMs', src.reloadMs, live.reloadMs],
+      ['cat', src.cat, live.cat], ['role', src.role, live.role], ['pellets', src.pellets, live.pellets]]) {
+      if (a !== b && !(typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 1e-6)) parseMismatch.push(`${id}.${k}: tool ${a}, product ${b}`);
+    }
+  }
+  check('A.§F6: tools/balance.js 가 src/ 에서 정적으로 읽은 무기 표가 실행 중인 번들이 발행하는 표와 23종 전부에서 일치한다',
+    parseMismatch.length === 0, parseMismatch.slice(0, 10));
 
   /* §A1 은 목록이 아니라 문법이다 — 무기고 전체에 대해 참이거나 어디에도 참이 아니다. */
   const altTableCD = await page.evaluate(() => window.__crashScreen.debug.altTable());
@@ -5953,6 +6016,393 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
     !!yankA && yankA.t.held === false && Math.hypot(yankA.b.vx, yankA.b.vy) > 50, yankA);
   await api.restore(page);
   await sleep(140);
+
+  // =======================================================================================
+  // SPEC-arsenal §E 무기 다양화 (9단계) — 샷건 · 못총 · 냉각총 · 중력탄, 무기고가 23종이 된다.
+  //   §E 가 건 기준은 "피해량이 다른가" 가 아니라 "할 수 있는 일이 다른가" 다. 그래서 아래 단언은
+  //   전부 **새 동사**를 본다: 한 번에 여럿 / 조각 고정 / 피해 증폭 / 끌어모으기.
+  // =======================================================================================
+  console.log('--- ammo: SPEC-arsenal §E — 샷건 · 못총 · 냉각총 · 중력탄 (무기고 23종) ---');
+  await api.restore(page);
+  await sleep(120);
+  const arsE = {};
+  for (const w of await page.evaluate(() => window.__crashScreen.arsenal())) arsE[w.id] = w;
+  const utC = await page.evaluate(() => window.__crashScreen.debug.utConst());
+
+  check('A.§E 표: 샷건은 펠릿 9발에 한 발씩 장전, 못총은 고정 반경 130 의 길게 누르는 무기, 냉각총은 피해 4 의 길게 누르는 무기, 중력탄은 직접 피해 0 이다',
+    !!utC && utC.pellets === 9 && utC.shellReload === true
+    && utC.pinRadius === 130 && utC.pinMax === 6
+    && arsE.nailgun && arsE.nailgun.hold === true && arsE.freezegun && arsE.freezegun.hold === true && arsE.freezegun.damage === 4
+    && arsE.gravity && arsE.gravity.damage === 0 && utC.gravityDamage === 0
+    && arsE.shotgun && arsE.shotgun.hold === false,
+    { utC, shotgun: arsE.shotgun, nailgun: arsE.nailgun, freezegun: arsE.freezegun, gravity: arsE.gravity });
+  check('A.§E 표: 냉각총의 빙결이 §E 가 적은 세 숫자를 그대로 들고 있다 — 받는 피해 ×1.8, 조각 수 ×2.5, 적 2초 정지',
+    !!utC && utC.freezeMul === 1.8 && utC.pieceMul === 2.5 && utC.stunMs === 2000, utC);
+
+  /* §E 의 조준점 · 분해 방식 · 무기 아트는 무기고 전체를 도는 기존 단언들이 이미 본다(§A4 · 6단계 §B ·
+   * 5단계 §9 — 전부 ARSENAL_IDS 를 돌고 23 이 되었다). 여기서는 §F5 역할만 따로 확인한다. */
+  const destE = await page.evaluate((ids) => {
+    const w = window.__crashScreen.debug.weaponBand();
+    const by = {}; for (const r of w) by[r.id] = r;
+    return ids.map((id) => by[id] && by[id].role);
+  }, UT_IDS);
+  check('A.§E: 네 무기 전부 §F5 역할을 들고 있다 (밀집 다수 동시 · 조각 고정 · 피해 증폭 · 끌어모으기)',
+    destE.join(',') === 'cluster,pin,amplify,gather', destE);
+
+  /* ---- §E 샷건: 밀집한 작은 요소를 한 번에 ------------------------------------------------------- */
+  await api.setWeapon(page, 'shotgun');
+  await sleep(360);
+  const clusterE = await api.rect(page, '#cluster');
+  /* 펠릿은 무작위로 흩어진다. "한 번에 여럿" 은 한 발의 결과이지 평균이 아니므로, 한 발을 쏘고 그 한
+   * 발이 몇 개를 쳤는지(`lastSpread`)를 제품이 직접 세어 발행한 값으로 읽는다 — 밖에서 HP 를 여러 번
+   * 왕복해 재면 그 사이에 조각이 생기고 사라져 무엇을 셌는지 알 수 없게 된다. */
+  const sgShotE = await page.evaluate((x, y) => {
+    const a = window.__crashScreen;
+    a.smashAt(x, y);
+    return { spread: a.debug.utility().lastSpread, dealt: a.stats().damageDealt };
+  }, clusterE.cx, clusterE.cy);
+  check(`A.§E 샷건: 한 발(펠릿 9)이 밀집한 요소 여럿을 동시에 친다 — 이번 한 발이 ${sgShotE.spread}개를 쳤다`,
+    sgShotE.spread >= 2 && sgShotE.dealt > 0, { sgShotE, cluster: clusterE });
+
+  /* §E "한 발씩 장전": 탄창을 비우고 재장전이 도는 동안 한 발씩 차오르는지, 그리고 중간에 쏘면 그때까지
+   * 채운 발이 남는지를 본다. fastReload 를 끄고 실제 420 ms 를 센다 — 이 단언은 시간 자체가 요점이다. */
+  await api.debug(page, { fastReload: false, infiniteAmmo: false });
+  await api.setWeapon(page, 'shotgun');
+  await sleep(360);
+  const sgDrainE = await poll(async () => {
+    const am = await api.ammo(page);
+    if (am && (am.mag === 0 || am.reloading)) return am;
+    await api.smashAt(page, clusterE.cx, clusterE.cy);
+    await sleep(430);
+    return null;
+  }, 6000, 80);
+  const sgShellsE = [];
+  for (let i = 0; i < 6; i++) { sgShellsE.push((await api.ammo(page)).mag); await sleep(230); }
+  const sgRose = sgShellsE.some((v, i) => i > 0 && v > sgShellsE[i - 1]);
+  const sgNeverFull = sgShellsE.slice(0, 3).every((v) => v < 6);
+  check(`A.§E 샷건 한 발씩 장전: 빈 탄창이 **한 발씩** 차오른다 — 통째로 채워지지 않는다 (관측 ${sgShellsE.join('→')})`,
+    !!sgDrainE && sgRose && sgNeverFull, { sgDrainE, sgShellsE });
+  await api.debug(page, { fastReload: true });
+  await api.restore(page);
+  await sleep(140);
+
+  /* ---- §E 못총: 고정 ------------------------------------------------------------------------------ */
+  /* 고정할 **조각이 있어야** 고정을 볼 수 있다. 한 대로는 부서지지 않으므로 부서질 때까지 친다 —
+   * 첫 측정은 이것 때문에 "추적 0개" 로 졌다. 요소의 패딩을 노린다(가운데는 자식 <img> 다). */
+  const breakFor = async (sel) => {
+    for (let i = 0; i < 40 && !(await api.broken(page, sel)); i++) {
+      await page.evaluate((q) => {
+        const el = document.querySelector(q);
+        if (!el) return;
+        const b = el.getBoundingClientRect();
+        window.__crashScreen.smashAt(b.left + 6, b.top + 6);
+      }, sel);
+      await sleep(25);
+    }
+    return api.broken(page, sel);
+  };
+  await api.setWeapon(page, 'hammer');
+  await sleep(480);
+  const figE = await api.rect(page, '#figure');
+  const figBrokeE = await breakFor('#figure');
+  check('A.§E 못총 (전제): 못을 박을 조각이 생겼다 — #figure 가 부서졌다', figBrokeE === true, figBrokeE);
+  await sleep(200);
+  await api.setWeapon(page, 'nailgun');
+  await sleep(300);
+  /* 고정은 **그 자리에 멈춘다**는 뜻이다. 밖에서 두 번 왕복해 좌표를 재면 그 사이의 프레임이 몇 장인지
+   * 알 수 없으므로, 페이지 안에서 못을 박고 rAF 로 12 프레임을 센 다음 한 번에 가져온다. */
+  const pinE = await page.evaluate((x, y) => new Promise((resolve) => {
+    const a = window.__crashScreen, d = a.debug;
+    const n = d.pinAt(x, y, 400, 8);
+    const before = d.pieceBoxes().filter((p) => p.resting);
+    const pinned = d.pins();
+    let frames = 0;
+    const step = () => {
+      if (++frames < 12) return requestAnimationFrame(step);
+      const after = d.pieceBoxes();
+      const byPid = {}; for (const p of after) byPid[p.pid] = p;
+      const moved = pinned.ids.map((pid) => {
+        const b = before.find((q) => q.pid === pid), c = byPid[pid];
+        if (!b || !c) return null;
+        return { pid, dx: +(c.rawL - b.rawL).toFixed(2), dy: +(c.rawTop - b.rawTop).toFixed(2), vx: c.vx, vy: c.vy };
+      }).filter(Boolean);
+      resolve({ n, pinned, moved, total: after.length });
+      };
+    requestAnimationFrame(step);
+  }), figE.cx, figE.cy);
+  check(`A.§E 못총 고정: 박힌 조각은 12프레임 뒤에도 그 자리에 있고 속도가 0 이다 — 공중에서 멈춘다 (${pinE.moved.length}개 추적)`,
+    pinE.n > 0 && pinE.moved.length > 0 && pinE.moved.every((m) => Math.abs(m.dx) < 0.5 && Math.abs(m.dy) < 0.5 && m.vx === 0 && m.vy === 0),
+    pinE);
+  /* "수명의 영향을 받지 않는다" 는 장부 위의 사실이다: debrisSweep() 은 expireAt / hardExpireAt 둘 중
+   * 하나라도 지나야 조각을 거둬 가고, 박힌 조각은 그 둘이 모두 0 이다.
+   * debug.expirePiece() 는 쓰지 않는다 — 그 훅은 **일부러** 만료 시각을 지금으로 덮어쓰는 디버그 훅이라
+   * (src/65-pieces.js) "수명이 꺼져 있는가" 가 아니라 "강제 만료가 먹히는가" 를 재게 된다. 첫 측정이
+   * 그래서 졌다. 대신 박힌 조각과 **박히지 않은** 조각의 장부를 나란히 읽고, 쓸기가 여러 번 도는
+   * 시간만큼 기다린 뒤 박힌 쪽이 그대로 있는지 본다. */
+  const pinLifeE = await page.evaluate((pids) => {
+    const d = window.__crashScreen.debug;
+    const free = d.pieceBoxes().filter((p) => p.resting && pids.indexOf(p.pid) < 0).map((p) => p.pid);
+    return {
+      pinned: pids.map((pid) => d.pieceLife(pid)).filter(Boolean),
+      free: free.slice(0, 3).map((pid) => d.pieceLife(pid)).filter(Boolean)
+    };
+  }, pinE.pinned.ids);
+  await sleep(900);
+  const pinAliveE = await page.evaluate((pids) => ({
+    alive: pids.filter((pid) => window.__crashScreen.debug.pieceLife(pid)).length,
+    asked: pids.length,
+    pins: window.__crashScreen.debug.pins()
+  }), pinE.pinned.ids);
+  check('A.§E 못총 고정: 박힌 조각은 수명의 영향을 받지 않는다 — expireAt 과 hardExpireAt 이 모두 0 이고(박히지 않은 조각은 0 이 아니다) 쓸기가 여러 번 돈 뒤에도 그대로 있다',
+    pinLifeE.pinned.length > 0 && pinLifeE.pinned.every((p) => p.pinned === true && p.expireAt === 0 && p.hardExpireAt === 0)
+    && pinLifeE.free.every((p) => p.hardExpireAt > 0)
+    && pinAliveE.alive === pinAliveE.asked && pinAliveE.pins.pinned > 0,
+    { pinLifeE, pinAliveE });
+  await api.restore(page);
+  await sleep(140);
+
+  /* ---- §E 냉각총: 피해 증폭 ------------------------------------------------------------------------ */
+  await api.setWeapon(page, 'freezegun');
+  await sleep(360);
+  const fzE = await page.evaluate(() => {
+    const a = window.__crashScreen, d = a.debug;
+    const el = document.querySelector('#big-card');
+    const hp0 = a.hpOf(el).hp;
+    d.freeze2(el, 60, 4000);
+    const info = d.frozenOf(el);
+    const hp1 = a.hpOf(el).hp;
+    a.setWeapon('hammer');
+    return { hp0, hp1, info, frozen: !!(info && info.frozen) };
+  });
+  await sleep(500);
+  const fzHitE = await page.evaluate(() => {
+    const a = window.__crashScreen;
+    const el = document.querySelector('#big-card');
+    const r = el.getBoundingClientRect();
+    const before = a.hpOf(el).hp;
+    a.debug.noCrit = true;
+    a.smashAt(r.left + 8, r.top + 8);
+    return { before, after: a.hpOf(el).hp, frozen: a.debug.frozenOf(el) };
+  });
+  check(`A.§E 냉각총 피해 증폭: 언 요소를 망치로 치면 65 가 아니라 117 이 들어간다 (×1.8) — 관측 ${fzHitE.before - fzHitE.after}`,
+    fzE.frozen === true && (fzHitE.before - fzHitE.after) === Math.round(65 * 1.8), { fzE, fzHitE });
+  /* §E "SPA 리렌더도 묶는다" — 고른 해석(보고에 적었다): 얼어 있는 동안 그 요소 자신의 애니메이션과
+   * 전이가 멈춘다. 인라인 두 줄이고, 원래 값과 우선순위를 저장했다가 되돌린다. */
+  check('A.§E 냉각총: 얼어 있는 동안 그 요소의 animation-play-state 가 paused 이고 transition 이 none 이다 (고른 해석: "SPA 리렌더도 묶는다")',
+    !!fzHitE.frozen && fzHitE.frozen.paused === 'paused' && fzHitE.frozen.transition === 'none' && fzHitE.frozen.owns === true && fzHitE.frozen.frost === true,
+    fzHitE.frozen);
+  await api.restore(page);
+  await sleep(140);
+
+  /* §E "조각 수 ×2.5": 같은 무기로 **같은 요소**를 두 번 부수되 한 번은 얼려 두고 한 번은 아니다.
+   * 쌍둥이 두 개를 쓰지 않는 이유는, 조각 수가 요소의 면적 · 자손 수 · 재질 · 분해 모양에 전부 달려 있어
+   * 겉보기 쌍둥이도 같은 수가 나오지 않기 때문이다. api.restore() 가 요소를 되살리므로 같은 요소를 두 번
+   * 쓸 수 있다 — 그게 이 제품에서 가장 정확한 대조군이다. */
+  const pieceCmpE = [];
+  for (const frozenRun of [false, true]) {
+    await api.restore(page);
+    await sleep(170);
+    await api.setWeapon(page, 'hammer');
+    await sleep(480);
+    await api.rect(page, '#figure');
+    const froze = frozenRun
+      ? await page.evaluate(() => window.__crashScreen.debug.freeze2(document.querySelector('#figure'), 90, 9000))
+      : null;
+    const broke = await breakFor('#figure');
+    const seen = await page.evaluate(() => {
+      const d = window.__crashScreen.debug;
+      return { pieces: d.pieceBoxes().filter((p) => !p.chip).length, frozen: !!d.frozenOf(document.querySelector('#figure')) };
+    });
+    pieceCmpE.push({ frozen: frozenRun, froze, broke, pieces: seen.pieces });
+  }
+  check(`A.§E 냉각총 조각 수: 같은 요소를 얼려서 부수면 더 많은 조각으로 깨진다 (×2.5) — ${pieceCmpE[0].pieces} → ${pieceCmpE[1].pieces}`,
+    pieceCmpE.length === 2 && pieceCmpE.every((r) => r.broke === true) && pieceCmpE[1].froze > 0
+    && pieceCmpE[1].pieces > pieceCmpE[0].pieces, pieceCmpE);
+  await api.restore(page);
+  await sleep(140);
+
+  /* §E 가 "특히 중요하다" 고 적은 연계: 물총이 적셔 두면 냉각총이 2.5배로 언다 (8단계 §D 의 ixCoolMul).
+   * 로드아웃 구성에 처음으로 조합이라는 개념이 생기는 자리다. */
+  const comboE = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    const dry = document.querySelector('#small-card');
+    const wet = document.querySelector('#big-card');
+    /* 10 은 "얼었다" 의 문턱(12) 아래라 fzFreeze() 가 null 을 돌려준다 — 첫 측정은 그것 때문에 졌다.
+     * 20 이면 마른 쪽도 얼고, 젖은 쪽은 같은 한 틱에 50 이 된다. */
+    d.wet(wet, 8000);
+    const a = d.freeze2(dry, 20, 4000);
+    const b = d.freeze2(wet, 20, 4000);
+    return { dry: a, wet: b, coolMulDry: d.coolMul(dry), coolMulWet: d.coolMul(wet) };
+  });
+  check(`A.§E 연계 (물총 → 냉각총): 젖은 요소는 같은 한 틱에 2.5배로 언다 — 마른 ${comboE.dry} 대 젖은 ${comboE.wet}`,
+    comboE.coolMulDry === 1 && comboE.coolMulWet === 2.5 && comboE.wet === Math.round(comboE.dry * 2.5 * 100) / 100,
+    comboE);
+  await api.restore(page);
+  await sleep(140);
+
+  /* ---- §E 중력탄: 끌어모으기 ---------------------------------------------------------------------- */
+  await api.setWeapon(page, 'hammer');
+  await sleep(480);
+  const gvFigE = await api.rect(page, '#long-para');
+  const gvBrokeE = await breakFor('#long-para');
+  check('A.§E 중력탄 (전제): 끌어모을 조각이 생겼다 — #long-para 가 단어 조각으로 흩어졌다', gvBrokeE === true, gvBrokeE);
+  await sleep(260);
+  /* 중력장 **안에 있던** 조각만 따라간다. 밖에 있던 것은 §E 가 당긴다고 하지 않았고, 전체 평균을 쓰면
+   * 당겨지지 않는 것들이 신호를 덮는다. 조각 id 로 같은 조각을 앞뒤로 비교하므로 그 사이에 수명으로
+   * 사라진 것은 자동으로 빠진다 — 측정 쪽 결함 네 가지 중 두 가지가 여기서 막힌다. */
+  const gvE = await page.evaluate((x, y) => new Promise((resolve) => {
+    const a = window.__crashScreen, d = a.debug;
+    const dealt0 = a.stats().damageDealt;
+    const R = d.utConst().wellR;
+    const centre = { x, y };
+    const distOf = (p) => Math.hypot((p.l + p.r) / 2 - centre.x, (p.top + p.bottom) / 2 - centre.y);
+    const before = {};
+    for (const p of d.pieceBoxes()) { if (p.chip) continue; const dd = distOf(p); if (dd <= R) before[p.pid] = dd; }
+    const pids = Object.keys(before).map(Number);
+    d.gravityAt(x, y);
+    let frames = 0;
+    const step = () => {
+      if (++frames < 40) return requestAnimationFrame(step);
+      const after = {};
+      for (const p of d.pieceBoxes()) if (before[p.pid] != null) after[p.pid] = distOf(p);
+      const kept = pids.filter((pid) => after[pid] != null);
+      const mean = (f) => (kept.length ? kept.reduce((s2, pid) => s2 + f(pid), 0) / kept.length : null);
+      resolve({
+        d0: mean((pid) => before[pid]), d1: mean((pid) => after[pid]),
+        inside: pids.length, kept: kept.length, R,
+        closer: kept.filter((pid) => after[pid] < before[pid] - 1).length,
+        wells: d.wells(), dealt: a.stats().damageDealt - dealt0
+      });
+    };
+    requestAnimationFrame(step);
+  }), gvFigE.cx, gvFigE.cy);
+  check(`A.§E 중력탄 끌어모으기: 중력장 안(반경 ${gvE.R})에 있던 조각 ${gvE.kept}개의 평균 거리가 ${gvE.d0 && gvE.d0.toFixed(1)} → ${gvE.d1 && gvE.d1.toFixed(1)} px 로 줄고(${gvE.closer}개가 가까워졌다) **직접 피해는 0 이다**`,
+    gvE.kept >= 3 && gvE.d0 != null && gvE.d1 != null && gvE.d1 < gvE.d0 && gvE.closer > gvE.kept / 2 && gvE.dealt === 0,
+    gvE);
+  await api.restore(page);
+  await sleep(160);
+
+  /* ---- §A1 문법: 네 무기도 보조 공격을 갖는다 ----------------------------------------------------- */
+  const altTableE = await page.evaluate(() => window.__crashScreen.debug.altTable());
+  check('A.§E (§A1): 네 무기 전부 보조 공격 유형을 들고 있고, 길게 눌러 지속되는 냉각총만 짧게 누르는 쪽이 보조다',
+    !!altTableE && UT_IDS.every((id) => altTableE[id] && typeof altTableE[id].type === 'string')
+    && altTableE.freezegun.type === 'burst'
+    && ['shotgun', 'nailgun', 'gravity'].every((id) => altTableE[id].type === 'charge' && altTableE[id].ms > 0),
+    UT_IDS.map((id) => `${id}:${altTableE && altTableE[id] && altTableE[id].type}/${altTableE && altTableE[id] && altTableE[id].ms}`));
+
+  /* ---- 무흔적: 빙결 · 고정 · 중력장이 전부 걸린 채로 Escape -------------------------------------- */
+  await api.setWeapon(page, 'hammer');
+  await sleep(480);
+  const traceFigE = await api.rect(page, '#table');
+  await breakFor('#table');
+  await sleep(220);
+  const traceSetE = await page.evaluate((x, y) => {
+    const a = window.__crashScreen, d = a.debug;
+    const el = document.querySelector('#big-card');
+    /* 되돌릴 "원래 값" 이 빈 문자열이 아니어야 이 단언이 뜻을 갖는다 — 페이지가 이미 쓰고 있던 인라인
+     * 값을 먼저 심어 두고, 빙결이 그 위에 쓴 뒤, 복구가 **그 값으로** 돌아오는지 본다. */
+    el.style.setProperty('animation-play-state', 'running');
+    el.style.setProperty('transition', 'opacity 2s ease-in-out');
+    d.freeze2(el, 80, 9000);
+    d.pinAt(x, y, 500, 8);
+    d.gravityAt(x, y);
+    return {
+      ut: d.utility(),
+      frozen: d.frozenOf(el),
+      inline: { aps: el.style.getPropertyValue('animation-play-state'), tr: el.style.getPropertyValue('transition') }
+    };
+  }, traceFigE.cx, traceFigE.cy);
+  await sleep(120);
+  await page.keyboard.press('Escape');
+  await sleep(320);
+  await settleRaf(page);
+  const traceAfterE = await page.evaluate(() => {
+    const el = document.querySelector('#big-card');
+    return {
+      crsNodes: document.querySelectorAll('[data-crs]').length,
+      frost: document.querySelectorAll('.crs-frost').length,
+      wells: document.querySelectorAll('.crs-well').length,
+      nails: document.querySelectorAll('.crs-nail').length,
+      inline: { aps: el.style.getPropertyValue('animation-play-state'), tr: el.style.getPropertyValue('transition') }
+    };
+  });
+  const tracePendingE = await api.pending(page);
+  const traceRafE = await api.pendingRaf(page);
+  check('A.§E 무흔적: 빙결 · 고정 · 중력장이 전부 걸린 채 Escape → [data-crs] 0개, 서리/중력장/못 노드 0개, 타이머 0, 프레임 0',
+    traceSetE.ut.frozen > 0 && traceSetE.ut.pinned > 0 && traceSetE.ut.wells > 0
+    && traceAfterE.crsNodes === 0 && traceAfterE.frost === 0 && traceAfterE.wells === 0 && traceAfterE.nails === 0
+    && tracePendingE === 0 && traceRafE === 0,
+    { before: traceSetE.ut, after: traceAfterE, timers: tracePendingE, rafs: traceRafE });
+  check('A.§E 무흔적: 빙결이 빌려 간 인라인 두 속성이 **빈 문자열이 아니라 원래 값**으로 돌아온다 (running / opacity 2s ease-in-out)',
+    traceSetE.inline.aps === 'paused' && traceSetE.inline.tr === 'none'
+    && traceAfterE.inline.aps === 'running' && /opacity 2s/.test(traceAfterE.inline.tr),
+    { before: traceSetE.inline, after: traceAfterE.inline });
+  await page.evaluate(() => { const el = document.querySelector('#big-card'); el.style.removeProperty('animation-play-state'); el.style.removeProperty('transition'); });
+  const reOnE = await page.evaluate(contentJs);
+  check('A.§E 무흔적: Escape 로 내린 뒤 content.js 를 다시 평가하면 "on" 으로 되살아난다 — 흔적을 지우는 것이 기능을 망가뜨리지 않았다', reOnE === 'on', reOnE);
+  await sleep(260);
+  await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noFalloff: true, noPartial: true });
+  await api.restore(page);
+  await sleep(140);
+
+  // =======================================================================================
+  // SPEC-arsenal §F 밸런스 — tools/balance.js 가 실제로 위반을 잡는지 본다.
+  //   밸런스를 "문서가 아니라 실행 가능한 검사" 로 만든 것이 §F6 의 요점이므로, 그 검사 자체에
+  //   검사가 필요하다: 일부러 어긋난 표를 넣으면 exit 1 이어야 한다.
+  // =======================================================================================
+  const bandNow = balance.model();
+  check(`A.§F4: 실전 ${bandNow.rows.filter((r) => r.cat === 'field').length}종이 전부 중앙값(${Math.round(bandNow.median)}) ±18% 안에 있다 — 붕괴만 §F4 가 직접 뺀다`,
+    bandNow.rows.filter((r) => r.cat === 'field' && r.id !== 'collapse').every((r) => r.ratio >= 0.82 - 1e-9 && r.ratio <= 1.18 + 1e-9),
+    bandNow.rows.filter((r) => r.cat === 'field').map((r) => `${r.id} ${(r.ratio * 100).toFixed(0)}%`));
+  check('A.§F4: 특수 다섯은 제공 효용 환산 후 40~90%, 예능 넷은 25~50% 이고 예능 넷만 quirk 를 들고 있다',
+    bandNow.rows.filter((r) => r.cat === 'special').every((r) => r.ratio >= 0.40 - 1e-9 && r.ratio <= 0.90 + 1e-9)
+    && bandNow.rows.filter((r) => r.cat === 'fun').every((r) => r.ratio >= 0.25 - 1e-9 && r.ratio <= 0.50 + 1e-9)
+    && bandNow.rows.filter((r) => r.cat === 'fun').every((r) => !!r.quirk)
+    && bandNow.rows.filter((r) => r.cat !== 'fun').every((r) => !r.quirk),
+    bandNow.rows.filter((r) => r.cat !== 'field').map((r) => `${r.id} ${r.cat} ${(r.ratio * 100).toFixed(0)}% quirk=${r.quirk}`));
+  const roleSetF = bandNow.rows.map((r) => r.role);
+  check('A.§F5 역할: 23종이 전부 역할을 들고 있고 **하나도 겹치지 않는다**',
+    roleSetF.every((v) => typeof v === 'string' && v.length > 0) && new Set(roleSetF).size === roleSetF.length,
+    roleSetF.join(','));
+  check('A.§F6: 현재 무기 표에 위반이 하나도 없다 — node tools/balance.js --check 가 exit 0 이다',
+    bandNow.violations.length === 0, bandNow.violations.map((v) => `§F6-${v.rule} ${v.id}: ${v.msg}`));
+
+  /* 그 검사가 **실제로 잡는지**. src 트리를 통째로 복사해 네 군데를 일부러 어긋나게 만든 뒤
+   * CRS_BALANCE_SRC 로 도구를 그쪽에 겨누고 exit 1 과 규칙 번호를 확인한다. 저장소는 건드리지 않는다. */
+  const brokenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crs-balance-'));
+  try {
+    for (const f of fs.readdirSync(path.join(__dirname, '..', 'src'))) {
+      if (!/\.js$/.test(f)) continue;
+      fs.copyFileSync(path.join(__dirname, '..', 'src', f), path.join(brokenDir, f));
+    }
+    const pre = path.join(brokenDir, '00-prelude.js');
+    let txt = fs.readFileSync(pre, 'utf8');
+    txt = txt.replace("gravity:   { cat: 'special', role: 'gather', utility: 150 }", "gravity:   { cat: 'special', role: 'push', utility: 150 }");   // §F5 역할 겹침
+    txt = txt.replace("shotgun:   { cat: 'field',   role: 'cluster' }", "shotgun:   { cat: 'field',   role: 'cluster', moveSpeed: 1.9 }");         // §F6-5 moveSpeed 밖
+    fs.writeFileSync(pre, txt, 'utf8');
+    let brokenOut = '';
+    let brokenCode = 0;
+    try {
+      execFileSync(process.execPath, [path.join(__dirname, '..', 'tools', 'balance.js'), '--check', '--quiet'],
+        { env: Object.assign({}, process.env, { CRS_BALANCE_SRC: brokenDir }), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      brokenCode = e.status == null ? -1 : e.status;
+      brokenOut = String((e.stderr || '') + (e.stdout || ''));
+    }
+    check('A.§F6: 일부러 어긋난 표(역할 겹침 + moveSpeed 1.9)를 주면 tools/balance.js --check 가 exit 1 이고 어떤 규칙이 깨졌는지 말한다',
+      brokenCode === 1 && /§F6-5/.test(brokenOut) && /§F6-F5/.test(brokenOut),
+      { brokenCode, brokenOut: brokenOut.split('\n').slice(0, 6).join(' | ') });
+  } finally {
+    try { fs.rmSync(brokenDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  }
+  /* docs/BALANCE.md 는 content.js 와 같은 생성물이다 — 어긋나 있으면 --check 가 진다. */
+  let docFresh = 0;
+  try {
+    execFileSync(process.execPath, [path.join(__dirname, '..', 'tools', 'balance.js'), '--check', '--quiet'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) { docFresh = e.status == null ? -1 : e.status; }
+  check('A.§F6: 커밋된 docs/BALANCE.md 가 현재 무기 표와 일치한다 (생성물이므로 어긋나면 --check 가 진다)',
+    docFresh === 0, docFresh);
+
 
   await api.applyPreset(page, 'default');
   await api.setWeapon(page, 'hammer');
@@ -9607,9 +10057,15 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   check('A.§A7: 로켓을 쏘면 준비 링이 뜨고 0 → 1 로 차오르다가 쿨다운이 끝나면 사라진다 — 탄약 HUD 를 안 봐도 언제 쏠 수 있는지 안다',
     !!ringIdle && ringIdle.on === false && !!ringA && ringA.on === true && ringA.kind === 'cooldown' && !!ringB && ringB.deg !== null && ringA.deg !== null && ringB.deg > ringA.deg && !!ringGone,
     { idle: ringIdle, at120: ringA, at620: ringB, gone: !!ringGone });
-  // 재장전: 로켓은 탄창 2발이라 한 발 더 쏘면 자동 재장전에 들어간다
-  await poll(async () => (await api.ammo(page)).mag === 1, 2500, 60);
-  await api.smashAt(page, cardCh.cx, cardCh.cy);
+  /* 재장전: 탄창이 빌 때까지 쏘면 자동 재장전에 들어간다.
+   * CHANGED by SPEC-arsenal §F7: 로켓 탄창이 2 → 3 이 되어 "한 발 더" 로는 비지 않는다. 탄창 크기를
+   * 전제하지 않도록 **빌 때까지** 쏘는 모양으로 고쳐 썼다 — 다음에 또 움직여도 여기는 안 깨진다. */
+  for (let guard = 0; guard < 8; guard++) {
+    const amCh = await api.ammo(page);
+    if (!amCh || amCh.reloading || amCh.mag === 0) break;
+    await api.smashAt(page, cardCh.cx, cardCh.cy);
+    await sleep(1300);   // 로켓 쿨다운 1200 ms — 배율 1 로 둔다 (쿨다운 자체가 이 단언의 요점이다)
+  }
   const ringReload = await poll(async () => { const r = await ringRead(); return r && r.kind === 'reload' ? r : null; }, 2500, 50);
   check('A.§A7: 재장전 중에는 링의 색이 다르다 (#e3b341) — 쿨다운과 재장전이 같은 자리에서 구별된다',
     !!ringReload && /227,\s*179,\s*65/.test(ringReload.bg), ringReload);
@@ -10837,7 +11293,7 @@ async function suiteC(puppeteer, origin) {
    * 본질인 단언들이라 전부 거기로 갔다) and went 28 s → 42 s, `rules` took the 나팔 · 견인 단언들, and
    * `ammo` took the 무기 표 · 예능 밴드. Order is measured cost, longest first. */
   const A_BLOCKS = [
-    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~92 s
+    ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~107 s — §E 가 들어오며 92 → 107 s. 가장 긴 레인이고 벽시계가 곧 이 값이다
     ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],       // ~76 s
     ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~60 s
     ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~42 s

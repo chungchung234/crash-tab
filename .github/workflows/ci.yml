@@ -73,6 +73,13 @@ jobs:
       - name: Static validation
         run: node tools/validate.js
 
+      # SPEC-arsenal §F6: 밸런스를 문서가 아니라 실행 가능한 검사로 만든다 — 밸런스 회귀가 테스트로 잡힌다.
+      # tools/balance.js 는 src/ 의 무기 표를 정적으로 파싱해 §F6 의 위반 다섯 가지와 §F5 의 역할 겹침을
+      # 검사하고, 사람이 읽을 표인 docs/BALANCE.md 가 그 표와 어긋나 있으면 함께 실패한다(생성물이므로
+      # content.js 와 같은 규칙이다 — 고치는 법은 `node tools/balance.js --write`).
+      - name: Balance bands
+        run: node tools/balance.js --check --quiet
+
       - name: Icons are deterministic
         run: |
           rm -rf "$RUNNER_TEMP/icons-committed"

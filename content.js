@@ -39,19 +39,25 @@
   /* SPEC-arsenal §C (상호작용) · §D (예능), 8단계: the arsenal grows 12 → 19. The three §C weapons ride the
    * displacement system (src/67-displace.js) and the four §D weapons are the 예능 band — weak on paper, each
    * carrying ONE effect that is not damage. Nothing about the loadout changed: it is still at most 10. */
+  /* SPEC-arsenal §E (무기 다양화), 9단계: the arsenal grows 19 → 23. The bar for a new weapon is not
+   * "피해량이 다른가" but "할 수 있는 일이 다른가" — four new verbs: 밀집한 작은 요소를 한 번에 (샷건),
+   * 조각 고정 (못총), 빙결로 피해 증폭 (냉각총), 끌어모으기 (중력탄). 냉각총이 특히 중요하다: 혼자 쓰면
+   * 가장 약하고 반드시 다른 무기와 같이 써야 한다 — 로드아웃 구성에 처음으로 조합이라는 개념이 생긴다.
+   * The ids are APPENDED, so every existing slot, key and preset keeps the position it had. */
   const WEAPON_IDS = ['hammer', 'pistol', 'smg', 'sniper', 'axe', 'katana', 'bomb', 'rocket', 'flame', 'collapse', 'laser', 'minigun',
-    'shockwave', 'tractor', 'rubber', 'squeaky', 'watergun', 'horn', 'chicken'];
+    'shockwave', 'tractor', 'rubber', 'squeaky', 'watergun', 'horn', 'chicken',
+    'shotgun', 'nailgun', 'freezegun', 'gravity'];
   const LOADOUT_MAX = 10;            // §B1: 숫자키 10칸
   const WEAPONS = {
-    hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
+    hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 400,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     pistol:   { id: 'pistol',   emoji: '🔫', name: 'weaponPistol',   kind: 'gun',      damage: 25,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: 12, reloadMs: 900 },
     smg:      { id: 'smg',      emoji: '💥', name: 'weaponSmg',      kind: 'gun',      damage: 22,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 70, mag: 30, reloadMs: 1400 },
-    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 5, reloadMs: 2000, spread: 25, scope: true },
+    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 5, reloadMs: 1900, spread: 25, scope: true },
     axe:      { id: 'axe',      emoji: '🪓', name: 'weaponAxe',      kind: 'hammer',   damage: 130, cooldownMs: 550,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
-    katana:    { id: 'katana',    emoji: '🗡️', name: 'weaponKatana',    kind: 'hammer',   damage: 60,  cooldownMs: 0,    radius: 0,   hold: false, input: 'drag', stabCooldownMs: 120, mag: null, reloadMs: null },
+    katana:    { id: 'katana',    emoji: '🗡️', name: 'weaponKatana',    kind: 'hammer',   damage: 60,  cooldownMs: 0,    radius: 0,   hold: false, input: 'drag', stabCooldownMs: 520, mag: null, reloadMs: null },
     bomb:     { id: 'bomb',     emoji: '💣', name: 'weaponBomb',     kind: 'bomb',     damage: 190, cooldownMs: 700,  radius: 240, hold: false, input: 'click', rings: [60, 130, 210], maxTargets: 10, mag: 3, reloadMs: 1800 },
-    rocket:   { id: 'rocket',   emoji: '🚀', name: 'weaponRocket',   kind: 'bomb',     damage: 260, cooldownMs: 1200, radius: 360, hold: false, input: 'click', rings: [70, 150, 230, 320], maxTargets: 14, mag: 2, reloadMs: 1500 },
-    flame:    { id: 'flame',    emoji: '🔥', name: 'weaponFlame',    kind: 'gun',      damage: 15,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 50, mag: 100, reloadMs: 2500 },
+    rocket:   { id: 'rocket',   emoji: '🚀', name: 'weaponRocket',   kind: 'bomb',     damage: 260, cooldownMs: 1200, radius: 360, hold: false, input: 'click', rings: [70, 150, 230, 320], maxTargets: 14, mag: 3, reloadMs: 1400 },
+    flame:    { id: 'flame',    emoji: '🔥', name: 'weaponFlame',    kind: 'gun',      damage: 15,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 50, mag: 100, reloadMs: 3400 },
     collapse: { id: 'collapse', emoji: '🌪️', name: 'weaponCollapse', kind: 'collapse', damage: Infinity, cooldownMs: 2000, radius: Infinity, hold: false, input: 'click', mag: 1, reloadMs: 5000 },
     /* ── SPEC-arsenal §B2 레이저 커터 ───────────────────────────────────────────────────────────────
      * No magazine at all: `heat` 0–100 is the resource (heatPerTick / heatPulse / overheatMs / coolDelayMs
@@ -64,11 +70,11 @@
      * `Object.assign(W, undefined)` leaves what is written here alone. */
     laser:    { id: 'laser',    emoji: '🔆', name: 'weaponLaser',   kind: 'gun',      damage: 11,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 50, mag: null, reloadMs: null,
                 heat: true, heatPerTick: 2.2, heatPulse: 25, heatMax: 100, overheatMs: 2500, coolDelayMs: 400, coolPerSec: 28, pulseDamage: 90,
-                swapMs: 320, recoil: 0.2, bloom: 0, critChance: 0.07, knockback: 0.4, moveSpeed: 0.88, falloff: 0, pierce: 999, pierceFalloff: 0.75 },
+                swapMs: 250, recoil: 0.2, bloom: 0, critChance: 0.07, knockback: 0.4, moveSpeed: 1.00, falloff: 0, pierce: 999, pierceFalloff: 0.75 },
     /* ── SPEC-arsenal §B3 미니건 ────────────────────────────────────────────────────────────────────
      * 26 damage every 60 ms = 433/s, the number §B3's table publishes. `spinUpMs` is the 0.8 s 예열 before
      * the first round and `idleGraceMs` the 0.6 s 공회전 유예 that lets a re-press skip it. */
-    minigun:  { id: 'minigun',  emoji: '⚙️', name: 'weaponMinigun', kind: 'gun',      damage: 26,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 60, mag: 200, reloadMs: 4000,
+    minigun:  { id: 'minigun',  emoji: '⚙️', name: 'weaponMinigun', kind: 'gun',      damage: 26,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 60, mag: 300, reloadMs: 2600,
                 spinUpMs: 800, idleGraceMs: 600, fixedRounds: 20,
                 swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 },
     /* ── SPEC-arsenal §C 상호작용 무기 ──────────────────────────────────────────────────────────────
@@ -91,12 +97,12 @@
                 swapMs: 380, recoil: 0, bloom: 0, critChance: 0, knockback: 0, moveSpeed: 0.95, falloff: 0, pierce: 0 },
     rubber:   { id: 'rubber', emoji: '⚪', name: 'weaponRubber', kind: 'gun', damage: 18, cooldownMs: 260, radius: 0, hold: false, input: 'click', mag: 8, reloadMs: 1300,
                 bouncyMs: 6000, bounceRest: 0.85, collisionMul: 1.6,
-                swapMs: 240, recoil: 0.8, bloom: 4, critChance: 0.05, knockback: 1.2, moveSpeed: 1.00, falloff: 0.20, pierce: 0 },
+                swapMs: 210, recoil: 0.8, bloom: 4, critChance: 0.05, knockback: 1.2, moveSpeed: 1.05, falloff: 0.20, pierce: 0 },
     /* ── SPEC-arsenal §D 예능 무기 ──────────────────────────────────────────────────────────────────
      * "밸런스 밴드에서 제외하되 … 실효 화력이 중앙값의 25~50%, 그리고 각각 피해가 아닌 고유 효과를 하나씩."
      * `quirk` names that effect so the rule is a field rather than a promise — §D's own table, in the table.
      * 뿅망치 and 고무 치킨 are melee (no magazine), which is also what makes them the fastest things to swing. */
-    squeaky:  { id: 'squeaky', emoji: '🎈', name: 'weaponSqueaky', kind: 'hammer', damage: 8, cooldownMs: 0, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
+    squeaky:  { id: 'squeaky', emoji: '🎈', name: 'weaponSqueaky', kind: 'hammer', damage: 8, cooldownMs: 170, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
                 quirk: 'squash', squashMs: 420,
                 swapMs: 120, recoil: 0.6, bloom: 0, critChance: 0.10, knockback: 0.9, moveSpeed: 1.20, falloff: 0, pierce: 0 },
     /* 틱 40 ms / 탄창 180: §D fixes the tick DAMAGE at 3 and says nothing about the rate, and 3 damage every
@@ -108,10 +114,81 @@
     horn:     { id: 'horn', emoji: '🎺', name: 'weaponHorn', kind: 'gun', damage: 5, cooldownMs: 520, radius: 420, hold: false, input: 'click', mag: 6, reloadMs: 1500,
                 quirk: 'reflect', coneDeg: 90, coneImpulse: 520, rings: [120, 260, 400], maxTargets: 12,
                 swapMs: 260, recoil: 0.9, bloom: 0, critChance: 0.04, knockback: 1.5, moveSpeed: 1.05, falloff: 0, pierce: 0 },
-    chicken:  { id: 'chicken', emoji: '🐔', name: 'weaponChicken', kind: 'hammer', damage: 12, cooldownMs: 0, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
+    chicken:  { id: 'chicken', emoji: '🐔', name: 'weaponChicken', kind: 'hammer', damage: 12, cooldownMs: 300, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
                 quirk: 'bouncy', bouncyChance: 0.20,
-                swapMs: 110, recoil: 0.5, bloom: 0, critChance: 0.18, knockback: 0.8, moveSpeed: 1.25, falloff: 0, pierce: 0 }
+                swapMs: 110, recoil: 0.5, bloom: 0, critChance: 0.18, knockback: 0.8, moveSpeed: 1.25, falloff: 0, pierce: 0 },
+    /* ── SPEC-arsenal §E 무기 다양화 (9단계) ────────────────────────────────────────────────────────
+     * 샷건: "펠릿 9발 원뿔. 밀집한 작은 요소를 한 번에. 사거리 감쇠 최대. 한 발씩 장전."
+     * `pellets` is a NEW table field and it is what makes 밀집 다수 동시 a number rather than a promise:
+     * one shell is nine hitscan rays inside `pelletCone` degrees, each one resolving its own target. The
+     * falloff 0.86 is the highest in the arsenal (§E: 사거리 감쇠 최대), and `shellReload` changes reloadMs's
+     * meaning — it becomes the time for ONE shell, because this magazine refills one at a time
+     * (src/69-utility.js wraps startReload for it). `pelletSpread` is the radius the nine rays scatter in at
+     * the aim point. `slugDamage` is the 보조 공격: one solid slug, no cone — §F6-3 의 "슬러그" 가 이것이다. */
+    shotgun:  { id: 'shotgun', emoji: '🎇', name: 'weaponShotgun', kind: 'gun', damage: 13, cooldownMs: 400, radius: 0, hold: false, input: 'click',
+                mag: 6, reloadMs: 420, shellReload: true, pellets: 9, pelletSpread: 72, slugDamage: 190,
+                swapMs: 300, recoil: 2.2, bloom: 0, critChance: 0.08, knockback: 1.5, moveSpeed: 0.92, falloff: 0.86, pierce: 0 },
+    /* 못총: "고정. 맞은 조각이 그 자리에 박힌다. 공중에서 멈추고 수명의 영향을 받지 않는다."
+     * `pinRadius` is how far from the nail a debris piece is caught, `pinMax` the cap per shot. The pin
+     * itself is src/69-utility.js — it freezes the piece's own integrator state and clears its expiry. */
+    nailgun:  { id: 'nailgun', emoji: '📌', name: 'weaponNailgun', kind: 'gun', damage: 19, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 100,
+                mag: 40, reloadMs: 1400, pinRadius: 130, pinMax: 6,
+                swapMs: 240, recoil: 0.9, bloom: 2, critChance: 0.07, knockback: 0.7, moveSpeed: 1.00, falloff: 0.18, pierce: 1 },
+    /* 냉각총: "빙결. 받는 피해 ×1.8, 조각 수 ×2.5, 적은 2초 정지. SPA 리렌더도 묶는다."
+     * 피해가 거의 없는 것이 설계다 — §E 가 "혼자 쓰면 가장 약하고 반드시 다른 무기와 같이 써야 한다" 고
+     * 적었다. 물총의 젖음이 `ixCoolMul` 로 빙결을 2.5배로 만들어 두었으므로(8단계 §D) 물총 → 냉각총 →
+     * 망치가 가장 센 연계가 된다. `utility` 는 §F4 특수 범주의 "제공 효용 환산" 이다 — 아래 §F 주석 참조. */
+    freezegun:{ id: 'freezegun', emoji: '❄️', name: 'weaponFreezegun', kind: 'gun', damage: 4, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 60,
+                mag: 100, reloadMs: 1800, freezePerTick: 7, freezeMul: 1.8, pieceMul: 2.5, stunMs: 2000, frostMs: 5000, shardDamage: 46,
+                swapMs: 340, recoil: 0.2, bloom: 0, critChance: 0.03, knockback: 0.3, moveSpeed: 0.90, falloff: 0.30, pierce: 0 },
+    /* 중력탄: "끌어모으기. 조각과 적의 탄환을 빨아들인다. 직접 피해 0."
+     * 직접 피해가 0 이므로 `effective` 가 0 이 되고, 곱셈으로 된 환산 계수로는 어떤 값을 줘도 0 이다.
+     * 그래서 §F4 의 "제공 효용 환산" 은 곱이 아니라 **burstDPS 에 더하는 환산 화력**(`utility`)으로 두었다
+     * — 그 무기가 로드아웃에 돌려주는 초당 피해를 적어 둔 숫자다. 유도 과정은 §F 주석에 있다. */
+    gravity:  { id: 'gravity', emoji: '🕳️', name: 'weaponGravity', kind: 'bomb', damage: 0, cooldownMs: 900, radius: 300, hold: false, input: 'click',
+                rings: [90, 180, 270], maxTargets: 12, mag: 3, reloadMs: 2000, wellMs: 1700, wellPull: 2600, wellOrbPull: 1900, collapseMul: 1.5,
+                swapMs: 320, recoil: 0.6, bloom: 0, critChance: 0, knockback: 0.4, moveSpeed: 1.00, falloff: 0, pierce: 0, aoeIgnoresCover: true }
   };
+  /* ── SPEC-arsenal §F4 범주 · §F5 역할 ─────────────────────────────────────────────────────────────
+   * §F5: "각 무기가 1등인 한 가지. 하나도 겹치면 안 된다. 겹치면 둘 중 하나는 존재 이유가 없다."
+   * 약속이 아니라 필드다 — `tools/balance.js --check` 가 빈 역할 · 모르는 역할 · 겹치는 역할을 잡는다.
+   * `cat` 은 §F4 의 범주(실전 ±18% · 특수 40~90% · 예능 25~50%)이고, `utility` 는 특수 범주의 "제공 효용
+   * 환산" — 피해가 아닌 일로 로드아웃에 돌려주는 초당 피해를 환산한 값이다. 전부 번갈아 쓰는 보정 0.5 를
+   * 이미 먹은 숫자다(한 무기를 쓰는 동안 다른 무기는 못 쓴다):
+   *   충격포 150  반경 260 을 900 의 충격량으로 밀어 서로 박게 만든다 — 피해는 전부 충돌에서 나온다
+   *   견인 광선 100  하나를 들어 던지고, 잡는 동안 그 적은 공격을 멈춘다
+   *   고무탄 70  6초간 반발 0.85 + 충돌 피해 ×1.6 — 한 번의 사격이 여러 번의 충돌이 된다
+   *   냉각총 100  얼린 동안 뒤이은 공격이 ×1.8. 실전 중앙 수준(약 250/s)의 0.8배를 번갈아 보정 0.5 로
+   *   중력탄 150  한 점에 모아 둔 것을 범위 무기 한 발이 한 번에 친다
+   *   나팔 45  §D 가 직접 "유일하게 전투 효용이 분명하다" 고 적은 무기다. 탄환을 되돌리면 그 피해가
+   *            사라지는 동시에 쏜 쪽으로 간다 — 예능 중 유일하게 환산을 받는다
+   * 그 외 전부 0 (피해로 일하는 무기는 환산이 필요 없다). */
+  const WEAPON_ROLES = {
+    hammer:    { cat: 'field',   role: 'single-mid' },
+    pistol:    { cat: 'field',   role: 'reaction' },
+    smg:       { cat: 'field',   role: 'mid-range' },
+    sniper:    { cat: 'field',   role: 'single-max' },
+    axe:       { cat: 'field',   role: 'melee-max' },
+    katana:    { cat: 'field',   role: 'crit-mobility' },
+    bomb:      { cat: 'field',   role: 'area-efficiency' },
+    rocket:    { cat: 'field',   role: 'area-single-max' },
+    flame:     { cat: 'field',   role: 'stacked-damage' },
+    collapse:  { cat: 'field',   role: 'wipe' },
+    laser:     { cat: 'field',   role: 'pierce-cut' },
+    minigun:   { cat: 'field',   role: 'sustained-max' },
+    shotgun:   { cat: 'field',   role: 'cluster' },
+    nailgun:   { cat: 'field',   role: 'pin' },
+    shockwave: { cat: 'special', role: 'push',   utility: 150 },
+    tractor:   { cat: 'special', role: 'tow',    utility: 100 },
+    rubber:    { cat: 'special', role: 'bounce', utility: 70 },
+    freezegun: { cat: 'special', role: 'amplify', utility: 90 },
+    gravity:   { cat: 'special', role: 'gather', utility: 150 },
+    squeaky:   { cat: 'fun',     role: 'squash' },
+    watergun:  { cat: 'fun',     role: 'soak' },
+    horn:      { cat: 'fun',     role: 'reflect', utility: 45 },
+    chicken:   { cat: 'fun',     role: 'chaos' }
+  };
+  for (const id of WEAPON_IDS) Object.assign(WEAPONS[id], WEAPON_ROLES[id]);
   /* Loadout presets (v1.2 §4): permutations of WEAPON_IDS mapped onto keys 1 2 3 4 5 6 7 8 9 0. */
   /* SPEC-arsenal §B1: "프리셋이 서로 다른 10개 조합이 되어 실제 선택이 생긴다." The arsenal holds 12 and a
    * loadout holds 10, so each preset now LEAVES TWO OUT — and no two presets leave out the same pair, which
@@ -128,10 +205,15 @@
     explosive: ['rocket', 'bomb', 'flame', 'collapse', 'laser', 'minigun', 'smg', 'pistol', 'hammer', 'axe'],                 // 빠짐: 저격총 · 카타나
     melee:     ['hammer', 'axe', 'katana', 'laser', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'collapse'],               // 빠짐: 기관총 · 미니건
     interaction: ['shockwave', 'tractor', 'rubber', 'hammer', 'pistol', 'smg', 'sniper', 'bomb', 'rocket', 'collapse'],       // §C 셋을 앞에 두고 뒤는 실전
-    fun:         ['squeaky', 'watergun', 'horn', 'chicken', 'rubber', 'hammer', 'pistol', 'smg', 'flame', 'collapse']          // §D 넷 + 고무탄, 뒤는 실전
+    fun:         ['squeaky', 'watergun', 'horn', 'chicken', 'rubber', 'hammer', 'pistol', 'smg', 'flame', 'collapse'],         // §D 넷 + 고무탄, 뒤는 실전
+    /* §E (9단계): 무기고가 23 이 되었고 로드아웃은 여전히 열이다. `breach` 는 샷건과 못총이 들어간 실전
+     * 조합이고, `combo` 는 §E 가 처음으로 말한 **조합** 그 자체다 — 물총으로 적시고 냉각총으로 얼린 뒤
+     * 망치로 깬다. 중력탄이 모아 주고 폭탄이 친다. 둘 다 앞의 일곱 프리셋과 서로 다른 열 개다. */
+    breach:      ['shotgun', 'nailgun', 'smg', 'pistol', 'sniper', 'hammer', 'axe', 'bomb', 'rocket', 'collapse'],            // §E 실전 둘 + 기존 실전
+    combo:       ['watergun', 'freezegun', 'hammer', 'gravity', 'bomb', 'shotgun', 'nailgun', 'pistol', 'smg', 'collapse']    // §E 의 조합: 적시고 → 얼리고 → 깬다
   };
   const PRESET_KEYS = { default: 'presetDefault', assault: 'presetAssault', sniper: 'presetSniper', explosive: 'presetExplosive', melee: 'presetMelee',
-    interaction: 'presetInteraction', fun: 'presetFun' };
+    interaction: 'presetInteraction', fun: 'presetFun', breach: 'presetBreach', combo: 'presetCombo' };
   const HOLD_WINDOW = 150;           // ms: hold-weapon damage aggregation / fx throttle window (A4, A5)
   const BURNT_FILTER = 'brightness(.55) sepia(.6)';   // flame-broken pieces (A9)
   const SWAP_MS = 250;               // weapon swap delay (v1.2 A5)
@@ -422,7 +504,7 @@
   /* schema file is absent (build.js then only warns): the unresolved form   */
   /* is Object.freeze([].concat()) — a frozen empty schema.                  */
   /* ===================================================================== */
-  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
+  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","breach","combo","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"}])));
   const SETTING_GROUPS = ['general', 'combat', 'accessibility', 'advanced'];
   /* chrome.storage.sync keys are namespaced `crs.<key>` so they can never collide with the v1 flat keys
    * (crsWeapon, crsMuted, …) that §1.2 migrates away from. Only big things go to `local` — the one that
@@ -2181,6 +2263,21 @@
       else if (kind === 'horn') { tone(t, 'sawtooth', 300, 290, 0.3, 0.3 * gm, 0.32); tone(t + 0.01, 'sawtooth', 600, 585, 0.26, 0.14 * gm, 0.28); noiseBurst(t, 0.05, { type: 'bandpass', freq: 1800, Q: 1.2 }, 0.1 * gm, 0.06); }
       /* 고무 치킨: two squawks, the second lower and later, because one is a squeak and two is a chicken. */
       else if (kind === 'chicken') { tone(t, 'sawtooth', 820, 520, 0.09, 0.2 * gm, 0.1); tone(t + 0.1, 'sawtooth', 620, 330, 0.11, 0.17 * gm, 0.13); noiseBurst(t + 0.02, 0.05, { type: 'bandpass', freq: 2400, Q: 1.6 }, 0.1 * gm, 0.06); }
+      /* ── SPEC-arsenal §E 무기 다양화 (9단계) ──
+       * 여섯 개 전부 기존의 tone() / noiseBurst() / noiseSweep() 세 가지로만 만든다. 새 오디오 그래프는
+       * 없다. 구분의 기준도 §C/§D 때와 같다 — HUD 를 안 보고 **귀로만** 다른 무기임을 알 수 있을 것.
+       * 샷건: 넓은 저역 충격과 그 위의 산탄 쇳소리. 권총보다 낮고, 폭탄보다 짧다. */
+      else if (kind === 'shotgun') { noiseSweep(t, 0.16, 'lowpass', 2600, 420, 0.85 * gm); tone(t, 'square', 180, 60, 0.12, 0.42 * gm, 0.14); noiseBurst(t + 0.02, 0.07, { type: 'highpass', freq: 3800, Q: 0.8 }, 0.26 * gm, 0.08); }
+      /* 한 발씩 장전: 약실에 한 발 밀어 넣는 소리. 재장전 막대가 한 발마다 다시 차는 것과 짝이다. */
+      else if (kind === 'shell') { noiseBurst(t, 0.045, { type: 'bandpass', freq: 1500, Q: 2.4 }, 0.3 * gm, 0.05); tone(t + 0.03, 'square', 420, 300, 0.04, 0.12 * gm, 0.05); }
+      /* 못총: 공압이다. 짧은 쉿 소리 뒤에 금속이 박히는 딱 소리 — 총성이 아니다. */
+      else if (kind === 'nail') { noiseBurst(t, 0.03, { type: 'highpass', freq: 5200, Q: 0.7 }, 0.2 * gm, 0.035); tone(t + 0.02, 'square', 1800, 900, 0.035, 0.22 * gm, 0.045); }
+      /* 냉각총: 음정이 없는 가는 고역 분사. 물총보다 높고 차갑고, 레이저와 달리 톤이 섞이지 않는다. */
+      else if (kind === 'freeze') { noiseSweep(t, 0.09, 'highpass', 2600, 7200, 0.22 * gm); }
+      /* 서리 파편: 유리가 얼어붙는 소리 — 위로 치솟는 삼각파 둘과 잔금. */
+      else if (kind === 'frostShard') { tone(t, 'triangle', 900, 2600, 0.12, 0.26 * gm, 0.14); tone(t + 0.04, 'triangle', 1400, 3200, 0.1, 0.16 * gm, 0.12); tinks(3, 0.03, 0.09 * gm); }
+      /* 중력탄: 유일하게 **내려가는** 소리다. 빨려 들어가는 것에는 올라가는 음이 붙으면 안 된다. */
+      else if (kind === 'gravity') { tone(t, 'sine', 520, 40, 0.5, 0.34 * gm, 0.55); noiseSweep(t, 0.45, 'lowpass', 2400, 160, 0.3 * gm); tone(t + 0.06, 'triangle', 300, 30, 0.4, 0.14 * gm, 0.45); }
     } catch (e) { /* ignore */ }
   }
 
@@ -3284,6 +3381,190 @@
         artCircle(41, 22, 1.7, ART.dark[2], { 'data-part': 'eye' }),
         poly([[45, 24], [48, 26], [45, 28]], c.mat('hot', 'h'), { 'data-part': 'beak' }),
         artPath('M24,36 Q22,41 18,44 L20,45 Q26,41 27,37 Z', c.cyl('hot', 'h'), { 'data-part': 'leg' })
+      ]
+    },
+
+    /* ───────── 샷건 · SPEC-arsenal §E ─────────
+     * 상하 2연 총열에 나무 개머리판과 앞으로 뺀 펌프 손잡이. 무기고에서 유일하게 **총구가 둘**이라
+     * 24px 에서도 샷건으로 읽힌다 — 아이콘은 그 두 개의 구멍과 개머리판 경사만 남긴다. */
+    shotgun: {
+      detail: (c) => [
+        artPath('M12,78 Q22,62 44,58 L58,56 L62,84 L34,94 Q16,96 12,78 Z', c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        artPath('M12,78 Q22,62 44,58 L58,56 L57.6,60 L44,62 Q24,66 15.4,80 Z', RIM2),
+        artPath('M34,94 Q52,92 62,84 L62,88 Q50,97 35,98 Z', SEAM2),
+        artRect(56, 54, 26, 34, c.cyl('metal', 'v'), 3, { 'data-part': 'receiver' }),
+        artRect(57, 55, 24, 2.4, RIM, 1.2),
+        artRect(56, 86, 26, 2.4, SEAM, 1.2),
+        artRect(62, 88, 10, 14, c.mat('dark', 'd'), 2, { 'data-part': 'trigger-guard' }),
+        artPath('M66,90 Q70,98 66,102 Q63,97 66,90 Z', ART.dark[2], { 'data-part': 'trigger' }),
+        artRect(80, 56, 24, 12, c.cyl('rubber', 'v'), 3, { 'data-part': 'pump' }),
+        artRect(81, 57, 22, 1.8, RIM2, 0.9),
+        artRect(84, 58, 2, 8, SEAM2),
+        artRect(90, 58, 2, 8, SEAM2),
+        artRect(96, 58, 2, 8, SEAM2),
+        artRect(80, 58, 128, 13, c.cyl('metal', 'v'), 5, { 'data-part': 'barrel-top' }),
+        artRect(80, 59, 128, 2.2, RIM, 1.1),
+        artRect(80, 72, 128, 13, c.cyl('metal', 'v'), 5, { 'data-part': 'barrel-bottom' }),
+        artRect(80, 73, 128, 1.8, RIM2, 0.9),
+        artRect(80, 70, 128, 2.6, SEAM, 1.3),
+        artEllipse(207, 64.5, 5, 6.5, c.cyl('metal', 'h'), { 'data-part': 'muzzle-top' }),
+        artEllipse(207, 64.5, 2.6, 4.2, ART.dark[1], { 'data-part': 'bore' }),
+        artEllipse(207, 78.5, 5, 6.5, c.cyl('metal', 'h'), { 'data-part': 'muzzle-bottom' }),
+        artEllipse(207, 78.5, 2.6, 4.2, ART.dark[1], { 'data-part': 'bore' }),
+        artRect(196, 56, 4, 6, c.mat('metal', 'h'), 1, { 'data-part': 'bead' }),
+        artRect(104, 86, 46, 9, c.cyl('brass', 'v'), 3, { 'data-part': 'shell' }),
+        artRect(104, 87, 46, 1.6, RIM2, 0.8),
+        artRect(104, 86, 11, 9, c.mat('brass', 'h'), 2, { 'data-part': 'shell-rim' }),
+        artRect(148, 88, 6, 5, c.mat('accent', 'd'), 1.5, { 'data-part': 'shell-tip' }),
+        artCircle(70, 72, 3.2, ART.dark[2], { 'data-part': 'pin' }),
+        artRect(84, 96, 30, 4, 'rgba(0,0,0,.16)', 2, { 'data-part': 'shade' }),
+        artEllipse(150, 92, 34, 4, 'rgba(0,0,0,.14)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artPath('M2,30 Q6,22 16,20 L22,19 L24,32 L10,37 Q3,37 2,30 Z', c.mat('wood', 'd'), { 'data-part': 'stock' }),
+        artRect(20, 18, 10, 14, c.cyl('metal', 'v'), 2, { 'data-part': 'receiver' }),
+        artRect(28, 19, 20, 6, c.cyl('metal', 'v'), 2.5, { 'data-part': 'barrel-top' }),
+        artRect(28, 26, 20, 6, c.cyl('metal', 'v'), 2.5, { 'data-part': 'barrel-bottom' }),
+        artCircle(45, 22, 2, ART.dark[1], { 'data-part': 'bore' }),
+        artCircle(45, 29, 2, ART.dark[1], { 'data-part': 'bore' }),
+        artRect(22, 32, 6, 7, c.mat('dark', 'd'), 1.5, { 'data-part': 'trigger-guard' }),
+        artRect(29, 20, 19, 1.4, RIM, 0.7)
+      ]
+    },
+
+    /* ───────── 못총 · SPEC-arsenal §E ─────────
+     * 공구다. 총이 아니라 **박는 물건**이라는 것이 실루엣에서 읽혀야 해서, 비스듬히 꽂힌 못 탄창 띠와
+     * 코끝의 접촉 안전핀을 가장 크게 그렸다. 못 세 자루가 띠 밖으로 나와 있다. */
+    nailgun: {
+      detail: (c) => [
+        artPath('M44,100 L70,54 L92,62 L66,112 Z', c.cyl('metal', 'r'), { 'data-part': 'magazine' }),
+        artPath('M44,100 L70,54 L72.6,55 L47,101 Z', RIM2),
+        artPath('M50,96 L74,60 L78,62 L54,98 Z', c.mat('dark', 'v'), { 'data-part': 'nail-strip' }),
+        artRect(52, 86, 3, 16, ART.metal[0], 0, { 'data-part': 'nail' }),
+        artRect(58, 78, 3, 16, ART.metal[1], 0, { 'data-part': 'nail' }),
+        artRect(64, 70, 3, 16, ART.metal[0], 0, { 'data-part': 'nail' }),
+        artRect(62, 48, 96, 40, c.cyl('accent', 'v'), 8, { 'data-part': 'body' }),
+        artRect(64, 50, 92, 3, RIM, 1.5),
+        artRect(62, 84, 96, 3, SEAM, 1.5),
+        artPath('M70,48 Q104,36 140,44 L140,50 Q106,42 72,53 Z', 'rgba(255,122,125,.55)', { 'data-part': 'shell-light' }),
+        artRect(94, 60, 44, 16, c.mat('dark', 'd'), 4, { 'data-part': 'vent' }),
+        artRect(100, 63, 3, 10, ART.dark[2]),
+        artRect(108, 63, 3, 10, ART.dark[2]),
+        artRect(116, 63, 3, 10, ART.dark[2]),
+        artRect(124, 63, 3, 10, ART.dark[2]),
+        artPath('M62,88 L86,88 L80,118 L56,118 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M62,88 L86,88 L85.2,91.4 L61.4,91.4 Z', RIM2),
+        artRect(84, 88, 12, 5, c.mat('dark', 'v'), 2, { 'data-part': 'trigger' }),
+        artRect(156, 54, 34, 28, c.cyl('metal', 'v'), 4, { 'data-part': 'nose-housing' }),
+        artRect(157, 55, 32, 2.2, RIM, 1.1),
+        artRect(186, 60, 20, 16, c.cyl('metal', 'h'), 3, { 'data-part': 'nose' }),
+        artRect(204, 64, 10, 8, c.mat('dark', 'd'), 2, { 'data-part': 'tip' }),
+        artRect(212, 66, 14, 4, ART.metal[0], 1, { 'data-part': 'driven-nail' }),
+        artRect(224, 63, 4, 10, c.mat('metal', 'h'), 1, { 'data-part': 'nail-head' }),
+        artPath('M188,52 L200,52 L198,60 L186,60 Z', c.mat('brass', 'd'), { 'data-part': 'safety' }),
+        artCircle(80, 68, 4, ART.dark[2], { 'data-part': 'pivot' }),
+        artCircle(81.2, 66.6, 1.5, RIM),
+        artEllipse(110, 120, 40, 5, 'rgba(0,0,0,.16)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artPath('M8,40 L17,18 L26,22 L17,44 Z', c.cyl('metal', 'r'), { 'data-part': 'magazine' }),
+        artRect(14, 14, 22, 14, c.cyl('accent', 'v'), 3, { 'data-part': 'body' }),
+        artRect(15, 15, 20, 1.6, RIM, 0.8),
+        artPath('M14,28 L23,28 L20,42 L11,42 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(35, 17, 9, 9, c.cyl('metal', 'h'), 2, { 'data-part': 'nose' }),
+        artRect(42, 20, 6, 3, ART.metal[0], 1, { 'data-part': 'nail' }),
+        artRect(24, 18, 9, 5, c.mat('dark', 'd'), 1.5, { 'data-part': 'vent' })
+      ]
+    },
+
+    /* ───────── 냉각총 · SPEC-arsenal §E ─────────
+     * 등에 지는 냉매 탱크에서 호스가 나와 뭉툭한 노즐로 들어간다. 노즐 앞에는 서리 결정 셋 —
+     * 화염방사기와 같은 골격을 쓰되 모든 뜨거운 색을 유리/금속의 찬 색으로 바꿔 쌍을 이루게 했다. */
+    freezegun: {
+      detail: (c) => [
+        artRect(14, 40, 40, 72, c.cyl('metal', 'h'), 14, { 'data-part': 'tank' }),
+        artRect(16, 42, 36, 4, RIM, 2),
+        artRect(14, 104, 40, 4, SEAM, 2),
+        artEllipse(34, 42, 20, 7, c.cyl('metal', 'v'), { 'data-part': 'tank-cap' }),
+        artRect(28, 28, 12, 14, c.mat('dark', 'v'), 3, { 'data-part': 'valve' }),
+        artCircle(34, 28, 7, c.cyl('brass', 'd'), { 'data-part': 'wheel' }),
+        artCircle(34, 28, 3, ART.dark[2]),
+        artRect(20, 58, 28, 22, c.mat('gloss', 'v'), 3, { 'data-part': 'gauge-plate' }),
+        artCircle(34, 69, 9, c.cyl('gloss', 'd'), { 'data-part': 'gauge' }),
+        artPath('M34,69 L40,63 L41.6,65 Z', ART.dark[2], { 'data-part': 'needle' }),
+        artPath('M54,66 Q82,58 96,70 Q84,78 56,76 Z', c.cyl('rubber', 'd'), { 'data-part': 'hose' }),
+        artPath('M54,66 Q82,58 96,70 L94,72 Q82,62 55,69 Z', RIM2),
+        artRect(94, 56, 44, 32, c.cyl('metal', 'v'), 6, { 'data-part': 'body' }),
+        artRect(95, 57, 42, 2.4, RIM, 1.2),
+        artRect(94, 85, 44, 3, SEAM, 1.5),
+        artPath('M100,88 L124,88 L118,118 L94,118 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artPath('M100,88 L124,88 L123.2,91.4 L99.4,91.4 Z', RIM2),
+        artRect(122, 88, 12, 5, c.mat('dark', 'v'), 2, { 'data-part': 'trigger' }),
+        artRect(136, 60, 54, 24, c.cyl('metal', 'h'), 5, { 'data-part': 'nozzle' }),
+        artRect(136, 61, 54, 2, RIM2, 1),
+        artRect(150, 56, 6, 32, c.mat('gloss', 'v'), 2, { 'data-part': 'fin' }),
+        artRect(162, 56, 6, 32, c.mat('gloss', 'v'), 2, { 'data-part': 'fin' }),
+        artRect(174, 56, 6, 32, c.mat('gloss', 'v'), 2, { 'data-part': 'fin' }),
+        artEllipse(190, 72, 7, 14, c.cyl('gloss', 'h'), { 'data-part': 'mouth' }),
+        artEllipse(190, 72, 3.6, 10, ART.dark[1], { 'data-part': 'bore' }),
+        artPath('M202,58 L206,66 L214,62 L209,72 L218,76 L208,78 L210,88 L202,80 L196,88 L198,78 L188,76 L197,72 L192,62 Z', 'rgba(246,250,254,.75)', { 'data-part': 'frost' }),
+        artPath('M222,46 L224,52 L230,50 L226,56 L232,60 L225,60 L226,67 L221,61 L216,66 L218,59 L211,58 L217,55 L214,49 Z', 'rgba(242,246,253,.55)', { 'data-part': 'frost' }),
+        artPath('M224,96 L226,101 L231,99 L228,104 L233,108 L227,108 L228,113 L224,108 L219,112 L221,106 L215,105 L220,102 L218,97 Z', 'rgba(246,250,254,.4)', { 'data-part': 'frost' }),
+        artCircle(112, 70, 4, ART.dark[2], { 'data-part': 'port' }),
+        artEllipse(120, 122, 44, 5, 'rgba(0,0,0,.16)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artRect(3, 14, 12, 22, c.cyl('metal', 'h'), 5, { 'data-part': 'tank' }),
+        artRect(4, 15, 10, 2, RIM, 1),
+        artPath('M15,22 Q22,19 26,24 Q21,27 16,26 Z', c.cyl('rubber', 'd'), { 'data-part': 'hose' }),
+        artRect(24, 18, 13, 11, c.cyl('metal', 'v'), 3, { 'data-part': 'body' }),
+        artPath('M26,29 L34,29 L31,42 L23,42 Z', c.cyl('rubber', 'd'), { 'data-part': 'grip' }),
+        artRect(36, 20, 9, 8, c.cyl('metal', 'h'), 2, { 'data-part': 'nozzle' }),
+        artPath('M44,17 L45.6,21 L49,19 L46.8,23.6 L50,26 L46,26 L46.6,30 L43.6,27 L41,30 L42,26 L38,25 L41.6,23.4 L39.6,19.6 Z', 'rgba(246,250,254,.75)', { 'data-part': 'frost' })
+      ]
+    },
+
+    /* ───────── 중력탄 · SPEC-arsenal §E ─────────
+     * 직접 피해가 0 인 무기라 **총구에 아무것도 없고 구멍만 있다** — 사출관 끝의 검은 구와 그것을
+     * 감는 두 개의 호가 전부다. 무기고에서 유일하게 가장 밝은 색이 하나도 없는 그림. */
+    gravity: {
+      detail: (c) => [
+        artPath('M16,84 Q26,70 48,66 L62,64 L66,92 L38,100 Q20,102 16,84 Z', c.mat('dark', 'd'), { 'data-part': 'stock' }),
+        artPath('M16,84 Q26,70 48,66 L62,64 L61.6,68 L48,70 Q28,74 19.4,86 Z', RIM2),
+        artRect(58, 56, 36, 38, c.cyl('metal', 'v'), 5, { 'data-part': 'receiver' }),
+        artRect(59, 57, 34, 2.4, RIM, 1.2),
+        artRect(58, 92, 36, 2.6, SEAM, 1.3),
+        artRect(64, 94, 12, 16, c.mat('dark', 'd'), 2, { 'data-part': 'trigger-guard' }),
+        artPath('M69,96 Q73,104 69,109 Q66,103 69,96 Z', ART.dark[2], { 'data-part': 'trigger' }),
+        artRect(66, 42, 20, 16, c.cyl('brass', 'v'), 3, { 'data-part': 'magazine' }),
+        artRect(67, 43, 18, 1.8, RIM2, 0.9),
+        artRect(92, 58, 72, 34, c.cyl('metal', 'v'), 8, { 'data-part': 'tube' }),
+        artRect(92, 60, 72, 2.4, RIM, 1.2),
+        artRect(92, 88, 72, 2.6, SEAM, 1.3),
+        artRect(104, 56, 5, 38, c.mat('dark', 'v'), 1.5, { 'data-part': 'band' }),
+        artRect(126, 56, 5, 38, c.mat('dark', 'v'), 1.5, { 'data-part': 'band' }),
+        artRect(148, 56, 5, 38, c.mat('dark', 'v'), 1.5, { 'data-part': 'band' }),
+        artEllipse(164, 75, 9, 20, c.cyl('metal', 'h'), { 'data-part': 'mouth' }),
+        artEllipse(164, 75, 5, 15, ART.dark[1], { 'data-part': 'bore' }),
+        artCircle(196, 75, 22, c.cyl('dark', 'd'), { 'data-part': 'well' }),
+        artCircle(196, 75, 14, ART.dark[2], { 'data-part': 'core' }),
+        artCircle(196, 75, 6, '#14171c', { 'data-part': 'singularity' }),
+        artPath('M196,45 Q226,52 226,75 L221,75 Q221,56 195,50 Z', 'rgba(142,151,166,.55)', { 'data-part': 'arc' }),
+        artPath('M196,105 Q166,98 166,75 L171,75 Q171,94 197,100 Z', 'rgba(142,151,166,.38)', { 'data-part': 'arc' }),
+        artPath('M232,62 Q242,75 232,88 L236,88 Q246,75 236,62 Z', 'rgba(58,64,73,.5)', { 'data-part': 'arc' }),
+        artCircle(176, 58, 3, 'rgba(212,218,228,.5)', { 'data-part': 'mote' }),
+        artCircle(212, 96, 2.4, 'rgba(212,218,228,.4)', { 'data-part': 'mote' }),
+        artCircle(82, 74, 4, ART.dark[2], { 'data-part': 'port' }),
+        artEllipse(120, 112, 42, 5, 'rgba(0,0,0,.18)', { 'data-part': 'shade' })
+      ],
+      icon: (c) => [
+        artPath('M2,32 Q6,24 16,22 L22,21 L24,34 L10,39 Q3,39 2,32 Z', c.mat('dark', 'd'), { 'data-part': 'stock' }),
+        artRect(20, 19, 10, 14, c.cyl('metal', 'v'), 2, { 'data-part': 'receiver' }),
+        artRect(28, 20, 12, 11, c.cyl('metal', 'v'), 3, { 'data-part': 'tube' }),
+        artRect(29, 21, 10, 1.4, RIM, 0.7),
+        artCircle(43, 25, 6, c.cyl('dark', 'd'), { 'data-part': 'well' }),
+        artCircle(43, 25, 2.6, '#14171c', { 'data-part': 'singularity' }),
+        artRect(22, 33, 6, 7, c.mat('dark', 'd'), 1.5, { 'data-part': 'trigger-guard' })
       ]
     }
   };
@@ -7902,6 +8183,581 @@
     raf(step);
   });
 
+// ── 69-utility.js ──
+// ── SPEC-arsenal §E 무기 다양화 (샷건 · 못총 · 냉각총 · 중력탄) ──
+  /* =====================================================================
+   * 10.6 Utility weapons — 9단계
+   *
+   * §E 는 무기를 더 넣는 기준을 "피해량이 다른가" 가 아니라 **"할 수 있는 일이
+   * 다른가"** 로 못박았다. 그래서 이 파일에 피해 계산은 거의 없다. 네 개의 새
+   * 동사가 전부다.
+   *
+   *   샷건    밀집한 작은 요소를 한 번에   — 펠릿 아홉이 각자 자기 표적을 찾는다
+   *   못총    고정                          — 맞은 조각이 그 자리에 박힌다
+   *   냉각총  빙결                          — 받는 피해 ×1.8, 조각 수 ×2.5, 적 2초 정지
+   *   중력탄  끌어모으기                    — 조각과 적의 탄환을 빨아들인다. 직접 피해 0
+   *
+   * **냉각총이 이 묶음의 중심이다.** 혼자 쓰면 무기고에서 가장 약하다(틱당 4).
+   * 8단계가 물총의 젖음과 `ixFreeze` 자리를 만들어 두었으므로 (src/68-interaction.js)
+   * 물총 → 냉각총 → 망치가 가장 센 연계가 된다: 젖은 것은 `ixCoolMul` 로 2.5배 빨리
+   * 얼고, 언 것은 1.8배로 맞고 2.5배로 부서진다. 로드아웃 구성에 처음으로 조합이라는
+   * 개념이 생긴다 — `PRESETS.combo` 가 그 조합이다.
+   *
+   * THE STRUCTURAL RULE, same as §C/§D's: every state this module puts on a PAGE
+   * element goes on through ONE function and comes off through ONE function, and
+   * restore() empties the lot. 빙결은 페이지 요소의 인라인 `animation-play-state`
+   * 와 `transition` 두 개만 빌리고(원래 값과 우선순위를 먼저 저장한다), 보이는
+   * 서리는 `[data-crs]` 오버레이라 페이지 요소에는 아무것도 안 쓴다. 젖음(§D)이
+   * 빌리는 `filter` 와 연소(§F)가 빌리는 `filter` 에는 손대지 않는다 — 셋이 같은
+   * 속성을 두고 다투면 되돌릴 원래 값이 누구 것인지 알 수 없게 된다.
+   * ===================================================================== */
+
+  /* ── the table extras ─────────────────────────────────────────────────────
+   * DESTRUCTION (src/66-fracture.js) and CH_SHAPES (src/51-crosshair.js) are plain objects declared EARLIER
+   * in the bundle; the rows are added from here rather than by editing two files this workstream only reads,
+   * exactly as §B and §C/§D did. src/66's `for (const id of WEAPON_IDS) WEAPONS[id].destruction =
+   * DESTRUCTION[id]` has already run and wrote `undefined` for these four ids.
+   * INTERPRETATION (reported): §E names no destruction profile, only the verb — so the profile follows the
+   * verb. 샷건은 여러 점을 한꺼번에 때리므로 파편이 터져 나가고, 못총은 박아 넣으므로 안으로 모이고,
+   * 냉각총은 언 것이 **깨져 떨어지고**(얼음이므로 파편 shard), 중력탄은 빨려 들어가므로 implode 다. */
+  DESTRUCTION.shotgun   = { shape: 'shard', separation: 'burst',   finish: 'none', particles: 'spark', delayMs: 0,  vaporise: 0 };
+  DESTRUCTION.nailgun   = { shape: 'strip', separation: 'implode', finish: 'none', particles: 'spark', delayMs: 0,  vaporise: 0 };
+  DESTRUCTION.freezegun = { shape: 'shard', separation: 'drop',    finish: 'none', particles: 'dust',  delayMs: 60, vaporise: 0 };
+  DESTRUCTION.gravity   = { shape: 'wedge', separation: 'implode', finish: 'none', particles: 'dust',  delayMs: 0,  vaporise: 0 };
+  for (const id of ['shotgun', 'nailgun', 'freezegun', 'gravity']) WEAPONS[id].destruction = DESTRUCTION[id];
+
+  /* §A4 of SPEC-crosshair: every weapon has a shape, added from outside the same way.
+   * 샷건은 펠릿이 퍼지는 넓은 원, 못총은 못 한 자루라 가늘고 긴 수직 획에 점 하나, 냉각총은 서리 결정
+   * 두 획, 중력탄은 안으로 빨려 드는 점선 원(`blast` 가 WEAPONS[id].radius 를 읽는다). */
+  CH_SHAPES.shotgun   = { arms: 4, dot: false, armLen: 9, parts: [{ cls: 'crs-ch-circle', size: 34, w: 1, rot: 0 }] };
+  CH_SHAPES.nailgun   = { arms: 4, dot: true,  armLen: 4, thin: true, parts: [{ cls: 'crs-ch-slash', size: 18, w: 2, rot: 0 }] };
+  CH_SHAPES.freezegun = { arms: 0, dot: true,  armLen: 0, parts: [{ cls: 'crs-ch-slash', size: 22, w: 2, rot: 30 }, { cls: 'crs-ch-slash', size: 22, w: 2, rot: -30 }] };
+  CH_SHAPES.gravity   = { arms: 0, dot: true,  armLen: 0, blast: true, parts: [{ cls: 'crs-ch-circle', size: 16, w: 2, rot: 0 }] };
+
+  /* ── constants ──────────────────────────────────────────────────────────── */
+  const UT_FROST_TICK_MS = 120;        // 빙결 만료 / 서리 추종의 심장 박동 (self-rescheduling later(), never setInterval)
+  const UT_FROST_MIN = 12;             // 이 아래의 `frozen` 은 "얼었다" 로 치지 않는다 — 녹는 중의 꼬리
+  const UT_PIN_FLASH_MS = 260;         // 못이 박힐 때의 섬광
+  const UT_WELL_STEP_CAP = 0.05;       // s — 중력장 적분의 dt 상한 (tickFrame 과 같은 값)
+
+  /* ===================================================================== */
+  /* §E 냉각총 — 빙결                                                        */
+  /* ===================================================================== */
+  /*
+   * `chilled` (src/77-burn.js) 는 이미 `frozen` 0~100 을 들고 있고 §F4 의 불 ↔ 얼음 규칙이 그 위에서
+   * 돈다. 냉각총은 새 장부를 만들지 않는다 — ixFreeze() (src/68) 하나로 그 장부에 쌓고, 여기서는
+   * "얼어 있는 동안 무엇이 달라지는가" 만 본다. 그래서 물총의 ixCoolMul ×2.5 가 공짜로 따라온다.
+   *
+   * INTERPRETATION (reported): §E 의 "SPA 리렌더도 묶는다" 를 **얼어 있는 동안 그 요소 자신의 애니메이션과
+   * 전이가 멈춘다** 로 읽었다. 임의의 페이지의 리렌더를 가로막는 것은 (a) MutationObserver 로 DOM 을
+   * 되돌린다는 뜻이고 그건 적대적 페이지에서 무한 루프가 되며, (b) 우리가 되돌릴 "원래 값" 을 영원히
+   * 알 수 없게 만든다. 읽을 수 있는 쪽, 되돌릴 수 있는 쪽, 그리고 화면에서 실제로 "묶였다" 로 보이는
+   * 쪽은 인라인 CSSOM 두 줄이다. 저장 → 쓰기 → 원래 값으로 복구가 전부 한 쌍의 함수 안에 있다.
+   */
+  const utFrozenEls = new Map();      // el -> { until, frostNode, saved: [{prop, value, priority}], owns, stunUntil }
+  let utFrostTimer = 0;
+
+  function fzLevel(el) {
+    if (!el) return 0;
+    let c = null;
+    try { c = chilled.get(el); } catch (e) { c = null; }
+    return c ? c.frozen : 0;
+  }
+  function fzIsFrozen(el) { return fzLevel(el) >= UT_FROST_MIN; }
+  function fzMul(el) { return fzIsFrozen(el) ? (WEAPONS.freezegun.freezeMul || 1) : 1; }
+
+  function utFrostArm() {
+    if (utFrostTimer || !state.active || !utFrozenEls.size) return;
+    utFrostTimer = later(utFrostStep, UT_FROST_TICK_MS);
+  }
+  function utFrostStep() {
+    utFrostTimer = 0;
+    if (!state.active) { utFrostClear(); return; }
+    const t = now();
+    for (const [el, rec] of Array.from(utFrozenEls)) {
+      let gone = false;
+      try { gone = !el.isConnected || el.hasAttribute('data-crs-broken'); } catch (e) { gone = true; }
+      if (gone || t >= rec.until || !fzIsFrozen(el)) { fzUnfreezeEl(el); continue; }
+      utFrostFollow(el, rec);
+    }
+    utFrostArm();
+  }
+
+  /* 서리는 `[data-crs]` 오버레이다 — 페이지 요소에는 한 글자도 쓰지 않는다. 연소의 불꽃 띠가 요소를
+   * 따라 움직이는 것과 같은 모양이고, 같은 이유로 restore() 의 노드 쓸기에 그냥 걸린다. */
+  function utFrostFollow(el, rec) {
+    const r = rectOf(el);
+    const n = rec.frostNode;
+    if (!n || !n.isConnected || !r) return;
+    try {
+      n.style.left = px(r.left); n.style.top = px(r.top);
+      n.style.width = px(r.width); n.style.height = px(r.height);
+      n.style.opacity = String(0.25 + 0.5 * clamp(fzLevel(el) / BURN_FROZEN_FULL, 0, 1));
+    } catch (e) { /* ignore */ }
+  }
+  function utFrostNode(el) {
+    if (!root) return null;
+    const n = mk('div', 'crs-frost');
+    root.append(n);
+    for (let i = 0; i < 3; i++) n.append(mk('span', 'crs-frost-x crs-frost-x' + i));
+    return n;
+  }
+
+  /* 페이지 요소에서 빌리는 두 속성. 원래 값과 **우선순위까지** 저장한다 (빈 문자열이 아니라 원래 값). */
+  const UT_FREEZE_PROPS = [['animation-play-state', 'paused'], ['transition', 'none']];
+  function utFreezePaint(el, rec) {
+    if (rec.owns) return;
+    rec.saved = [];
+    for (const [prop] of UT_FREEZE_PROPS) {
+      let value = '', priority = '';
+      try { value = el.style.getPropertyValue(prop) || ''; priority = el.style.getPropertyPriority(prop) || ''; } catch (e) { value = ''; priority = ''; }
+      rec.saved.push({ prop, value, priority });
+    }
+    rec.owns = true;
+    for (const [prop, want] of UT_FREEZE_PROPS) { try { el.style.setProperty(prop, want); } catch (e) { /* ignore */ } }
+  }
+  function utFreezeUnpaint(el, rec) {
+    if (!rec.owns) return;
+    rec.owns = false;
+    for (const s of rec.saved || []) {
+      try {
+        if (s.value) el.style.setProperty(s.prop, s.value, s.priority);
+        else el.style.removeProperty(s.prop);
+      } catch (e) { /* ignore */ }
+    }
+    rec.saved = [];
+  }
+
+  /* The ONE way anything freezes. `amount` goes through ixFreeze() so 젖음의 ×2.5 는 자동으로 붙는다. */
+  function fzFreeze(el, amount, ms) {
+    if (!el || el.nodeType !== 1 || !state.active || isOurs(el)) return null;
+    try { if (!el.isConnected || el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
+    const level = ixFreeze(el, amount > 0 ? amount : WEAPONS.freezegun.freezePerTick);
+    if (!(level >= UT_FROST_MIN)) return null;
+    let rec = utFrozenEls.get(el);
+    if (!rec) {
+      rec = { until: 0, frostNode: utFrostNode(el), saved: [], owns: false, stunUntil: 0 };
+      utFrozenEls.set(el, rec);
+    }
+    const dur = scaleMs(ms > 0 ? ms : WEAPONS.freezegun.frostMs);
+    rec.until = Math.max(rec.until, now() + dur);
+    /* §E: "적은 2초 정지." The stun rides the same record, so letting go of the freeze also lets go of it. */
+    rec.stunUntil = Math.max(rec.stunUntil, now() + scaleMs(WEAPONS.freezegun.stunMs));
+    utFreezePaint(el, rec);
+    utFrostFollow(el, rec);
+    utFrostArm();
+    kick();
+    return level;
+  }
+  function fzUnfreezeEl(el) {
+    const rec = utFrozenEls.get(el);
+    if (!rec) return false;
+    utFrozenEls.delete(el);
+    utFreezeUnpaint(el, rec);
+    const n = rec.frostNode;
+    rec.frostNode = null;
+    if (n) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+    try { const c = chilled.get(el); if (c) c.frozen = 0; } catch (e) { /* ignore */ }
+    return true;
+  }
+  function fzStunned(el) {
+    const rec = el && utFrozenEls.get(el);
+    return !!(rec && now() < rec.stunUntil && fzIsFrozen(el));
+  }
+  function utFrostClear() {
+    for (const el of Array.from(utFrozenEls.keys())) fzUnfreezeEl(el);
+    utFrozenEls.clear();
+    untrack(utFrostTimer); utFrostTimer = 0;
+  }
+
+  /* ===================================================================== */
+  /* §E 못총 — 고정                                                          */
+  /* ===================================================================== */
+  /*
+   * "맞은 조각이 그 자리에 박힌다. 공중에서 멈추고 수명의 영향을 받지 않는다."
+   *
+   * 조각의 적분은 `if (p.resting) continue` 한 줄로 건너뛴다 (src/92-tick.js). 그래서 고정은 새 물리가
+   * 아니라 **그 한 줄을 영구히 참으로 만드는 것**이다: 속도를 0 으로, resting 을 켜고, 수명 두 개를 모두
+   * 지운다. restPiece() 를 쓰지 않는 이유는 그것이 회전을 바닥에 눕히고(±12° tilt) 수명을 다시 켜기
+   * 때문이다 — 공중에 박힌 못은 눕지 않는다.
+   */
+  const utPinned = new Set();
+  const utNails = [];
+
+  function pnPinPiece(p) {
+    if (!p || p.pinned || utPinned.has(p)) return false;
+    p.pinned = true;
+    p.vx = 0; p.vy = 0; p.vr = 0;
+    p.resting = true; p.grounded = true;
+    p.expireAt = 0; p.hardExpireAt = 0;      // §E: 수명의 영향을 받지 않는다
+    p.restedFirstAt = 0;
+    try { applyTransform(p); } catch (e) { /* ignore */ }
+    try { p.node.style.willChange = 'auto'; } catch (e) { /* ignore */ }
+    utPinned.add(p);
+    return true;
+  }
+  function pnUnpin(p) {
+    if (!p || !utPinned.has(p)) return false;
+    utPinned.delete(p);
+    p.pinned = false;
+    return true;
+  }
+  function pnPinnedCount() {
+    let n = 0;
+    for (const p of state.pieces) if (p.pinned) n++;
+    return n;
+  }
+  /* 못 한 자루가 반경 `pinRadius` 안의 조각을 최대 `pinMax` 개까지 잡는다. 가까운 것부터. */
+  function pnPinAt(x, y, radius, max) {
+    const R = radius > 0 ? radius : WEAPONS.nailgun.pinRadius;
+    const cap = max > 0 ? max : WEAPONS.nailgun.pinMax;
+    const near = [];
+    for (const p of state.pieces) {
+      if (p.pinned) continue;
+      let b = null;
+      try { b = pieceBox(p); } catch (e) { b = null; }
+      if (!b) continue;
+      const cx = (b.l + b.r) / 2, cy = (b.top + b.bottom) / 2;
+      const d = Math.hypot(cx - x, cy - y);
+      if (d <= R) near.push({ p, d });
+    }
+    near.sort((a, b) => a.d - b.d);
+    let n = 0;
+    for (const q of near) { if (n >= cap) break; if (pnPinPiece(q.p)) n++; }
+    return n;
+  }
+  /* 박힌 자리에 남는 못 머리. `[data-crs]` 노드이고 restore() 가 쓸어 간다. */
+  function pnNailFx(x, y) {
+    if (!root || reducedMotion()) return null;
+    const n = mk('div', 'crs-nail');
+    n.style.left = px(x - 3); n.style.top = px(y - 3);
+    root.append(n);
+    utNails.push(n);
+    while (utNails.length > 40) { const old = utNails.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+    try {
+      trackAnim(n.animate([{ transform: 'scale(2.2)', opacity: 0.1 }, { transform: 'scale(1)', opacity: 1 }],
+        { duration: scaleMs(UT_PIN_FLASH_MS), easing: 'ease-out', fill: 'none' }));
+    } catch (e) { /* ignore */ }
+    return n;
+  }
+  function pnClearNails() {
+    while (utNails.length) { const n = utNails.pop(); try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+  }
+
+  /* ===================================================================== */
+  /* §E 중력탄 — 끌어모으기                                                   */
+  /* ===================================================================== */
+  /*
+   * "조각과 적의 탄환을 빨아들인다. 직접 피해 0."
+   *
+   * 중력장은 **tickFrame 위에 올라탄다** — 자기 RAF 를 열지 않는다. 그래야 히트스톱, 일시정지,
+   * restore() 가 전부 공짜로 적용되고 "살아있는 RAF 0개" 가 깨지지 않는다. 적분은 가속도이지 위치가
+   * 아니다: 조각은 빨려 들어가는 동안에도 서로, 그리고 바닥과 부딪힌다.
+   */
+  const utWells = [];                 // { x, y, R, until, pull, orbPull, node, pulled }
+  let utWellLastT = 0;
+
+  function gwActive() { return utWells.length > 0; }
+  function gwSpawn(x, y, R, ms, pullMul) {
+    const W = WEAPONS.gravity;
+    const w = {
+      x, y,
+      R: R > 0 ? R : W.radius,
+      until: now() + scaleMs(ms > 0 ? ms : W.wellMs),
+      pull: W.wellPull * (pullMul > 0 ? pullMul : 1),
+      orbPull: W.wellOrbPull * (pullMul > 0 ? pullMul : 1),
+      node: null, pulled: 0, orbs: 0
+    };
+    if (root) {
+      const n = mk('div', 'crs-well');
+      n.style.left = px(w.x - w.R); n.style.top = px(w.y - w.R);
+      n.style.width = px(2 * w.R); n.style.height = px(2 * w.R);
+      root.append(n);
+      w.node = n;
+      if (!reducedMotion()) {
+        try {
+          trackAnim(n.animate([{ transform: 'scale(1)', opacity: 0.85 }, { transform: 'scale(.18)', opacity: 0.35 }],
+            { duration: Math.max(80, w.until - now()), easing: 'ease-in', fill: 'forwards' }));
+        } catch (e) { /* ignore */ }
+      }
+    }
+    utWells.push(w);
+    utWellLastT = 0;
+    kick();
+    return w;
+  }
+  function gwKill(w) {
+    const i = utWells.indexOf(w);
+    if (i >= 0) utWells.splice(i, 1);
+    const n = w.node;
+    w.node = null;
+    if (n) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+  }
+  function gwClear() { for (const w of utWells.slice()) gwKill(w); utWells.length = 0; utWellLastT = 0; }
+
+  /* 끌어모으기는 **가속**이 아니라 **속도 추종**이다. 가속으로 당기면 조각이 중심을 지나쳐 반대쪽으로
+   * 날아가고, 평균 거리가 오히려 멀어진다 (첫 측정이 그랬다: 269 → 305 px). 목표 속도를 거리에
+   * 비례시켜 두면 가까워질수록 느려져 가운데에 **모인다** — 그게 §E 가 적은 동사다.
+   * 돌아오는 값은 새 속도이지 가속도가 아니다. */
+  function gwSeek(w, cx, cy, vx, vy, dt, maxSpeed) {
+    const dx = w.x - cx, dy = w.y - cy;
+    const d = Math.hypot(dx, dy);
+    if (!(d > 0.5) || d > w.R) return null;
+    const k = 1 - d / w.R;                      // 가장자리에서 0, 중심에서 1
+    const want = Math.min(maxSpeed * k, d * 5); // 가까울수록 느리게 — 지나치지 않는다
+    const f = Math.min(1, 12 * dt);             // 추종의 세기 (1/s)
+    return { vx: vx + ((dx / d) * want - vx) * f, vy: vy + ((dy / d) * want - vy) * f };
+  }
+  /* 탄환은 멈추는 게 아니라 **휘어야** 하므로 가속 모델 그대로다. */
+  function gwBend(w, cx, cy, dt, strength) {
+    const dx = w.x - cx, dy = w.y - cy;
+    const d = Math.hypot(dx, dy);
+    if (!(d > 1) || d > w.R) return null;
+    const a = strength * (1 - d / w.R) * dt;
+    return { ax: (dx / d) * a, ay: (dy / d) * a };
+  }
+  function gwStep(t, dt) {
+    if (!utWells.length) return false;
+    const expired = [];
+    for (const w of utWells) {
+      if (t >= w.until) { expired.push(w); continue; }
+      /* 조각 — 쉬고 있던 것은 깨워서 끌어올린다. 못으로 박아 둔 것은 **움직이지 않는다**:
+       * 고정이 끌어모으기를 이긴다. 그래야 두 무기가 서로 다른 일을 하는 것이 눈에 보인다. */
+      for (const p of state.pieces) {
+        if (p.pinned) continue;
+        let b = null;
+        try { b = pieceBox(p); } catch (e) { b = null; }
+        if (!b) continue;
+        const g = gwSeek(w, (b.l + b.r) / 2, (b.top + b.bottom) / 2, p.vx, p.vy, dt, w.pull);
+        if (!g) continue;
+        if (p.resting) wakePiece(p);
+        p.vx = g.vx; p.vy = g.vy;
+        p.noGravUntil = t + 120;                // 빨려 들어가는 동안에는 중력에 지지 않는다
+        w.pulled++;
+      }
+      /* 밀려나 있는 페이지 요소 — §E 의 변위 몸체도 조각과 같이 끌린다. 질량이 있으므로 절반 속도로. */
+      for (const b of state.movedList) {
+        if (!b || b.released) continue;
+        const g = gwSeek(w, b.x + (b.w || 0) / 2, b.y + (b.h || 0) / 2, b.vx, b.vy, dt, w.pull * 0.5);
+        if (!g) continue;
+        b.vx = g.vx; b.vy = g.vy; b.resting = false;
+      }
+      /* 적의 탄환 — §E 가 직접 적은 둘째 대상. 아직 발사 전인 것은 건드리지 않는다(속도가 없다). */
+      for (const o of state.orbs) {
+        if (!o || !o.launched || o.kind === 'mortar') continue;
+        const g = gwBend(w, o.x, o.y, dt, w.orbPull);
+        if (!g) continue;
+        o.vx += g.ax; o.vy += g.ay;
+        w.orbs++;
+      }
+    }
+    for (const w of expired) {
+      /* 꺼질 때 한 번 더 세게 당긴다 (`collapseMul`) — 중력장이 닫히는 순간이 가장 세다. */
+      for (const p of state.pieces) {
+        if (p.pinned) continue;
+        let b = null;
+        try { b = pieceBox(p); } catch (e) { b = null; }
+        if (!b) continue;
+        const g = gwSeek(w, (b.l + b.r) / 2, (b.top + b.bottom) / 2, p.vx, p.vy, 0.05, w.pull * (WEAPONS.gravity.collapseMul || 1));
+        if (!g) continue;
+        if (p.resting) wakePiece(p);
+        p.vx = g.vx; p.vy = g.vy;
+      }
+      gwKill(w);
+    }
+    return utWells.length > 0;
+  }
+
+  /* ===================================================================== */
+  /* §E 샷건 — 한 발씩 장전                                                   */
+  /* ===================================================================== */
+  /*
+   * "한 발씩 장전." src/82-ammo-reload.js 의 startReload() 는 한 번의 대기 끝에 탄창을 통째로 채운다 —
+   * 샷건은 그 모양이 아니다. 그래서 그 파일을 고치는 대신 여기서 **감싸고**, 샷건일 때만 한 발짜리
+   * 체인을 돌린다. 체인은 매 발마다 새 `state.reload` 레코드를 만든다: HUD 의 재장전 막대는
+   * `hudEls.aFillFor !== r` 로 다시 그리므로, 레코드가 바뀌어야 막대가 한 발마다 다시 찬다.
+   * 중간에 끊기면(무기 교체 · KO · restore) stopReload() 가 state.reload 를 비우고, 체인은 다음
+   * 깨어남에서 `state.reload !== rec` 를 보고 조용히 멈춘다 — **그때까지 채운 발은 남는다.**
+   */
+  function sgShellStep(manual) {
+    const id = 'shotgun', W = WEAPONS[id];
+    const ms = scaleMs(debug.fastReload ? 30 : W.reloadMs);
+    const rec = { id, startedAt: now(), ms, timer: 0, magTimer: 0, shell: true };
+    state.reload = rec;
+    sfx('shell');
+    rec.timer = laterRaw(() => {
+      rec.timer = 0;
+      if (state.reload !== rec) return;
+      state.reload = null;
+      state.ammo[id] = Math.min(W.mag, (state.ammo[id] || 0) + 1);
+      updateAmmoHud(); scheduleHud();
+      if (state.active && state.ammo[id] < W.mag) sgShellStep(false);
+      else syncScope();
+    }, ms);
+    updateAmmoHud();
+    if (manual) toast(msg('toastReload') + '…');
+  }
+
+  /* ===================================================================== */
+  /* wiring — every one of these is a WRAP, never a fork                     */
+  /* ===================================================================== */
+
+  /* §E 냉각총: "받는 피해 ×1.8." applyHit() is the ONE damage sink every weapon goes through (src/73), so
+   * one wrapper covers hitscan, AoE, burn ticks, collision damage and anything added later. */
+  const utApplyHitBase = applyHit;
+  applyHit = function (el, dmg, kind, ix, iy, opts) {
+    const m = fzMul(el);
+    return utApplyHitBase(el, m === 1 ? dmg : Math.max(1, Math.round(dmg * m)), kind, ix, iy, opts);
+  };
+  /* §E 냉각총: "조각 수 ×2.5."
+   * The wrap goes on fracPieceCount() (src/66-fracture.js), not on pieceCount() (src/70-break.js): breakElement()
+   * asks fracPieceCount(), and that function barely uses pieceCount's answer — the DESTRUCTION shape decides the
+   * count and `base` only caps it (§B1). Wrapping the inner one moved almost nothing, which is exactly what the
+   * first measurement showed (6 pieces frozen, 6 pieces not).
+   * `opts.pieces` (an explicit override: axe / katana / collapse / tests) is honoured by the base and must stay
+   * honoured — a caller that asks for exactly n gets n, frozen or not.
+   * INTERPRETATION (reported): 글자가 지배하는 요소는 단어 단위로 흩어지고(spawnWordPieces) 그 수는 단어
+   * 수가 정한다 — 거기에 2.5 를 곱하면 단어를 쪼개야 한다. 그래서 ×2.5 는 **기하 분해**에만 걸린다. */
+  const utFracPieceCountBase = fracPieceCount;
+  fracPieceCount = function (el, mode, rect, descendants, opts) {
+    const n = utFracPieceCountBase(el, mode, rect, descendants, opts);
+    if ((opts && opts.pieces != null) || !fzIsFrozen(el)) return n;
+    return Math.max(n + 1, Math.round(n * (WEAPONS.freezegun.pieceMul || 1)));
+  };
+  /* §E 냉각총: "적은 2초 정지." Same gate the tractor beam uses — the attack is RESCHEDULED, not dropped,
+   * so the enemy picks straight back up when it thaws. */
+  const utHostileAttackBase = hostileAttack;
+  hostileAttack = function (rec, forced) {
+    if (rec && rec.el && fzStunned(rec.el)) {
+      try { scheduleAttack(rec, attackInterval(rec)); } catch (e) { /* ignore */ }
+      return false;
+    }
+    return utHostileAttackBase(rec, forced);
+  };
+  /* §E 못총: a pinned piece is never woken — not by the eviction support pass, not by a resize. That is
+   * the whole of "공중에서 멈춘다": the integrator skips resting pieces, and nothing un-rests this one. */
+  const utWakePieceBase = wakePiece;
+  wakePiece = function (p) {
+    if (p && p.pinned) return;
+    return utWakePieceBase(p);
+  };
+  /* §E 중력탄: the well rides the product's one frame loop. `busy` is OR-ed so an open well keeps the
+   * loop awake by itself — a page with nothing else moving still gets its debris pulled in. */
+  const utTickFrameBase = tickFrame;
+  tickFrame = function (t) {
+    let busy = utTickFrameBase(t);
+    if (utWells.length) {
+      const dt = utWellLastT ? clamp((t - utWellLastT) / 1000, 0, UT_WELL_STEP_CAP) : 0;
+      if (gwStep(t, dt)) busy = true;
+    }
+    utWellLastT = t;
+    return busy;
+  };
+  /* §E 샷건: 한 발씩 장전. Every other weapon falls straight through to the base. */
+  const utStartReloadBase = startReload;
+  startReload = function (id, manual) {
+    if (id !== 'shotgun') return utStartReloadBase(id, manual);
+    const W = WEAPONS.shotgun;
+    if (!state.active || !W || state.reload) return false;
+    if (state.ammo[id] >= W.mag) return false;
+    scopeOff();
+    sgShellStep(!!manual);
+    return true;
+  };
+  /* §E 샷건: 한 발씩 장전은 **끊을 수 있어야** 뜻이 있다 — 두 발만 채우고 쏘는 것이 그 장전 방식의
+   * 전부다. spend() 는 재장전 중이면 빈 클릭을 내므로, 샷건이고 쏠 탄이 한 발이라도 있으면 체인을
+   * 먼저 멈춘다. 그때까지 채운 발은 남는다. 다른 무기는 그대로 base 로 떨어진다. */
+  const utSpendBase = spend;
+  spend = function (id) {
+    if (id === 'shotgun' && isReloading(id) && state.ammo[id] > 0) stopReload();
+    return utSpendBase(id);
+  };
+  /* restore() (Z / Escape / deactivate) must leave NOTHING of ours: no node, no timer, no borrowed
+   * property, no pinned piece. It runs BEFORE the base so the base's own node sweep and piece sweep see an
+   * already quiet module — and the frozen element's two inline properties go back while it is still the
+   * element we saved them from. */
+  const utRestoreBase = restore;
+  restore = function () { utResetAll(); return utRestoreBase(); };
+  function utResetAll() {
+    utFrostClear();
+    gwClear();
+    for (const p of Array.from(utPinned)) pnUnpin(p);
+    utPinned.clear();
+    pnClearNails();
+    if (root) {
+      let leftovers = [];
+      try { leftovers = root.querySelectorAll('.crs-frost, .crs-well, .crs-nail, .crs-pellet'); } catch (e) { leftovers = []; }
+      for (const n of leftovers) { try { cancelAnimsOf(n); n.remove(); } catch (e) { /* ignore */ } }
+    }
+  }
+
+  /* ---- debug surface (the suite is written against these) ------------------------------------------ */
+  debug.frozenOf = (el) => {
+    const rec = el && utFrozenEls.get(el);
+    if (!rec) return null;
+    let paused = '', trans = '';
+    try { paused = el.style.getPropertyValue('animation-play-state') || ''; trans = el.style.getPropertyValue('transition') || ''; } catch (e) { /* ignore */ }
+    return {
+      level: Math.round(fzLevel(el)), frozen: fzIsFrozen(el), msLeft: Math.max(0, Math.round(rec.until - now())),
+      stunMsLeft: Math.max(0, Math.round(rec.stunUntil - now())), mul: fzMul(el),
+      owns: !!rec.owns, paused, transition: trans, saved: (rec.saved || []).map((s) => s.prop + '=' + s.value),
+      frost: !!(rec.frostNode && rec.frostNode.isConnected)
+    };
+  };
+  debug.freeze2 = (el, n, ms) => fzFreeze(el, n == null ? WEAPONS.freezegun.freezePerTick : +n, ms);
+  debug.unfreeze = (el) => fzUnfreezeEl(el);
+  debug.pins = () => ({
+    pinned: pnPinnedCount(), tracked: utPinned.size,
+    nails: root ? root.querySelectorAll('.crs-nail').length : 0,
+    ids: state.pieces.filter((p) => p.pinned).map((p) => p.pid)
+  });
+  debug.pinAt = (x, y, r, max) => pnPinAt(+x, +y, r == null ? 0 : +r, max == null ? 0 : +max);
+  /* §E "수명의 영향을 받지 않는다" 는 장부 위의 사실이다 — 박힌 조각은 만료 시각 두 개가 모두 0 이고,
+   * debrisSweep() 은 `(p.expireAt && t >= p.expireAt) || (p.hardExpireAt && t >= p.hardExpireAt)` 로만
+   * 거둬 간다. 그래서 그 두 숫자를 그대로 내보낸다. */
+  debug.pieceLife = (pid) => {
+    for (const p of state.pieces) {
+      if (p.pid !== pid) continue;
+      return { pid, pinned: !!p.pinned, resting: !!p.resting, expireAt: Math.round(p.expireAt || 0), hardExpireAt: Math.round(p.hardExpireAt || 0), alive: true };
+    }
+    return null;
+  };
+  debug.wells = () => utWells.map((w) => ({
+    x: Math.round(w.x), y: Math.round(w.y), r: Math.round(w.R),
+    msLeft: Math.max(0, Math.round(w.until - now())), pulled: w.pulled, orbs: w.orbs,
+    node: !!(w.node && w.node.isConnected)
+  }));
+  debug.gravityAt = (x, y) => { const w = gwSpawn(+x, +y, 0, 0, 1); return { r: Math.round(w.R), msLeft: Math.max(0, Math.round(w.until - now())) }; };
+  debug.utility = () => ({
+    frozen: utFrozenEls.size, wells: utWells.length, pinned: pnPinnedCount(), nails: utNails.length,
+    lastSpread: state.lastShotgunSpread || 0,
+    frostTimer: !!utFrostTimer,
+    frostNodes: root ? root.querySelectorAll('.crs-frost').length : 0,
+    wellNodes: root ? root.querySelectorAll('.crs-well').length : 0
+  });
+  /* §E 의 네 수치를 제품이 직접 발행한다 — 표가 아니라 필드여야 검사가 된다. */
+  debug.utConst = () => ({
+    pellets: WEAPONS.shotgun.pellets, pelletCone: WEAPONS.shotgun.pelletCone, shellMs: WEAPONS.shotgun.reloadMs,
+    shellReload: !!WEAPONS.shotgun.shellReload, slugDamage: WEAPONS.shotgun.slugDamage,
+    pinRadius: WEAPONS.nailgun.pinRadius, pinMax: WEAPONS.nailgun.pinMax,
+    freezeMul: WEAPONS.freezegun.freezeMul, pieceMul: WEAPONS.freezegun.pieceMul, stunMs: WEAPONS.freezegun.stunMs,
+    freezePerTick: WEAPONS.freezegun.freezePerTick, frostMin: UT_FROST_MIN,
+    wellMs: WEAPONS.gravity.wellMs, wellR: WEAPONS.gravity.radius, gravityDamage: WEAPONS.gravity.damage
+  });
+  /* §F4 · §F5: the band tool reads the SOURCE, the suite reads the PRODUCT, and this is where the two
+   * meet — `debug.weaponBand()` (src/68-interaction.js) publishes the §F3 inputs and the wrap below adds
+   * the three fields §F4/§F5 turned into table columns. Wrapped rather than edited: src/68 is not this
+   * workstream's file. */
+  const utWeaponBandBase = debug.weaponBand;
+  debug.weaponBand = () => utWeaponBandBase().map((w) => {
+    const W = WEAPONS[w.id];
+    return Object.assign(w, {
+      cat: W.cat || null, role: W.role || null, utility: W.utility || 0,
+      pellets: W.pellets || 1, shellReload: !!W.shellReload,
+      stabCooldownMs: W.stabCooldownMs || 0, spread: W.spread || 0
+    });
+  });
+
 // ── 70-break.js ──
   /* ===================================================================== */
   /* 11. Breaking elements                                                    */
@@ -8421,16 +9277,21 @@
   /* 붕괴's pierce is "전부" (all). A sentinel integer, not Infinity: Infinity does not survive the structured
    * clone / JSON hop that api.weapons() takes to reach an extension page or a test harness. */
   const PIERCE_ALL = 999;
+  /* ── SPEC-arsenal §F7 (9단계) ─────────────────────────────────────────────
+   * 이 표의 `swapMs` 와 `moveSpeed` 가 §F 의 조정 대상이다. §F7 이 "피해량보다 핸들링(교체 · 이동 ·
+   * 산포 · 재장전)을 먼저 건드린다" 고 했고, 피해량은 §A2 가 못박은 값이라 여기부터 움직였다.
+   * 무엇이 왜 움직였는지는 `docs/BALANCE.md` 에 한 줄씩 적혀 있고, `node tools/balance.js --check` 가
+   * 이 표를 정적으로 읽어 밴드를 검사한다 — 숫자를 되돌리면 CI 가 진다. */
   const WEAPON_STATS = {
-    hammer:   { swapMs: 220, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 1.00, falloff: 0,    pierce: 0 },
-    pistol:   { swapMs: 150, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.10, falloff: 0.25, pierce: 0 },
-    smg:      { swapMs: 260, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.95, falloff: 0.40, pierce: 0 },
-    sniper:   { swapMs: 420, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.75, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
-    axe:      { swapMs: 400, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.85, falloff: 0,    pierce: 0 },
-    katana:    { swapMs: 200, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
-    bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.95, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
-    rocket:   { swapMs: 480, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.80, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
-    flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.90, falloff: 0.55, pierce: 0 },
+    hammer:   { swapMs: 440, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 0.88, falloff: 0,    pierce: 0 },
+    pistol:   { swapMs: 130, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.00, falloff: 0.25, pierce: 0 },
+    smg:      { swapMs: 280, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40, pierce: 0 },
+    sniper:   { swapMs: 320, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.82, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
+    axe:      { swapMs: 430, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.60, falloff: 0,    pierce: 0 },
+    katana:    { swapMs: 260, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
+    bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.90, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
+    rocket:   { swapMs: 380, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.92, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
+    flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55, pierce: 0 },
     collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0,    pierce: PIERCE_ALL, aoeIgnoresCover: true }
   };
   for (const id of WEAPON_IDS) Object.assign(WEAPONS[id], WEAPON_STATS[id]);
@@ -9498,6 +10359,107 @@
     return el;
   }
 
+  /* ══ SPEC-arsenal §E 무기 다양화 (9단계) ══════════════════════════════════════════════════════════
+   * 네 개의 fire() 는 전부 얇다 — 새 동사의 본체는 src/69-utility.js 에 있고 여기서는 그것을 제품의
+   * 공격 한 번으로 묶을 뿐이다. §C/§D 의 일곱이 그랬던 것과 같은 모양이다. */
+
+  /* 샷건: "펠릿 9발 원뿔. 밀집한 작은 요소를 한 번에."
+   * 펠릿은 각자 자기 pickTarget 을 돈다 — 그래야 "한 번에 여럿" 이 연출이 아니라 사실이 된다. 캐시를
+   * 한 개 공유하므로 아홉 번의 적중 판정이 한 번의 레이아웃 읽기 비용으로 끝난다. 사거리 감쇠는
+   * falloff 0.86 으로 무기고 최대다(§E). */
+  function fireShotgun(x, y) {
+    state.shots++;
+    const W = WEAPONS.shotgun;
+    const sp = shotPoint(x, y, 'shotgun');
+    x = sp.x; y = sp.y;
+    noteShot('shotgun');
+    sfx('shotgun');
+    flash(x, y, 'gun', { size: 72, dur: 150 });
+    shake('gun', { amp: 4.6 });
+    drawCrack(x, y, 'gun', { ink: 0.4 });
+    spawnChips(x, y, randInt(5, 8));
+    if (interceptOrb(x, y)) return null;
+    const cache = new Map();
+    const R = W.pelletSpread;
+    const hit = new Map();
+    let first = null;
+    for (let i = 0; i < W.pellets; i++) {
+      /* 첫 펠릿은 조준점 그대로, 나머지 여덟은 반경 R 의 원 안에 고르게 — 면적 균등이므로 sqrt. */
+      const a = rand(0, Math.PI * 2), d = i === 0 ? 0 : R * Math.sqrt(Math.random());
+      const px0 = clamp(x + Math.cos(a) * d, 0, viewW()), py0 = clamp(y + Math.sin(a) * d, 0, viewH());
+      const el = pickTarget(px0, py0, cache);
+      if (!el) continue;
+      if (!first) first = el;
+      const crit = rollCrit('shotgun');
+      const dmg = rollDamage(W.damage, crit, falloffMul('shotgun', px0, py0));
+      applyHit(el, dmg, 'gun', px0, py0, { crit });
+      hit.set(el, (hit.get(el) || 0) + 1);
+    }
+    state.lastShotgunSpread = hit.size;    // §E: "밀집한 작은 요소를 한 번에" — 몇 개를 한 번에 쳤는가
+    return first;
+  }
+  /* 못총: "고정. 맞은 조각이 그 자리에 박힌다." 피해는 평범한 연사고, 새로운 것은 pnPinAt() 하나다. */
+  function fireNailgun(x, y, c) {
+    state.shots++;
+    const h = (c && c.hold && c.h) || null;
+    const W = WEAPONS.nailgun;
+    const sp = shotPoint(x, y, 'nailgun');
+    x = sp.x; y = sp.y;
+    noteShot('nailgun');
+    if (!h || h.tick % 2 === 1) sfx('nail');
+    flash(x, y, 'gun', { size: 30, dur: 90 });
+    drawCrack(x, y, 'gun', { ink: 0.22 });
+    /* 못은 조각을 먼저 잡는다. 때려서 생긴 조각이 아니라 **이미 날고 있는** 조각을 박는 무기이기 때문에,
+     * 이 순서가 바뀌면 방금 만든 조각이 태어나기도 전에 고정 대상을 찾게 된다. */
+    const pinned = pnPinAt(x, y, W.pinRadius, W.pinMax);
+    if (pinned) pnNailFx(x, y);
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    if (!el) return null;
+    let crit = false, win = null;
+    if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('nailgun');
+    const dmg = rollDamage(W.damage, crit, falloffMul('nailgun', x, y));
+    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    return el;
+  }
+  /* 냉각총: "빙결. 받는 피해 ×1.8, 조각 수 ×2.5, 적은 2초 정지."
+   * 피해 4 가 전부다 — §E 가 "혼자 쓰면 가장 약하다" 고 적었고 그 말이 숫자로 지켜져야 조합이 뜻을
+   * 갖는다. 얼리는 양은 ixFreeze() 를 통과하므로 젖은 표적에서는 자동으로 2.5배가 된다(8단계 §D). */
+  function fireFreezegun(x, y, c) {
+    state.shots++;
+    const h = (c && c.hold && c.h) || null;
+    const W = WEAPONS.freezegun;
+    const sp = shotPoint(x, y, 'freezegun');
+    x = sp.x; y = sp.y;
+    noteShot('freezegun');
+    if (!h || h.tick % 4 === 1) sfx('freeze', { gain: 0.6 });
+    flash(x, y, 'gun', { size: 26, dur: 80 });
+    if (interceptOrb(x, y)) return null;
+    const el = pickTarget(x, y, h ? h.cache : undefined);
+    if (!el) return null;
+    let crit = false, win = null;
+    if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('freezegun');
+    const dmg = rollDamage(W.damage, crit, falloffMul('freezegun', x, y));
+    /* 얼리는 것이 먼저다. applyHit() 은 빙결 배수를 읽으므로, 이 순서라야 같은 틱의 4 도 ×1.8 을 받는다
+     * — "받는 피해 ×1.8" 에 예외를 두지 않는다는 뜻이다. */
+    fzFreeze(el, W.freezePerTick, 0);
+    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    return el;
+  }
+  /* 중력탄: "끌어모으기. 조각과 적의 탄환을 빨아들인다. 직접 피해 0."
+   * applyHit() 을 한 번도 부르지 않는다. 이 무기의 피해는 0 이고, 그건 버그가 아니라 §E 의 문장이다. */
+  function fireGravity(x, y) {
+    state.shots++;
+    const W = WEAPONS.gravity;
+    sfx('gravity');
+    flash(x, y, 'bomb', { size: W.radius * 0.5, dur: 160 });
+    ring(x, y, { r: W.radius });
+    shake('bomb', { amp: 3, dur: 220 });
+    gwSpawn(x, y, W.radius, W.wellMs, 1);
+    scheduleHud();
+    return null;
+  }
+
 // ── 77-burn.js ──
 // ── SPEC-destruction §F: 연소 시스템 — 지속 피해 · 확산 · 모습과 소리 · 상태 연계 · 화염탄 ──
   /* 사용자: "불 공격은 지속딜과 확산이 포인트인데 없네"
@@ -10064,7 +11026,18 @@
     squeaky:  { type: 'charge', ms: 400, dmgMul: 2.0, radius: 90 },
     watergun: { type: 'burst',  fuel: 8, splashR: 120 },
     horn:     { type: 'charge', ms: 600, rangeMul: 1.6 },
-    chicken:  { type: 'charge', ms: 450, dmgMul: 1.5 }
+    chicken:  { type: 'charge', ms: 450, dmgMul: 1.5 },
+    /* ── SPEC-arsenal §E (9단계): 네 무기도 §A1 문법을 따른다 ──────────────────────────────────────
+     * §E 역시 보조 공격을 적지 않았으므로 네 줄 다 INTERPRETATION (reported) 이고, §C/§D 때와 같은
+     * 원칙으로 골랐다 — **같은 동사의 한 번 더 센 판본**이지 두 번째 무기가 아니다:
+     *   샷건    펠릿 아홉을 하나로 뭉친 **슬러그**. 흩어지지 않는다 — §F6-3 이 이름으로 빼 둔 바로 그것
+     *   못총    **대못**. 피해 ×2.0, 그리고 반경이 2.2배가 되어 주변의 조각을 한 번에 박는다
+     *   냉각총  hold 무기이므로 짧게 누르는 쪽이 보조(§A2 burst) — **서리 파편**, 즉발로 크게 얼린다
+     *   중력탄  중력장이 넓고 세진다 (폭탄의 심지 조절과 같은 모양) */
+    shotgun:  { type: 'charge', ms: 500, slug: true },
+    nailgun:  { type: 'charge', ms: 550, dmgMul: 2.0, radiusMul: 2.2 },
+    freezegun:{ type: 'burst',  rounds: 10, freezeMul: 4 },
+    gravity:  { type: 'charge', ms: 600, radius: 300, radiusMax: 480, pullMul: 1.6 }
   };
   function altOf(id) { return ALTS[id] || null; }
   function altChargeMs(id) { const a = altOf(id); return (a && a.ms > 0) ? a.ms : 0; }
@@ -10286,7 +11259,94 @@
     if (id === 'squeaky') return altSqueakSmash(x, y, p);
     if (id === 'horn') return altHornBlast(x, y, p);
     if (id === 'chicken') return altChickenFling(x, y, p);
+    // ── §E ──
+    if (id === 'shotgun') return altSlug(x, y, p);
+    if (id === 'nailgun') return altSpike(x, y, p);
+    if (id === 'gravity') return altWideWell(x, y, p);
     return null;
+  }
+
+  /* ── §E 샷건 보조: 슬러그 ─────────────────────────────────────────────────────────────────────────
+   * 펠릿 아홉을 하나로 뭉친 한 덩어리. 흩어지지 않고, 충전에 따라 평소 한 발(13×9)에서
+   * `slugDamage` 까지 보간된다 (§A5: charge 유형만 중간값을 보간한다). 큰 카드를 한 방에 부수는 셋 중
+   * 하나로 §F6-3 이 이름을 적어 둔 공격이다 — 탄약 2발을 쓰는 보조 공격이라 "값싼 한 방" 이 아니다. */
+  function altSlug(x, y, p) {
+    const a = ALTS.shotgun, W = WEAPONS.shotgun;
+    const base = W.damage * W.pellets;
+    const dmg0 = Math.round(base + (W.slugDamage - base) * clamp(p, 0, 1));
+    return altAction('shotgun', x, y, () => {
+      state.shots++;
+      sfx('shotgun', { gain: 1.25, pitch: 0.78 });
+      flash(x, y, 'gun', { size: 54, dur: 170 });
+      shake('gun', { amp: 6.2 });
+      drawCrack(x, y, 'gun', { ink: 0.5 });
+      spawnChips(x, y, randInt(4, 7));
+      if (interceptOrb(x, y)) return null;
+      const el = pickTarget(x, y);
+      if (!el) return null;
+      const crit = rollCrit('shotgun');
+      applyHit(el, rollDamage(dmg0, crit), 'gun', x, y, { crit });
+      return el;
+    }) !== undefined;
+  }
+  /* ── §E 못총 보조: 대못 ───────────────────────────────────────────────────────────────────────────
+   * 같은 동사가 세진다 — 피해 ×2.0, 그리고 고정 반경이 2.2배가 되어 주변의 조각을 **전부** 박는다
+   * (`pinMax` 도 같이 올린다. 한 번 크게 박는 것이 이 보조의 전부다). */
+  function altSpike(x, y, p) {
+    const a = ALTS.nailgun, W = WEAPONS.nailgun;
+    const mul = 1 + (a.dmgMul - 1) * clamp(p, 0, 1);
+    return altAction('nailgun', x, y, () => {
+      state.shots++;
+      sfx('nail', { gain: 1.3, pitch: 0.7 });
+      flash(x, y, 'gun', { size: 44, dur: 140 });
+      shake('gun', { amp: 3.2 });
+      drawCrack(x, y, 'gun', { ink: 0.4 });
+      const pinned = pnPinAt(x, y, W.pinRadius * a.radiusMul, W.pinMax * 4);
+      if (pinned) pnNailFx(x, y);
+      if (interceptOrb(x, y)) return null;
+      const el = pickTarget(x, y);
+      if (!el) return null;
+      const crit = rollCrit('nailgun');
+      applyHit(el, rollDamage(Math.round(W.damage * mul), crit), 'gun', x, y, { crit });
+      return el;
+    }) !== undefined;
+  }
+  /* ── §E 중력탄 보조: 넓은 중력장 ─────────────────────────────────────────────────────────────────── */
+  function altWideWell(x, y, p) {
+    const a = ALTS.gravity, W = WEAPONS.gravity;
+    const R = Math.round(a.radius + (a.radiusMax - a.radius) * clamp(p, 0, 1));
+    return altAction('gravity', x, y, () => {
+      state.shots++;
+      sfx('gravity', { gain: 1.2, pitch: 0.75 });
+      flash(x, y, 'bomb', { size: R * 0.5, dur: 200 });
+      ring(x, y, { r: R });
+      shake('bomb', { amp: 5, dur: 300 });
+      gwSpawn(x, y, R, W.wellMs * 1.4, a.pullMul);
+      return null;
+    }) !== undefined;
+  }
+  /* ── §E 냉각총 보조 (짧게): 서리 파편 ────────────────────────────────────────────────────────────
+   * hold 무기의 짧은 누름이 보조다 (§A2 burst). 틱당 4 로 천천히 얼리는 대신 한 번에 크게 얼리고
+   * `shardDamage` 를 넣는다 — 그래도 혼자서는 여전히 가장 약하다. §A4 의 "burst 는 자기 값을 따로
+   * 정한다" 를 따라 탄창 10 발을 쓴다. */
+  function altFrostShard(x, y) {
+    const a = ALTS.freezegun, W = WEAPONS.freezegun;
+    if (onCooldown()) { cooldownFeedback(); return false; }
+    if (!altSpendRounds('freezegun', a.rounds)) { emptyClick(); return false; }
+    state.shots++;
+    sfx('frostShard');
+    flash(x, y, 'gun', { size: 60, dur: 180 });
+    shake('gun', { amp: 2.6 });
+    if (interceptOrb(x, y)) { startCooldown('freezegun', 420); return true; }
+    const el = pickTarget(x, y);
+    if (el) {
+      fzFreeze(el, W.freezePerTick * a.freezeMul, W.frostMs);
+      const crit = rollCrit('freezegun');
+      applyHit(el, rollDamage(W.shardDamage, crit), 'gun', x, y, { crit });
+    }
+    startCooldown('freezegun', 420);
+    scheduleHud();
+    return true;
   }
 
   /* ── §C 충격포 보조: 반경 260 → 420, 충격량 ×1.8 ─────────────────────────────────────────────────── */
@@ -11264,6 +12324,7 @@
     // ── SPEC-arsenal §C / §D: the two hold weapons the arsenal grew by ──
     else if (id === 'tractor') altTractorYank(state.hoverX, state.hoverY);
     else if (id === 'watergun') altWaterBalloon(state.hoverX, state.hoverY);
+    else if (id === 'freezegun') altFrostShard(state.hoverX, state.hoverY);   // §E
     return r;
   };
   /* §B2 / §B3: the two new hold weapons' own gates — the laser may be overheated, the minigun has to spin up
@@ -11410,6 +12471,9 @@
   WEAPONS.shockwave.fire = fireShockwave; WEAPONS.tractor.fire = fireTractor; WEAPONS.rubber.fire = fireRubber;
   WEAPONS.squeaky.fire = fireSqueaky; WEAPONS.watergun.fire = fireWater; WEAPONS.horn.fire = fireHorn;
   WEAPONS.chicken.fire = fireChicken;
+  /* ── SPEC-arsenal §E 무기 다양화 (샷건 · 못총 · 냉각총 · 중력탄) ── */
+  WEAPONS.shotgun.fire = fireShotgun; WEAPONS.nailgun.fire = fireNailgun;
+  WEAPONS.freezegun.fire = fireFreezegun; WEAPONS.gravity.fire = fireGravity;
 
   /* --- actions (A3 ordering + v1.2 A5 gates): mount → cooldown → swap delay → spend → counters/combo/swing → fire → HUD --- */
   function action(id, x, y, run) {

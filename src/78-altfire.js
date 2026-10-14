@@ -99,7 +99,18 @@
     squeaky:  { type: 'charge', ms: 400, dmgMul: 2.0, radius: 90 },
     watergun: { type: 'burst',  fuel: 8, splashR: 120 },
     horn:     { type: 'charge', ms: 600, rangeMul: 1.6 },
-    chicken:  { type: 'charge', ms: 450, dmgMul: 1.5 }
+    chicken:  { type: 'charge', ms: 450, dmgMul: 1.5 },
+    /* ── SPEC-arsenal §E (9단계): 네 무기도 §A1 문법을 따른다 ──────────────────────────────────────
+     * §E 역시 보조 공격을 적지 않았으므로 네 줄 다 INTERPRETATION (reported) 이고, §C/§D 때와 같은
+     * 원칙으로 골랐다 — **같은 동사의 한 번 더 센 판본**이지 두 번째 무기가 아니다:
+     *   샷건    펠릿 아홉을 하나로 뭉친 **슬러그**. 흩어지지 않는다 — §F6-3 이 이름으로 빼 둔 바로 그것
+     *   못총    **대못**. 피해 ×2.0, 그리고 반경이 2.2배가 되어 주변의 조각을 한 번에 박는다
+     *   냉각총  hold 무기이므로 짧게 누르는 쪽이 보조(§A2 burst) — **서리 파편**, 즉발로 크게 얼린다
+     *   중력탄  중력장이 넓고 세진다 (폭탄의 심지 조절과 같은 모양) */
+    shotgun:  { type: 'charge', ms: 500, slug: true },
+    nailgun:  { type: 'charge', ms: 550, dmgMul: 2.0, radiusMul: 2.2 },
+    freezegun:{ type: 'burst',  rounds: 10, freezeMul: 4 },
+    gravity:  { type: 'charge', ms: 600, radius: 300, radiusMax: 480, pullMul: 1.6 }
   };
   function altOf(id) { return ALTS[id] || null; }
   function altChargeMs(id) { const a = altOf(id); return (a && a.ms > 0) ? a.ms : 0; }
@@ -321,7 +332,94 @@
     if (id === 'squeaky') return altSqueakSmash(x, y, p);
     if (id === 'horn') return altHornBlast(x, y, p);
     if (id === 'chicken') return altChickenFling(x, y, p);
+    // ── §E ──
+    if (id === 'shotgun') return altSlug(x, y, p);
+    if (id === 'nailgun') return altSpike(x, y, p);
+    if (id === 'gravity') return altWideWell(x, y, p);
     return null;
+  }
+
+  /* ── §E 샷건 보조: 슬러그 ─────────────────────────────────────────────────────────────────────────
+   * 펠릿 아홉을 하나로 뭉친 한 덩어리. 흩어지지 않고, 충전에 따라 평소 한 발(13×9)에서
+   * `slugDamage` 까지 보간된다 (§A5: charge 유형만 중간값을 보간한다). 큰 카드를 한 방에 부수는 셋 중
+   * 하나로 §F6-3 이 이름을 적어 둔 공격이다 — 탄약 2발을 쓰는 보조 공격이라 "값싼 한 방" 이 아니다. */
+  function altSlug(x, y, p) {
+    const a = ALTS.shotgun, W = WEAPONS.shotgun;
+    const base = W.damage * W.pellets;
+    const dmg0 = Math.round(base + (W.slugDamage - base) * clamp(p, 0, 1));
+    return altAction('shotgun', x, y, () => {
+      state.shots++;
+      sfx('shotgun', { gain: 1.25, pitch: 0.78 });
+      flash(x, y, 'gun', { size: 54, dur: 170 });
+      shake('gun', { amp: 6.2 });
+      drawCrack(x, y, 'gun', { ink: 0.5 });
+      spawnChips(x, y, randInt(4, 7));
+      if (interceptOrb(x, y)) return null;
+      const el = pickTarget(x, y);
+      if (!el) return null;
+      const crit = rollCrit('shotgun');
+      applyHit(el, rollDamage(dmg0, crit), 'gun', x, y, { crit });
+      return el;
+    }) !== undefined;
+  }
+  /* ── §E 못총 보조: 대못 ───────────────────────────────────────────────────────────────────────────
+   * 같은 동사가 세진다 — 피해 ×2.0, 그리고 고정 반경이 2.2배가 되어 주변의 조각을 **전부** 박는다
+   * (`pinMax` 도 같이 올린다. 한 번 크게 박는 것이 이 보조의 전부다). */
+  function altSpike(x, y, p) {
+    const a = ALTS.nailgun, W = WEAPONS.nailgun;
+    const mul = 1 + (a.dmgMul - 1) * clamp(p, 0, 1);
+    return altAction('nailgun', x, y, () => {
+      state.shots++;
+      sfx('nail', { gain: 1.3, pitch: 0.7 });
+      flash(x, y, 'gun', { size: 44, dur: 140 });
+      shake('gun', { amp: 3.2 });
+      drawCrack(x, y, 'gun', { ink: 0.4 });
+      const pinned = pnPinAt(x, y, W.pinRadius * a.radiusMul, W.pinMax * 4);
+      if (pinned) pnNailFx(x, y);
+      if (interceptOrb(x, y)) return null;
+      const el = pickTarget(x, y);
+      if (!el) return null;
+      const crit = rollCrit('nailgun');
+      applyHit(el, rollDamage(Math.round(W.damage * mul), crit), 'gun', x, y, { crit });
+      return el;
+    }) !== undefined;
+  }
+  /* ── §E 중력탄 보조: 넓은 중력장 ─────────────────────────────────────────────────────────────────── */
+  function altWideWell(x, y, p) {
+    const a = ALTS.gravity, W = WEAPONS.gravity;
+    const R = Math.round(a.radius + (a.radiusMax - a.radius) * clamp(p, 0, 1));
+    return altAction('gravity', x, y, () => {
+      state.shots++;
+      sfx('gravity', { gain: 1.2, pitch: 0.75 });
+      flash(x, y, 'bomb', { size: R * 0.5, dur: 200 });
+      ring(x, y, { r: R });
+      shake('bomb', { amp: 5, dur: 300 });
+      gwSpawn(x, y, R, W.wellMs * 1.4, a.pullMul);
+      return null;
+    }) !== undefined;
+  }
+  /* ── §E 냉각총 보조 (짧게): 서리 파편 ────────────────────────────────────────────────────────────
+   * hold 무기의 짧은 누름이 보조다 (§A2 burst). 틱당 4 로 천천히 얼리는 대신 한 번에 크게 얼리고
+   * `shardDamage` 를 넣는다 — 그래도 혼자서는 여전히 가장 약하다. §A4 의 "burst 는 자기 값을 따로
+   * 정한다" 를 따라 탄창 10 발을 쓴다. */
+  function altFrostShard(x, y) {
+    const a = ALTS.freezegun, W = WEAPONS.freezegun;
+    if (onCooldown()) { cooldownFeedback(); return false; }
+    if (!altSpendRounds('freezegun', a.rounds)) { emptyClick(); return false; }
+    state.shots++;
+    sfx('frostShard');
+    flash(x, y, 'gun', { size: 60, dur: 180 });
+    shake('gun', { amp: 2.6 });
+    if (interceptOrb(x, y)) { startCooldown('freezegun', 420); return true; }
+    const el = pickTarget(x, y);
+    if (el) {
+      fzFreeze(el, W.freezePerTick * a.freezeMul, W.frostMs);
+      const crit = rollCrit('freezegun');
+      applyHit(el, rollDamage(W.shardDamage, crit), 'gun', x, y, { crit });
+    }
+    startCooldown('freezegun', 420);
+    scheduleHud();
+    return true;
   }
 
   /* ── §C 충격포 보조: 반경 260 → 420, 충격량 ×1.8 ─────────────────────────────────────────────────── */
@@ -1299,6 +1397,7 @@
     // ── SPEC-arsenal §C / §D: the two hold weapons the arsenal grew by ──
     else if (id === 'tractor') altTractorYank(state.hoverX, state.hoverY);
     else if (id === 'watergun') altWaterBalloon(state.hoverX, state.hoverY);
+    else if (id === 'freezegun') altFrostShard(state.hoverX, state.hoverY);   // §E
     return r;
   };
   /* §B2 / §B3: the two new hold weapons' own gates — the laser may be overheated, the minigun has to spin up
