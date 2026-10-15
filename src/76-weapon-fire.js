@@ -310,7 +310,8 @@
     return el;
   }
   /* ══ SPEC-arsenal §B3 미니건 — 예열이 끝난 뒤의 연사 ══════════════════════════════════════════════
-   * 26 / 60ms = 433 a second, and 14 px of bloom a shot buys it. The 0.8 s 예열 and the 0.6 s 공회전 유예
+   * 26 / 60ms = 433 a second. SPEC-weapon-identity §B2 로 그 값을 사는 블룸이 14 → 2.2 px/발 이 됐다 —
+   * 상한 140px 에서 버튼을 4% 로 맞히던 것이 22px 에서 68% 가 된다. The 0.8 s 예열 and the 0.6 s 공회전 유예
    * are in the hold chain (src/78-altfire.js); by the time this runs the barrels are already up to speed. */
   function fireMinigun(x, y, c) {
     state.shots++;

@@ -31,13 +31,13 @@
   const WEAPON_STATS = {
     hammer:   { swapMs: 440, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 0.88, falloff: 0,    pierce: 0 },
     pistol:   { swapMs: 130, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.00, falloff: 0.25, pierce: 0 },
-    smg:      { swapMs: 280, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40, pierce: 0 },
+    smg:      { swapMs: 280, recoil: 0.5, bloom: 2, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40, pierce: 0 },
     sniper:   { swapMs: 320, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.82, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
     axe:      { swapMs: 430, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.60, falloff: 0,    pierce: 0 },
     katana:    { swapMs: 260, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
     bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.90, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
     rocket:   { swapMs: 380, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.92, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
-    flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55, pierce: 0 },
+    flame:    { swapMs: 340, recoil: 0.3, bloom: 2, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55, pierce: 0 },
     collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0,    pierce: PIERCE_ALL, aoeIgnoresCover: true }
   };
   for (const id of WEAPON_IDS) Object.assign(WEAPONS[id], WEAPON_STATS[id]);
@@ -71,15 +71,37 @@
    * tick, nothing to cancel on deactivate and nothing to drift: `aim.kick` /
    * `aim.bloom` are the values AT `aim.at`, and every read extrapolates. */
   const aim = { at: 0, kick: 0, bloom: 0 };
-  function resetAim() { aim.at = 0; aim.kick = 0; aim.bloom = 0; }
+  /* ── SPEC-weapon-identity §D 명중률 계측 ───────────────────────────────────
+   * 명중률은 쏴 봐야 아는 값이고, CDP 왕복으로 한 발씩 쏘면 틱 간격이 어긋나 측정이 제품이 아니라
+   * 하네스를 재게 된다. 그래서 페이지 안에서 세게 한다: `debug.traceShots` 를 켜면 shotPoint() 가
+   * 돌려준 **최종 착탄점**이 고리 버퍼에 쌓이고 `debug.shotTrace()` 가 그것을 가져가며 비운다.
+   * fireSmg / fireMinigun 의 기계적 ±9 · ±7 원뿔이 이미 더해진 뒤의 점이므로 "탄이 실제로 간 곳"
+   * 그 자체다 — 무기 표만 보는 tools/balance.js 의 pHit 이 상한인 이유가 바로 그 두 원뿔이다.
+   * 기본은 꺼짐이고, 버퍼는 resetAim()(restore · deactivate · 재장전 초기화)에서 비워진다. */
+  const SHOT_TRACE_MAX = 40000;
+  const shotTrace = [];
+  Object.assign(debug, {
+    traceShots: false,
+    shotTrace() { const out = shotTrace.slice(); shotTrace.length = 0; return out; }
+  });
+  function noteShotPoint(x, y) {
+    if (!debug.traceShots) return;
+    if (shotTrace.length >= SHOT_TRACE_MAX) shotTrace.shift();
+    shotTrace.push({ x, y });
+  }
+  function resetAim() { aim.at = 0; aim.kick = 0; aim.bloom = 0; shotTrace.length = 0; }
   function recoilKickNow(t) {
     if (!aim.at || debug.noSpread || debug.noRecoil) return 0;
     return aim.kick * (1 - clamp((t - aim.at) / 250, 0, 1));
   }
+  /* SPEC-weapon-identity §B2: 회복을 40 → 120 px/s 로 올렸다. 미니건이 상한에서 완전히 식는 데 3.5초가
+   * 걸렸고, 그 동안 "참다가 쏜다" 가 성립하지 않아 산포가 운용이 아니라 벌이었다. 120 px/s 면 어떤 무기든
+   * 손을 떼고 1초 안에 상한에서 0 으로 돌아온다 (0.4초 유예 + 최대 30px ÷ 120 = 0.65초). */
+  const BLOOM_RECOVER_PX_S = 120;
   function bloomNow(t) {
     if (!aim.at || debug.noSpread || debug.noBloom) return 0;
     const idle = (t - aim.at) - 400;            // 0.4 s of quiet before recovery starts
-    return idle <= 0 ? aim.bloom : Math.max(0, aim.bloom - 40 * idle / 1000);   // then 40 px/s
+    return idle <= 0 ? aim.bloom : Math.max(0, aim.bloom - BLOOM_RECOVER_PX_S * idle / 1000);
   }
   /* Called by each hitscan shot AFTER its aim point was computed: this shot's kick lands on the NEXT one. */
   function noteShot(id) {
@@ -110,8 +132,10 @@
    * same (concatenated) function scope, and the later declaration would silently win. */
   function shotPoint(x, y, id) {
     const s = spreadNow(id);
-    if (!(s > 0)) return { x, y };
-    return { x: clamp(x + gauss(s), 0, viewW()), y: clamp(y + gauss(s), 0, viewH()) };
+    if (!(s > 0)) { noteShotPoint(x, y); return { x, y }; }
+    const p = { x: clamp(x + gauss(s), 0, viewW()), y: clamp(y + gauss(s), 0, viewH()) };
+    noteShotPoint(p.x, p.y);
+    return p;
   }
 
   /* ── v1.5 §3: distance falloff ─────────────────────────────────────────────
