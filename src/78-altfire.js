@@ -64,9 +64,25 @@
    * `type` is §A2's own 유형 column and it decides how the release is read (§A5):
    *   charge   중간값을 보간한다 — a half-charged 내려치기 is half-way between the two attacks
    *   steady   완충이 아니면 일반 공격 — "어중간한 정조준은 의미가 없다"
+   *   chamber  완충이 아니면 일반 공격. 모이는 것이 없고 고정 시간 뒤 준비가 끝난다
    *   lock     완충이 아니면 일반 공격, plus a designated element
    *   burst    the weapon sustains on a long press, so the SHORT press is the alt
    *   marquee  a dragged rectangle, not a charge at all
+   *
+   * ── SPEC-weapon-identity §F 보조 공격 문법 (12단계) ───────────────────────
+   * 7단계는 문법을 하나로 통일했다 — "길게 누르면 모으고 떼면 나간다". 배우기는 쉬웠지만 들고 있는
+   * 물건이 할 수 없는 일을 하게 됐다: 권총이 에너지를 모으고(연출만), 산탄총·못총·고무탄총이
+   * 에너지를 모았다. §F2 가 동사를 셋으로 가른다. 누르는 제스처는 하나이므로 배우는 비용은 그대로다.
+   *
+   *   charge   에너지·힘을 모은다      링이 차오른다 · 뷰모델이 뒤로 당겨진다 · 음정이 올라간다
+   *   steady   조준이 가라앉는다        링 없음 · 조준점 팔이 모인다 · 중심 점이 밝아지며 딸깍
+   *   chamber  다른 것을 장전한다      링 없음 · 장전 왕복 · 금속성 철컥 · 조준점 중앙에 탄 표식
+   *
+   * **차오르는 링은 `charge` 에만 쓴다.** 조준과 장전은 모으는 것이 아니다 — 그 한 줄이 §F 의 전부고,
+   * chRingNow() 의 래퍼(아래)와 altChargeFxStart() 의 분기가 그것을 코드로 적은 것이다.
+   * §F3: chamber 는 모이는 것이 없고, 고정 시간 뒤 준비가 끝나며, 중간에 떼면 취소되고 평소 탄이 나가고,
+   * 장전은 다음 한 발에만 유효하다(떼는 순간 그 한 발이 나가므로 구조적으로 그렇다).
+   * 피해·반경 수치는 그대로다 — `charge` 가 보간하던 `p` 자리에 chamber 는 언제나 1 을 넣는다.
    */
   const ALTS = {
     hammer:   { type: 'charge', ms: 600, dmgMul: 2.2, radius: 120 },
@@ -95,7 +111,9 @@
      *   고무 치킨  완충이면 20% 가 아니라 반드시 걸린다 */
     shockwave:{ type: 'charge', ms: 700, radius: 260, radiusMax: 420, impulseMul: 1.8 },
     tractor:  { type: 'burst',  yank: true, rounds: 0 },
-    rubber:   { type: 'charge', ms: 500, radius: 150, dmgMul: 1.5 },
+    /* §F2: 고무탄총은 모으지 않는다 — **과압탄**을 약실에 넣는 동작이다. 반경 150 · ×1.5 는 그대로고
+     * 바뀐 것은 문법과 연출뿐이다(`mark` 는 조준점 중앙에 찍히는 그 탄의 표식, §F2 세 번째 줄). */
+    rubber:   { type: 'chamber', ms: 500, radius: 150, dmgMul: 1.5, mark: 'over' },
     squeaky:  { type: 'charge', ms: 400, dmgMul: 2.0, radius: 90 },
     watergun: { type: 'burst',  fuel: 8, splashR: 120 },
     horn:     { type: 'charge', ms: 600, rangeMul: 1.6 },
@@ -107,8 +125,10 @@
      *   못총    **대못**. 피해 ×2.0, 그리고 반경이 2.2배가 되어 주변의 조각을 한 번에 박는다
      *   냉각총  hold 무기이므로 짧게 누르는 쪽이 보조(§A2 burst) — **서리 파편**, 즉발로 크게 얼린다
      *   중력탄  중력장이 넓고 세진다 (폭탄의 심지 조절과 같은 모양) */
-    shotgun:  { type: 'charge', ms: 500, slug: true },
-    nailgun:  { type: 'charge', ms: 550, dmgMul: 2.0, radiusMul: 2.2 },
+    /* §F2: 산탄총과 못총도 모으지 않는다. 슬러그는 **약실에 다른 탄을 넣는** 동작이고, 대못은
+     * **대고 박아 넣는** 동작이다. 수치는 §E 가 정한 그대로 — 슬러그 `slugDamage` 190, 대못 ×2.0 · 반경 ×2.2. */
+    shotgun:  { type: 'chamber', ms: 500, slug: true, mark: 'slug' },
+    nailgun:  { type: 'chamber', ms: 550, dmgMul: 2.0, radiusMul: 2.2, mark: 'spike' },
     freezegun:{ type: 'burst',  rounds: 10, freezeMul: 4 },
     gravity:  { type: 'charge', ms: 600, radius: 300, radiusMax: 480, pullMul: 1.6 }
   };
@@ -1196,9 +1216,25 @@
   /* ===================================================================== */
   /* §A3 충전 피드백                                                         */
   /* ===================================================================== */
+  /* §F2 는 연출을 세 갈래로 가른다. 한 함수 안의 세 분기로 쓴 이유는, 이것들이 **같은 제스처의 서로 다른
+   * 뜻**이기 때문이다 — 분기를 세 함수로 흩어 놓으면 "무엇이 모으고 무엇이 모으지 않는가" 를 한눈에 볼
+   * 수 없게 되고, 그 한눈이 §F 가 고치려는 바로 그 결함이다. */
   function altChargeFxStart(id) {
     const a = altOf(id);
     if (!a || !a.ms) return;
+    if (a.type === 'steady') {
+      /* §F2 조준: 모으는 소리가 없다. 뷰모델은 **들어 올려 고정**되고, 조준점 팔이 모이는 것(chGap 래퍼)과
+       * 준비가 끝났을 때의 딸깍만으로 말한다. */
+      vmSteady(a.ms);
+      return;
+    }
+    if (a.type === 'chamber') {
+      /* §F2 장전: 뷰모델이 **한 번 왕복**하고 금속성 철컥이 난다. 모이는 것이 없으므로 반경 미리보기도
+       * 충전 톤도 없다 — 있으면 그것이 곧 "모으고 있다" 는 거짓말이 된다(§F1). */
+      sfx('chamberIn');
+      vmChamber(a.ms);
+      return;
+    }
     sfx('charge', { ms: a.ms });                        // §A3: 음정이 올라가는 톤 (사인 180→420Hz)
     vmCharge(a.ms);                                     // §A3: 뷰모델이 뒤로 당겨지거나 위로 들린다
     if (a.radius || a.radiusMax) altRadiusNodeOn();
@@ -1214,8 +1250,20 @@
       } catch (e) { /* ignore */ }
     }
     if (a.type === 'lock') altLockStep(p);
+    /* §F2 조준: 중심 점은 "준비가 끝났다" 는 뜻이므로 준비가 끝나 있는 동안에만 밝다. 저격총의 호흡은
+     * 2초 제한이 있고(§A2) 그 창이 지나면 흔들림이 돌아오므로, 점도 같이 꺼져야 거짓말이 아니다. */
+    if (a.type === 'steady') chSteadyMark(p >= 1 && (id !== 'sniper' || altBreathHeld()));
+    /* 표식도 박동마다 다시 쓴다. 조준점은 무기·배율·모드가 바뀌면 통째로 다시 만들어지고, 그때
+     * 클래스 하나로 들고 있던 표식이 사라진다. 한 번만 찍으면 그 뒤로 영영 없는 상태가 된다. */
+    if (a.type === 'chamber') chChamberMark(p >= 1 ? (a.mark || 'slug') : null);
   }
   function altChargeMaxCue() {
+    const a = altOf(altP.id);
+    /* §F2 조준: "다 모이면 중심 점이 밝아지며 한 번 딸깍." 차오를 것이 없으므로 끝을 알리는 것은
+     * 중심 점 하나뿐이고, 그래서 그 하나가 분명해야 한다. */
+    if (a && a.type === 'steady') { sfx('steadyLock'); chSteadyMark(true); return; }
+    /* §F2 장전: "조준점 중앙에 그 탄의 표식." 준비가 끝난 순간에 찍히고, 떼면 그 탄이 나간다. */
+    if (a && a.type === 'chamber') { sfx('chamberReady'); chChamberMark(a.mark || 'slug'); return; }
     sfx('chargeMax');                                   // §A3: 최대에서 짧은 클릭
     vmChargeMax();                                      // §A3: 최대에서 미세하게 떨린다 (모션 축소 시 생략)
     const ring = xhair.ring;
@@ -1226,6 +1274,8 @@
   }
   function altChargeFxEnd() {
     vmChargeEnd();
+    chSteadyMark(false);
+    chChamberMark(null);
     const ring = xhair.ring;
     if (ring) { try { ring.classList.remove('crs-ch-ring-full'); } catch (e) { /* ignore */ } }
   }
@@ -1299,7 +1349,14 @@
    * and the minigun's spin-up own it whenever they are what the player is waiting on. */
   const chRingNowBase = chRingNow;
   chRingNow = function (t) {
-    if (altActive() && !altP.blocked) return { kind: 'charge', p: altChargeP(), color: ALT_RING };
+    /* ── SPEC-weapon-identity §F2 의 핵심 규칙 ───────────────────────────────────────────────────────
+     * **차오르는 링은 `charge` 에만 쓴다.** 이 한 줄이 §F1 의 "권총을 누르면 충전 게이지가 차오른다" 를
+     * 끝낸다. `steady`(조준)와 `chamber`(장전)는 모으는 것이 아니므로 여기서 링을 돌려주지 않고,
+     * 아래 base 로 떨어져 재장전·교체·쿨다운이라는 **원래의** 준비 링만 남는다.
+     * `lock`(유도 조준)은 §F2 가 "그대로" 라고 적은 셋 중 하나라 7단계의 모습을 유지한다. */
+    if (altActive() && !altP.blocked && altP.type !== 'steady' && altP.type !== 'chamber') {
+      return { kind: 'charge', p: altChargeP(), color: ALT_RING };
+    }
     if (state.weapon === 'laser' && (lz.heat > 0 || lzOverheated())) return { kind: 'heat', p: lzHeatRatio(), color: lzOverheated() ? '#e5484d' : lzGlowColor(lzHeatRatio()) };
     const h = state.hold;
     if (h && h.id === 'minigun' && h.spinUntil && t < h.spinUntil) return { kind: 'spin', p: clamp(1 - (h.spinUntil - t) / Math.max(1, scaleMs(WEAPONS.minigun.spinUpMs)), 0, 1), color: ALT_RING };
@@ -1466,8 +1523,12 @@
   }
 
   /* ---- debug surface (the suite is written against these) ------------------------------------------ */
+  /* §F4: "chamber 는 고정 시간 뒤 `debug.alt().ready` 가 참이 된다." 준비는 세 문법 모두가 가지는
+   * 개념이므로(모으기가 끝났다 · 조준이 가라앉았다 · 장전이 끝났다) 하나의 질문으로 적는다. */
+  function altReady() { return altActive() && !altP.blocked && altChargeP() >= 1; }
   debug.alt = () => ({
     on: altP.on, id: altP.id, type: altP.type, charging: altActive(), p: +altChargeP().toFixed(3),
+    ready: altReady(), mark: (altOf(altP.id) || {}).mark || null,
     maxed: altP.maxed, blocked: altP.blocked, reserved: altP.reserved, elapsed: Math.round(altElapsed()),
     minMs: ALT_MIN_MS, chargeMs: altP.id ? altChargeMs(altP.id) : 0, cancels: altP.cancels, lastCancel: altP.lastCancel,
     lock: !!(altP.lock && altP.lock.isConnected), lockNode: !!(altP.lockNode && altP.lockNode.isConnected),
@@ -1512,6 +1573,10 @@
         t: Math.round(now() - t0), p: +altChargeP().toFixed(3), gap: +chGap().toFixed(2),
         ring: r ? r.kind : null, ringP: r ? +clamp(r.p, 0, 1).toFixed(3) : null, ringColor: r ? r.color : null,
         maxed: altP.maxed, on: altP.on, spreadMul: altSpreadMul,
+        /* §F4 의 세 문법을 **한 표본 안에서** 구별할 수 있게 하는 세 칸이다. 링이 charge 인지,
+         * 중심 점이 밝은지(steady), 중앙에 탄 표식이 있는지(chamber) — 셋을 같은 프레임에서 읽어야
+         * "권총을 누르는 동안 차오르는 링이 없다" 를 측정이 아니라 관측으로 말할 수 있다. */
+        type: altP.type, ready: altReady(), steadyMark: chSteadyMarkOn(), chamberMark: chChamberMarkOn(),
         radius: altP.radiusNode ? Math.round(parseFloat(altP.radiusNode.style.width) / 2) : null,
         lock: !!(altP.lockNode && altP.lockNode.isConnected),
         heat: +lz.heat.toFixed(2), overheated: lzOverheated(),

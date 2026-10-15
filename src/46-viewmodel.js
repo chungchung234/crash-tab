@@ -294,8 +294,34 @@
       ], { duration: 90, iterations: Infinity, easing: 'linear' }));
     } catch (e) { vm.shiver = null; }
   }
+  /* ── SPEC-weapon-identity §F2: 조준(`steady`) ─────────────────────────────
+   * "뷰모델은 들어 올려 고정." 모으는 동작(vmCharge 의 뒤로 당기기)과 **반대 방향**이어야 한다 —
+   * 그래야 손끝에서 "모으는 중" 과 "조준 중" 이 섞이지 않는다. 총을 눈높이로 올려 붙이는 동작이므로
+   * 위로 올라가고 살짝 세워진 뒤 그 자리에 머문다(fill: 'forwards'), 떨림은 없다. */
+  function vmSteady(ms) {
+    if (!vm.node || vm.hidden) return;
+    vmChargeEnd();
+    const amp = vmAmp(), total = Math.max(60, ms || 350);
+    const up = 'translate(' + px(-6 * amp) + ', ' + px(-24 * amp) + ') rotate(' + (3 * amp).toFixed(2) + 'deg)';
+    try { vm.steady = trackAnim(vm.node.animate([{ transform: VM_BASE }, { transform: up }], { duration: total, easing: 'ease-out', fill: 'forwards' })); } catch (e) { vm.steady = null; }
+  }
+  /* ── SPEC-weapon-identity §F2: 장전(`chamber`) ────────────────────────────
+   * "뷰모델이 한 번 왕복하는 장전 동작." 한 번 **왕복**이라는 것이 핵심이다 — 끝에 머무르면 그것도
+   * 모으는 것처럼 보인다. 무기를 당겼다가 제자리로 돌려놓는 한 번의 스트로크이고, 그 길이가 곧
+   * 장전 시간이다. vmPlay() 를 쓰므로 fill: 'none' 이고 흔들림(idle bob)이 뒤에 정확히 돌아온다. */
+  function vmChamber(ms) {
+    if (!vm.node || vm.hidden) return;
+    vmChargeEnd();
+    const amp = vmAmp(), total = Math.max(80, ms || 500);
+    const back = 'translate(' + px(16 * amp) + ', ' + px(6 * amp) + ') rotate(' + (-5 * amp).toFixed(2) + 'deg)';
+    vmPlay([
+      { transform: VM_BASE, offset: 0 },
+      { transform: back, offset: 0.45 },
+      { transform: VM_BASE, offset: 1 }
+    ], total, 'ease-in-out', 'idle');
+  }
   function vmChargeEnd() {
-    for (const k of ['charge', 'shiver']) {
+    for (const k of ['charge', 'shiver', 'steady']) {
       const a = vm[k];
       vm[k] = null;
       if (a) { try { a.cancel(); } catch (e) { /* ignore */ } state.anims.delete(a); }

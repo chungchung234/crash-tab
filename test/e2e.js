@@ -2160,7 +2160,10 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const PALETTE = new Set(['#d4dae4', '#8e97a6', '#3f4654', '#e8edf5', '#b9c2d0', '#6d7788',
       '#a9794e', '#8b6240', '#5a3f28', '#4a4f58', '#33373e', '#1e2127', '#e6c87e', '#c8a24a', '#7f6322',
       '#ff7a7d', '#e5484d', '#86232a', '#ffe08a', '#ffb224', '#3a4049', '#262a31', '#14171c',
-      '#f6fafe', '#f2f6fd', '#ffe9b0']);
+      '#f6fafe', '#f2f6fd', '#ffe9b0',
+      // SPEC-weapon-identity §G3: 물총의 청록. ART 에 재질로 들어간 세 톤이다 (몸체·노즐은 그라데이션을
+      // 쓰므로 지금은 리터럴 채움으로 나오지 않지만, 이 목록은 ART 의 사본이므로 같이 적는다).
+      '#8fe6e4', '#2bb8bf', '#125a66']);
     const offPalette = [];
     for (const id of ARSENAL_IDS) {
       for (const f of (det[id] && det[id].fills) || []) {
@@ -5806,6 +5809,134 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.alt §A2 권총 정조준: 완충하고 떼면 피해 ×1.4 (25 → 35) 가 그 한 요소에 들어간다',
     hpAim0.hp - hpAim1.hp === Math.round(DMG('pistol') * 1.4), { before: hpAim0, after: hpAim1, want: Math.round(DMG('pistol') * 1.4) });
 
+  /* ══ SPEC-weapon-identity §F 보조 공격 문법 (12단계) ════════════════════════════════════════════════
+   * 사용자: "권총을 모아쏘는건 뭐지? 말도 안되는 액션인데."
+   *
+   * §F1 의 결함은 **보이는 것**이었다. 권총의 보조 공격은 7단계부터 이미 `steady`(정조준)였는데
+   * 조준점이 보조 공격 종류를 가리지 않고 `kind: 'charge'` 링을 띄웠다 — 개념은 조준인데 화면에서는
+   * 충전 게이지가 차올랐다. 그래서 아래 단언들은 **같은 프레임에서 셋을 동시에 읽는다**: 링이 무엇인지,
+   * 중심 점이 밝은지, 조준점 중앙에 탄 표식이 있는지. 한 번에 읽지 않으면 "링은 없었지만 다른 순간에
+   * 있었다" 를 구별할 수 없다. 표본은 페이지 안에서 애니메이션 프레임마다 모은다(§A3 와 같은 길). */
+
+  // ---- §F4: 권총을 누르고 있어도 차오르는 링이 없다 ----------------------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  await api.setWeapon(page, 'pistol');
+  await sleep(260);
+  const bigF1 = await api.rect(page, '#demo-img');
+  const steadySamples = await pressFor({ x: bigF1.cx, y: bigF1.cy }, 620);   // 350 ms 정조준 + 여유
+  await sleep(200);
+  const steadyLive = steadySamples.filter((v) => v.on && v.type === 'steady');
+  const steadyRings = Array.from(new Set(steadyLive.map((v) => v.ring)));
+  check(`A.alt §F2/§F4 권총: 누르고 있는 동안 **차오르는 링이 없다** — 표본 ${steadyLive.length}개 전부 ring !== 'charge' 이고 유형은 steady 다`,
+    steadyLive.length >= 15 && steadyLive.every((v) => v.ring !== 'charge'),
+    { n: steadyLive.length, rings: steadyRings, type: steadyLive.length ? steadyLive[0].type : null });
+  /* `ready` 는 **시계**에서 나오고(altChargeP() 가 now() 를 읽는다) 표식은 16 ms 박동(ALT_STEP_MS)에서
+   * 나온다. 그래서 준비가 된 직후 **한 박동 동안** "ready 인데 아직 표식이 없는" 프레임이 존재할 수
+   * 있다 — 이것은 부하가 아니라 구조다. 단언은 그 구조를 그대로 적는다: 표식은 준비 전에는 절대 없고,
+   * 준비 뒤에는 한 박동(16 ms) 안에 켜진 다음 유지된다. 실패 메시지가 실제로 잰 지연을 말한다. */
+  const MARK_LAG_MAX = 40;        // ALT_STEP_MS 16 + 애니메이션 프레임 한 번(≈17) + 여유
+  const markLag = (samples, on) => {
+    const after = samples.filter((v) => v.ready);
+    if (!after.length) return { after, lit: [], lag: Infinity };
+    const t0 = after[0].t;
+    const dark = after.filter((v) => !on(v));
+    return { after, lit: after.filter(on), lag: dark.length ? Math.max(...dark.map((v) => v.t)) - t0 : 0 };
+  };
+  const steadyBefore = steadyLive.filter((v) => !v.ready);
+  const steadyMark = markLag(steadyLive, (v) => v.steadyMark === true);
+  check(`A.alt §F2 권총: 조준이 가라앉는다 — 준비 전 ${steadyBefore.length}개 표본은 중심 점이 평소대로이고, 준비 뒤 ${steadyMark.lit.length}개는 중심 점이 밝다 (점이 켜지기까지 ${steadyMark.lag} ms, 한 박동 ${MARK_LAG_MAX} ms 이내)`,
+    steadyBefore.length >= 3 && steadyMark.after.length >= 5 && steadyMark.lit.length >= 3
+    && steadyMark.lag <= MARK_LAG_MAX
+    && steadyBefore.every((v) => v.steadyMark === false),
+    { before: steadyBefore.slice(0, 4).map((v) => `${v.t}:${v.steadyMark}`), after: steadyMark.after.slice(0, 6).map((v) => `${v.t}:${v.steadyMark}`), lag: steadyMark.lag });
+  const gapF0 = steadyLive.length ? steadyLive[0].gap : 0, gapF1 = steadyLive.length ? steadyLive[steadyLive.length - 1].gap : 0;
+  check('A.alt §F2 권총: 조준점 팔이 안쪽으로 모인다 — 차오르는 것이 없는 대신 이 축소가 "가라앉는 중" 을 말한다',
+    gapF0 > 0 && gapF1 < gapF0 - 0.5, { gapF0, gapF1 });
+  check('A.alt §F2 권총: 조준점 중앙에 탄 표식이 없다 — 장전(chamber)이 아니라 조준(steady)이기 때문이다',
+    steadyLive.every((v) => v.chamberMark === null), Array.from(new Set(steadyLive.map((v) => v.chamberMark))));
+
+  // ---- §F2/§F3 chamber: 샷건 슬러그 장전 --------------------------------------------------------------
+  await api.restore(page);
+  await sleep(140);
+  await api.setWeapon(page, 'shotgun');
+  await sleep(380);
+  const bigF2 = await api.rect(page, '#demo-img');
+  const chamberSamples = await pressFor({ x: bigF2.cx, y: bigF2.cy }, 760);   // 500 ms 장전 + 여유
+  await sleep(240);
+  const chamberLive = chamberSamples.filter((v) => v.on && v.type === 'chamber');
+  check(`A.alt §F2/§F4 샷건: 장전에도 **차오르는 링이 없다** — 표본 ${chamberLive.length}개 전부 ring !== 'charge' 이고, 모이는 반경 미리보기도 없다`,
+    chamberLive.length >= 20 && chamberLive.every((v) => v.ring !== 'charge' && v.radius === null),
+    { n: chamberLive.length, rings: Array.from(new Set(chamberLive.map((v) => v.ring))) });
+  const chFirstReady = chamberLive.find((v) => v.ready);
+  const chBeforeReady = chamberLive.filter((v) => !v.ready);
+  check(`A.alt §F3 샷건: **고정 시간** 뒤에 준비가 끝난다 — debug.alt().ready 가 ${chFirstReady && chFirstReady.t} ms 에 처음 참이 되고(장전 500 ms), 그 전에는 거짓이다`,
+    !!chFirstReady && chFirstReady.t >= 420 && chFirstReady.t <= 680 && chBeforeReady.every((v) => v.ready === false),
+    { firstReadyAt: chFirstReady && chFirstReady.t, n: chamberLive.length });
+  const chMark = markLag(chamberLive, (v) => v.chamberMark === 'slug');
+  check(`A.alt §F2 샷건: 준비가 끝나면 조준점 중앙에 **그 탄의 표식**(슬러그)이 찍힌다 — 그 전 ${chBeforeReady.length}개 표본에는 없고, 준비 뒤 ${chMark.lag} ms 만에 켜져 ${chMark.lit.length}개 표본에서 유지된다`,
+    chMark.after.length >= 5 && chMark.lit.length >= 3 && chMark.lag <= MARK_LAG_MAX
+    && chBeforeReady.every((v) => v.chamberMark === null),
+    { marks: Array.from(new Set(chamberLive.map((v) => `${v.ready}:${v.chamberMark}`))), lag: chMark.lag, n: chMark.after.length });
+
+  /* §F3: "중간에 떼면 **장전이 취소되고 평소 탄이 나간다**." 평소 한 발은 펠릿 아홉이고 슬러그는
+   * 한 덩어리 190 이므로, 피해를 재면 어느 쪽이 나갔는지가 한 숫자로 갈린다. */
+  /* 큰 카드를 쏜다. 슬러그는 한 덩어리 190 이고 #demo-img 의 체력은 그보다 작아서 한 방에 사라진다 —
+   * 사라진 요소의 체력 차이는 "슬러그가 몇 들어갔나" 를 말해 주지 않는다. 그리고 카드 한가운데는 그
+   * 안의 <p> 이므로 PADDING 을 노린다(이 파일의 §C/§D 블록이 같은 주석을 달고 있다).
+   * §C3 등급 계수가 피해에 곱해지므로 기댓값은 제품 자신에게 묻는다(`debug.vsOf`) — 테스트가 계수의
+   * 사본을 들고 있으면 표를 고치는 날 조용히 어긋난다. */
+  await api.restore(page);
+  await sleep(160);
+  await api.debug(page, { infiniteAmmo: true });
+  const slugDmg = balance.model().weapons.shotgun.slugDamage;
+  const vsSlug = await page.evaluate(() => window.__crashScreen.debug.vsOf(document.querySelector('#big-card'), 'shotgun'));
+  const slugWant = Math.max(1, Math.round(slugDmg * vsSlug));
+  const rectF3 = await api.rect(page, '#big-card');
+  const aimF3 = { x: rectF3.left + 8, y: rectF3.top + 8 };
+  const hpCh0 = await api.hpOf(page, '#big-card');
+  await pressFor(aimF3, 300);     // 120 ms 는 넘고 500 ms 장전에는 못 미친다
+  await sleep(240);
+  const hpCh1 = await api.hpOf(page, '#big-card');
+  check(`A.alt §F3 샷건: 장전이 끝나기 전에 떼면 **취소되고 평소 탄이 나간다** — 들어간 피해 ${hpCh0.hp - hpCh1.hp} 가 슬러그(${slugWant} = ${slugDmg}×${vsSlug})가 아니다`,
+    hpCh0.hp - hpCh1.hp > 0 && hpCh0.hp - hpCh1.hp < slugWant, { before: hpCh0.hp, after: hpCh1.hp, slugWant, vs: vsSlug });
+
+  /* 완충하고 떼면 그 탄이 나간다 — 수치는 §E 가 정한 그대로이고 §F3 이 "피해·반경 수치는 지금 값을
+   * 그대로 쓴다" 고 못박았으므로, 이 단언이 그 약속을 지킨다. */
+  await api.restore(page);
+  await sleep(160);
+  const rectF4 = await api.rect(page, '#big-card');
+  const aimF4 = { x: rectF4.left + 8, y: rectF4.top + 8 };
+  const hpSl0 = await api.hpOf(page, '#big-card');
+  await pressFor(aimF4, 760);
+  await sleep(260);
+  const hpSl1 = await api.hpOf(page, '#big-card');
+  check(`A.alt §F3 샷건: 장전이 끝난 뒤 떼면 슬러그 ${slugDmg}(등급 계수 ${vsSlug} → ${slugWant})가 그대로 나간다 — 문법만 바뀌고 수치는 그대로다`,
+    hpSl0.hp - hpSl1.hp === slugWant, { before: hpSl0.hp, after: hpSl1.hp, want: slugWant });
+  await api.debug(page, { infiniteAmmo: false });
+
+  /* §F4 마지막 줄: "23종의 `type` 이 §F2 표와 일치한다. **`charge` 인 무기 중 `kind: 'gun'` 은 없다.**"
+   * 앞 절은 무기고 세 블록이 나눠 보고 있고(§A1 · §C/§D · §E), 뒷 절은 한 줄로 전부를 본다. */
+  const altGrammar = await page.evaluate(() => {
+    const a = window.__crashScreen, d = a.debug;
+    const tab = d.altTable(), W = {};
+    for (const w of a.arsenal()) W[w.id] = w;
+    const out = { bad: [], byType: {} };
+    for (const id of Object.keys(tab)) {
+      const t = tab[id] && tab[id].type;
+      if (!t) continue;
+      out.byType[t] = (out.byType[t] || 0) + 1;
+      /* "총기" 는 총구에서 한 점으로 나가는 것 — tools/balance.js 의 §F6-9 와 **같은 읽기**다
+       * (나팔은 kind 가 'gun' 이지만 반경 420 의 원뿔 무기이고 §F2 의 charge 열에 이름이 있다). */
+      if (t === 'charge' && W[id] && W[id].kind === 'gun' && !(W[id].radius > 0)) out.bad.push(id + ':' + W[id].kind);
+    }
+    return out;
+  });
+  check('A.alt §F4: **`charge` 인 무기 중 한 점으로 쏘는 총기는 하나도 없다** — 이 한 줄이 "총기가 모은다" 를 구조적으로 막는다',
+    altGrammar.bad.length === 0, altGrammar);
+  check('A.alt §F2: 문법이 셋으로 갈렸다 — charge · steady · chamber 가 전부 실제로 쓰이고 있다',
+    altGrammar.byType.charge > 0 && altGrammar.byType.steady === 2 && altGrammar.byType.chamber === 3, altGrammar.byType);
+
   // ---- §A4 근접은 탄약이 없으므로 쿨다운으로 값을 치른다 ------------------------------------------------
   await api.restore(page);
   await sleep(140);
@@ -6326,12 +6457,17 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.§F6: tools/balance.js 가 src/ 에서 정적으로 읽은 무기 표가 실행 중인 번들이 발행하는 표와 23종 전부에서 일치한다',
     parseMismatch.length === 0, parseMismatch.slice(0, 10));
 
-  /* §A1 은 목록이 아니라 문법이다 — 무기고 전체에 대해 참이거나 어디에도 참이 아니다. */
+  /* §A1 은 목록이 아니라 문법이다 — 무기고 전체에 대해 참이거나 어디에도 참이 아니다.
+   * 12단계(SPEC-weapon-identity §F2)가 그 문법을 셋으로 갈랐다. 고무탄은 `charge` 에서 **`chamber`**
+   * 로 옮겼다 — 고무탄총은 에너지를 모으지 않고 과압탄을 약실에 넣는다(§F1 의 표가 이름을 적었다).
+   * 반경 150 · ×1.5 라는 수치는 그대로이므로 이 단언이 보는 것은 **문법**뿐이고, 바뀐 쪽을 바뀐 대로
+   * 적는다(단언을 지우는 것이 아니라 고쳐 쓴다 — CLAUDE.md). */
   const altTableCD = await page.evaluate(() => window.__crashScreen.debug.altTable());
-  check('A.§C / §D (§A1): 새 무기 일곱도 §A1 문법을 따른다 — 전부 보조 공격 유형을 들고 있고, 길게 눌러 지속되는 둘(견인 광선 · 물총)은 짧게 누르는 쪽이 보조다',
+  check('A.§C / §D (§A1 · §F2): 새 무기 일곱도 문법을 따른다 — 길게 눌러 지속되는 둘(견인 광선 · 물총)은 짧게 누르는 쪽이 보조이고, 고무탄만 `chamber`(장전), 나머지 넷은 `charge`(모은다)다',
     !!altTableCD && IX_IDS.concat(FUN_IDS).every((id) => altTableCD[id] && typeof altTableCD[id].type === 'string')
     && altTableCD.tractor.type === 'burst' && altTableCD.watergun.type === 'burst'
-    && ['shockwave', 'rubber', 'squeaky', 'horn', 'chicken'].every((id) => altTableCD[id].type === 'charge' && altTableCD[id].ms > 0),
+    && altTableCD.rubber.type === 'chamber' && altTableCD.rubber.ms > 0
+    && ['shockwave', 'squeaky', 'horn', 'chicken'].every((id) => altTableCD[id].type === 'charge' && altTableCD[id].ms > 0),
     IX_IDS.concat(FUN_IDS).map((id) => `${id}:${altTableCD && altTableCD[id] && altTableCD[id].type}/${altTableCD && altTableCD[id] && altTableCD[id].ms}`));
 
   /* ---- §D 뿅망치: 피해 8 · 찌그러졌다 튀어오른다 · 별 입자 ------------------------------------- */
@@ -6768,12 +6904,17 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.restore(page);
   await sleep(160);
 
-  /* ---- §A1 문법: 네 무기도 보조 공격을 갖는다 ----------------------------------------------------- */
+  /* ---- §A1 문법: 네 무기도 보조 공격을 갖는다 -----------------------------------------------------
+   * 12단계(SPEC-weapon-identity §F2)가 샷건과 못총을 `charge` 에서 **`chamber`** 로 옮겼다. 산탄총은
+   * 모으지 않고 **약실에 슬러그를 넣고**, 못총은 모으지 않고 **대고 박는다** — §F1 의 표가 이 둘을
+   * 이름으로 적었다. 중력탄은 §F2 가 charge 로 남겨 둔 쪽이다(에너지를 모으는 것이 말이 된다).
+   * 슬러그 190 · 대못 ×2.0 · 반경 ×2.2 는 그대로다. */
   const altTableE = await page.evaluate(() => window.__crashScreen.debug.altTable());
-  check('A.§E (§A1): 네 무기 전부 보조 공격 유형을 들고 있고, 길게 눌러 지속되는 냉각총만 짧게 누르는 쪽이 보조다',
+  check('A.§E (§A1 · §F2): 네 무기 전부 보조 공격 유형을 들고 있고, 냉각총만 짧게 누르는 쪽이 보조이며, 샷건·못총은 `chamber`(장전) · 중력탄만 `charge`(모은다)다',
     !!altTableE && UT_IDS.every((id) => altTableE[id] && typeof altTableE[id].type === 'string')
     && altTableE.freezegun.type === 'burst'
-    && ['shotgun', 'nailgun', 'gravity'].every((id) => altTableE[id].type === 'charge' && altTableE[id].ms > 0),
+    && ['shotgun', 'nailgun'].every((id) => altTableE[id].type === 'chamber' && altTableE[id].ms > 0)
+    && altTableE.gravity.type === 'charge' && altTableE.gravity.ms > 0,
     UT_IDS.map((id) => `${id}:${altTableE && altTableE[id] && altTableE[id].type}/${altTableE && altTableE[id] && altTableE[id].ms}`));
 
   /* ---- 무흔적: 빙결 · 고정 · 중력장이 전부 걸린 채로 Escape -------------------------------------- */

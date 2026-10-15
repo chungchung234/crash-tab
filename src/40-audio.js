@@ -191,6 +191,22 @@
         tone(t, 'sine', 180, 420, dur, 0.17 * gm, dur);
       }
       else if (kind === 'chargeMax') { tone(t, 'square', 1500, 1400, 0.018, 0.2 * gm, 0.02); tinks(1, 0, 0.06 * gm); }
+      /* ── SPEC-weapon-identity §F2: 보조 공격 문법 셋의 서로 다른 소리 ──
+       * §F1 의 결함은 눈으로만 난 것이 아니다 — 권총도 산탄총도 올라가는 `charge` 톤을 냈다. 모으지
+       * 않는 두 문법에는 **모이는 소리가 아예 없어야** 하고, 대신 각자의 동작이 내는 소리가 난다.
+       * 'steadyLock' 조준이 가라앉고 멎는 "딸깍". 금속이 아니다 — 삼각파 둘뿐이고 노이즈가 없어서
+       *   'clack'(쿨다운 거절)이나 'chargeMax'(사각파) 와 귀로 섞이지 않는다.
+       * 'chamberIn' 약실을 여는 **금속성 철컥**. 노리쇠가 뒤로 갔다 오는 두 번의 금속음이라
+       *   한 발씩 밀어 넣는 'shell' 보다 무겁고 둘로 들린다.
+       * 'chamberReady' 노리쇠가 닫혔다. 'chamberIn' 의 둘째 음보다 짧고 높아서 "끝났다" 로 들린다. */
+      else if (kind === 'steadyLock') { tone(t, 'triangle', 1260, 1190, 0.022, 0.14 * gm, 0.026); tone(t + 0.035, 'triangle', 1680, 1600, 0.016, 0.08 * gm, 0.02); }
+      else if (kind === 'chamberIn') {
+        noiseBurst(t, 0.05, { type: 'bandpass', freq: 1150, Q: 3.2 }, 0.34 * gm, 0.055);
+        tone(t, 'square', 300, 210, 0.05, 0.2 * gm, 0.06);
+        noiseBurst(t + 0.1, 0.045, { type: 'bandpass', freq: 1900, Q: 2.8 }, 0.28 * gm, 0.05);
+        tone(t + 0.1, 'square', 380, 260, 0.04, 0.16 * gm, 0.05);
+      }
+      else if (kind === 'chamberReady') { noiseBurst(t, 0.03, { type: 'bandpass', freq: 2600, Q: 2.2 }, 0.26 * gm, 0.035); tone(t, 'square', 620, 520, 0.028, 0.18 * gm, 0.034); }
       /* §B2 레이저: the loop tick is a thin bright buzz, the pulse a short bright stab, and 과열 a falling
        * hiss that can only be the sound of something being shut down. */
       else if (kind === 'laserLoop') { tone(t, 'sawtooth', 1750, 1700, 0.07, 0.07 * gm, 0.07); noiseBurst(t, 0.05, { type: 'highpass', freq: 6000, Q: 0.8 }, 0.07 * gm, 0.05); }

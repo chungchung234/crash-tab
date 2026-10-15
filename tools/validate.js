@@ -691,6 +691,281 @@ rule('R16', 'text-hygiene', (r, ctx) => {
   if (!r.failed()) r.note(checked + ' text file(s) are BOM-free and LF-only');
 });
 
+
+/* ===================================================================== */
+/* 6b. SPEC-weapon-identity §G — 무기 그림이 읽히는가                      */
+/* ===================================================================== */
+
+/* ---- 아주 작은 자유 변수 스캐너 (R17) ------------------------------------------------------------
+ * 파서를 들이지 않는다 — 이 도구의 규칙이 "의존성 0" 이다. 대신 세 단계로 어림한다:
+ *   1) 주석 · 문자열 · 정규식 리터럴을 지운다 (식별자가 아닌 글자를 식별자로 세지 않기 위해)
+ *   2) 그 파일 안에서 **선언된** 이름을 전부 모은다 (const/let/var 의 모든 선언자, 함수 이름과
+ *      매개변수, 화살표 매개변수, catch, class, 객체 메서드 축약형)
+ *   3) 나머지 중 JS 내장이 아닌 것이 자유 변수다
+ * 선언 쪽을 **넉넉히** 모으는 방향으로 틀리므로(어느 스코프에서든 선언된 이름은 선언으로 친다)
+ * 거짓 양성이 나지 않는다 — 이 검사는 "아트가 새 전역을 쓰기 시작했다" 를 잡으려는 것이고,
+ * 그 경우 그 이름은 파일 어디에도 선언되어 있지 않다. 7단계의 `DEG` 가 바로 그 모양이었다. */
+const FV_ID = '[A-Za-z_$][A-Za-z0-9_$]*';
+
+function fvStripLiterals(src) {
+  let out = '', i = 0, prev = '';
+  const n = src.length;
+  while (i < n) {
+    const ch = src[i], nx = src[i + 1];
+    if (ch === '/' && nx === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+    if (ch === '/' && nx === '*') { i += 2; while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') out += '\n'; i++; } i += 2; out += ' '; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const q = ch; i++;
+      let inner = '';
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        /* 템플릿 치환부는 코드다. 지우면 그 안의 자유 변수를 놓친다. */
+        if (q === '`' && src[i] === '$' && src[i + 1] === '{') {
+          i += 2;
+          let depth = 1;
+          const start = i;
+          while (i < n && depth > 0) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; if (depth > 0) i++; }
+          inner += '+(' + fvStripLiterals(src.slice(start, i)) + ')+';
+          i++;
+          continue;
+        }
+        if (src[i] === q) { i++; break; }
+        if (src[i] === '\n') inner += '\n';
+        i++;
+      }
+      out += '0' + inner + '0'; prev = '0';
+      continue;
+    }
+    if (ch === '/' && /[=(,:[!&|?{;+\-*%~^<>]/.test(prev)) {        // 정규식 리터럴
+      i++;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '[') { while (i < n && src[i] !== ']') { if (src[i] === '\\') i++; i++; } }
+        if (src[i] === '/') { i++; break; }
+        if (src[i] === '\n') break;
+        i++;
+      }
+      while (i < n && /[a-z]/.test(src[i])) i++;
+      out += '0'; prev = '0';
+      continue;
+    }
+    out += ch;
+    if (!/\s/.test(ch)) prev = ch;
+    i++;
+  }
+  return out;
+}
+
+/** `const a = 1, [b, c] = xs;` 의 선언자 머리들. 깊이 0 의 쉼표에서 끊고 `=` 앞만 읽는다. */
+function fvDeclaratorNames(code, from) {
+  const names = [];
+  let depth = 0, i = from, head = '', eating = true;
+  const push = () => { for (const m of head.matchAll(new RegExp(FV_ID, 'g'))) names.push(m[0]); head = ''; };
+  while (i < code.length) {
+    const c = code[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') { if (depth === 0) break; depth--; }
+    else if (depth === 0 && c === ';') break;
+    else if (depth === 0 && c === ',') { push(); eating = true; i++; continue; }
+    else if (depth === 0 && c === '=' && code[i + 1] !== '=' && !'=!<>'.includes(code[i - 1])) { push(); eating = false; i++; continue; }
+    else if (depth === 0 && c === '\n' && eating && /^\s*(?:const|let|var|return|if|for|while|function|})/.test(code.slice(i + 1, i + 40))) break;
+    if (eating && depth <= 1) head += c;
+    i++;
+  }
+  push();
+  return names;
+}
+
+function fvDeclared(code, topLevelOnly) {
+  const d = new Set();
+  const add = (s) => { for (const m of String(s).matchAll(new RegExp(FV_ID, 'g'))) d.add(m[0]); };
+  const declRe = topLevelOnly ? /^ {0,2}(?:const|let|var)\s/gm : /\b(?:const|let|var)\s/g;
+  for (const m of code.matchAll(declRe)) for (const nm of fvDeclaratorNames(code, m.index + m[0].length)) d.add(nm);
+  const fnRe = topLevelOnly
+    ? new RegExp('^ {0,2}function\\s*\\*?\\s*(' + FV_ID + ')?\\s*\\(([^)]*)\\)', 'gm')
+    : new RegExp('\\bfunction\\s*\\*?\\s*(' + FV_ID + ')?\\s*\\(([^)]*)\\)', 'g');
+  for (const m of code.matchAll(fnRe)) { if (m[1]) d.add(m[1]); if (!topLevelOnly) add(m[2] || ''); }
+  if (topLevelOnly) return d;
+  for (const m of code.matchAll(/\(([^()]*)\)\s*=>/g)) add(m[1]);
+  for (const m of code.matchAll(new RegExp('(?:^|[^.\\w$])(' + FV_ID + ')\\s*=>', 'gm'))) d.add(m[1]);
+  for (const m of code.matchAll(new RegExp('\\bcatch\\s*\\(\\s*(' + FV_ID + ')', 'g'))) d.add(m[1]);
+  for (const m of code.matchAll(new RegExp('\\bclass\\s+(' + FV_ID + ')', 'g'))) d.add(m[1]);
+  /* 객체 리터럴의 메서드 축약형: `mat(name, dir) {` — 이름도 매개변수도 선언이다 */
+  for (const m of code.matchAll(new RegExp('(?:^|[,{])\\s*(?:get\\s+|set\\s+|async\\s+)?(' + FV_ID + ')\\s*\\(([^)]*)\\)\\s*\\{', 'gm'))) { d.add(m[1]); add(m[2] || ''); }
+  return d;
+}
+
+const FV_GLOBALS = new Set(['Math', 'Object', 'Array', 'String', 'Number', 'Boolean', 'JSON', 'Map', 'Set', 'WeakMap', 'WeakSet',
+  'Promise', 'Date', 'RegExp', 'Error', 'TypeError', 'RangeError', 'Symbol', 'Infinity', 'NaN', 'undefined', 'this', 'arguments',
+  'window', 'document', 'console', 'parseInt', 'parseFloat', 'isFinite', 'isNaN', 'Intl', 'URL', 'Blob', 'Image', 'CSS',
+  'performance', 'navigator', 'requestAnimationFrame', 'cancelAnimationFrame', 'setTimeout', 'clearTimeout', 'setInterval',
+  'clearInterval', 'getComputedStyle', 'MutationObserver', 'ResizeObserver', 'IntersectionObserver', 'CustomEvent', 'Event',
+  'Node', 'Element', 'HTMLElement', 'SVGElement', 'DOMParser', 'TextEncoder', 'TextDecoder', 'Uint8Array', 'Float32Array',
+  'ArrayBuffer', 'chrome', 'globalThis', 'structuredClone', 'KeyboardEvent', 'PointerEvent', 'AbortController', 'Function',
+  'Proxy', 'Reflect', 'BigInt']);
+const FV_KEYWORDS = new Set(['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case',
+  'break', 'continue', 'new', 'typeof', 'instanceof', 'delete', 'in', 'of', 'try', 'catch', 'finally', 'throw', 'class',
+  'extends', 'super', 'yield', 'await', 'async', 'void', 'default', 'export', 'import', 'from', 'as', 'static', 'get', 'set',
+  'true', 'false', 'null']);
+
+function fvFree(code) {
+  const decl = fvDeclared(code, false);
+  const out = [];
+  const re = new RegExp('(\\.\\s*)?\\b(' + FV_ID + ')\\b\\s*(:)?', 'g');
+  const seen = new Set();
+  let m;
+  while ((m = re.exec(code))) {
+    if (m[1]) continue;                                  // 멤버 접근
+    if (m[3]) {                                          // 객체 리터럴 키
+      const before = code.slice(Math.max(0, m.index - 60), m.index).replace(/\s+$/, '');
+      const c = before[before.length - 1];
+      if (c === '{' || c === ',' || c === undefined) continue;
+    }
+    const name = m[2];
+    if (seen.has(name) || decl.has(name) || FV_GLOBALS.has(name) || FV_KEYWORDS.has(name)) continue;
+    seen.add(name);
+    out.push({ name, line: code.slice(0, m.index).split('\n').length });
+  }
+  return out;
+}
+
+/* ---- R17 ---- */
+/* SPEC-weapon-identity §G3: "아트가 빌려 쓰는 전역을 시트의 심에 넣고, R17 로 아트 모듈의 자유 변수가
+ * 전부 시트 심 또는 prelude 에 있는지 검사한다. 도구가 다시 죽으면 CI 가 잡는다."
+ *
+ * 왜 이 규칙이 있나: 7단계가 미니건 아트에 prelude 의 `DEG` 를 쓰면서 tools/weapon-sheet.js 가
+ * `DEG is not defined` 로 죽었고, **그 뒤로 무기 그림을 눈으로 본 사람이 없다** — 그 사이 무기가
+ * 12종에서 23종이 됐고 11종은 한 번도 검수되지 않았다(§G1). 그림을 보는 도구가 조용히 죽는 것이
+ * 그림이 안 읽히는 것보다 먼저 온 사고다. */
+rule('R17', 'weapon-art-free-vars', (r, ctx) => {
+  const artRel = 'src/44-weapon-art.js', sheetRel = 'tools/weapon-sheet.js', preludeRel = 'src/00-prelude.js';
+  for (const rel of [artRel, sheetRel, preludeRel]) {
+    if (!isFile(path.join(ctx.root, rel))) { r.skip(rel + ' does not exist'); return; }
+  }
+  const sheet = readText(path.join(ctx.root, sheetRel));
+  const start = sheet.indexOf('const SHIM =');
+  const end = sheet.indexOf('function bootSource', start < 0 ? 0 : start);
+  if (start < 0 || end < 0) { r.fail(sheetRel + ': could not find the `const SHIM = …` block'); return; }
+  const shim = new Set();
+  for (const m of sheet.slice(start, end).matchAll(new RegExp('\\bconst\\s+(' + FV_ID + ')', 'g'))) shim.add(m[1]);
+  shim.delete('SHIM');
+  const prelude = fvDeclared(fvStripLiterals(readText(path.join(ctx.root, preludeRel))), true);
+  const free = fvFree(fvStripLiterals(readText(path.join(ctx.root, artRel))));
+  const missing = free.filter((f) => !shim.has(f.name) && !prelude.has(f.name));
+  for (const f of missing) {
+    r.fail(artRel + ':' + f.line + ': `' + f.name + '` is neither in the sheet shim (' + sheetRel + ') nor declared at the top level of ' + preludeRel
+      + ' — tools/weapon-sheet.js will die on it (that is how §G1 happened)');
+  }
+  if (!r.failed()) {
+    r.note(free.length + ' free variable(s) in ' + artRel + ', all covered (shim ' + shim.size + ', prelude ' + prelude.size + ')');
+    r.detail('free: ' + free.map((f) => f.name).sort().join(' '));
+  }
+});
+
+/* ---- R18 ---- */
+/* SPEC-weapon-identity §G4: "아이콘 48×48 을 실제로 래스터화해 쌍마다 비교한다. 실루엣 차이는 알파
+ * 채널의 자카드 거리가 0.18 이상, 색 차이는 평균 색조·채도·명도 벡터의 거리가 0.12 이상. 둘 다
+ * 밑돌면 그 쌍은 실패. 어느 쌍인지 이름으로 말한다."
+ *
+ * 왜 래스터인가: 아트 검사(SPEC-weapon-art §9)는 요소 수 · 그라데이션 · 획 · 팔레트를 본다. 그 전부를
+ * 통과하면서도 48 px 에서 똑같은 회색 덩어리일 수 있다 — §G2 가 찾은 것이 정확히 그것이다. **구별은
+ * 픽셀에서만 증명된다.**
+ *
+ * 색 거리의 해석 (보고에 적었다): "색조·채도·명도 벡터" 를 (h, s, v) 세 숫자로 그대로 읽으면 회색의
+ * 색조(정의되지 않는 값)가 거리에 섞이고 359° 와 1° 가 가장 먼 색이 된다. 그래서 HSV **원뿔** 좌표
+ * (s·v·cos h, s·v·sin h, v) 로 읽는다 — 채도가 0 이면 색조가 거리에 아무 영향을 주지 않는다는,
+ * "회색끼리는 밝기로만 구별된다" 는 그 문장의 뜻 그대로다.
+ *
+ * 래스터는 tools/weapon-sheet.js --r18 이 굽는다(puppeteer 가 필요하고 이 파일은 의존성이 0 이다).
+ * 그 도구가 puppeteer 를 못 찾으면 exit 2 를 돌려주고, 여기서는 FAIL 이 아니라 SKIP 이다. */
+const R18_SILHOUETTE_MIN = 0.18;
+const R18_COLOUR_MIN = 0.12;
+const R18_ALPHA = 128;            // 이 이상이면 그 픽셀은 그림이다 (가장자리 안티앨리어싱의 절반)
+
+function rgbToHsvCone(r, g, b) {
+  const rr = r / 255, gg = g / 255, bb = b / 255;
+  const mx = Math.max(rr, gg, bb), mn = Math.min(rr, gg, bb), d = mx - mn;
+  let h = 0;
+  if (d > 1e-9) {
+    if (mx === rr) h = ((gg - bb) / d) % 6;
+    else if (mx === gg) h = (bb - rr) / d + 2;
+    else h = (rr - gg) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  const s = mx <= 0 ? 0 : d / mx;
+  const rad = h * Math.PI / 180;
+  return [s * mx * Math.cos(rad), s * mx * Math.sin(rad), mx];
+}
+
+rule('R18', 'weapon-icon-distinct', (r, ctx) => {
+  const sheetRel = 'tools/weapon-sheet.js';
+  if (!isFile(path.join(ctx.root, sheetRel))) { r.skip(sheetRel + ' does not exist'); return; }
+  const res = require('child_process').spawnSync(process.execPath, [path.join(ctx.root, sheetRel), '--r18'],
+    { cwd: ctx.root, encoding: 'utf8', timeout: 120000 });
+  if (res.status === 2) { r.skip('puppeteer is not installed — ' + sheetRel + ' --r18 cannot rasterise (npm install)'); return; }
+  if (res.status !== 0) {
+    r.fail(sheetRel + ' --r18 exited ' + res.status + ': ' + String(res.stderr || res.error || '').trim().split('\n').slice(0, 3).join(' / '));
+    return;
+  }
+  let meta;
+  try { meta = JSON.parse(String(res.stdout).trim().split('\n').pop()); }
+  catch (e) { r.fail(sheetRel + ' --r18 printed something that is not JSON: ' + String(res.stdout).slice(0, 160)); return; }
+  const png = path.join(ctx.root, meta.path);
+  if (!isFile(png)) { r.fail('the raster was not written: ' + meta.path); return; }
+  const img = pngPixels(fs.readFileSync(png));
+  const cell = meta.cell, ids = meta.ids;
+  if (img.height !== cell || img.width !== cell * ids.length) {
+    r.fail('raster is ' + img.width + '×' + img.height + ', expected ' + (cell * ids.length) + '×' + cell);
+    return;
+  }
+  const tiles = ids.map((id, i) => {
+    const x0 = i * cell;
+    const mask = new Uint8Array(cell * cell);
+    let n = 0, cx = 0, cy = 0, cv = 0;
+    for (let y = 0; y < cell; y++) {
+      for (let x = 0; x < cell; x++) {
+        const o = (y * img.width + (x0 + x)) * 4;
+        if (img.data[o + 3] < R18_ALPHA) continue;
+        mask[y * cell + x] = 1;
+        n++;
+        const c = rgbToHsvCone(img.data[o], img.data[o + 1], img.data[o + 2]);
+        cx += c[0]; cy += c[1]; cv += c[2];
+      }
+    }
+    return { id, mask, n, c: n ? [cx / n, cy / n, cv / n] : [0, 0, 0] };
+  });
+  /* 아무것도 안 그려진 아이콘은 쌍 비교 이전의 실패다 — 빈 타일끼리는 자카드 거리가 0 이라
+   * "둘 다 비어 있다" 가 "둘이 똑같다" 로 조용히 통과할 수도 있다. */
+  for (const t of tiles) if (t.n < 16) r.fail('`' + t.id + '` icon covers only ' + t.n + ' px at ' + cell + '×' + cell + ' — it is effectively blank');
+  let worst = null;
+  const fails = [];
+  for (let i = 0; i < tiles.length; i++) {
+    for (let j = i + 1; j < tiles.length; j++) {
+      const a = tiles[i], b = tiles[j];
+      let inter = 0, uni = 0;
+      for (let k = 0; k < a.mask.length; k++) { const p = a.mask[k], q = b.mask[k]; if (p && q) inter++; if (p || q) uni++; }
+      const sil = uni ? 1 - inter / uni : 0;
+      let s2 = 0;
+      for (let k = 0; k < 3; k++) { const d = a.c[k] - b.c[k]; s2 += d * d; }
+      const col = Math.sqrt(s2);
+      /* 통과 여유: 두 문턱 중 **더 많이 넘은 쪽**이 그 쌍을 구해 준다(둘 다 밑돌아야 실패이므로). */
+      const margin = Math.max(sil / R18_SILHOUETTE_MIN, col / R18_COLOUR_MIN);
+      if (!worst || margin < worst.margin) worst = { a: a.id, b: b.id, sil, col, margin };
+      if (sil < R18_SILHOUETTE_MIN && col < R18_COLOUR_MIN) fails.push({ a: a.id, b: b.id, sil, col });
+    }
+  }
+  for (const f of fails) {
+    r.fail('`' + f.a + '` and `' + f.b + '` are not told apart at ' + cell + '×' + cell
+      + ' — silhouette ' + f.sil.toFixed(3) + ' (need ' + R18_SILHOUETTE_MIN + ') AND colour ' + f.col.toFixed(3) + ' (need ' + R18_COLOUR_MIN + ')');
+  }
+  if (!r.failed()) {
+    const pairs = tiles.length * (tiles.length - 1) / 2;
+    r.note(pairs + ' icon pair(s) of ' + tiles.length + ' weapons are distinguishable at ' + cell + '×' + cell);
+    if (worst) r.detail('closest pair: ' + worst.a + ' / ' + worst.b + ' — silhouette ' + worst.sil.toFixed(3) + ', colour ' + worst.col.toFixed(3) + ' (' + worst.margin.toFixed(2) + '× the threshold it passes on)');
+  }
+});
+
 /* ===================================================================== */
 /* 7. Runner                                                              */
 /* ===================================================================== */
