@@ -57,7 +57,14 @@ const SHIM =
   "  const doc = document;\n" +
   "  const SVG_NS = 'http://www.w3.org/2000/svg';\n" +
   "  const debug = {};\n" +
-  "  const px = (v) => (Math.round(v * 100) / 100) + 'px';\n";
+  "  const px = (v) => (Math.round(v * 100) / 100) + 'px';\n" +
+  /* 이 목록은 src/44-weapon-art.js 가 prelude 에서 빌려 쓰는 전역이다. 7단계가 미니건 아트에
+   * DEG 를 쓰면서 이 시트가 'DEG is not defined' 로 죽었고, 그 뒤로 무기 그림을 눈으로 본
+   * 사람이 없다 — 그 사이 무기가 12종에서 23종이 됐다. 아트가 새 전역을 쓰면 여기도 늘린다.
+   * tools/validate.js 가 이 목록과 아트의 자유 변수를 대조한다(R17). */
+  "  const DEG = Math.PI / 180;\n" +
+  "  const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);\n" +
+  "  const rand = (a, b) => a + Math.random() * (b - a);\n";
 
 function bootSource() {
   const src = fs.readFileSync(path.join(ROOT, 'src', '44-weapon-art.js'), 'utf8');

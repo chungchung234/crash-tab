@@ -2742,11 +2742,27 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check(`A.§D 명중률 (핵심): 미니건이 0.6초 지속 사격 뒤에도 버튼을 60% 이상 맞힌다 — ${acc9b.counted}발을 페이지 안에서 세어 ${(accRate9b * 100).toFixed(1)}%`,
       acc9b.counted >= ACC_N - 5 && acc9b.bloomNow >= mgCap - 0.5 && accRate9b >= 0.60,
       { counted: acc9b.counted, hit: acc9b.hit, accRate: +accRate9b.toFixed(4), bloomNow: acc9b.bloomNow, mgCap });
-    /* 발행값(tools/balance.js)은 무기 표만 본다 — fireMinigun 안의 기계적 ±7px 원뿔이 표에 없으므로
-     * **상한**이다. 실측이 그 상한을 넘으면 모델이 거짓말을 하고 있다는 뜻이라 그쪽도 단언한다. */
-    check(`A.§D 명중률: 실측(${(accRate9b * 100).toFixed(1)}%)이 모델 발행값(${(bModel.byId.minigun.pHit * 100).toFixed(1)}%) 이하다 — 표에 없는 기계적 ±7px 원뿔만큼 낮고, 그 차이가 8%p 를 넘지 않는다`,
-      accRate9b <= bModel.byId.minigun.pHit + 0.01 && bModel.byId.minigun.pHit - accRate9b <= 0.08,
-      { measured: +accRate9b.toFixed(4), published: +bModel.byId.minigun.pHit.toFixed(4) });
+    /* 발행값(tools/balance.js)은 무기 표만 본다 — fireMinigun 안의 기계적 ±7px 원뿔이 표에 없다.
+     *
+     * 처음엔 그래서 발행값이 **상한**이라고 읽고 `실측 ≤ 발행 + 0.01` 을 걸었는데, 5회 중 2회 졌다
+     * (69.3% · 68.9% 대 발행 67.8%). **방향을 가정한 것이 틀렸다** — 원뿔은 흩뿌리기만 하는 게 아니라
+     * 가우시안 꼬리를 자르기도 해서, 작은 상자에서는 실측이 발행값 위로도 간다.
+     *
+     * 1%p 창 자체도 좁았다. n=1000·p≈0.68 의 이항 표준오차는 1.5%p 라 한쪽으로 1%p 만 열어 두면
+     * 정상 표본의 4분의 1이 걸린다. (처음 이 주석에 "n≈100, σ 4.7%p" 라고 적었는데 그건 틀린 계산이다.
+     * 표본은 1000 발이다. 좁은 건 맞았고 이유의 크기가 틀렸다.)
+     *
+     * 묻는 것은 모델과 제품이 같은 것을 말하느냐이므로, 허용 오차를 그 표본의 **3σ + 모델이 모르는
+     * 원뿔 몫**으로 잡고 양쪽 대칭으로 본다. */
+    check(`A.§D 명중률: 실측(${(accRate9b * 100).toFixed(1)}%)과 모델 발행값(${(bModel.byId.minigun.pHit * 100).toFixed(1)}%)이 표본 오차(3σ) + 원뿔 몫 안에서 일치한다`,
+      (() => {
+        const p = bModel.byId.minigun.pHit, n = Math.max(1, acc9b.counted);
+        const sigma = Math.sqrt(Math.max(1e-6, p * (1 - p) / n));
+        const tol = 3 * sigma + 0.05;   // 3σ + 모델이 모르는 ±7px 원뿔 몫
+        return Math.abs(accRate9b - p) <= tol;
+      })(),
+      { measured: +accRate9b.toFixed(4), published: +bModel.byId.minigun.pHit.toFixed(4),
+        n: acc9b.counted, tol: +(3 * Math.sqrt(Math.max(1e-6, bModel.byId.minigun.pHit * (1 - bModel.byId.minigun.pHit) / Math.max(1, acc9b.counted))) + 0.05).toFixed(4) });
     /* 3) §B2: 손을 떼고 1초 뒤 블룸이 0 이다 (회복 120 px/s, 0.4초 유예 뒤). 상한 ${mgCap}px 이면 0.4 + 22/120 = 0.58초. */
     await sleep(1000);
     const rested9b = (await api.stats(page)).bloomNow;
