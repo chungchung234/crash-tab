@@ -83,6 +83,7 @@ CRS_BLOCKS=combat node test/e2e.js    # 56초  — 드론·락온·복구·보�
 CRS_BLOCKS=depth node test/e2e.js     # 42초  — 깊이·관통·변위·상호작용
 CRS_BLOCKS=debris node test/e2e.js    # 38초  — 파편 수명
 CRS_BLOCKS=settings node test/e2e.js  # 17초  — 스키마·성능 가드·접근성·통계
+CRS_BLOCKS=roles node test/e2e.js     # 6초   — 표적 등급 계수·§C4 액션·무흔적 (11단계)
 CRS_SUITES=D node test/e2e.js         # 12초  — 옵션 페이지 (실제 확장 로드)
 ```
 

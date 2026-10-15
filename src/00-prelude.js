@@ -37,7 +37,7 @@
     hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 400,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     pistol:   { id: 'pistol',   emoji: '🔫', name: 'weaponPistol',   kind: 'gun',      damage: 25,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: 12, reloadMs: 900 },
     smg:      { id: 'smg',      emoji: '💥', name: 'weaponSmg',      kind: 'gun',      damage: 22,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 70, mag: 30, reloadMs: 1400 },
-    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 4, reloadMs: 1900, spread: 25, scope: true },
+    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 3, reloadMs: 1900, spread: 25, scope: true },
     axe:      { id: 'axe',      emoji: '🪓', name: 'weaponAxe',      kind: 'hammer',   damage: 130, cooldownMs: 550,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     katana:    { id: 'katana',    emoji: '🗡️', name: 'weaponKatana',    kind: 'hammer',   damage: 60,  cooldownMs: 0,    radius: 0,   hold: false, input: 'drag', stabCooldownMs: 520, mag: null, reloadMs: null },
     bomb:     { id: 'bomb',     emoji: '💣', name: 'weaponBomb',     kind: 'bomb',     damage: 190, cooldownMs: 700,  radius: 240, hold: false, input: 'click', rings: [60, 130, 210], maxTargets: 10, mag: 3, reloadMs: 1800 },
@@ -87,7 +87,7 @@
      * "밸런스 밴드에서 제외하되 … 실효 화력이 중앙값의 25~50%, 그리고 각각 피해가 아닌 고유 효과를 하나씩."
      * `quirk` names that effect so the rule is a field rather than a promise — §D's own table, in the table.
      * 뿅망치 and 고무 치킨 are melee (no magazine), which is also what makes them the fastest things to swing. */
-    squeaky:  { id: 'squeaky', emoji: '🎈', name: 'weaponSqueaky', kind: 'hammer', damage: 8, cooldownMs: 170, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
+    squeaky:  { id: 'squeaky', emoji: '🎈', name: 'weaponSqueaky', kind: 'hammer', damage: 8, cooldownMs: 185, radius: 0, hold: false, input: 'click', mag: null, reloadMs: null,
                 quirk: 'squash', squashMs: 420,
                 swapMs: 120, recoil: 0.6, bloom: 0, critChance: 0.10, knockback: 0.9, moveSpeed: 1.20, falloff: 0, pierce: 0 },
     /* 틱 40 ms / 탄창 180: §D fixes the tick DAMAGE at 3 and says nothing about the rate, and 3 damage every
@@ -174,6 +174,38 @@
     chicken:   { cat: 'fun',     role: 'chaos' }
   };
   for (const id of WEAPON_IDS) Object.assign(WEAPONS[id], WEAPON_ROLES[id]);
+  /* ── SPEC-weapon-identity §C2 · §C3 표적 등급 계수 ────────────────────────────────────────────────
+   * "무기의 정체성은 '무엇을 잘하는가'가 아니라 **'무엇을 못하는가'** 다."
+   * §F5 의 역할표는 산문이라 강제되지 않았다. 등급 계수는 **수치**다 — 피해에 곱하고(src/72-roles.js),
+   * `tools/balance.js --check` 의 §F6-7 · §F6-8 이 정적으로 읽어 "못 하는 일이 없는 무기" 와 "둘이 같은
+   * 무기" 를 구조적으로 막는다. 등급 경계는 §C2 의 면적이다: 낱말 < 3,000 · 작은 것 ~20,000 ·
+   * 중간 ~150,000 · 큰 것 그 위.
+   *
+   * 표는 §C3 그대로다. 단 한 칸만 다르고, 그것은 **명세가 자기 규칙과 어긋난 자리**다:
+   *   `bomb` 낱말 1.0 → **0.8**. §C3 의 폭탄 줄은 { 1.0, 1.0, 1.2, 1.0 } 이라 1.0 미만이 하나도 없는데,
+   *   같은 절이 바로 다음 줄에서 "실전 무기는 1.0 미만인 등급이 최소 하나 있어야 한다" 고 요구한다.
+   *   원칙(§C1)과 검사(§F6-7)가 표의 한 칸보다 무겁다고 읽었고, 내릴 칸은 저격총이 이미 쓴 논리를
+   *   그대로 따랐다 — "낱말에 200 을 쓰는 건 낭비다"(저격총 0.4). 폭탄은 190 이다. 나머지 세 칸은
+   *   §C3 이 적은 값 그대로다. (보고에 적었다.)
+   *
+   * 붕괴는 표에 없다. 피해가 Infinity 이고 §F4 가 이미 밴드 검사에서 뺐다 — 곱할 피해가 없다.
+   * 특수 · 예능 무기도 표에 없다: §C3 의 표는 실전 13종만 적었고 §C3 자신이 "기본 1.0" 이라고 썼다. */
+  const WEAPON_VS = {
+    hammer:  { word: 1.0, small: 1.0, mid: 1.0, large: 0.5 },   // 큰 것은 망치로 안 된다
+    pistol:  { word: 1.0, small: 1.3, mid: 1.0, large: 0.6 },   // 작은 것 저격
+    smg:     { word: 1.0, small: 1.0, mid: 1.0, large: 0.7 },   // 무난하되 큰 것엔 약하다
+    sniper:  { word: 0.4, small: 1.0, mid: 1.4, large: 1.2 },   // 낱말에 200 을 쓰는 건 낭비다
+    axe:     { word: 0.6, small: 1.0, mid: 1.3, large: 1.0 },   // 쪼갠다
+    katana:  { word: 1.5, small: 1.2, mid: 0.7, large: 0.5 },   // 낱말과 작은 것을 썬다
+    bomb:    { word: 0.8, small: 1.0, mid: 1.2, large: 1.0 },   // 뭉친 것 (낱말 0.8 은 위 주석 참조)
+    rocket:  { word: 0.5, small: 0.7, mid: 1.2, large: 1.5 },   // 큰 것 전문
+    flame:   { word: 1.4, small: 1.1, mid: 1.0, large: 0.6 },   // 번진다
+    laser:   { word: 1.0, small: 1.1, mid: 1.0, large: 0.8 },   // 관통이 값이다
+    minigun: { word: 0.7, small: 0.8, mid: 1.2, large: 1.4 },   // 큰 것을 갈아낸다
+    shotgun: { word: 1.2, small: 1.4, mid: 0.6, large: 0.4 },   // 밀집한 작은 것
+    nailgun: { word: 1.0, small: 1.2, mid: 1.0, large: 0.7 }    // 고정이 값이다
+  };
+  for (const id of WEAPON_IDS) if (WEAPON_VS[id]) WEAPONS[id].vs = WEAPON_VS[id];
   /* Loadout presets (v1.2 §4): permutations of WEAPON_IDS mapped onto keys 1 2 3 4 5 6 7 8 9 0. */
   /* SPEC-arsenal §B1: "프리셋이 서로 다른 10개 조합이 되어 실제 선택이 생긴다." The arsenal holds 12 and a
    * loadout holds 10, so each preset now LEAVES TWO OUT — and no two presets leave out the same pair, which

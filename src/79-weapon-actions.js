@@ -25,6 +25,7 @@
     if (!spend(id)) { updateAmmoHud(); return undefined; }                        // empty / reloading: rejected, auto-reload running
     state.hintCollapse = false;
     state.hoverX = x; state.hoverY = y;
+    rlSetFiring(id);   // SPEC-weapon-identity §C3: 등급 계수의 임자는 **쏜** 무기다 (src/72-roles.js)
     bumpCombo();
     swingCursor();
     let out = null;
@@ -101,6 +102,7 @@
     if (t - h.cacheAt >= HOLD_WINDOW) { h.cache = new Map(); h.cacheAt = t; }
     if (h.tick > 0 && !spend(h.id)) { stopHold(); updateAmmoHud(); return; }   // v1.2 A5: a hold that runs dry stops (auto-reload keeps running)
     h.tick++;
+    rlSetFiring(h.id);   // SPEC-weapon-identity §C3: 지속 사격의 매 틱도 같은 임자를 적어 둔다
     let hit = null;
     try { hit = WEAPONS[h.id].fire(state.hoverX, state.hoverY, { hold: true, h }) || null; } catch (e) { state.lastError = String((e && e.stack) || e); }
     vmFire(h.id);   // ── v1.5 §2.1: sustained fire kicks too (vmFire throttles itself to one per 60 ms) ──

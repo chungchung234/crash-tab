@@ -81,8 +81,10 @@ const SPEC_COOLDOWN = { hammer: 400, pistol: 0, sniper: 600, axe: 550, bomb: 700
  * CHANGED again by SPEC-weapon-identity §B1 (11단계): 저격총 탄창 5 → 4. 모델이 산포를 `handling` 에서
  * 빼면서(한 축을 두 번 세지 않는다) 저격총의 handling 이 0.545 → 0.689 로 올라 중앙값의 126% 가 됐다.
  * §B3 이 허락한 축은 틱 간격과 탄창뿐이고 쿨다운 600 은 §A2 가 못박은 값이라 탄창만 남았다 —
- * 그리고 위로는 못 올린다(탄창 6 부터가 §F6-3 의 "값싼 한 방" 문턱이다). docs/BALANCE.md §F7 참조. */
-const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [4, 1900], bomb: [3, 1800], rocket: [3, 1400], flame: [100, 3400], collapse: [1, 5000] };
+ * 그리고 위로는 못 올린다(탄창 6 부터가 §F6-3 의 "값싼 한 방" 문턱이다). docs/BALANCE.md §F7 참조. * CHANGED again by SPEC-weapon-identity §C3 (11단계): 저격총 탄창 4 → 3. 등급 계수가 §F3 통화에
+ * 네 등급 평균으로 들어오면서 실전 중앙값이 111.5 → 103.5 로 내려갔고, 평균 1.0 인 저격총이 화력은
+ * 그대로인데 124% 가 됐다. 같은 축, 같은 이유 — 가동률 0.558 → 0.486, 108%. docs/BALANCE.md §F7 참조. */
+const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [3, 1900], bomb: [3, 1800], rocket: [3, 1400], flame: [100, 3400], collapse: [1, 5000] };
 const PRESETS = {
   default: WEAPON_IDS,
   assault: ['smg', 'minigun', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'collapse'],
@@ -356,7 +358,7 @@ const WANT = (id) => SUITES.includes(id);
 // A typo must not look green: an unknown name is a hard error, never a silent zero-block run.
 const BLOCK_ARG = (process.argv.find((a) => a.startsWith('--blocks=')) || '').slice(9);
 const BLOCKS_RAW = String(process.env.CRS_BLOCKS || BLOCK_ARG || '').trim().toLowerCase();
-const BLOCK_NAMES = ['core', 'ammo', 'combat', 'debris', 'depth', 'rules', 'settings'];
+const BLOCK_NAMES = ['core', 'ammo', 'combat', 'debris', 'depth', 'roles', 'rules', 'settings'];
 const BLOCKS_PICKED = BLOCKS_RAW ? BLOCKS_RAW.split(/[,\s]+/).filter(Boolean) : null;
 if (BLOCKS_PICKED) {
   const bad = BLOCKS_PICKED.filter((b) => !BLOCK_NAMES.includes(b));
@@ -497,6 +499,10 @@ const api = {
   broken: (page, sel) => page.evaluate((s) => { const el = document.querySelector(s); return !!(el && el.hasAttribute('data-crs-broken')); }, sel),
   visibility: (page, sel) => page.evaluate((s) => getComputedStyle(document.querySelector(s)).visibility, sel),
   dmgTexts: (page) => page.evaluate(() => [...document.querySelectorAll('.crs-dmg')].map((n) => (n.textContent || '').trim())),
+  /* SPEC-weapon-identity §C3 표적 등급 계수. 표를 두 벌 두면 한쪽이 조용히 낡으므로 **제품에 묻는다**. */
+  vsOf: (page, sel, id) => page.evaluate((s2, w) => { const el = document.querySelector(s2); return el ? window.__crashScreen.debug.vsOf(el, w) : 1; }, sel, id || null),
+  gradeOf: (page, sel) => page.evaluate((s2) => { const el = document.querySelector(s2); return el ? window.__crashScreen.debug.gradeOf(el) : null; }, sel),
+  roles: (page) => page.evaluate(() => window.__crashScreen.debug.roles()),
   fx: (page) => page.evaluate(() => {
     const c = (s) => document.querySelectorAll(s).length;
     return { dmg: c('.crs-dmg'), hit: c('.crs-hit'), fire: c('.crs-fire'), rocket: c('.crs-rocket'), preview: c('.crs-slash-preview'), slashFx: c('.crs-slash-fx'), ring: c('.crs-fx-ring'), ringXl: c('.crs-fx-ring.crs-fx-ring-xl'), debris: c('.crs-debris'),
@@ -819,6 +825,13 @@ async function ammoReady(page) {
   if (a && a.mag === 0 && !a.reloading) await api.reload(page);
   return poll(async () => { const b = await api.ammo(page); return b && b.mag > 0 && !b.reloading ? b : null; }, 2500, 20);
 }
+/* SPEC-weapon-identity §C3: 실제로 들어가는 피해는 `발행 피해 × vs[표적 등급]` 이고 제품은
+ * rollDamage() 로 한 번, applyHit() 의 등급 래퍼로 한 번, 두 번 반올림한다(src/72-roles.js).
+ * 여기서도 같은 순서로 센다 — 한 번에 곱해 반올림하면 33 과 32 가 어긋나는 자리가 생긴다. */
+async function effDmg(page, sel, id, base) {
+  const m = await api.vsOf(page, sel, id);
+  return Math.max(1, Math.round(Math.max(1, Math.round(base)) * m));
+}
 // Damage numbers from api.weapons() (fallback: the A2 table) keyed by id.
 async function weaponTable(page) {
   let list = [];
@@ -970,7 +983,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.weapons: api.weapons() lists the 10 ids in default-loadout order with slot 1–10 and keys 1–9, 0', W.list.map((w) => w.id).join(',') === WEAPON_IDS.join(',') && W.list.every((w, i) => String(w.key) === KEYS[i] && w.slot === i + 1), W.list.map((w) => `${w && w.id}:${w && w.slot}:${w && w.key}`));
   check('A.weapons: damages match the A1/A2 table (65/25/22/200/130/60/190/260/15)', Object.keys(SPEC_DMG).every((id) => W.byId[id] && W.byId[id].damage === SPEC_DMG[id]), Object.keys(SPEC_DMG).map((id) => `${id}=${W.byId[id] && W.byId[id].damage}`));
   check('A.weapons: cooldownMs hammer 0 / pistol 0 / sniper 600 / axe 550 / bomb 700 / rocket 1200 / collapse 2000; smg & flame are hold weapons', Object.keys(SPEC_COOLDOWN).every((id) => W.byId[id] && W.byId[id].cooldownMs === SPEC_COOLDOWN[id]) && !!(W.byId.smg && W.byId.smg.hold) && !!(W.byId.flame && W.byId.flame.hold) && WEAPON_IDS.filter((id) => !HOLD_IDS.has(id)).every((id) => !(W.byId[id] && W.byId[id].hold)), Object.keys(SPEC_COOLDOWN).map((id) => `${id}=${W.byId[id] && W.byId[id].cooldownMs}`));
-  check('A.weapons: mag / reloadMs per weapon (pistol 12/900, smg 30/1400, sniper 4/1900, bomb 3/1800, rocket 3/1400, flame 100/3400, collapse 1/5000; melee null/null)', Object.keys(SPEC_MAG).every((id) => W.byId[id] && W.byId[id].mag === SPEC_MAG[id][0] && W.byId[id].reloadMs === SPEC_MAG[id][1]), Object.keys(SPEC_MAG).map((id) => `${id}=${W.byId[id] && W.byId[id].mag}/${W.byId[id] && W.byId[id].reloadMs}`));
+  check('A.weapons: mag / reloadMs per weapon (pistol 12/900, smg 30/1400, sniper 3/1900, bomb 3/1800, rocket 3/1400, flame 100/3400, collapse 1/5000; melee null/null)', Object.keys(SPEC_MAG).every((id) => W.byId[id] && W.byId[id].mag === SPEC_MAG[id][0] && W.byId[id].reloadMs === SPEC_MAG[id][1]), Object.keys(SPEC_MAG).map((id) => `${id}=${W.byId[id] && W.byId[id].mag}/${W.byId[id] && W.byId[id].reloadMs}`));
   check('A.weapons: sniper { kind: "gun", spread: 25, scope: true, emoji 🎯, name 저격총 }; every other weapon spread null / scope false', !!W.byId.sniper && W.byId.sniper.kind === 'gun' && W.byId.sniper.spread === 25 && W.byId.sniper.scope === true && W.byId.sniper.emoji === '🎯' && W.byId.sniper.name === '저격총' && WEAPON_IDS.filter((id) => id !== 'sniper').every((id) => W.byId[id] && W.byId[id].spread === null && W.byId[id].scope === false), W.byId.sniper);
   /* SPEC-arsenal §B: 레이저 커터 and 미니건 are hold weapons too, so the "everything else is a click weapon"
    * sweep above reads HOLD_IDS rather than the two literals it used to name. They are not in the DEFAULT
@@ -1060,23 +1073,30 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await api.setWeapon(page, 'hammer');
   const inkCard = await api.rect(page, '#big-card');
   const inkMax = (await api.hpOf(page, '#big-card')).max;
+  /* NOTE (SPEC-weapon-identity §C3, 11단계): #big-card 는 580×380 = 220,400px² 이라 §C2 의 **큰 것**이고
+   * 망치의 큰 것 계수는 0.5 다 — 한 방이 65 가 아니라 33 이다. 이 검사는 한 방을 세지 않고 데칼의 잉크만
+   * 보므로 수치는 바뀌지 않는다; 아래의 처치 횟수 루프들이 그 값을 제품에서 받아 온다. */
   const inkPt = { x: inkCard.left + 12, y: inkCard.top + 12 };
   await page.mouse.click(inkPt.x, inkPt.y);
   await poll(async () => (await api.hpOf(page, '#big-card')).hp < inkMax, 400, 20);
   const inkBefore = await page.evaluate((pt) => {
+    /* 계측 (CLAUDE.md): 실패했을 때 "무엇을 읽었는가" 를 메시지가 직접 말하게 한다. */
+    const all = document.querySelectorAll('.crs-decal');
+    const card = document.querySelector('#big-card');
+    const diag = { decals: all.length, broken: !!(card && card.hasAttribute('data-crs-broken')), hp: card ? window.__crashScreen.hpOf(card).hp : null, max: card ? window.__crashScreen.hpOf(card).max : null };
     const host = document.querySelector('.crs-decal');
-    if (!host) return -1;
+    if (!host) return Object.assign({ ink: -1 }, diag);
     const canvas = host.tagName === 'CANVAS' ? host : host.querySelector('canvas');
-    if (!canvas) return -2;
+    if (!canvas) return Object.assign({ ink: -2 }, diag);
     const r = host.getBoundingClientRect();
     const sx = canvas.width / (canvas.clientWidth || r.width || 1), sy = canvas.height / (canvas.clientHeight || r.height || 1);
     const lx = Math.round((pt.x - r.left) * sx), ly = Math.round((pt.y - r.top) * sy);
     const ctx = canvas.getContext('2d');
     const d = ctx.getImageData(Math.max(0, lx - 4), Math.max(0, ly - 4), 9, 9).data;
     let a = 0; for (let i = 3; i < d.length; i += 4) a += d[i];
-    return a;
+    return Object.assign({ ink: a }, diag);
   }, inkPt);
-  check('A.decal: #big-card\'s own decal has ink at the impact point before restore (rewritten from the removed .crs-canvas check, SPEC-material §9.1)', inkBefore > 0, inkBefore);
+  check('A.decal: #big-card\'s own decal has ink at the impact point before restore (rewritten from the removed .crs-canvas check, SPEC-material §9.1)', inkBefore.ink > 0, inkBefore);
 
   // --- restore ------------------------------------------------------------------------------
   await api.restore(page);
@@ -1106,16 +1126,19 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const bigPt = { x: bc.left + 12, y: bc.top + 12 };
   const bigHp0 = await api.hpOf(page, '#big-card');
   const bigMax = bigHp0.max;
-  const nBig = hitsFor(bigMax, DMG('hammer'));
-  /* Was `nBig === 3` (184 / 65). SPEC-combat §C2 adds 0.6 × the h2 / p / ul inside the card, so the shell is
-   * no longer the whole price — more hits, derived from the live max rather than frozen into the test. */
-  check('A.hammer large card: hitsFor(max, 65) > hitsFor(own, 65) — §C2 charges for what the card holds', nBig === hitsFor(bigMax, DMG('hammer')) && nBig > hitsFor(bigHp0.own, DMG('hammer')), { bigMax, own: bigHp0.own, nBig, ownHits: hitsFor(bigHp0.own, DMG('hammer')) });
+  /* CHANGED by SPEC-weapon-identity §C3: 큰 것 계수 0.5 가 곱해진 값으로 센다 (65 → 33). 세는 대상이
+   * 바뀌었을 뿐 §C2 가 묻던 것 — "껍데기 값보다 비싸다" — 은 그대로다. */
+  const bigDmg = await effDmg(page, '#big-card', 'hammer', DMG('hammer'));
+  const nBig = hitsFor(bigMax, bigDmg);
+  check(`A.hammer large card: hitsFor(max, ${bigDmg}) > hitsFor(own, ${bigDmg}) — §C2 charges for what the card holds, §C3 은 큰 것에 망치를 ×0.5 한다`,
+    bigDmg === Math.round(DMG('hammer') * 0.5) && nBig > hitsFor(bigHp0.own, bigDmg),
+    { bigMax, own: bigHp0.own, nBig, bigDmg, ownHits: hitsFor(bigHp0.own, bigDmg) });
   const b0 = (await api.stats(page)).broken;
   let bigOk = true;
   const bigSteps = [];
   for (let k = 1; k < nBig; k++) {
     await page.mouse.click(bigPt.x, bigPt.y);
-    const expected = 'DIV ' + (bigMax - DMG('hammer') * k) + '/' + bigMax;
+    const expected = 'DIV ' + (bigMax - bigDmg * k) + '/' + bigMax;
     const tb = await poll(async () => { const t = await api.targetBox(page); return t && t.label === expected ? t : null; }, 600, 20);
     const step = { k, broken: await api.broken(page, '#big-card'), count: (await api.stats(page)).broken, label: (tb || await api.targetBox(page) || {}).label, expected };
     bigSteps.push(step);
@@ -1135,22 +1158,23 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const gunPt = { x: gc.left + 12, y: gc.top + 12 };
   const gunHp0 = await api.hpOf(page, '#big-card');
   const gunMax = gunHp0.max;
-  const nGun = hitsFor(gunMax, DMG('pistol'));
-  /* Was `nGun === 8` (184 / 25). Same §C2 change as the hammer run above — and the count now exceeds the
-   * pistol's 12-round magazine, so every shot waits for a chambered round (ammoReady). */
-  check('A.gun large card: hitsFor(max, 25) > hitsFor(own, 25) — §C2 charges for what the card holds', nGun === hitsFor(gunMax, DMG('pistol')) && nGun > hitsFor(gunHp0.own, DMG('pistol')), { gunMax, own: gunHp0.own, nGun });
+  /* CHANGED by SPEC-weapon-identity §C3: 권총의 큰 것 계수는 0.6 이라 25 → 15. */
+  const gunDmg = await effDmg(page, '#big-card', 'pistol', DMG('pistol'));
+  const nGun = hitsFor(gunMax, gunDmg);
+  check(`A.gun large card: hitsFor(max, ${gunDmg}) > hitsFor(own, ${gunDmg}) — §C2 charges for what the card holds, §C3 은 큰 것에 권총을 ×0.6 한다`,
+    gunDmg === Math.round(DMG('pistol') * 0.6) && nGun > hitsFor(gunHp0.own, gunDmg), { gunMax, own: gunHp0.own, nGun, gunDmg });
   const debris0 = await api.count(page, '.crs-debris');
   const gunSteps = [];
   for (let k = 1; k < nGun; k++) {
     await ammoReady(page);
     await page.mouse.click(gunPt.x, gunPt.y);
-    const expected = 'DIV ' + (gunMax - DMG('pistol') * k) + '/' + gunMax;
+    const expected = 'DIV ' + (gunMax - gunDmg * k) + '/' + gunMax;
     const tb = await poll(async () => { const t = await api.targetBox(page); return t && t.label === expected ? t : null; }, 600, 20);
     gunSteps.push({ k, broken: await api.broken(page, '#big-card'), debris: await api.count(page, '.crs-debris'), label: (tb || await api.targetBox(page) || {}).label, expected });
   }
   check('A.gun large card: shots 1 … ' + (nGun - 1) + ' → not broken, debris count unchanged', gunSteps.length === nGun - 1 && gunSteps.every((s) => !s.broken && s.debris === debris0), { debris0, steps: gunSteps.map((s) => [s.k, s.broken, s.debris]) });
-  check('A.gun large card: shot 1 → label "DIV ' + (gunMax - DMG('pistol')) + '/' + gunMax + '"', gunSteps[0] && gunSteps[0].label === gunSteps[0].expected, gunSteps[0]);
-  check('A.gun large card: shot 2 → label "DIV ' + (gunMax - 2 * DMG('pistol')) + '/' + gunMax + '"', gunSteps[1] && gunSteps[1].label === gunSteps[1].expected, gunSteps[1]);
+  check('A.gun large card: shot 1 → label "DIV ' + (gunMax - gunDmg) + '/' + gunMax + '"', gunSteps[0] && gunSteps[0].label === gunSteps[0].expected, gunSteps[0]);
+  check('A.gun large card: shot 2 → label "DIV ' + (gunMax - 2 * gunDmg) + '/' + gunMax + '"', gunSteps[1] && gunSteps[1].label === gunSteps[1].expected, gunSteps[1]);
   await ammoReady(page);
   await page.mouse.click(gunPt.x, gunPt.y);
   check(`A.gun large card: shot ${nGun} → broken`, await poll(() => api.broken(page, '#big-card'), 1500));
@@ -1252,10 +1276,17 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   // (2) fresh large card: hammer −65, pistol −25, axe −130 (restore between checks)
   const bcc = await api.rect(page, '#big-card');
   const cardPt = { x: bcc.left + 12, y: bcc.top + 12 };
+  /* CHANGED by SPEC-weapon-identity §C3 (11단계): #big-card 는 580×380 = 220,400px² 이라 §C2 의 **큰 것**
+   * 이고, 발행 피해에 그 등급의 계수가 곱해진다 — 망치 ×0.5(65 → 33) · 권총 ×0.6(25 → 15) · 도끼 ×1.0
+   * (130 그대로). 발행 피해(`DMG`)는 한 값도 바뀌지 않았다: 바뀐 것은 이 표적에 **들어가는** 값이다.
+   * 계수는 표로 적지 않고 제품에서 받아 온다(effDmg) — 두 벌이 되면 한쪽이 조용히 낡는다. */
+  const EFF_H_BIG = await effDmg(page, '#big-card', 'hammer', DMG('hammer'));
+  const EFF_P_BIG = await effDmg(page, '#big-card', 'pistol', DMG('pistol'));
+  const EFF_HCRIT_BIG = await effDmg(page, '#big-card', 'hammer', 2 * DMG('hammer'));
   const h2 = await hitFresh(page, 'hammer', cardPt, '#big-card');
-  check('A.hp 2: hammer on a fresh large card → hp === max − 65, not broken', h2.hp === h2.max - DMG('hammer') && !h2.broken, h2);
+  check(`A.hp 2: hammer on a fresh large card → hp === max − ${EFF_H_BIG} (발행 ${DMG('hammer')} × 큰 것 0.5), not broken`, h2.hp === h2.max - EFF_H_BIG && !h2.broken && EFF_H_BIG === Math.round(DMG('hammer') * 0.5), { h2, EFF_H_BIG });
   const p2 = await hitFresh(page, 'pistol', cardPt, '#big-card');
-  check('A.hp 2: pistol on a fresh large card → hp === max − 25', p2.hp === p2.max - DMG('pistol') && !p2.broken, p2);
+  check(`A.hp 2: pistol on a fresh large card → hp === max − ${EFF_P_BIG} (발행 ${DMG('pistol')} × 큰 것 0.6)`, p2.hp === p2.max - EFF_P_BIG && !p2.broken && EFF_P_BIG === Math.round(DMG('pistol') * 0.6), { p2, EFF_P_BIG });
   const a2 = await hitFresh(page, 'axe', cardPt, '#big-card');
   check('A.hp 2: axe on a fresh large card → hp === max − 130 (54 left), not broken', a2.hp === a2.max - DMG('axe') && !a2.broken, a2);
 
@@ -1301,14 +1332,14 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.power 3: "-" / "_" / "[" / "=" / "+" / "]" are no-ops — stats() carries no "power" field and is otherwise unchanged', !('power' in afterKeys3) && afterKeys3.weapon === beforeKeys3.weapon && afterKeys3.combo === beforeKeys3.combo && afterKeys3.cracks === beforeKeys3.cracks, { before: beforeKeys3, after: afterKeys3 });
   check('A.power 3: the locale key "labelPower" is unreachable — no quoted/property reference to it survives in content.js (comments mentioning its removal are fine)', !/['"]labelPower['"]|\.labelPower\b/.test(contentJs), null);
   const h3 = await hitFresh(page, 'hammer', cardPt, '#big-card');
-  check('A.power 3: a single hammer hit deals exactly 65 (max − 65) — no multiplier applies', h3.hp === h3.max - DMG('hammer'), h3);
+  check(`A.power 3: a single hammer hit deals exactly ${EFF_H_BIG} (max − ${EFF_H_BIG}) — 발행 ${DMG('hammer')} 에 §C3 의 큰 것 계수 0.5 말고는 어떤 배수도 붙지 않는다`, h3.hp === h3.max - EFF_H_BIG, { h3, EFF_H_BIG });
 
   // (4) forced crit: 130 and a "-130!" floating number
   await api.debug(page, { forceCrit: true, noCrit: false });
   const c4 = await hitFresh(page, 'hammer', cardPt, '#big-card');
-  const critText = await poll(async () => { const t = await api.dmgTexts(page); return t.includes('-' + 2 * DMG('hammer') + '!') ? t : null; }, 300, 15);
-  check('A.crit 4: debug.forceCrit → hammer deals 130', c4.hp === c4.max - 2 * DMG('hammer'), c4);
-  check('A.crit 4: a .crs-dmg with text "-130!" appears', !!critText, await api.dmgTexts(page));
+  const critText = await poll(async () => { const t = await api.dmgTexts(page); return t.includes('-' + EFF_HCRIT_BIG + '!') ? t : null; }, 300, 15);
+  check(`A.crit 4: debug.forceCrit → hammer deals ${EFF_HCRIT_BIG} (발행 ${DMG('hammer')} × 치명타 2 × 큰 것 0.5)`, c4.hp === c4.max - EFF_HCRIT_BIG, { c4, EFF_HCRIT_BIG });
+  check(`A.crit 4: a .crs-dmg with text "-${EFF_HCRIT_BIG}!" appears`, !!critText, await api.dmgTexts(page));
   const dbgReset = await api.debug(page, { forceCrit: false, noCrit: true, noPartial: true });
   check('A.crit 4: debug flags reset (forceCrit false, noCrit true)', dbgReset.forceCrit === false && dbgReset.noCrit === true, dbgReset);
   check('A.crit 4: stats().crits ≥ 1 after the forced crit', (await api.stats(page)).crits >= 1, (await api.stats(page)).crits);
@@ -1322,16 +1353,16 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const t5 = Date.now();
   while (Date.now() - t5 < 300 && !(seen5.dmg && seen5.hit)) {
     const s = await page.evaluate(() => ({ dmg: [...document.querySelectorAll('.crs-dmg')].map((n) => (n.textContent || '').trim()), hit: document.querySelectorAll('.crs-hit').length }));
-    if (!seen5.dmg && s.dmg.includes('-' + DMG('hammer'))) { seen5.dmg = true; seen5.dmgAt = Date.now() - t5; }
+    if (!seen5.dmg && s.dmg.includes('-' + EFF_H_BIG)) { seen5.dmg = true; seen5.dmgAt = Date.now() - t5; }
     if (!seen5.hit && s.hit >= 1) { seen5.hit = true; seen5.hitAt = Date.now() - t5; }
     await sleep(10);
   }
-  check('A.fx 5: a .crs-dmg with text "-65" exists within 300 ms of a hammer hit', seen5.dmg, seen5);
+  check(`A.fx 5: a .crs-dmg with text "-${EFF_H_BIG}" exists within 300 ms of a hammer hit (§C3: 큰 카드는 큰 것이라 ${DMG('hammer')} × 0.5)`, seen5.dmg, seen5);
   check('A.fx 5: a .crs-hit tint appears on the hit', seen5.hit, seen5);
   check('A.fx 5: .crs-hit gone within 1 s', await poll(async () => (await api.count(page, '.crs-hit')) === 0, 1000, 30), await api.count(page, '.crs-hit'));
-  check('A.fx 5: "-65" number gone within 2.5 s', await poll(async () => !(await api.dmgTexts(page)).includes('-' + DMG('hammer')), 2500, 50), await api.dmgTexts(page));
+  check(`A.fx 5: "-${EFF_H_BIG}" number gone within 2.5 s`, await poll(async () => !(await api.dmgTexts(page)).includes('-' + EFF_H_BIG), 2500, 50), await api.dmgTexts(page));
   const st5 = await api.stats(page);
-  check('A.fx 5: stats().damageDealt === 65 and shots === 1 for the single hit', st5.damageDealt === DMG('hammer') && st5.shots === 1, { damageDealt: st5.damageDealt, shots: st5.shots });
+  check(`A.fx 5: stats().damageDealt === ${EFF_H_BIG} and shots === 1 for the single hit`, st5.damageDealt === EFF_H_BIG && st5.shots === 1, { damageDealt: st5.damageDealt, shots: st5.shots, EFF_H_BIG });
 
   // (14) restore() resets HP, counters and every feedback node
   await page.mouse.click(cardPt.x, cardPt.y);   // leaves a live .crs-dmg / .crs-hit
@@ -1378,8 +1409,17 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   const s6crit = await api.stats(page);
   const h6c1 = await api.hpOf(page, '#arena');
   check('A.smg crit: a gold "-<sum>!" window number appears during a forced-crit smg hold', !!goldSeen, await api.dmgTexts(page));
-  check('A.smg crit: the window sum is a multiple of the crit shot (44 = 22 × 2)', !!goldSeen && parseInt(goldSeen.slice(1), 10) % (2 * DMG('smg')) === 0, goldSeen);
-  check('A.smg crit: stats().crits ≥ 1 (one per window) and arena lost ≥ 2 crit shots (≥ 88)', s6crit.crits >= 1 && h6c0.hp - h6c1.hp >= 2 * 2 * DMG('smg'), { crits: s6crit.crits, lost: h6c0.hp - h6c1.hp });
+  /* CHANGED by SPEC-weapon-identity §C3: #arena 는 **큰 것**이고 기관단총의 큰 것 계수는 0.7 이라 치명타
+   * 한 발이 44 가 아니라 31 이다. 그리고 §C4 의 **연사 누적**(같은 요소를 연속으로 맞히면 탄마다 +8%,
+   * 5발까지)이 붙으면서 창의 합은 더 이상 한 발의 배수가 아니다 — 창 안의 발들이 서로 다른 배수를
+   * 갖는다. 그래서 묻는 것을 바꾼다: 합은 **한 발 이상이고 누적 상한(×1.4)을 넘지 않는 발들의 합**이다.
+   * 무엇이 왜 바뀌었는지는 보고에 적었다. */
+  const smgCrit = await effDmg(page, '#arena', 'smg', 2 * DMG('smg'));
+  const goldSum = goldSeen ? parseInt(goldSeen.slice(1), 10) : 0;
+  const goldShots = goldSum / smgCrit;
+  check(`A.smg crit: the window sum lies between n × ${smgCrit} and n × ${Math.round(smgCrit * 1.4)} — §C3 의 큰 것 0.7 과 §C4 의 연사 누적(최대 ×1.4) 사이다`,
+    !!goldSeen && goldSum >= smgCrit * 1.08 * 0.99 && goldSum <= Math.ceil(goldShots) * smgCrit * 1.4 + 1, { goldSeen, smgCrit, goldSum });
+  check(`A.smg crit: stats().crits ≥ 1 (one per window) and arena lost ≥ 2 crit shots (≥ ${2 * smgCrit})`, s6crit.crits >= 1 && h6c0.hp - h6c1.hp >= 2 * smgCrit, { crits: s6crit.crits, lost: h6c0.hp - h6c1.hp, smgCrit });
   const dbg6 = await api.debug(page, { forceCrit: false, noCrit: true, noPartial: true });
   check('A.smg crit: debug flags reset (forceCrit false, noCrit true)', dbg6.forceCrit === false && dbg6.noCrit === true, dbg6);
 
@@ -1446,7 +1486,14 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await poll(async () => (await api.hpOf(page, '#small-card')).hp < (await api.hpOf(page, '#small-card')).max, 400, 20);
   const bigS = await api.hpOf(page, '#big-card');
   const smallS = await api.hpOf(page, '#small-card');
-  check('A.katana 8: api.slash across both cards → each at hp === max − 60, neither broken', bigS.hp === bigS.max - DMG('katana') && smallS.hp === smallS.max - DMG('katana') && !(await api.broken(page, '#big-card')) && !(await api.broken(page, '#small-card')), { ret: nSlash, big: bigS, small: smallS });
+  /* CHANGED by SPEC-weapon-identity §C3: 카타나는 낱말 1.5 · 작은 것 1.2 · **중간 0.7 · 큰 것 0.5** 다 —
+   * "낱말과 작은 것을 썬다". 같은 한 번의 베기가 큰 카드에 30, 작은 카드(중간)에 42 를 넣는다. 발행
+   * 피해 60 은 그대로이고 두 카드가 **다르게** 맞는 것이 이 단계가 하려던 일 그 자체다. */
+  const kBig = await effDmg(page, '#big-card', 'katana', DMG('katana'));
+  const kSmall = await effDmg(page, '#small-card', 'katana', DMG('katana'));
+  check(`A.katana 8: api.slash across both cards → 큰 카드 max − ${kBig}, 작은 카드 max − ${kSmall} (§C3 등급 계수가 둘을 가른다), neither broken`,
+    bigS.hp === bigS.max - kBig && smallS.hp === smallS.max - kSmall && kBig !== kSmall
+    && !(await api.broken(page, '#big-card')) && !(await api.broken(page, '#small-card')), { ret: nSlash, big: bigS, small: smallS, kBig, kSmall });
   check('A.katana 8: api.slash returns the number of elements damaged (≥ 2)', typeof nSlash === 'number' && nSlash >= 2, nSlash);
   check('A.katana 8: a slash counts as one action (stats().shots === 1) and draws a crack', (await api.stats(page)).shots === 1 && (await api.stats(page)).cracks >= 1, await api.stats(page).then((s) => ({ shots: s.shots, cracks: s.cracks })));
   await api.restore(page);
@@ -1856,7 +1903,12 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.audio: no <audio> element is cloned into the debris', (await api.count(page, '.crs-root audio')) === 0, await api.count(page, '.crs-root audio'));
   await page.mouse.click(hd.h.cx, hd.h.cy);
   check('A.nested: heading broken first', await poll(() => api.broken(page, '#x-nest-h'), 1500));
-  await clickUntilBroken(page, '#x-nest', hd.nest.left + 6, hd.nest.top + 6, 3);
+  /* CHANGED by SPEC-weapon-identity §C3: 클릭 예산을 고정 3 에서 **필요한 만큼**으로 바꾼다. 이 컨테이너가
+   * 어느 등급인지는 페이지가 정하고(면적), 망치의 큰 것 계수는 0.5 다 — 3 은 더 이상 충분하지 않다.
+   * 단언이 묻는 것(부서졌는가 · 속성 수가 stats 와 같은가)은 그대로다. */
+  const nestHp = await api.hpOf(page, '#x-nest');
+  const nestDmg = await effDmg(page, '#x-nest', 'hammer', DMG('hammer'));
+  await clickUntilBroken(page, '#x-nest', hd.nest.left + 6, hd.nest.top + 6, hitsFor(nestHp.hp, nestDmg) + 1);
   const nestState = { containerBroken: await api.broken(page, '#x-nest'), attrs: await api.count(page, '[data-crs-broken]'), broken: (await api.stats(page)).broken, inPieces: await api.count(page, '.crs-root [data-crs-broken]') };
   check('A.nested: container broken after its heading; [data-crs-broken] count === stats().broken (no copies in the clones)', nestState.containerBroken && nestState.attrs === nestState.broken && nestState.inPieces === 0, nestState);
   await api.restore(page);
@@ -2690,11 +2742,27 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check(`A.§D 명중률 (핵심): 미니건이 0.6초 지속 사격 뒤에도 버튼을 60% 이상 맞힌다 — ${acc9b.counted}발을 페이지 안에서 세어 ${(accRate9b * 100).toFixed(1)}%`,
       acc9b.counted >= ACC_N - 5 && acc9b.bloomNow >= mgCap - 0.5 && accRate9b >= 0.60,
       { counted: acc9b.counted, hit: acc9b.hit, accRate: +accRate9b.toFixed(4), bloomNow: acc9b.bloomNow, mgCap });
-    /* 발행값(tools/balance.js)은 무기 표만 본다 — fireMinigun 안의 기계적 ±7px 원뿔이 표에 없으므로
-     * **상한**이다. 실측이 그 상한을 넘으면 모델이 거짓말을 하고 있다는 뜻이라 그쪽도 단언한다. */
-    check(`A.§D 명중률: 실측(${(accRate9b * 100).toFixed(1)}%)이 모델 발행값(${(bModel.byId.minigun.pHit * 100).toFixed(1)}%) 이하다 — 표에 없는 기계적 ±7px 원뿔만큼 낮고, 그 차이가 8%p 를 넘지 않는다`,
-      accRate9b <= bModel.byId.minigun.pHit + 0.01 && bModel.byId.minigun.pHit - accRate9b <= 0.08,
-      { measured: +accRate9b.toFixed(4), published: +bModel.byId.minigun.pHit.toFixed(4) });
+    /* 발행값(tools/balance.js)은 무기 표만 본다 — fireMinigun 안의 기계적 ±7px 원뿔이 표에 없다.
+     *
+     * 처음엔 그래서 발행값이 **상한**이라고 읽고 `실측 ≤ 발행 + 0.01` 을 걸었는데, 5회 중 2회 졌다
+     * (69.3% · 68.9% 대 발행 67.8%). **방향을 가정한 것이 틀렸다** — 원뿔은 흩뿌리기만 하는 게 아니라
+     * 가우시안 꼬리를 자르기도 해서, 작은 상자에서는 실측이 발행값 위로도 간다.
+     *
+     * 1%p 창 자체도 좁았다. n=1000·p≈0.68 의 이항 표준오차는 1.5%p 라 한쪽으로 1%p 만 열어 두면
+     * 정상 표본의 4분의 1이 걸린다. (처음 이 주석에 "n≈100, σ 4.7%p" 라고 적었는데 그건 틀린 계산이다.
+     * 표본은 1000 발이다. 좁은 건 맞았고 이유의 크기가 틀렸다.)
+     *
+     * 묻는 것은 모델과 제품이 같은 것을 말하느냐이므로, 허용 오차를 그 표본의 **3σ + 모델이 모르는
+     * 원뿔 몫**으로 잡고 양쪽 대칭으로 본다. */
+    check(`A.§D 명중률: 실측(${(accRate9b * 100).toFixed(1)}%)과 모델 발행값(${(bModel.byId.minigun.pHit * 100).toFixed(1)}%)이 표본 오차(3σ) + 원뿔 몫 안에서 일치한다`,
+      (() => {
+        const p = bModel.byId.minigun.pHit, n = Math.max(1, acc9b.counted);
+        const sigma = Math.sqrt(Math.max(1e-6, p * (1 - p) / n));
+        const tol = 3 * sigma + 0.05;   // 3σ + 모델이 모르는 ±7px 원뿔 몫
+        return Math.abs(accRate9b - p) <= tol;
+      })(),
+      { measured: +accRate9b.toFixed(4), published: +bModel.byId.minigun.pHit.toFixed(4),
+        n: acc9b.counted, tol: +(3 * Math.sqrt(Math.max(1e-6, bModel.byId.minigun.pHit * (1 - bModel.byId.minigun.pHit) / Math.max(1, acc9b.counted))) + 0.05).toFixed(4) });
     /* 3) §B2: 손을 떼고 1초 뒤 블룸이 0 이다 (회복 120 px/s, 0.4초 유예 뒤). 상한 ${mgCap}px 이면 0.4 + 22/120 = 0.58초. */
     await sleep(1000);
     const rested9b = (await api.stats(page)).bloomNow;
@@ -2758,8 +2826,12 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const falloffMult = (f, d) => 1 - f * Math.min(d, 900) / 900;
     const pistolFalloff11 = (W.byId.pistol && typeof W.byId.pistol.falloff === 'number') ? W.byId.pistol.falloff : SPEC_STATS.pistol.falloff;
     const pistolDmg11 = DMG('pistol');
-    const expNear11 = Math.round(pistolDmg11 * falloffMult(pistolFalloff11, distNear11));
-    const expFar11 = Math.round(pistolDmg11 * falloffMult(pistolFalloff11, distFar11));
+    /* CHANGED by SPEC-weapon-identity §C3: #arena 는 **큰 것**이고 권총의 큰 것 계수는 0.6 이다.
+     * 제품은 rollDamage() 에서 한 번, 등급 래퍼에서 한 번 반올림하므로(src/72-roles.js) 여기서도
+     * 같은 순서로 센다 — 한 번에 곱해 반올림하면 ±1 안에서 어긋나는 자리가 생긴다. */
+    const vsArena11 = await api.vsOf(page, '#arena', 'pistol');
+    const expNear11 = Math.max(1, Math.round(Math.round(pistolDmg11 * falloffMult(pistolFalloff11, distNear11)) * vsArena11));
+    const expFar11 = Math.max(1, Math.round(Math.round(pistolDmg11 * falloffMult(pistolFalloff11, distFar11)) * vsArena11));
     const hitNearP11 = await hitFresh(page, 'pistol', nearPt11, '#arena');
     const hitFarP11 = await hitFresh(page, 'pistol', farPt11, '#arena');
     const dmgNearP11 = hitNearP11.max - hitNearP11.hp;
@@ -2792,15 +2864,19 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const ovPt = { x: (ovLeft + ovRight) / 2, y: (ovTop + ovBottom) / 2 };
     check('A.pierce setup: #pierce-front and #pierce-back genuinely overlap on screen (positive-area overlap rect)', ovRight > ovLeft && ovBottom > ovTop, { rFrontP, rBackP, ovPt });
 
-    const sniperDmg56 = DMG('sniper');
+    /* CHANGED by SPEC-weapon-identity §C3: 앞 카드와 뒤 카드는 서로 다른 등급일 수 있고(면적이 다르다)
+     * 관통 층도 각자 자기 등급 계수를 받는다 — applyHit() 이 하나의 피해 싱크이기 때문이다. 기대값을
+     * 각 표적의 계수로 센다. 묻는 것(앞은 전부, 뒤는 ×0.6)은 그대로다. */
+    const sniperDmg56 = await effDmg(page, '#pierce-front', 'sniper', DMG('sniper'));
+    const sniperBackBase56 = Math.round(DMG('sniper') * 0.6);
     const hitFrontSniper56 = await hitFresh(page, 'sniper', ovPt, '#pierce-front');
     const hitBackSniper56 = await hitFresh(page, 'sniper', ovPt, '#pierce-back');
     const dmgFrontSniper56 = hitFrontSniper56.max - hitFrontSniper56.hp;
     const dmgBackSniper56 = hitBackSniper56.max - hitBackSniper56.hp;
-    const expectedBackSniper56 = Math.round(sniperDmg56 * 0.6);
+    const expectedBackSniper56 = await effDmg(page, '#pierce-back', 'sniper', sniperBackBase56);
     check('A.combat-v2 §10.6-5: sniper (pierce 2) at the overlap point → front card takes full damage, back card takes ~60% (pierce layer 1, ×0.6)', dmgFrontSniper56 === sniperDmg56 && Math.abs(dmgBackSniper56 - expectedBackSniper56) <= 1, { dmgFrontSniper56, dmgBackSniper56, sniperDmg56, expectedBackSniper56 });
 
-    const pistolDmg56 = DMG('pistol');
+    const pistolDmg56 = await effDmg(page, '#pierce-front', 'pistol', DMG('pistol'));
     const hitFrontPistol56 = await hitFresh(page, 'pistol', ovPt, '#pierce-front');
     const hitBackPistol56 = await hitFresh(page, 'pistol', ovPt, '#pierce-back');
     const dmgFrontPistol56 = hitFrontPistol56.max - hitFrontPistol56.hp;
@@ -4618,7 +4694,12 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   check('A.sniper 3: a FIRST hp contact made while scoped is page-space — ownHp() divides the doubled rect by scopeMag()', hpFresh.own === specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false) && hpFresh.max > hpFresh.own && hpFresh.hp === hpFresh.max, { got: hpFresh, expected: specMaxHp(bcUnscaled.width, bcUnscaled.height, 1.0, false), unscaledRect: [bcUnscaled.width, bcUnscaled.height] });
   const shot3 = await api.smashAt(page, bossPt.x, bossPt.y);
   const hp3 = (await poll(async () => { const r = await api.hpOf(page, '#boss'); return r.hp < r.max ? r : null; }, 500, 15)) || await api.hpOf(page, '#boss');
-  check('A.sniper 3: one scoped shot at the boss centre → hp === max − dmg(sniper) (253 → 53)', shot3 === true && hp3.hp === hp3.max - DMG('sniper') && hp3.max === maxBefore, { shot: shot3, hp: hp3, dmg: DMG('sniper') });
+  /* CHANGED by SPEC-weapon-identity §C3: #boss 는 1000×420 = 441,840px² 이라 **큰 것**이고 저격총의
+   * 큰 것 계수는 1.2 다 — 발행 200 은 그대로이고 들어가는 값이 240 이다 (253 → 13). §C3 이 저격총에
+   * 준 약점은 반대쪽 끝에 있다: 낱말 0.4, "낱말에 200 을 쓰는 건 낭비다". */
+  const sniperBoss = await effDmg(page, '#boss', 'sniper', DMG('sniper'));
+  check(`A.sniper 3: one scoped shot at the boss centre → hp === max − ${sniperBoss} (발행 ${DMG('sniper')} × 큰 것 1.2, 253 → ${253 - sniperBoss})`,
+    shot3 === true && hp3.hp === hp3.max - sniperBoss && hp3.max === maxBefore, { shot: shot3, hp: hp3, dmg: DMG('sniper'), sniperBoss });
   const ls3 = (await api.stats(page)).lastShot;
   check('A.sniper 3: stats().lastShot records the scoped impact { x, y, offsetX: 0, offsetY: 0, scoped: true }', !!ls3 && ls3.scoped === true && ls3.offsetX === 0 && ls3.offsetY === 0 && near(ls3.x, bossPt.x, 1) && near(ls3.y, bossPt.y, 1), ls3);
   await sleep(120);
@@ -5758,9 +5839,13 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   const kDrag = await altDbg();
   const kBigHp = await api.hpOf(page, '#big-card');
   const kSmallHp = await api.hpOf(page, '#small-card');
-  check('A.alt §A5: 카타나는 드래그 12px 이상이면 발도가 취소되고 평소 베기가 된다 — 두 카드 모두 평소의 60 을 받고 취소 사유가 drag 로 남는다',
-    kDrag.lastCancel === 'drag' && kBigHp.hp === kBigHp.max - DMG('katana') && kSmallHp.hp === kSmallHp.max - DMG('katana'),
-    { kDrag, big: kBigHp, small: kSmallHp });
+  /* CHANGED by SPEC-weapon-identity §C3: "평소의 60" 은 이제 등급마다 다르다 (카타나는 큰 것 0.5 ·
+   * 중간 0.7). 발행 피해 60 은 그대로이고, 이 단언이 묻는 것은 **발도가 아니라 평소 베기였는가** 다. */
+  const kDragBig = await effDmg(page, '#big-card', 'katana', DMG('katana'));
+  const kDragSmall = await effDmg(page, '#small-card', 'katana', DMG('katana'));
+  check(`A.alt §A5: 카타나는 드래그 12px 이상이면 발도가 취소되고 평소 베기가 된다 — 두 카드 모두 평소의 ${DMG('katana')} 에 §C3 등급 계수를 곱한 값(큰 카드 ${kDragBig} · 작은 카드 ${kDragSmall})을 받고 취소 사유가 drag 로 남는다`,
+    kDrag.lastCancel === 'drag' && kBigHp.hp === kBigHp.max - kDragBig && kSmallHp.hp === kSmallHp.max - kDragSmall,
+    { kDrag, big: kBigHp, small: kSmallHp, kDragBig, kDragSmall });
 
   // ---- §A2 카타나 발도: 수평 호가 그 줄 전체를 지나간다 -------------------------------------------------
   await api.restore(page);
@@ -6016,10 +6101,15 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await sleep(220);
   const pulseHp1 = await api.hpOf(page, '#big-card');
   const pulseHeat = await dbgA('laser');
-  check('A.alt §B2: 보조는 짧게 눌러 단발 펄스 90, 즉발 — 그리고 열을 25 먹는다 (지속 빔 한 틱 11 과 완전히 다른 한 방이다)',
-    (pulseHp0.hp - pulseHp1.hp) >= 90 && (pulseHp0.hp - pulseHp1.hp) <= 90 + 11 * 2
+  /* CHANGED by SPEC-weapon-identity §C3: #big-card 는 **큰 것**이고 레이저의 큰 것 계수는 0.8 이라
+   * 펄스 90 이 72 로, 빔 한 틱 11 이 9 로 들어간다. 발행값(90 · 11)은 그대로이고 "완전히 다른 한 방"
+   * 이라는 비교도 그대로다 — 둘 다 같은 계수를 받는다. */
+  const pulseEff = await effDmg(page, '#big-card', 'laser', 90);
+  const tickEff = await effDmg(page, '#big-card', 'laser', 11);
+  check(`A.alt §B2: 보조는 짧게 눌러 단발 펄스 90 → 등급 계수 뒤 ${pulseEff}, 즉발 — 그리고 열을 25 먹는다 (지속 빔 한 틱 ${tickEff} 과 완전히 다른 한 방이다)`,
+    (pulseHp0.hp - pulseHp1.hp) >= pulseEff && (pulseHp0.hp - pulseHp1.hp) <= pulseEff + tickEff * 2
     && pulseHeat.heat >= 25 && pulseHeat.heat <= 25 + 2.2 * 3,
-    { before: pulseHp0, after: pulseHp1, heat: pulseHeat.heat });
+    { before: pulseHp0, after: pulseHp1, heat: pulseHeat.heat, pulseEff, tickEff });
 
   // 절단선: 궤적을 기록하고, 누적 절단선이 요소를 가로지르면 그 궤적을 따라 나뉜다
   await api.restore(page);
@@ -6279,11 +6369,17 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
     });
     return {
       hp: a.hpOf(el).hp, anims: anims.length, squash: squashed, frames: frames.slice(0, 6),
-      ix: a.debug.interaction(), inlineTr: el.style.getPropertyValue('transform')
+      ix: a.debug.interaction(), inlineTr: el.style.getPropertyValue('transform'),
+      moved: a.debug.movedOf(el)
     };
   }, sqTargetA.cx, sqTargetA.cy);
-  check('A.§D 뿅망치: 피해는 8 뿐이고, 맞은 요소가 찌그러졌다 튀어오르며(x·y 배율이 다른 키프레임), 별 입자가 뜬다 — 인라인 transform 은 건드리지 않는다',
-    (sqHp0A.hp - sqAfterA.hp) === 8 && sqAfterA.squash === true && sqAfterA.ix.stars > 0 && sqAfterA.inlineTr === '',
+  /* CHANGED by SPEC-weapon-identity §C4 (11단계): 뿅망치는 이제 **튕겨내기**다 — "피해 8 + 맞은 요소가
+   * 반대로 날아간다(변위 강함). 밀어내기 장난감." 그래서 §D 가 적었던 "인라인 transform 은 건드리지
+   * 않는다" 는 더 이상 참이 아니다: 변위 시스템이 transform 을 빌린다(원래 값은 clearMoved() 가
+   * 되돌리고, 아래 복구 단언들이 그것을 본다). 피해 8 과 찌그러짐과 별 입자는 그대로 묻는다. */
+  check('A.§D/§C4 뿅망치: 피해는 8 뿐이고, 맞은 요소가 찌그러졌다 튀어오르며(x·y 배율이 다른 키프레임) 별 입자가 뜨고, §C4 의 튕겨내기로 **변위 몸체가 생겨 날아간다**',
+    (sqHp0A.hp - sqAfterA.hp) === 8 && sqAfterA.squash === true && sqAfterA.ix.stars > 0
+    && !!sqAfterA.moved && sqAfterA.moved.mass > 0 && (Math.abs(sqAfterA.moved.vx) + Math.abs(sqAfterA.moved.vy)) > 0,
     { dmg: sqHp0A.hp - sqAfterA.hp, after: sqAfterA });
   await api.restore(page);
   await sleep(120);
@@ -6570,8 +6666,12 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
     a.smashAt(r.left + 8, r.top + 8);
     return { before, after: a.hpOf(el).hp, frozen: a.debug.frozenOf(el) };
   });
-  check(`A.§E 냉각총 피해 증폭: 언 요소를 망치로 치면 65 가 아니라 117 이 들어간다 (×1.8) — 관측 ${fzHitE.before - fzHitE.after}`,
-    fzE.frozen === true && (fzHitE.before - fzHitE.after) === Math.round(65 * 1.8), { fzE, fzHitE });
+  /* CHANGED by SPEC-weapon-identity §C3: #big-card 는 **큰 것**이고 망치의 큰 것 계수는 0.5 다. 두 배수는
+   * 같은 피해 싱크에서 차례로 곱해진다 — 등급 래퍼(src/72-roles.js)가 바깥, 빙결 래퍼(src/69-utility.js)가
+   * 안이라 round(65 × 0.5) = 33, round(33 × 1.8) = 59. 묻는 것은 그대로다: **빙결이 ×1.8 을 한다.** */
+  const fzBase = await effDmg(page, '#big-card', 'hammer', DMG('hammer'));
+  check(`A.§E 냉각총 피해 증폭: 언 요소를 망치로 치면 ${fzBase} 가 아니라 ${Math.round(fzBase * 1.8)} 이 들어간다 (×1.8, §C3 의 큰 것 0.5 뒤에) — 관측 ${fzHitE.before - fzHitE.after}`,
+    fzE.frozen === true && (fzHitE.before - fzHitE.after) === Math.round(fzBase * 1.8), { fzE, fzHitE, fzBase });
   /* §E "SPA 리렌더도 묶는다" — 고른 해석(보고에 적었다): 얼어 있는 동안 그 요소 자신의 애니메이션과
    * 전이가 멈춘다. 인라인 두 줄이고, 원래 값과 우선순위를 저장했다가 되돌린다. */
   check('A.§E 냉각총: 얼어 있는 동안 그 요소의 animation-play-state 가 paused 이고 transition 이 none 이다 (고른 해석: "SPA 리렌더도 묶는다")',
@@ -7148,10 +7248,22 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   const beamSeen8 = await poll(() => api.has(page, '.crs-repair'), 500);
   await api.setWeapon(page, 'rocket');
   const fg8 = await api.rect(page, '#figure');
-  await smashUntil(page, () => api.broken(page, '#figure'), fg8.left + 6, fg8.top + 6, 6);
+  /* 계측 (CLAUDE.md): "치유자를 죽였는가" 와 "그래서 복구가 취소됐는가" 는 서로 다른 질문이다.
+   * 둘을 한 단언에 묶어 두었더니 실패 메시지가 어느 쪽인지 말하지 못했다 — 먼저 죽인 사실을 세고,
+   * 그 다음에 취소를 묻는다. 예산도 §C3 의 등급 계수 때문에 한 방의 크기가 바뀌므로 넉넉히 둔다. */
+  const figHp8a = await api.hpOf(page, '#figure');
+  const figGrade8 = await api.gradeOf(page, '#figure');
+  const figVs8 = await api.vsOf(page, '#figure', 'rocket');
+  const shots8a = (await api.stats(page)).shots;
+  const figKilled8 = await smashUntil(page, () => api.broken(page, '#figure'), fg8.left + 6, fg8.top + 6, 12);
+  const figBroken8 = await api.broken(page, '#figure');
+  const beamAfterKill8 = await api.has(page, '.crs-repair');
+  const figHp8b = await api.hpOf(page, '#figure');
+  const diag8 = { figKilled8, figBroken8, beamAfterKill8, figHp8a, figHp8b, figGrade8, figVs8, shotsFired: (await api.stats(page)).shots - shots8a, ammo: await api.ammo(page) };
+  check('A.v2 7.8 전제: 빔이 도는 중에 치유자(#figure)가 실제로 죽는다', figBroken8 === true, diag8);
   await sleep(tms(page, 1500) + 300);
   const scStillBroken8 = await api.broken(page, '#small-card');
-  check('A.v2 7.8: killing the repairing hostile mid-beam cancels the repair — #small-card is still broken a full beam-length later', beamSeen8 === true && scStillBroken8 === true, { beamSeen8, scStillBroken8, scale: scaleOf(page) });
+  check('A.v2 7.8: killing the repairing hostile mid-beam cancels the repair — #small-card is still broken a full beam-length later', beamSeen8 === true && scStillBroken8 === true, Object.assign({ beamSeen8, scStillBroken8, scale: scaleOf(page) }, diag8));
   await api.setWeapon(page, 'hammer');
 
   // ---- (9) destroy ratio tracks broken vs. repaired area (§7.9) ----
@@ -7161,7 +7273,8 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   const ratio0_9 = (await api.stats(page)).destroyRatio;
   check('A.v2 7.9: stats().destroyRatio === 0 with nothing broken', ratio0_9 === 0, ratio0_9);
   const bc9 = await api.rect(page, '#big-card');
-  await smashUntil(page, () => api.broken(page, '#big-card'), bc9.cx, bc9.cy, 6);
+   /* CHANGED by SPEC-weapon-identity §C3: #big-card 는 **큰 것**이고 망치의 큰 것 계수는 0.5 다 — 클릭 예산을 늘린다. 단언은 '부서졌는가' 그대로다. */
+  await smashUntil(page, () => api.broken(page, '#big-card'), bc9.cx, bc9.cy, 14);
   const ratio1_9 = await poll(async () => { const r = (await api.stats(page)).destroyRatio; return r > 0 ? r : null; }, tms(page, 2600) + 400, 80);
   check('A.v2 7.9: breaking a large element raises stats().destroyRatio above 0 (within the 2 s refresh)', ratio1_9 > 0, ratio1_9);
   await force('#figure', 'forceAttack');
@@ -8206,7 +8319,8 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
 
   // ---- (6) traceless while despawn fade animations are in flight (§9.4.6) ----
   const bc946 = await api.rect(page, '#big-card');
-  await smashUntil(page, () => api.broken(page, '#big-card'), bc946.cx, bc946.cy, 6);
+   /* CHANGED by SPEC-weapon-identity §C3: #big-card 는 **큰 것**이고 망치의 큰 것 계수는 0.5 다 — 클릭 예산을 늘린다. 단언은 '부서졌는가' 그대로다. */
+  await smashUntil(page, () => api.broken(page, '#big-card'), bc946.cx, bc946.cy, 14);
   const restedAt946 = await poll(async () => { const s = await api.stats(page); return (s.pieceCount > 0 && s.pieces.every((p) => p.resting)) ? Date.now() : null; }, 4000, 60);
   await sleep(Math.max(0, (restedAt946 ? 6200 - (Date.now() - restedAt946) : 6200)));   // land inside the ~500 ms fade window
   const fadingSeen946 = await api.count(page, '.crs-fading');
@@ -8357,10 +8471,13 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   await sleep(80);
   await api.setWeapon(page, 'katana');
   const katImg = await api.rect(page, '#demo-img');
-  // 60 a cut against the image's ~101 hp: the first slash only wounds it, the second is the one that splits it
-  await api.slash(page, katImg.left - 30, katImg.cy - 20, katImg.right + 30, katImg.cy + 20);
-  await sleep(260);
-  await api.slash(page, katImg.left - 30, katImg.cy - 20, katImg.right + 30, katImg.cy + 20);
+  /* CHANGED by SPEC-weapon-identity §C3: 이미지(240×140 = 33,600px²)는 **중간**이고 카타나의 중간 계수는
+   * 0.7 이라 한 번 베기가 60 이 아니라 42 다 — 두 번으로는 ~101 이 안 넘어간다. 횟수를 고정하지 않고
+   * **부서질 때까지** 벤다; 이 단언이 묻는 것은 횟수가 아니라 **조각이 정확히 둘인가** 다. */
+  for (let kt = 0; kt < 5 && !(await api.broken(page, '#demo-img')); kt++) {
+    await api.slash(page, katImg.left - 30, katImg.cy - 20, katImg.right + 30, katImg.cy + 20);
+    await sleep(260);
+  }
   const katBroken = await poll(() => api.broken(page, '#demo-img'), 1200);
   const katPieces = (await api.stats(page)).lastBreakPieces;
   check('A.destr §B4: 카타나 베기도 정확히 2조각이다', katBroken === true && katPieces === 2, { katBroken, katPieces });
@@ -8470,8 +8587,19 @@ async function suiteA14Debris(browser, origin, contentCss, contentJs) {
   await sleep(120);
   await api.setWeapon(page, 'katana');
   const slImg = await api.rect(page, '#demo-img');
-  await api.slash(page, slImg.left - 30, slImg.cy - 18, slImg.right + 30, slImg.cy + 18);   // wound it first
-  await sleep(300);
+  /* CHANGED by SPEC-weapon-identity §C3: 중간 등급 계수 0.7 로 한 번 베기가 42 이므로 "한 번 상처 내고
+   * 두 번째에 갈라진다" 가 더 이상 참이 아니다. 마지막 한 번을 남기고 깎아 둔다 — 아래 측정은 **그 마지막
+   * 한 번**이 어떻게 갈라지는지를 본다. */
+  const slDmg = await effDmg(page, '#demo-img', 'katana', DMG14('katana'));
+  const slHp = await api.hpOf(page, '#demo-img');
+  /* 상처는 **찌르기**로 낸다. 화면을 가로지르는 베기는 길 위의 모든 요소를 함께 치므로(doSlash 는 최대
+   * 12개) 미리 베어 두면 다른 요소의 조각이 남아 아래 측정이 "두 조각" 을 세지 못한다 — 처음 측정이
+   * 정확히 그래서 조각을 넷 세었다. 찌르기는 이미지 하나만 친다. */
+  for (let kt = 0; kt < Math.max(0, hitsFor(slHp.hp, slDmg) - 1); kt++) {
+    await api.smashAt(page, slImg.cx, slImg.cy, 'katana');
+    await sleep(tms(page, 560) + 60);
+  }
+  await sleep(120);
   const slide = await page.evaluate((x1, y1, x2, y2) => new Promise((resolve) => {
     const a = window.__crashScreen;
     const snap = () => a.debug.pieceBoxes().filter((b) => !b.chip && !b.ash).map((b) => ({ pid: b.pid, x: (b.l + b.r) / 2, y: (b.top + b.bottom) / 2 }));
@@ -8769,7 +8897,8 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
   const frontHp4b_106 = await api.hpOf(page, '#depth-front');
   const midHp4b_106 = await api.hpOf(page, '#depth-mid');
   check('A.v2 10.6.4: a hit at the overlap point damages only the occluder (#depth-front); #depth-mid underneath is untouched', frontHp4b_106.hp < frontHp4a_106.hp && midHp4b_106.hp === midHp4a_106.hp, { front: [frontHp4a_106, frontHp4b_106], mid: [midHp4a_106, midHp4b_106] });
-  await smashUntil(page, () => api.broken(page, '#depth-front'), overlapPt4_106.cx, overlapPt4_106.cy, 6);
+  /* CHANGED by SPEC-weapon-identity §C3: 등급 계수가 한 방의 크기를 바꾸므로 예산을 넉넉히 둔다. */
+  await smashUntil(page, () => api.broken(page, '#depth-front'), overlapPt4_106.cx, overlapPt4_106.cy, 14);
   const midHp4c_106 = await api.hpOf(page, '#depth-mid');
   await api.smashAt(page, overlapPt4_106.cx, overlapPt4_106.cy);
   const midHp4d_106 = await api.hpOf(page, '#depth-mid');
@@ -8791,8 +8920,10 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
   const midHp5b_106 = await api.hpOf(page, '#depth-tank-back');
   const frontDmg5_106 = frontHp5a_106.hp - frontHp5b_106.hp;
   const midDmg5_106 = midHp5a_106.hp - midHp5b_106.hp;
-  const sniperDmg5_106 = DMG14('sniper');
-  const expectedMid5_106 = Math.round(sniperDmg5_106 * 0.6);
+  /* CHANGED by SPEC-weapon-identity §C3: 두 카드의 등급 계수를 각각 적용한다 (관통 층도 같은 피해 싱크를
+   * 지난다). 묻는 것 — 앞은 전부, 뒤는 그 60% — 은 그대로다. */
+  const sniperDmg5_106 = await effDmg(page, '#depth-tank-front', 'sniper', DMG14('sniper'));
+  const expectedMid5_106 = await effDmg(page, '#depth-tank-back', 'sniper', Math.round(DMG14('sniper') * 0.6));
   check('A.v2 10.6.5: a sniper shot through the overlap deals full damage to the front card and ≈ 60% to the one behind it (pierce = 2)', near(frontDmg5_106, sniperDmg5_106, 1) && midDmg5_106 > 0 && near(midDmg5_106, expectedMid5_106, Math.max(2, Math.round(sniperDmg5_106 * 0.1))), { frontDmg5_106, midDmg5_106, sniperDmg5_106, expectedMid5_106, frontHp5a_106, midHp5a_106 });
   await api.restore(page);
   await sleep(80);
@@ -8989,7 +9120,8 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
   const scShot = await api.rect(page, '#small-card');
   await clickUntilBroken(page, '#small-card', scShot.cx, scShot.cy, 4);
   const bcShot = await api.rectNoScroll(page, '#big-card');
-  await clickUntilBroken(page, '#big-card', bcShot.cx, bcShot.cy, 5);
+   /* CHANGED by SPEC-weapon-identity §C3: #big-card 는 **큰 것**이고 망치의 큰 것 계수는 0.5 다 — 클릭 예산을 늘린다. 단언은 '부서졌는가' 그대로다. */
+  await clickUntilBroken(page, '#big-card', bcShot.cx, bcShot.cy, 14);
   await api.rect(page, '#figure');
   await sleep(2300);
   await page.evaluate((x, y) => {
@@ -9358,7 +9490,10 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
     d.shockwave(r.left - 10, r.top + r.height / 2);
     return { before, after: a.hpOf(el).hp, dealt: a.stats().damageDealt - dealt0, pushed: d.moved().length };
   });
-  check('A.§C 3: 충돌을 끈 충격포의 직접 피해는 정확히 10 이다 (밀린 요소마다 10, 감쇠 없음)',
+  /* NOTE (SPEC-weapon-identity §C3): 충격포는 §C3 의 표에 없다 — 표는 실전 13종만 적었고 나머지는
+   * "기본 1.0" 이다. 그래서 10 은 10 그대로다. 그런데 §C4 의 **망치 파동**이 같은 변위 시스템을 쓰므로
+   * 이 단언이 "밀린 요소마다 정확히 10" 을 지키는지가 둘을 가르는 검사이기도 하다. */
+  check('A.§C 3: 충돌을 끈 충격포의 직접 피해는 정확히 10 이다 (밀린 요소마다 10, 감쇠 없음 — §C3 의 등급 계수는 실전 13종만 받는다)',
     directC.before - directC.after === 10 && directC.pushed >= 1 && directC.dealt === 10 * directC.pushed, directC);
   await api.debug(page, { noDisplaceCollide: false });
   await api.restore(page);
@@ -11947,9 +12082,13 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
     const b = (a.debug.burning() || []).find((q) => q.id === 'burn-a');
     return { hp: a.hpOf(document.querySelector('#burn-a')).hp, stacks: b ? b.stacks : -1, by: b ? b.igniter : '' };
   }, aF.cx, aF.cy);
-  check('A.destr §F6: 화염방사기 한 틱은 피해 8 과 스택 9 다 — 즉시 화력은 최하위로 내리고 일을 연소로 옮겼다 (기존 15)',
-    hpFl0.hp - flameTick.hp === 8 && flameTick.stacks === 9 && flameTick.by === 'flame',
-    { before: hpFl0.hp, after: flameTick });
+  /* CHANGED by SPEC-weapon-identity §C3: 틱 피해 8 은 그대로이고 거기에 표적 등급 계수가 곱해진다
+   * (화염방사기: 낱말 1.4 · 작은 것 1.1 · 중간 1.0 · 큰 것 0.6 — "번진다"). 스택 9 는 피해가 아니라서
+   * 계수를 받지 않는다. */
+  const flameEff = await effDmg(page, '#burn-a', 'flame', 8);
+  check(`A.destr §F6: 화염방사기 한 틱은 피해 8(등급 계수 뒤 ${flameEff}) 과 스택 9 다 — 즉시 화력은 최하위로 내리고 일을 연소로 옮겼다 (기존 15)`,
+    hpFl0.hp - flameTick.hp === flameEff && flameTick.stacks === 9 && flameTick.by === 'flame',
+    { before: hpFl0.hp, after: flameTick, flameEff });
   await api.restore(page);
   await sleep(120);
 
@@ -12055,6 +12194,509 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   await combatTeardown(ctx);
 }
 
+
+
+// ---------------------------------------------------------------------------
+// Suite A — roles: SPEC-weapon-identity §C (표적 등급 계수 · 열한 개의 동사 · 무흔적)
+//
+// 자기 전제를 스스로 만든다: §C2 의 네 등급(면적)을 **정확히** 갖는 실험대를 페이지에 직접 세운다.
+// 픽스처의 요소들은 등급 경계에 걸쳐 있고 폰트 메트릭에 따라 기계마다 면적이 달라진다 — 등급이
+// 면적으로 정의된 이상 등급 검사는 면적이 확정된 상자 위에서 해야 한다.
+//   낱말  60 × 40  =   2,400 px²  (< 3,000)
+//   작은 것 120 × 44 =   5,280 px²  (§B1 의 기준 표적 버튼 그 자체)
+//   중간  300 × 200 =  60,000 px²
+//   큰 것  600 × 300 = 180,000 px²
+// 중간과 큰 것은 자식을 품는다 — §C2 집계로 체력을 올려야 다섯 발을 견디고(연사 누적), 로켓
+// 한 발을 견딘다(등급 계수 측정). 자식은 상자의 패딩 밖에 있으므로 패딩을 노리면 상자 자신이 잡힌다.
+// ---------------------------------------------------------------------------
+async function suiteARoles(browser, origin, contentCss, contentJs) {
+  console.log('--- roles: SPEC-weapon-identity §C 개성 (등급 계수 · 액션 · 무흔적) ---');
+  const h = await freshPage(browser, origin, contentCss, contentJs);
+  const { page } = h;
+
+  // 실험대를 세운다. 되돌릴 필요는 없다 — 이 블록은 자기 탭을 들고 있고 끝나면 닫는다.
+  const LAB = await page.evaluate(() => {
+    /* 패딩 44px: 자식을 품은 상자도 **자기 자신**이 잡히는 띠를 갖는다. 기관단총 ±9 · 미니건 ±7 의
+     * 기계적 원뿔이 그 띠 안에 머물러야 "이 상자의 등급" 을 재는 것이 되고, 그러지 않으면 측정이
+     * 상자가 아니라 자식(작은 것)을 잰다 — 첫 측정이 정확히 그래서 중간·큰 것이 전부 작은 것의
+     * 계수로 읽혔다. 조준점은 (left+22, top+22) 다. */
+    const box = (id, w, hh, left, top, kids) => {
+      const d = document.createElement('div');
+      d.id = id;
+      Object.assign(d.style, {
+        position: 'fixed', left: left + 'px', top: top + 'px', width: w + 'px', height: hh + 'px',
+        padding: (kids ? 44 : 16) + 'px', boxSizing: 'border-box', background: '#e8eefb', border: '1px solid #8a93a8', zIndex: '70'
+      });
+      for (let i = 0; i < (kids || 0); i++) {
+        const k = document.createElement('div');
+        k.id = id + '-k' + i;
+        Object.assign(k.style, { width: (w - 100) + 'px', height: '18px', marginBottom: '2px', background: '#4a7bd0' });
+        d.append(k);
+      }
+      document.body.append(d);
+      const r = d.getBoundingClientRect();
+      const pad = kids ? 22 : 6;
+      return { id: id, x: Math.round(r.left + pad), y: Math.round(r.top + pad), cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2), w: r.width, h: r.height, pad: pad };
+    };
+    const out = {};
+    out.word = box('rl-word', 60, 40, 40, 40, 0);
+    out.small = box('rl-small', 120, 44, 140, 40, 0);
+    out.mid = box('rl-mid', 300, 200, 40, 110, 5);
+    out.large = box('rl-large', 600, 300, 400, 110, 5);
+    // 이웃 한 쌍: 서로 맞닿아 있다 (서리 전파 · 못 꿰맴 · 도탄 · 망치 파동이 전부 이 둘 위에서 돈다)
+    out.nbrA = box('rl-nbr-a', 200, 120, 40, 450, 0);
+    out.nbrB = box('rl-nbr-b', 200, 120, 246, 450, 0);   // 6px 틈 — §F2 의 24px 인접 판정 안이다
+    // 밀집한 작은 것 아홉 (샷건 펠릿 산개)
+    const cl = [];
+    for (let i = 0; i < 9; i++) {
+      const c = document.createElement('div');
+      c.id = 'rl-cl' + i;
+      Object.assign(c.style, {
+        position: 'fixed', left: (700 + (i % 3) * 44) + 'px', top: (450 + Math.floor(i / 3) * 40) + 'px',
+        width: '40px', height: '36px', background: '#c9d6f2', border: '1px solid #8a93a8', boxSizing: 'border-box', zIndex: '70'
+      });
+      document.body.append(c);
+      const r = c.getBoundingClientRect();
+      cl.push({ id: c.id, cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2) });
+    }
+    out.cluster = cl;
+    out.clusterCentre = { x: 700 + 44 + 20, y: 450 + 40 + 18 };
+    return out;
+  });
+
+  // =============================================================================================
+  // §C2 — 표적 등급은 **면적**이 정한다
+  // =============================================================================================
+  const grades = await page.evaluate(() => {
+    const d = window.__crashScreen.debug;
+    const g = (id) => d.gradeOf(document.querySelector('#' + id));
+    return { word: g('rl-word'), small: g('rl-small'), mid: g('rl-mid'), large: g('rl-large'), table: d.roles().grades };
+  });
+  check('A.§C2: 네 등급의 경계가 명세 그대로다 — 낱말 < 3,000 · 작은 것 ~20,000 · 중간 ~150,000 · 큰 것 그 위',
+    JSON.stringify(grades.table) === JSON.stringify([{ key: 'word', maxArea: 3000 }, { key: 'small', maxArea: 20000 }, { key: 'mid', maxArea: 150000 }, { key: 'large', maxArea: null }]),
+    grades.table);
+  check('A.§C2: 실험대 네 상자가 각자의 등급으로 읽힌다 (2,400 → 낱말 · 5,280 → 작은 것 · 60,000 → 중간 · 180,000 → 큰 것)',
+    grades.word.grade === 'word' && grades.word.area === 2400
+    && grades.small.grade === 'small' && grades.small.area === 5280
+    && grades.mid.grade === 'mid' && grades.mid.area === 60000
+    && grades.large.grade === 'large' && grades.large.area === 180000, grades);
+
+  // =============================================================================================
+  // §C3 — 등급 계수. 표가 먼저, 그 다음 **쏴서** 센다.
+  // =============================================================================================
+  const vsTable = await page.evaluate(() => window.__crashScreen.debug.vsTable());
+  const VS_SPEC = {
+    hammer: [1.0, 1.0, 1.0, 0.5], pistol: [1.0, 1.3, 1.0, 0.6], smg: [1.0, 1.0, 1.0, 0.7],
+    sniper: [0.4, 1.0, 1.4, 1.2], axe: [0.6, 1.0, 1.3, 1.0], katana: [1.5, 1.2, 0.7, 0.5],
+    bomb: [0.8, 1.0, 1.2, 1.0], rocket: [0.5, 0.7, 1.2, 1.5], flame: [1.4, 1.1, 1.0, 0.6],
+    laser: [1.0, 1.1, 1.0, 0.8], minigun: [0.7, 0.8, 1.2, 1.4], shotgun: [1.2, 1.4, 0.6, 0.4],
+    nailgun: [1.0, 1.2, 1.0, 0.7]
+  };
+  const vsMiss = [];
+  for (const id of Object.keys(VS_SPEC)) {
+    const t = vsTable[id];
+    if (!t) { vsMiss.push(id + ': 표가 없다'); continue; }
+    const got = [t.word, t.small, t.mid, t.large];
+    if (got.some((v, i) => Math.abs(v - VS_SPEC[id][i]) > 1e-9)) vsMiss.push(`${id}: ${got.join('/')} ≠ ${VS_SPEC[id].join('/')}`);
+  }
+  check('A.§C3: 실전 13종의 등급 계수가 명세의 표 그대로다 (폭탄의 낱말만 1.0 → 0.8 — §F6-7 이 요구하는 "1.0 미만 하나" 가 그 줄에 없었다, 보고에 적었다)',
+    vsMiss.length === 0, vsMiss);
+  const vsExtra = Object.keys(vsTable).filter((id) => vsTable[id] && !VS_SPEC[id]);
+  check('A.§C3: 그 13종 **말고는** 계수표가 없다 — 붕괴 · 특수 · 예능은 §C3 이 적은 "기본 1.0" 이다',
+    vsExtra.length === 0, vsExtra);
+  check('A.§C3: 실전 무기마다 1.0 미만인 등급이 최소 하나 있다 (§C1 "못하는 것이 없으면 잘하는 것도 느껴지지 않는다")',
+    Object.keys(VS_SPEC).every((id) => VS_SPEC[id].some((v) => v < 1)), Object.keys(VS_SPEC).filter((id) => !VS_SPEC[id].some((v) => v < 1)));
+  const vsKeys = Object.keys(VS_SPEC).map((id) => VS_SPEC[id].join('/'));
+  check('A.§C3: 어떤 두 무기도 네 값이 모두 같지 않다', new Set(vsKeys).size === vsKeys.length, vsKeys);
+
+  // ---- 쏴서 센다: 단일 표적 무기 아홉 × 네 등급 ------------------------------------------------
+  // `stats().damageDealt` 로 읽는다 — applyHit() 이 피해를 더한 **뒤에** 파괴를 판정하므로 한 방에
+  // 지워지는 조합에서도 들어간 값이 그대로 남는다. hp 차이로 읽으면 그 자리가 전부 측정 불가가 된다.
+  const FIRED = [
+    ['hammer', 65], ['pistol', 25], ['sniper', 200], ['axe', 130], ['katana', 60],
+    ['nailgun', 19], ['laser', 11], ['minigun', 26], ['flame', 8]
+  ];
+  const GRADE_KEYS = ['word', 'small', 'mid', 'large'];
+  for (const [wid, base] of FIRED) {
+    const got = await page.evaluate((id, pts) => {
+      const a = window.__crashScreen;
+      const out = {};
+      for (const key of Object.keys(pts)) {
+        a.restore();
+        const d0 = a.stats().damageDealt;
+        /* 조준점은 상자 자신의 **패딩 띠**다 — 한가운데는 자식(작은 것)이고, 거기를 쏘면 측정이
+         * 상자의 등급이 아니라 자식의 등급을 재게 된다. `smashAt(x, y, id)` 는 **들고 있지 않은**
+         * 무기로도 한 방을 쏘므로 교체 지연을 기다릴 필요가 없다 (action() 이 §C3 의 임자를 적는다). */
+        a.smashAt(pts[key].x, pts[key].y, id);
+        out[key] = a.stats().damageDealt - d0;
+      }
+      a.restore();
+      return out;
+    }, wid, { word: LAB.word, small: LAB.small, mid: LAB.mid, large: LAB.large });
+    const want = {};
+    for (let i = 0; i < GRADE_KEYS.length; i++) want[GRADE_KEYS[i]] = Math.max(1, Math.round(base * VS_SPEC[wid][i]));
+    check(`A.§C3 (쏴서): ${wid} 한 방이 네 등급에서 ${GRADE_KEYS.map((k) => want[k]).join(' · ')} 다 (발행 ${base} × ${VS_SPEC[wid].join('/')})`,
+      GRADE_KEYS.every((k) => got[k] === want[k]), { got, want, base, vs: VS_SPEC[wid] });
+  }
+  /* 샷건은 펠릿 아홉이 **각자** 판정하므로 한 등급 위에서만 잴 수 있다. 밀집한 아홉(40×36 = 1,440px²,
+   * 전부 **낱말**) 한가운데에 한 발 — 총합이 펠릿당 `13 × 1.2` 의 배수여야 한다. */
+  const sgSpread = await page.evaluate((pt) => {
+    const a = window.__crashScreen;
+    a.restore();
+    const before = [];
+    for (let i = 0; i < 9; i++) before.push(a.hpOf(document.querySelector('#rl-cl' + i)).hp);
+    a.smashAt(pt.x, pt.y, 'shotgun');
+    /* 펠릿은 밀집 아홉 **말고도** 그 아래의 페이지를 맞힐 수 있으므로 총합이 아니라 **상자별 감소**를
+     * 본다. 부서진 상자는 뺀다 — 마지막 한 발은 남은 체력에서 멈추므로 배수가 아니다. */
+    const drops = [];
+    for (let i = 0; i < 9; i++) {
+      const el = document.querySelector('#rl-cl' + i);
+      if (el.hasAttribute('data-crs-broken')) continue;
+      const d = before[i] - a.hpOf(el).hp;
+      if (d > 0) drops.push(d);
+    }
+    const out = { drops, spread: a.debug.utility().lastSpread, grade: a.debug.gradeOf(document.querySelector('#rl-cl0')) };
+    a.restore();
+    return out;
+  }, LAB.clusterCentre);
+  const sgPellet = Math.max(1, Math.round(13 * 1.2));   // 낱말 1.2
+  check(`A.§C3 (쏴서): 샷건 펠릿 하나가 낱말 등급에 ${sgPellet}(발행 13 × 1.2) 를 넣는다 — 살아남은 상자들의 감소가 전부 그 배수다`,
+    sgSpread.grade && sgSpread.grade.grade === 'word' && sgSpread.drops.length >= 2 && sgSpread.drops.every((d) => d % sgPellet === 0), sgSpread);
+
+  // =============================================================================================
+  // §C4 — 열한 개의 동사. 각자 **관측 가능한 고유 효과**를 낸다.
+  // =============================================================================================
+
+  // ---- (1) 기관단총 연사 누적: 같은 요소를 연속으로 맞히면 탄마다 +8%, 5발째 ×1.4 ---------------
+  const streak = await page.evaluate((mid, other) => {
+    const a = window.__crashScreen;
+    a.restore();
+    const steps = [];
+    for (let i = 0; i < 5; i++) {
+      const d0 = a.stats().damageDealt;
+      a.smashAt(mid.x, mid.y, 'smg');
+      steps.push(a.stats().damageDealt - d0);
+    }
+    // 표적을 바꾸면 초기화된다 — 다른 것을 한 번 치고 다시 돌아와 첫 발을 잰다
+    a.smashAt(other.x, other.y, 'smg');
+    const d1 = a.stats().damageDealt;
+    a.smashAt(mid.x, mid.y, 'smg');
+    const reset = a.stats().damageDealt - d1;
+    const n = a.debug.roles().streak;
+    a.restore();
+    return { steps, reset, n };
+  }, LAB.mid, LAB.large);
+  const streakWant = [1, 2, 3, 4, 5].map((k) => Math.round(22 * (1 + 0.08 * k)));   // 중간 등급 계수 1.0
+  check(`A.§C4 기관단총 연사 누적: 같은 요소를 연속으로 맞히면 ${streakWant.join(' → ')} (탄마다 +8%, 5발째 ×1.4)`,
+    JSON.stringify(streak.steps) === JSON.stringify(streakWant), { got: streak.steps, want: streakWant });
+  check(`A.§C4 기관단총 연사 누적: 표적을 바꾸면 초기화된다 — 돌아와서 쏜 첫 발이 다시 ${streakWant[0]} 이다`,
+    streak.reset === streakWant[0], streak);
+
+  // ---- (2) 미니건 갈아내기: 명중할 때마다 그 요소의 max 를 0.6%씩, 최대 30% ---------------------
+  const grind = await page.evaluate((pt) => {
+    const a = window.__crashScreen, d = a.debug;
+    a.restore();
+    const el = document.querySelector('#rl-large');
+    const max0 = a.hpOf(el).max;
+    for (let i = 0; i < 10; i++) a.smashAt(pt.x, pt.y, 'minigun');
+    const after10 = a.hpOf(el).max;
+    const ground = d.groundOf(el);
+    return { max0, after10, ground, want: Math.round(max0 * (1 - 0.006 * 10)) };
+  }, LAB.large);
+  check(`A.§C4 미니건 갈아내기: 열 발이 그 요소의 max 를 ${grind.max0} → ${grind.want} 로 깎는다 (명중당 0.6%, 원래 max 기준)`,
+    grind.after10 === grind.want && grind.after10 < grind.max0 && !!grind.ground && grind.ground.steps === 10 && grind.ground.max0 === grind.max0, grind);
+  /* 상한은 **훅으로** 잰다. 50걸음에 닿으려면 미니건 쉰 발(1,800이 넘는 피해)을 같은 요소에 꽂아야
+   * 하는데 그걸 견디는 요소가 페이지에 없다 — `debug.grind(el, n)` 은 깎는 쪽만 떼어 부르는 길이고
+   * (debug.freeze2 와 같은 모양), 쏴서 깎인다는 사실은 바로 위의 열 발이 이미 본다. */
+  const grindCap = await page.evaluate(() => {
+    const a = window.__crashScreen, d = a.debug;
+    a.restore();
+    const el = document.querySelector('#rl-large');
+    const max0 = a.hpOf(el).max;
+    const at49 = d.grind(el, 49);
+    const at90 = d.grind(el, 41);
+    const consts = d.roles().grind;
+    a.restore();
+    return { max0, at49, at90, consts, floor: Math.round(max0 * 0.7) };
+  });
+  check(`A.§C4 미니건 갈아내기: 30% 에서 멈춘다 — 아흔 걸음을 걸어도 장부가 50 에서 서고 max 가 ${grindCap.floor} 아래로 내려가지 않는다 (명중당 0.6% · 상한 30%)`,
+    grindCap.at49.steps === 49 && grindCap.at90.steps === 50 && grindCap.at90.max === grindCap.floor
+    && grindCap.consts.perHit === 0.006 && grindCap.consts.cap === 0.3 && grindCap.consts.steps === 50, grindCap);
+
+  // ---- (3) 레이저 지속 절단: 같은 지점을 0.4초 유지하면 그 선을 따라 분리한다 -------------------
+  await api.restore(page);
+  await sleep(80);
+  await api.setWeapon(page, 'laser');
+  await sleep(320);
+  const lzHp0 = await api.hpOf(page, '#rl-mid');
+  await page.mouse.move(LAB.mid.x, LAB.mid.y);
+  await page.mouse.down();
+  const lzSevered = await poll(() => api.broken(page, '#rl-mid'), 1400, 25);
+  await page.mouse.up();
+  const lzPieces = (await api.stats(page)).lastBreakPieces;
+  const lzDealt = (await api.stats(page)).damageDealt;
+  check(`A.§C4 레이저 지속 절단: 같은 지점을 0.4초 유지하면 체력이 남아 있는데도 **그 선을 따라 둘로 갈라진다** (체력 ${lzHp0.max}, 그 동안 틱으로 들어간 피해는 ${lzDealt})`,
+    lzSevered === true && lzPieces === 2 && lzDealt < lzHp0.max, { lzSevered, lzPieces, lzDealt, max: lzHp0.max });
+  await api.restore(page);
+  await sleep(120);
+  // 멈추면 처음부터: 조준점을 계속 흔들면 0.4초가 지나도 잘리지 않는다
+  await page.mouse.move(LAB.mid.x, LAB.mid.y);
+  await page.mouse.down();
+  for (let i = 0; i < 14; i++) { await page.mouse.move(LAB.mid.x + (i % 2 ? 40 : 0), LAB.mid.y + (i % 2 ? 30 : 0)); await sleep(45); }
+  const lzMoved = await api.broken(page, '#rl-mid');
+  await page.mouse.up();
+  check('A.§C4 레이저 지속 절단: **멈추면 처음부터** — 0.6초 동안 조준점을 흔들면 분리가 일어나지 않는다',
+    lzMoved === false, { broken: lzMoved });
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (4) 샷건 펠릿 산개: 각 펠릿이 서로 다른 요소를 찾는다 -----------------------------------
+  const pellets = await page.evaluate((pt) => {
+    const a = window.__crashScreen;
+    a.restore();
+    const before = [];
+    for (let i = 0; i < 9; i++) before.push(a.hpOf(document.querySelector('#rl-cl' + i)).hp);
+    a.smashAt(pt.x, pt.y, 'shotgun');
+    const touched = [];
+    for (let i = 0; i < 9; i++) {
+      const el = document.querySelector('#rl-cl' + i);
+      if (el.hasAttribute('data-crs-broken') || a.hpOf(el).hp < before[i]) touched.push(i);
+    }
+    const spread = a.debug.utility().lastSpread;
+    a.restore();
+    return { touched, spread };
+  }, LAB.clusterCentre);
+  check(`A.§C4 샷건 펠릿 산개: 한 발이 밀집한 아홉 중 ${pellets.touched.length} 개를 **서로 다르게** 맞힌다 (lastSpread ${pellets.spread})`,
+    pellets.touched.length >= 4 && pellets.spread >= 4, pellets);
+
+  // ---- (5) 못총 꿰매기: 같은 요소에 못 3개 → 이웃과 꿰매고, 둘이 같이 부서진다 ------------------
+  /* 짝이 **누구인지**는 고정하지 않는다 — 이웃은 페이지가 정한다(맞닿은 것 중 가장 가까운 것).
+   * 고정하면 픽스처의 배치가 바뀔 때마다 단언이 틀리고, §C4 가 적은 것은 "이웃" 이지 특정 요소가
+   * 아니다. 고정하는 것은 **셋째 못에 생긴다**와 **둘이 같이 간다**이다. */
+  const stitch = await page.evaluate((pt) => {
+    const a = window.__crashScreen, d = a.debug;
+    a.restore();
+    const el = document.querySelector('#rl-nbr-a');
+    const seen = [];
+    let mate = null;
+    for (let i = 0; i < 3; i++) {
+      a.smashAt(pt.x, pt.y, 'nailgun');
+      mate = d.sewnOf(el);
+      seen.push({ nails: d.nailsOf(el), mate: mate ? (mate.id || mate.tagName) : null });
+    }
+    const seams = d.roles().seams;
+    const mateWasBroken = mate ? mate.hasAttribute('data-crs-broken') : null;
+    for (let i = 0; i < 60 && !el.hasAttribute('data-crs-broken'); i++) a.smashAt(pt.x, pt.y, 'nailgun');
+    const out = {
+      seen, seams, mateWasBroken,
+      aBroken: el.hasAttribute('data-crs-broken'),
+      mateBroken: mate ? mate.hasAttribute('data-crs-broken') : false
+    };
+    a.restore();
+    return out;
+  }, LAB.nbrA);
+  check('A.§C4 못 박기: 못 **세 개째**에 이웃과 꿰매진다 — 한 발 · 두 발에는 짝이 없고 세 발째에 생기며 실밥이 하나 남는다',
+    stitch.seen[0].mate === null && stitch.seen[1].mate === null && !!stitch.seen[2].mate
+    && stitch.seen.map((s) => s.nails).join(',') === '1,2,3' && stitch.seams === 1, stitch);
+  check('A.§C4 못 박기: 꿰매진 둘은 **같이 부서진다** — 꿰맬 때 멀쩡하던 짝이 한쪽을 깨는 순간 함께 간다',
+    stitch.mateWasBroken === false && stitch.aBroken === true && stitch.mateBroken === true, stitch);
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (6) 냉각총 서리 전파: 얼린 것을 또 맞히면 맞닿은 이웃으로 번진다 -------------------------
+  /* 번진 **대상**을 이름으로 고정하지 않는 이유는 꿰매기와 같다. 고정하는 것은 "얼기 전에는 하나,
+   * 언 것을 다시 맞히면 둘 이상" 이다 — 그게 §C4 가 적은 전파 그 자체다. */
+  const frost = await page.evaluate((pt) => {
+    const a = window.__crashScreen, d = a.debug;
+    a.restore();
+    const el = document.querySelector('#rl-nbr-a');
+    a.smashAt(pt.x, pt.y, 'freezegun');        // 아직 얼지 않았다 — 번지지 않는다
+    const before = d.utility().frozen;
+    d.freeze2(el, 60, 4000);                   // 확실히 얼려 둔다
+    const armed = d.utility().frozen;
+    a.smashAt(pt.x, pt.y, 'freezegun');        // 언 것을 또 맞힌다 → 번진다
+    const out = { before, armed, after: d.utility().frozen, aFrozen: !!d.frozenOf(el) };
+    a.restore();
+    return out;
+  }, LAB.nbrA);
+  check(`A.§C4 서리 전파: **얼린 것을** 다시 맞히면 맞닿은 이웃으로 빙결이 번진다 — 얼기 전 ${frost.armed}개가 맞힌 뒤 ${frost.after}개가 된다`,
+    frost.aFrozen === true && frost.armed === 1 && frost.after > frost.armed, frost);
+
+  // ---- (7) 고무탄 도탄: 맞은 지점에서 가장 가까운 다른 요소로 한 번 튕긴다 (피해 60%) ------------
+  /* 튕겨 간 **대상**은 페이지가 정한다(가장 가까운 다른 요소). 고정하는 것은 **총합**이다 —
+   * 맞은 쪽 18 에 튕긴 쪽 60% 11 이 더해져 29 가 되고, 튕기지 않으면 18 에서 멈춘다. */
+  const ricochet = await page.evaluate((pt) => {
+    const a = window.__crashScreen;
+    a.restore();
+    const el = document.querySelector('#rl-nbr-a');
+    const r = el.getBoundingClientRect();
+    const d0 = a.stats().damageDealt;
+    const a0 = a.hpOf(el).hp;
+    a.smashAt(r.right - 6, r.top + r.height / 2, 'rubber');
+    const out = { direct: a0 - a.hpOf(el).hp, total: a.stats().damageDealt - d0, mul: a.debug.roles().ricochetMul };
+    a.restore();
+    return out;
+  }, LAB.nbrA);
+  check(`A.§C4 고무탄 도탄: 한 발의 총 피해가 ${18 + Math.round(18 * 0.6)} 이다 — 맞은 요소에 18, 거기서 **가장 가까운 다른 요소**로 한 번 튕겨 60% 인 ${Math.round(18 * 0.6)}`,
+    ricochet.direct === 18 && ricochet.total === 18 + Math.round(18 * 0.6) && ricochet.mul === 0.6, ricochet);
+
+  // ---- (8) 망치 내리찍기 파동: 이웃이 흔들린다 (변위, **피해 없음**) ----------------------------
+  const wave = await page.evaluate(() => {
+    const a = window.__crashScreen, d = a.debug;
+    a.restore();
+    const el = document.querySelector('#rl-nbr-a'), b = document.querySelector('#rl-nbr-b');
+    const r = el.getBoundingClientRect();
+    const b0 = a.hpOf(b).hp;
+    a.smashAt(r.right - 8, r.top + r.height / 2, 'hammer');
+    const mv = d.movedOf(b);
+    return { b0, b1: a.hpOf(b).hp, mv, consts: { r: d.roles().waveR, px: d.roles().wavePushPx } };
+  });
+  check(`A.§C4 망치 파동: 명중 지점 바깥 ${wave.consts.r}px 의 이웃이 **흔들린다** — 변위 몸체가 생겨 자리를 벗어나고 곧 제자리로 돌아온다`,
+    !!wave.mv && wave.mv.returning === true && Math.hypot(wave.mv.x, wave.mv.y) > 0.5, wave);
+  check('A.§C4 망치 파동: 그 이웃은 **피해를 받지 않는다** — §C4 가 "변위, 피해 없음" 이라고 적었다',
+    wave.b1 === wave.b0, wave);
+  const waveGone = await poll(async () => (await page.evaluate(() => (window.__crashScreen.debug.movedOf(document.querySelector('#rl-nbr-b')) === null))), 1200, 40);
+  check('A.§C4 망치 파동: 돌아오고 나면 몸체가 사라진다 — 망치 한 번에 페이지가 계속 떨리지 않는다', waveGone === true);
+  await api.restore(page);
+  await sleep(120);
+
+  // ---- (9) 도끼 쪼개기: 어느 등급이든 **항상 2조각** -------------------------------------------
+  const axePieces = await page.evaluate(() => {
+    const a = window.__crashScreen;
+    const out = {};
+    for (const id of ['rl-word', 'rl-small', 'rl-mid', 'rl-large']) {
+      a.restore();
+      const el = document.querySelector('#' + id);
+      const r = el.getBoundingClientRect();
+      for (let i = 0; i < 40 && !el.hasAttribute('data-crs-broken'); i++) a.smashAt(r.left + 6, r.top + 6, 'axe');
+      out[id] = { broken: el.hasAttribute('data-crs-broken'), pieces: a.stats().lastBreakPieces };
+    }
+    a.restore();
+    return out;
+  });
+  check('A.§C4 도끼 쪼개기: 낱말 · 작은 것 · 중간 · 큰 것 **전부** 정확히 2조각으로 갈라진다 — 도끼의 값은 피해가 아니라 분해다',
+    Object.keys(axePieces).every((k) => axePieces[k].broken === true && axePieces[k].pieces === 2), axePieces);
+
+  // ---- (10) 뿅망치 튕겨내기: 맞은 요소가 반대로 날아간다 ----------------------------------------
+  const fling = await page.evaluate(() => {
+    const a = window.__crashScreen, d = a.debug;
+    a.restore();
+    const el = document.querySelector('#rl-nbr-a');
+    const r = el.getBoundingClientRect();
+    const hp0 = a.hpOf(el).hp;
+    a.smashAt(r.left + 6, r.top + 6, 'squeaky');
+    const mv = d.movedOf(el);
+    return { dmg: hp0 - a.hpOf(el).hp, mv, impulse: d.roles().flingImpulse };
+  });
+  check(`A.§C4 뿅망치 튕겨내기: 피해는 8 뿐인데 맞은 요소가 **반대로 날아간다** (충격량 ${fling.impulse}) — 맞은 지점의 반대쪽으로`,
+    fling.dmg === 8 && !!fling.mv && fling.mv.returning === false
+    && (Math.abs(fling.mv.vx) + Math.abs(fling.mv.vy)) > 100 && fling.mv.vx > 0, fling);
+
+  // =============================================================================================
+  // §D 무흔적 — 새 상태(꿰맴 · 갈아냄 · 연사 누적 · 파동 · 날림)가 걸린 채 Escape
+  // =============================================================================================
+  await api.restore(page);
+  await sleep(120);
+  const traceBefore = await page.evaluate(() => {
+    const a = window.__crashScreen;
+    const ids = ['rl-mid', 'rl-large', 'rl-nbr-a', 'rl-nbr-b'];
+    const out = { style: {}, max: {} };
+    for (const id of ids) { const el = document.querySelector('#' + id); out.style[id] = el.getAttribute('style'); out.max[id] = a.hpOf(el).max; }
+    // 다섯 가지 상태를 한꺼번에 건다
+    const mid = document.querySelector('#rl-mid'), big = document.querySelector('#rl-large'), na = document.querySelector('#rl-nbr-a');
+    const rm = mid.getBoundingClientRect(), rb = big.getBoundingClientRect(), rn = na.getBoundingClientRect();
+    /* 쏘는 자리를 **서로 겹치지 않게** 고른다. 처음에는 꿰맴 · 파동 · 날림을 전부 같은 상자에
+     * 쏘았는데, 못 세 발(57) 뒤의 망치 한 방(65)이 그 상자를 부수면서 꿰맨 실이 당겨져 버렸다 —
+     * 전제를 만드는 코드가 전제를 지우고 있었다. */
+    for (let i = 0; i < 3; i++) a.smashAt(rm.left + 22, rm.top + 22, 'smg');        // 연사 누적
+    for (let i = 0; i < 6; i++) a.smashAt(rb.left + 22, rb.top + 22, 'minigun');    // 갈아냄 (여섯 발: 그 전에 부서지지 않는다)
+    for (let i = 0; i < 3; i++) a.smashAt(rn.left + 6, rn.top + 6, 'nailgun');      // 꿰맴
+    const cl = document.querySelector('#rl-cl4').getBoundingClientRect();
+    a.smashAt(cl.left + cl.width / 2, cl.top + cl.height / 2, 'hammer');            // 파동 (밀집한 것들 한가운데)
+    const rw = document.querySelector('#rl-word').getBoundingClientRect();
+    a.smashAt(rw.left + 6, rw.top + 6, 'squeaky');                                  // 날림
+    const d = a.debug;
+    return Object.assign(out, {
+      streak: d.roles().streak.n, seams: d.roles().seams,
+      ground: d.groundOf(big) ? d.groundOf(big).steps : 0,
+      sewn: !!d.sewnOf(na), movedNow: d.moved().length,
+      maxGround: a.hpOf(big).max
+    });
+  });
+  check('A.§D 무흔적 전제: Escape 직전에 다섯 상태가 **실제로 걸려 있다** (연사 누적 · 갈아냄 · 꿰맴 · 파동/날림의 변위 · 실밥)',
+    traceBefore.streak >= 3 && traceBefore.ground === 6 && traceBefore.sewn === true
+    && traceBefore.seams >= 1 && traceBefore.movedNow >= 1 && traceBefore.maxGround < traceBefore.max['rl-large'], traceBefore);
+  await page.keyboard.press('Escape');
+  const inactiveR = await poll(async () => !(await api.active(page)), 2000, 25);
+  const nodesR = await api.count(page, '[data-crs]');
+  const pendR = await api.pending(page);
+  await settleRaf(page);
+  const rafR = await api.pendingRaf(page);
+  const traceAfter = await page.evaluate((before) => {
+    const out = { style: {}, anims: document.getAnimations().length };
+    for (const id of Object.keys(before.style)) out.style[id] = document.querySelector('#' + id).getAttribute('style');
+    return out;
+  }, traceBefore);
+  check('A.§D 무흔적: Escape → 비활성 · [data-crs] 0개 · 타이머 0 · 프레임 0 · 인라인 스타일이 **원래 값** 그대로',
+    inactiveR === true && nodesR === 0 && pendR === 0 && rafR === 0
+    && Object.keys(traceBefore.style).every((id) => traceAfter.style[id] === traceBefore.style[id]),
+    { inactiveR, nodesR, pendR, rafR, before: traceBefore.style, after: traceAfter.style });
+  // `max` 가 원래 값으로 — 갈아낸 장부는 state.hp 와 함께 사라지고 다음 접촉에서 DOM 에서 다시 계산된다
+  const maxBack = await page.evaluate(() => { window.__crashScreen.activate(); const a = window.__crashScreen; const out = {}; for (const id of ['rl-mid', 'rl-large', 'rl-nbr-a', 'rl-nbr-b']) out[id] = a.hpOf(document.querySelector('#' + id)).max; return out; });
+  check('A.§D 무흔적: 갈아낸 `max` 가 **원래 값**으로 돌아온다 (장부가 state.hp 와 함께 사라지고 DOM 에서 다시 계산된다)',
+    Object.keys(maxBack).every((id) => maxBack[id] === traceBefore.max[id]), { after: maxBack, before: traceBefore.max });
+
+  // =============================================================================================
+  // §F6-7 · §F6-8 — 두 규칙이 **실제로 무는지** 사보타주로 본다
+  // =============================================================================================
+  const sabo = (patch) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crs-vs-'));
+    try {
+      for (const f of fs.readdirSync(path.join(__dirname, '..', 'src'))) {
+        if (!/\.js$/.test(f)) continue;
+        fs.copyFileSync(path.join(__dirname, '..', 'src', f), path.join(dir, f));
+      }
+      const prel = path.join(dir, '00-prelude.js');
+      const before = fs.readFileSync(prel, 'utf8');
+      const after = before.replace(patch.from, patch.to);
+      fs.writeFileSync(prel, after, 'utf8');
+      let out = '', code = 0;
+      try {
+        execFileSync(process.execPath, [path.join(__dirname, '..', 'tools', 'balance.js'), '--check', '--quiet'],
+          { env: Object.assign({}, process.env, { CRS_BALANCE_SRC: dir }), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (e) { code = e.status == null ? -1 : e.status; out = String((e.stderr || '') + (e.stdout || '')); }
+      return { patched: after !== before, code, out };
+    } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* ignore */ } }
+  };
+  const sabo7 = sabo({
+    from: "    smg:     { word: 1.0, small: 1.0, mid: 1.0, large: 0.7 },",
+    to: "    smg:     { word: 1.0, small: 1.0, mid: 1.0, large: 1.0 },"
+  });
+  check('A.§F6-7: 어떤 실전 무기의 계수를 전부 1.0 으로 만들면 tools/balance.js --check 가 exit 1 이고 §F6-7 을 이름으로 부른다',
+    sabo7.patched && sabo7.code === 1 && /§F6-7/.test(sabo7.out) && /smg/.test(sabo7.out), sabo7);
+  const sabo8 = sabo({
+    from: "    pistol:  { word: 1.0, small: 1.3, mid: 1.0, large: 0.6 },",
+    to: "    pistol:  { word: 1.0, small: 1.0, mid: 1.0, large: 0.7 },"
+  });
+  check('A.§F6-8: 두 무기의 계수 네 값을 같게 만들면 --check 가 exit 1 이고 §F6-8 을 이름으로 부른다',
+    sabo8.patched && sabo8.code === 1 && /§F6-8/.test(sabo8.out) && /pistol/.test(sabo8.out), sabo8);
+
+  // 처치 시간표: "즉시" 가 하나도 없고, 무기마다 1.4초를 넘는 등급이 최소 하나 있다 (§E 완료 기준)
+  const bal = require(path.join(__dirname, '..', 'tools', 'balance.js')).model();
+  const noInstant = bal.rows.filter((r) => Object.keys(r.ttk).some((k) => r.ttk[k] === 0));
+  const noSlow = bal.rows.filter((r) => {
+    const vals = Object.keys(r.ttk).map((k) => r.ttk[k]).filter((v) => isFinite(v));
+    return vals.length > 0 && !vals.some((v) => v > 1.4);
+  });
+  check('A.§E 완료 기준: 처치 시간표에서 **"즉시" 가 사라졌다** — 0초인 칸이 하나도 없다',
+    noInstant.length === 0, noInstant.map((r) => r.id));
+  check('A.§E 완료 기준: **무기마다 1.4초를 넘는 등급이 최소 하나** 있다 — 못 하는 일이 없는 무기가 없다',
+    noSlow.length === 0, noSlow.map((r) => r.id));
+
+  await api.restore(page);
+  await sleep(120);
+  await closeBlockPage('A.roles', h);
+}
 
 // ---------------------------------------------------------------------------
 // Suite B — strict CSP + Trusted Types
@@ -13003,6 +13645,11 @@ async function suiteD(puppeteer, origin) {
     ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~43 s
     ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],     // ~37 s
     ['settings', (b) => suiteASettings(b, origin, contentCss, contentJs)],   // ~17 s — 10단계 §2 · §6 가 7 → 17 s 로 올렸다
+    /* SPEC-weapon-identity §C (11단계): 자기 브라우저를 드는 새 레인. 실험대(네 등급 상자 · 맞닿은 이웃
+     * 한 쌍 · 밀집 아홉)를 스스로 세우고, 등급 계수를 **쏴서** 재고, §C4 의 열 가지 동사를 하나씩 본다.
+     * 재 보니 6초다 — 큐가 긴 것부터이므로 **맨 뒤**다. 페이지를 거의 열지 않고 거의 전부를 한 번의
+     * evaluate 안에서 끝내기 때문에 짧다(CDP 왕복이 아니라 제품의 시간만 쓴다). */
+    ['roles', (b) => suiteARoles(b, origin, contentCss, contentJs)],         // ~6 s
   ];
   for (const [name, fn] of A_BLOCKS) {
     if (name === 'settings' && WANT('D')) runLane('D', () => slot(() => suiteD(puppeteer, origin)));   // ~20 s

@@ -402,7 +402,7 @@
          * An invulnerable element just chars, and the moment the fire has reached an enemy it bites —
          * which is the whole indirect-attack route §B2 is paying for. */
         if (damageable(el)) {
-          applyHit(el, Math.max(1, Math.round((BURN_DOT_BASE + rec.stacks * BURN_DOT_PER_STACK) * dt)), 'gun', cx, cy, { burnt: true, aoe: true, toward: { x: cx, y: cy } });
+          applyHit(el, Math.max(1, Math.round((BURN_DOT_BASE + rec.stacks * BURN_DOT_PER_STACK) * dt)), 'gun', cx, cy, { burnt: true, aoe: true, noVs: true, toward: { x: cx, y: cy } });   /* SPEC-weapon-identity §C3: 불은 요소에 붙어 있는 것이지 지금 든 무기가 쏘는 것이 아니다 — 등급 계수를 곱하지 않는다 (MINIMAL EDIT, 보고에 적었다) */
           if (!burning.has(el)) continue;   // the tick finished it off
         }
         if (!reducedMotion() && state.fire.length < particleCap()) spawnFire(cx + rand(-r.width / 3, r.width / 3), cy + rand(-r.height / 3, r.height / 3), 1);
