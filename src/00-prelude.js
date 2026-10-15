@@ -37,7 +37,7 @@
     hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 400,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     pistol:   { id: 'pistol',   emoji: '🔫', name: 'weaponPistol',   kind: 'gun',      damage: 25,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: 12, reloadMs: 900 },
     smg:      { id: 'smg',      emoji: '💥', name: 'weaponSmg',      kind: 'gun',      damage: 22,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 70, mag: 30, reloadMs: 1400 },
-    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 5, reloadMs: 1900, spread: 25, scope: true },
+    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 4, reloadMs: 1900, spread: 25, scope: true },
     axe:      { id: 'axe',      emoji: '🪓', name: 'weaponAxe',      kind: 'hammer',   damage: 130, cooldownMs: 550,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     katana:    { id: 'katana',    emoji: '🗡️', name: 'weaponKatana',    kind: 'hammer',   damage: 60,  cooldownMs: 0,    radius: 0,   hold: false, input: 'drag', stabCooldownMs: 520, mag: null, reloadMs: null },
     bomb:     { id: 'bomb',     emoji: '💣', name: 'weaponBomb',     kind: 'bomb',     damage: 190, cooldownMs: 700,  radius: 240, hold: false, input: 'click', rings: [60, 130, 210], maxTargets: 10, mag: 3, reloadMs: 1800 },
@@ -61,7 +61,7 @@
      * the first round and `idleGraceMs` the 0.6 s 공회전 유예 that lets a re-press skip it. */
     minigun:  { id: 'minigun',  emoji: '⚙️', name: 'weaponMinigun', kind: 'gun',      damage: 26,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 60, mag: 300, reloadMs: 2600,
                 spinUpMs: 800, idleGraceMs: 600, fixedRounds: 20,
-                swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 },
+                swapMs: 560, recoil: 0.45, bloom: 2.2, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 },
     /* ── SPEC-arsenal §C 상호작용 무기 ──────────────────────────────────────────────────────────────
      * All three are built on the displacement system, so what they publish here is not damage but the
      * physics the fire() entries hand to displaceEl(): `impulse` (충격포), `grabMaxMass` (견인 광선),
@@ -82,7 +82,7 @@
                 swapMs: 380, recoil: 0, bloom: 0, critChance: 0, knockback: 0, moveSpeed: 0.95, falloff: 0, pierce: 0 },
     rubber:   { id: 'rubber', emoji: '⚪', name: 'weaponRubber', kind: 'gun', damage: 18, cooldownMs: 260, radius: 0, hold: false, input: 'click', mag: 8, reloadMs: 1300,
                 bouncyMs: 6000, bounceRest: 0.85, collisionMul: 1.6,
-                swapMs: 210, recoil: 0.8, bloom: 4, critChance: 0.05, knockback: 1.2, moveSpeed: 1.05, falloff: 0.20, pierce: 0 },
+                swapMs: 210, recoil: 0.8, bloom: 3, critChance: 0.05, knockback: 1.2, moveSpeed: 1.05, falloff: 0.20, pierce: 0 },
     /* ── SPEC-arsenal §D 예능 무기 ──────────────────────────────────────────────────────────────────
      * "밸런스 밴드에서 제외하되 … 실효 화력이 중앙값의 25~50%, 그리고 각각 피해가 아닌 고유 효과를 하나씩."
      * `quirk` names that effect so the rule is a field rather than a promise — §D's own table, in the table.
@@ -93,9 +93,9 @@
     /* 틱 40 ms / 탄창 180: §D fixes the tick DAMAGE at 3 and says nothing about the rate, and 3 damage every
      * 70 ms put the 실효 화력 at 18 % of the 실전 중앙값 — under §D's own 25~50 % floor. §F7's rule ("피해량보다
      * 핸들링을 먼저 건드린다") says which number moves: the published 3 stays and the stream gets finer. */
-    watergun: { id: 'watergun', emoji: '💧', name: 'weaponWatergun', kind: 'gun', damage: 3, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 40, mag: 180, reloadMs: 1300,
+    watergun: { id: 'watergun', emoji: '💧', name: 'weaponWatergun', kind: 'gun', damage: 3, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 50, mag: 180, reloadMs: 1300,
                 quirk: 'wet', wetMs: 8000, coolMul: 2.5, splashR: 120,
-                swapMs: 200, recoil: 0.2, bloom: 5, critChance: 0.03, knockback: 0.3, moveSpeed: 1.05, falloff: 0.45, pierce: 0 },
+                swapMs: 200, recoil: 0.2, bloom: 1.5, critChance: 0.03, knockback: 0.3, moveSpeed: 1.05, falloff: 0.45, pierce: 0 },
     horn:     { id: 'horn', emoji: '🎺', name: 'weaponHorn', kind: 'gun', damage: 5, cooldownMs: 520, radius: 420, hold: false, input: 'click', mag: 6, reloadMs: 1500,
                 quirk: 'reflect', coneDeg: 90, coneImpulse: 520, rings: [120, 260, 400], maxTargets: 12,
                 swapMs: 260, recoil: 0.9, bloom: 0, critChance: 0.04, knockback: 1.5, moveSpeed: 1.05, falloff: 0, pierce: 0 },
@@ -118,7 +118,7 @@
      * itself is src/69-utility.js — it freezes the piece's own integrator state and clears its expiry. */
     nailgun:  { id: 'nailgun', emoji: '📌', name: 'weaponNailgun', kind: 'gun', damage: 19, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 100,
                 mag: 40, reloadMs: 1400, pinRadius: 130, pinMax: 6,
-                swapMs: 240, recoil: 0.9, bloom: 2, critChance: 0.07, knockback: 0.7, moveSpeed: 1.00, falloff: 0.18, pierce: 1 },
+                swapMs: 240, recoil: 0.9, bloom: 1.5, critChance: 0.07, knockback: 0.7, moveSpeed: 1.00, falloff: 0.18, pierce: 1 },
     /* 냉각총: "빙결. 받는 피해 ×1.8, 조각 수 ×2.5, 적은 2초 정지. SPA 리렌더도 묶는다."
      * 피해가 거의 없는 것이 설계다 — §E 가 "혼자 쓰면 가장 약하고 반드시 다른 무기와 같이 써야 한다" 고
      * 적었다. 물총의 젖음이 `ixCoolMul` 로 빙결을 2.5배로 만들어 두었으므로(8단계 §D) 물총 → 냉각총 →

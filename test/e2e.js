@@ -77,8 +77,12 @@ const SPEC_COOLDOWN = { hammer: 400, pistol: 0, sniper: 600, axe: 550, bomb: 700
 // mag / reloadMs per weapon (null = melee ∞); flame = 100 fuel, collapse = 1 charge
 /* CHANGED by SPEC-arsenal §F7: 저격총 재장전 2000 → 1900, 로켓 탄창 2 → 3 과 재장전 1500 → 1400,
  * 화염방사기 재장전 2500 → 3400. 앞의 둘은 밴드 아래였던 무기의 가동률을 올리기 위해서이고, 화염방사기는
- * 반대로 §F6-2 를 풀기 위해서다 — 재장전 2.5초일 때 기관총을 세 축 전부에서 지배하고 있었다. */
-const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [5, 1900], bomb: [3, 1800], rocket: [3, 1400], flame: [100, 3400], collapse: [1, 5000] };
+ * 반대로 §F6-2 를 풀기 위해서다 — 재장전 2.5초일 때 기관총을 세 축 전부에서 지배하고 있었다.
+ * CHANGED again by SPEC-weapon-identity §B1 (11단계): 저격총 탄창 5 → 4. 모델이 산포를 `handling` 에서
+ * 빼면서(한 축을 두 번 세지 않는다) 저격총의 handling 이 0.545 → 0.689 로 올라 중앙값의 126% 가 됐다.
+ * §B3 이 허락한 축은 틱 간격과 탄창뿐이고 쿨다운 600 은 §A2 가 못박은 값이라 탄창만 남았다 —
+ * 그리고 위로는 못 올린다(탄창 6 부터가 §F6-3 의 "값싼 한 방" 문턱이다). docs/BALANCE.md §F7 참조. */
+const SPEC_MAG = { hammer: [null, null], axe: [null, null], katana: [null, null], pistol: [12, 900], smg: [30, 1400], sniper: [4, 1900], bomb: [3, 1800], rocket: [3, 1400], flame: [100, 3400], collapse: [1, 5000] };
 const PRESETS = {
   default: WEAPON_IDS,
   assault: ['smg', 'minigun', 'pistol', 'sniper', 'bomb', 'rocket', 'flame', 'hammer', 'axe', 'collapse'],
@@ -96,17 +100,21 @@ const KO_NAME = { hammer: '망치', pistol: '권총', smg: '기관총', sniper: 
  * should be. Every one of them has a one-line reason in docs/BALANCE.md (§F7 표), generated from
  * tools/balance.js's ADJUSTMENTS, and `node tools/balance.js --check` fails if they drift back.
  * recoil / bloom / critChance / knockback / falloff were NOT touched except smg's and the minigun's bloom —
- * those are 산포, which §F3 reads into `handling`. */
+ * those are 산포, which §F3 reads into `handling`.
+ * CHANGED again by SPEC-weapon-identity §B2 (11단계): `bloom` 은 이제 **화력**에 들어간다
+ * (burstDPS × pHit, docs/BALANCE.md §F3) 이고 기관총 류의 값이 통째로 내려왔다 — smg 6 → 2,
+ * flame 3 → 2. 표 밖의 넷(minigun 14 → 2.2 · nailgun 2 → 1.5 · watergun 5 → 1.5 · rubber 4 → 3)은
+ * src/00-prelude.js 에 인라인으로 있고 §F7 표가 각각 한 줄씩 이유를 적는다. */
 const SPEC_STATS = {
   hammer:   { swapMs: 440, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 0.88, falloff: 0 },
   pistol:   { swapMs: 130, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.00, falloff: 0.25 },
-  smg:      { swapMs: 280, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40 },
+  smg:      { swapMs: 280, recoil: 0.5, bloom: 2, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40 },
   sniper:   { swapMs: 320, recoil: 2.0, bloom: 0, critChance: 0.10, knockback: 1.3, moveSpeed: 0.82, falloff: 0 },
   axe:      { swapMs: 430, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.60, falloff: 0 },
   katana:    { swapMs: 260, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0 },
   bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.90, falloff: 0, aoeIgnoresCover: true },
   rocket:   { swapMs: 380, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.92, falloff: 0, aoeIgnoresCover: true },
-  flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55 },
+  flame:    { swapMs: 340, recoil: 0.3, bloom: 2, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55 },
   collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0 },
 };
 const SPEC_PIERCE = { hammer: 0, pistol: 0, smg: 0, sniper: 2, axe: 0, katana: 0, bomb: 0, rocket: 0, flame: 0, collapse: Infinity };
@@ -962,7 +970,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   check('A.weapons: api.weapons() lists the 10 ids in default-loadout order with slot 1–10 and keys 1–9, 0', W.list.map((w) => w.id).join(',') === WEAPON_IDS.join(',') && W.list.every((w, i) => String(w.key) === KEYS[i] && w.slot === i + 1), W.list.map((w) => `${w && w.id}:${w && w.slot}:${w && w.key}`));
   check('A.weapons: damages match the A1/A2 table (65/25/22/200/130/60/190/260/15)', Object.keys(SPEC_DMG).every((id) => W.byId[id] && W.byId[id].damage === SPEC_DMG[id]), Object.keys(SPEC_DMG).map((id) => `${id}=${W.byId[id] && W.byId[id].damage}`));
   check('A.weapons: cooldownMs hammer 0 / pistol 0 / sniper 600 / axe 550 / bomb 700 / rocket 1200 / collapse 2000; smg & flame are hold weapons', Object.keys(SPEC_COOLDOWN).every((id) => W.byId[id] && W.byId[id].cooldownMs === SPEC_COOLDOWN[id]) && !!(W.byId.smg && W.byId.smg.hold) && !!(W.byId.flame && W.byId.flame.hold) && WEAPON_IDS.filter((id) => !HOLD_IDS.has(id)).every((id) => !(W.byId[id] && W.byId[id].hold)), Object.keys(SPEC_COOLDOWN).map((id) => `${id}=${W.byId[id] && W.byId[id].cooldownMs}`));
-  check('A.weapons: mag / reloadMs per weapon (pistol 12/900, smg 30/1400, sniper 5/2000, bomb 3/1800, rocket 2/1500, flame 100/2500, collapse 1/5000; melee null/null)', Object.keys(SPEC_MAG).every((id) => W.byId[id] && W.byId[id].mag === SPEC_MAG[id][0] && W.byId[id].reloadMs === SPEC_MAG[id][1]), Object.keys(SPEC_MAG).map((id) => `${id}=${W.byId[id] && W.byId[id].mag}/${W.byId[id] && W.byId[id].reloadMs}`));
+  check('A.weapons: mag / reloadMs per weapon (pistol 12/900, smg 30/1400, sniper 4/1900, bomb 3/1800, rocket 3/1400, flame 100/3400, collapse 1/5000; melee null/null)', Object.keys(SPEC_MAG).every((id) => W.byId[id] && W.byId[id].mag === SPEC_MAG[id][0] && W.byId[id].reloadMs === SPEC_MAG[id][1]), Object.keys(SPEC_MAG).map((id) => `${id}=${W.byId[id] && W.byId[id].mag}/${W.byId[id] && W.byId[id].reloadMs}`));
   check('A.weapons: sniper { kind: "gun", spread: 25, scope: true, emoji 🎯, name 저격총 }; every other weapon spread null / scope false', !!W.byId.sniper && W.byId.sniper.kind === 'gun' && W.byId.sniper.spread === 25 && W.byId.sniper.scope === true && W.byId.sniper.emoji === '🎯' && W.byId.sniper.name === '저격총' && WEAPON_IDS.filter((id) => id !== 'sniper').every((id) => W.byId[id] && W.byId[id].spread === null && W.byId[id].scope === false), W.byId.sniper);
   /* SPEC-arsenal §B: 레이저 커터 and 미니건 are hold weapons too, so the "everything else is a click weapon"
    * sweep above reads HOLD_IDS rather than the two literals it used to name. They are not in the DEFAULT
@@ -2596,7 +2604,7 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     const nonDecreasing9 = bloomSamples9.every((v, i) => i === 0 || typeof v !== 'number' || typeof bloomSamples9[i - 1] !== 'number' || v >= bloomSamples9[i - 1] - 0.01);
     const peak9 = Math.max(...bloomSamples9.filter((v) => typeof v === 'number'));
     check('A.weapons 9: holding the smg → stats().bloomNow rises (non-decreasing) and caps at bloom × 10', nonDecreasing9 && peak9 > 0 && peak9 <= bloomCap9 + 0.5, { bloomSamples9, bloomCap9, peak9 });
-    await sleep(2200);   // > 0.4 s grace + time to decay bloom×10 px at 40 px/s
+    await sleep(1200);   // §B2: 0.4 s grace + bloom×10 px at 120 px/s — 상한 20px 이면 0.57초면 끝난다
     const restedBloom9 = (await api.stats(page)).bloomNow;
     check('A.weapons 9: after resting well past the 0.4 s grace, bloomNow has decayed back to ~0', typeof restedBloom9 === 'number' && restedBloom9 <= 2, restedBloom9);
     await api.setWeapon(page, 'sniper');
@@ -2607,6 +2615,95 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check('A.weapons 9: a scoped sniper reads stats().spreadNow === 0', sniperSpreadNow9 === 0, sniperSpreadNow9);
     await api.scope(page, false);
     await api.debug(page, { noSpread: true });
+
+    /* ---- (9b) SPEC-weapon-identity §D 명중률 — 모델이 발행한 숫자를 **실제로 쏴서** 센다 -----------
+     * §B 의 사용자 문장이 "기관총 류는 명중률 높여줘 너무 안맞아서 재미가 없어" 이므로, 여기서 재는 것은
+     * 산포 스칼라가 아니라 **버튼 120×44 를 맞히는 비율** 그 자체다.
+     *
+     * 왜 페이지 안에서 세는가 (CLAUDE.md: 매 프레임 움직이는 것은 페이지 안에서 재라):
+     *   - CDP 왕복으로 한 발씩 쏘면 왕복 시간이 틱 간격이 되어 **블룸 사다리가 측정 쪽에서 결정된다**.
+     *   - 그래서 shotPoint() 의 최종 착탄점을 제품이 직접 적게 하고(`debug.traceShots`, src/71),
+     *     그 좌표를 페이지 안에서 상자와 대조해 **수 두 개**만 가져온다.
+     * 반동 킥은 측정 구간에서만 끈다(`debug.noRecoil`). 킥은 `now()` 기준 250ms 로 감쇠하는데 rAF 루프는
+     * 한 프레임에 수백 발을 쏘므로 킥이 **거의 감쇠하지 않은 채** 읽힌다 — 그 숫자는 무기가 아니라
+     * 하네스의 속도다. 킥 자체는 §A3 조준점 단언이 따로 본다. 블룸은 끄지 않는다. 그게 이 단언의 주제다. */
+    const HIT_BOX_E2E = { w: 120, h: 44 };
+    /* 기대값은 손으로 쓰지 않는다 — CI 가 돌리는 그 모델(tools/balance.js)이 발행한 σ 와 pHit 이다.
+     * 미니건의 `spread` 는 0 이므로 모델의 σ 가 곧 블룸 상한(bloom × 10)이다. */
+    const bModel = balance.model();
+    const mgCap = bModel.byId.minigun.spread;
+    await api.debug(page, { noSpread: false, noBloom: false, noRecoil: false, noCooldown: true, infiniteAmmo: true });
+    await api.restore(page);
+    await api.setWeapon(page, 'minigun');
+    await sleep(700);                       // swapMs 560
+    /* 조준점은 **아무것도 없는 곳**으로 고른다. 이 단언이 재는 것은 탄이 어디로 가는가이지 무엇이
+     * 부서지는가가 아니고, 요소를 쏘면 2500발이 파괴 · 파편 · 물리로 가 측정이 아니라 엔진 부하를 잰다.
+     * 상자 반쪽(60 × 22px)이 뷰포트 안에 들어오도록 가장자리에서 떨어진 점을 페이지 안에서 찾는다. */
+    const pt9b = await page.evaluate(() => {
+      /* 제품 자신의 조준 해석기에게 묻는다 — 우리 오버레이를 집지 않고 "여긴 부술 게 없다" 를
+       * 그대로 돌려준다(debug.pickAt, src/50-target.js). */
+      const a = window.__crashScreen;
+      const W = innerWidth, H = innerHeight;
+      let best = null;
+      for (let y = H - 90; y > 120 && !best; y -= 20) {
+        for (let x = W - 90; x > 120; x -= 20) {
+          if (a.debug.pickAt(x, y) === null) { best = { x, y }; break; }
+        }
+      }
+      return best || { x: Math.round(W / 2), y: Math.round(H / 2) };
+    });
+    /* 1) 진짜로 0.6초 지속 사격한다. 미니건은 예열 0.8초가 먼저이므로 누르고 1.4초를 기다린다. */
+    await page.mouse.move(pt9b.x, pt9b.y);
+    await page.mouse.down();
+    await sleep(1450);
+    const heldStats9b = await api.stats(page);
+    await page.mouse.up();
+    check(`A.§D 명중률: 미니건을 0.6초 넘게 지속 사격하면 블룸이 발행 상한(${mgCap.toFixed(0)}px)까지 차고 거기서 멈춘다`,
+      typeof heldStats9b.bloomNow === 'number' && heldStats9b.bloomNow >= mgCap - 0.5 && heldStats9b.bloomNow <= mgCap + 0.5,
+      { bloomNow: heldStats9b.bloomNow, mgCap, shots: heldStats9b.shots });
+    /* 2) 블룸이 상한에 앉은 채로 N발을 쏴 버튼 상자 안에 몇 발이 들어가는지 센다. 앞 60발은 버린다
+     *    — 상한까지 오르는 사다리(10발)와 측정 시작 전의 감쇠를 측정에서 제외하기 위한 여유다. */
+    const ACC_N = 1000, ACC_WARM = 60;   // p≈0.66 에서 표준편차 1.5%p — 60% 문턱까지 4σ 다
+    const acc9b = await page.evaluate(async (pt, n, warm, box) => {
+      const a = window.__crashScreen;
+      const frame = () => new Promise((r) => requestAnimationFrame(r));
+      a.debug.noRecoil = true;
+      a.debug.traceShots = true;
+      let fired = 0;
+      while (fired < n + warm) {
+        for (let i = 0; i < 200 && fired < n + warm; i++) { a.smashAt(pt.x, pt.y); fired++; }
+        await frame();
+      }
+      const trace = a.debug.shotTrace();
+      a.debug.traceShots = false;
+      a.debug.noRecoil = false;
+      let hit = 0, counted = 0;
+      for (let i = warm; i < trace.length; i++) {
+        const p = trace[i];
+        counted++;
+        if (Math.abs(p.x - pt.x) <= box.w / 2 && Math.abs(p.y - pt.y) <= box.h / 2) hit++;
+      }
+      return { fired, traced: trace.length, counted, hit, bloomNow: a.stats().bloomNow };
+    }, pt9b, ACC_N, ACC_WARM, HIT_BOX_E2E);
+    const accRate9b = acc9b.counted > 0 ? acc9b.hit / acc9b.counted : 0;
+    info(`A.§D 명중률: 미니건 ${acc9b.counted}발 — 버튼(${HIT_BOX_E2E.w}×${HIT_BOX_E2E.h}) 안 ${acc9b.hit}발 = ${(accRate9b * 100).toFixed(1)}% (블룸 ${acc9b.bloomNow.toFixed(1)}px, 모델 발행값 ${(bModel.byId.minigun.pHit * 100).toFixed(1)}%)`);
+    check(`A.§D 명중률 (핵심): 미니건이 0.6초 지속 사격 뒤에도 버튼을 60% 이상 맞힌다 — ${acc9b.counted}발을 페이지 안에서 세어 ${(accRate9b * 100).toFixed(1)}%`,
+      acc9b.counted >= ACC_N - 5 && acc9b.bloomNow >= mgCap - 0.5 && accRate9b >= 0.60,
+      { counted: acc9b.counted, hit: acc9b.hit, accRate: +accRate9b.toFixed(4), bloomNow: acc9b.bloomNow, mgCap });
+    /* 발행값(tools/balance.js)은 무기 표만 본다 — fireMinigun 안의 기계적 ±7px 원뿔이 표에 없으므로
+     * **상한**이다. 실측이 그 상한을 넘으면 모델이 거짓말을 하고 있다는 뜻이라 그쪽도 단언한다. */
+    check(`A.§D 명중률: 실측(${(accRate9b * 100).toFixed(1)}%)이 모델 발행값(${(bModel.byId.minigun.pHit * 100).toFixed(1)}%) 이하다 — 표에 없는 기계적 ±7px 원뿔만큼 낮고, 그 차이가 8%p 를 넘지 않는다`,
+      accRate9b <= bModel.byId.minigun.pHit + 0.01 && bModel.byId.minigun.pHit - accRate9b <= 0.08,
+      { measured: +accRate9b.toFixed(4), published: +bModel.byId.minigun.pHit.toFixed(4) });
+    /* 3) §B2: 손을 떼고 1초 뒤 블룸이 0 이다 (회복 120 px/s, 0.4초 유예 뒤). 상한 ${mgCap}px 이면 0.4 + 22/120 = 0.58초. */
+    await sleep(1000);
+    const rested9b = (await api.stats(page)).bloomNow;
+    check('A.§D 명중률: 손을 떼고 1초 뒤 블룸이 0 이다 (§B2 회복 120 px/s)',
+      typeof rested9b === 'number' && rested9b <= 0.001, { rested9b, mgCap });
+    await api.debug(page, { noSpread: true, noRecoil: false, noBloom: false, infiniteAmmo: false });
+    await api.restore(page);
+    await api.setWeapon(page, 'smg');
+    await sleep(320);
 
     // ---- (10) crit rate: 200 katana hits (seeded RNG override of Math.random, so a failure reproduces) land
     //     a critChance 0.20 ± 0.08 fraction of crits ------------------------------------------------------
@@ -4624,13 +4721,16 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   await api.smashAt(page, bossPt.x, bossPt.y);
   const tracerSeen = await poll(async () => { const s = await api.seen(page); return s['.crs-tracer'] ? s : null; }, 500, 15);
   check('A.sniper 3: a .crs-tracer line appears after a sniper shot', !!tracerSeen, await api.seen(page));
-  // magazine 5
+  /* magazine — 크기는 SPEC_MAG 가 발행한다. CHANGED by SPEC-weapon-identity §B1: 5 → 4 (§F7 표 참조).
+   * 단언을 지우지 않고 **기대값을 표에서 읽게** 고쳤다: 문장은 그대로다 — 탄창을 다 쓰면 자동 재장전이
+   * 걸리고 그 다음 한 발은 거부된다. */
   await api.debug(page, { infiniteAmmo: false });
   await api.restore(page);
   await sleep(60);
-  const mag5 = await page.evaluate((p) => { const a = window.__crashScreen; const shots = []; let after5 = null; for (let i = 1; i <= 6; i++) { shots.push(a.smashAt(p.x, p.y)); if (i === 5) after5 = a.ammo(); } return { shots, after5, size: a.ammo().size }; }, bossPt);
-  check('A.sniper 3: magazine 5 — shots 1–5 true, ammo() after the 5th { mag: 0, reloading: true }, 6th false', mag5.size === 5 && mag5.shots.slice(0, 5).every((s) => s === true) && !!mag5.after5 && mag5.after5.mag === 0 && mag5.after5.reloading === true && mag5.shots[5] === false, mag5);
-  await poll(async () => { const m = await api.ammo(page); return m.mag === 5 && !m.reloading; }, 600, 15);
+  const SNIPER_MAG = SPEC_MAG.sniper[0];
+  const mag5 = await page.evaluate((p, n) => { const a = window.__crashScreen; const shots = []; let afterLast = null; for (let i = 1; i <= n + 1; i++) { shots.push(a.smashAt(p.x, p.y)); if (i === n) afterLast = a.ammo(); } return { shots, after5: afterLast, size: a.ammo().size }; }, bossPt, SNIPER_MAG);
+  check(`A.sniper 3: magazine ${SNIPER_MAG} — shots 1–${SNIPER_MAG} true, ammo() after the ${SNIPER_MAG}th { mag: 0, reloading: true }, ${SNIPER_MAG + 1}th false`, mag5.size === SNIPER_MAG && mag5.shots.slice(0, SNIPER_MAG).every((s) => s === true) && !!mag5.after5 && mag5.after5.mag === 0 && mag5.after5.reloading === true && mag5.shots[SNIPER_MAG] === false, mag5);
+  await poll(async () => { const m = await api.ammo(page); return m.mag === SNIPER_MAG && !m.reloading; }, 600, 15);
   // A4 + A5: the magazine-emptying round is still fired SCOPED — the auto-reload (which scopes out) runs after it
   await api.debug(page, { noSpread: false });
   await api.scope(page, true);
@@ -4642,7 +4742,7 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   }, bossPt);
   check('A.sniper 3: every round of a scoped magazine — the 5th included — is exact (lastShot.scoped, offset 0); only then does the auto-reload scope out', magScoped.shots.length === 5 && magScoped.shots.every((s) => s && s.scoped === true && s.ox === 0 && s.oy === 0) && !!magScoped.ammo && magScoped.ammo.reloading === true && magScoped.scoped === false, magScoped);
   await api.debug(page, { noSpread: true });
-  await poll(async () => { const m = await api.ammo(page); return m.mag === 5 && !m.reloading; }, 600, 15);
+  await poll(async () => { const m = await api.ammo(page); return m.mag === SNIPER_MAG && !m.reloading; }, 600, 15);
   // A2: the reload scopes out, but the chord is still held — the scope must come back when the magazine is full
   await api.restore(page);
   await sleep(60);
@@ -4652,7 +4752,7 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   const rmbScoped6 = await poll(async () => (await api.stats(page)).scoped === true, 500, 15);
   for (let i = 0; i < 5; i++) { await page.mouse.down(); await page.mouse.up(); }
   const dryScoped = await api.stats(page);
-  const reScoped = await poll(async () => { const st = await api.stats(page); const m = await api.ammo(page); return st.scoped === true && m.mag === 5 && !m.reloading; }, 3000, 40);
+  const reScoped = await poll(async () => { const st = await api.stats(page); const m = await api.ammo(page); return st.scoped === true && m.mag === SNIPER_MAG && !m.reloading; }, 3000, 40);
   await page.mouse.up({ button: 'right' });
   const afterRelease = await poll(async () => (await api.stats(page)).scoped === false, 500, 15);
   check('A.sniper 3: the auto-reload scopes out, the scope comes back when it finishes with RMB still held, and the RMB release scopes out again', rmbScoped6 === true && dryScoped.scoped === false && dryScoped.reloading === true && reScoped === true && afterRelease === true, { rmbScoped6, dry: { scoped: dryScoped.scoped, reloading: dryScoped.reloading }, reScoped, afterRelease });
@@ -6688,6 +6788,64 @@ async function suiteA12(browser, origin, contentCss, contentJs) {
   } catch (e) { docFresh = e.status == null ? -1 : e.status; }
   check('A.§F6: 커밋된 docs/BALANCE.md 가 현재 무기 표와 일치한다 (생성물이므로 어긋나면 --check 가 진다)',
     docFresh === 0, docFresh);
+
+  // =======================================================================================
+  // SPEC-weapon-identity §B — 명중률 교정. §D 의 "명중률" 문단이 요구하는 것 전부.
+  //   §B1 이 모델에 pHit 을 넣었으므로 **발행된 명중률** 은 이제 CI 가 돌리는 그 도구가 계산한다.
+  //   실제로 쏴서 센 쪽은 A.core 의 (9b) 블록이 본다 — 여기서는 표와 문턱만 본다.
+  // =======================================================================================
+  /* §B2 표. AMBIGUITY, reading chosen (보고에 적었다): 명세의 세 줄은 **이름표가 어긋나 있다**.
+   * `laser` · `shotgun` · `freezegun` 의 `bloom` 은 교정 전에도 전부 **0** 이었고, §A3 이 σ 상한 50px(26%)
+   * · 40px(36%) 으로 적은 두 줄의 진짜 주인은 **물총**(bloom 5)과 **고무탄**(bloom 4)이다 — §A3 의 수치는
+   * 정확했고 이름만 어긋났다. 그래서 수치를 따라 적용했고, 이미 0 인 셋은 **올리지 않았다**(올리면 §B 가
+   * 하려는 일의 정반대다). 그 셋은 §B2 의 목표치를 이미 넘고 있으므로 "목표 이상" 으로 단언한다. */
+  const PHIT_B2 = [
+    ['minigun', 0.65, 'eq'], ['smg', 0.73, 'eq'], ['flame', 0.73, 'eq'], ['nailgun', 0.85, 'eq'],
+    ['watergun', 0.85, 'eq'],   // §B2 의 `laser 5 → 1.5` 줄
+    ['rubber', 0.51, 'eq'],     // §B2 의 `shotgun 4 → 3` 줄
+    ['laser', 0.85, 'min'], ['shotgun', 0.51, 'min'], ['freezegun', 0.73, 'min']
+  ];
+  const phitMiss = [];
+  for (const [id, want, how] of PHIT_B2) {
+    const r = bandNow.byId[id];
+    if (!r) { phitMiss.push(`${id}: 모델에 없다`); continue; }
+    const got = r.pHit;
+    if (how === 'eq' ? Math.abs(got - want) > 0.03 + 1e-9 : got < want - 1e-9) {
+      phitMiss.push(`${id}: ${(got * 100).toFixed(1)}% vs §B2 ${(want * 100).toFixed(0)}% (${how})`);
+    }
+  }
+  check(`A.§B2 명중률: 아홉 무기의 pHit(버튼 120×44) 이 §B2 표와 ±3%p 안이다 — ${PHIT_B2.map(([id]) => `${id} ${(bandNow.byId[id].pHit * 100).toFixed(0)}%`).join(' · ')}`,
+    phitMiss.length === 0, phitMiss);
+  /* §F6-6 문턱 그 자체. "지속 사격 무기가 작은 표적을 절반도 못 맞히면 그것은 역할이 아니라 결함이다." */
+  const phitLow = bandNow.rows.filter((r) => r.cat === 'field' && r.pHitEff < 0.55 - 1e-9);
+  check(`A.§F6-6: 실전 ${bandNow.rows.filter((r) => r.cat === 'field').length}종이 전부 버튼을 55% 이상 맞힌다 (샷건은 펠릿 보정값) — 가장 낮은 쪽이 ${bandNow.rows.filter((r) => r.cat === 'field').map((r) => r.pHitEff).sort((a, b) => a - b).slice(0, 1).map((v) => (v * 100).toFixed(0) + '%')[0]}`,
+    phitLow.length === 0, phitLow.map((r) => `${r.id} ${(r.pHitEff * 100).toFixed(0)}%`));
+  /* 그 규칙이 **실제로 무는지**. 미니건의 bloom 만 교정 전 값(14)으로 되돌린 src 복사본을 만들어
+   * CRS_BALANCE_SRC 로 겨눈다 — exit 1 이고 §F6-6 이 이름으로 불려야 한다. 저장소는 건드리지 않는다. */
+  const bloomDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crs-bloom-'));
+  try {
+    for (const f of fs.readdirSync(path.join(__dirname, '..', 'src'))) {
+      if (!/\.js$/.test(f)) continue;
+      fs.copyFileSync(path.join(__dirname, '..', 'src', f), path.join(bloomDir, f));
+    }
+    const prelude6 = path.join(bloomDir, '00-prelude.js');
+    const before6 = fs.readFileSync(prelude6, 'utf8');
+    const after6 = before6.replace('recoil: 0.45, bloom: 2.2,', 'recoil: 0.45, bloom: 14,');
+    fs.writeFileSync(prelude6, after6, 'utf8');
+    let out6 = '', code6 = 0;
+    try {
+      execFileSync(process.execPath, [path.join(__dirname, '..', 'tools', 'balance.js'), '--check', '--quiet'],
+        { env: Object.assign({}, process.env, { CRS_BALANCE_SRC: bloomDir }), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      code6 = e.status == null ? -1 : e.status;
+      out6 = String((e.stderr || '') + (e.stdout || ''));
+    }
+    check('A.§F6-6: 미니건 bloom 을 교정 전 14 로 되돌리면 tools/balance.js --check 가 exit 1 이고 §F6-6 을 이름으로 부른다',
+      after6 !== before6 && code6 === 1 && /§F6-6/.test(out6) && /minigun/.test(out6),
+      { patched: after6 !== before6, code6, out6: out6.split('\n').slice(0, 4).join(' | ') });
+  } finally {
+    try { fs.rmSync(bloomDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  }
 
 
   await api.applyPreset(page, 'default');
@@ -10829,18 +10987,29 @@ async function suiteA14Rules(browser, origin, contentCss, contentJs) {
   const shotsFired = (await api.stats(page)).shots;
   const gapPeak = gapSeries[gapSeries.length - 1].gap;
   const monotonic = gapSeries.every((s, i) => i === 0 || s.gap >= gapSeries[i - 1].gap - 0.6);
-  check('A.§A3 (핵심): 기관총을 15발 가까이 연사하는 동안 팔 간격이 단조 증가한다 — 반동 킥과 블룸이 그대로 보인다',
-    shotsFired >= 12 && monotonic === true && gapPeak > gapStart + 20,
-    { shotsFired, gapStart, gapPeak, series: gapSeries.map((s) => s.gap) });
+  /* CHANGED by SPEC-weapon-identity §B2: 기관단총의 `bloom` 이 6 → 2 가 되면서 상한이 60px → 20px 이 됐다.
+   * gap = 6 + spreadNow × 0.9 이므로 15발을 쏜 뒤의 간격 증가분은 **약 20px** 이고, 전에 쓰던 `+ 20` 은
+   * 이제 경계 바로 위에 걸터앉는다. 단언을 지우지 않고 **기대값을 발행 수치에서 읽게 고쳤다** — 블룸 상한의
+   * 70% 가 보이면 통과다(측정은 프레임 경계에 걸리므로 100% 를 요구하지 않는다). 문장은 그대로다:
+   * 연사하면 벌어지고, 그 벌어짐은 무기 표가 발행한 블룸 그 자체다. */
+  /* 기대값은 손으로 쓰지 않는다 — SPEC_STATS 는 A.weapons 블록이 api.weapons() 와 한 줄씩 대조하는
+   * 바로 그 표이고, tools/balance.js --check 가 그 표가 src/ 와 어긋나면 진다. */
+  const smgBloomCh = SPEC_STATS.smg.bloom;
+  const wantGrowCh = smgBloomCh * 10 * 0.9 * 0.7;
+  check(`A.§A3 (핵심): 기관총을 15발 가까이 연사하는 동안 팔 간격이 단조 증가한다 — 반동 킥과 블룸이 그대로 보인다 (블룸 상한 ${smgBloomCh * 10}px → 간격 +${wantGrowCh.toFixed(1)}px 이상)`,
+    shotsFired >= 12 && monotonic === true && gapPeak > gapStart + wantGrowCh,
+    { shotsFired, gapStart, gapPeak, wantGrowCh, smgBloomCh, series: gapSeries.map((s) => s.gap) });
   await sleep(800);
   const gap800 = (await chInfo()).gap;
   const gapBack = await poll(async () => { const g = (await chInfo()).gap; return Math.abs(g - gapStart) <= 1 ? g : null; }, 2600, 80);
   /* AMBIGUITY, reading chosen. §D says "0.8초 쉬면 초기값으로". The ledger §A3 reads (src/71) recovers
-   * bloom at 40 px/s after 0.4 s of quiet, and a 15-round burst caps the smg's bloom at 60 px — so the
-   * arm gap is provably FALLING by 0.8 s but needs ~1.9 s to be all the way home. Both halves are
-   * asserted rather than one of them being quietly dropped: 떨어지고 있다 at 0.8 s, 초기값 by 2.6 s. */
-  check('A.§A3: 손을 떼면 간격이 되돌아온다 — 0.8초에 이미 줄고 있고, 블룸이 다 식으면 초기값으로 (40 px/s 회복)',
-    gap800 < gapPeak - 5 && gapBack !== null && Math.abs(gapBack - gapStart) <= 1,
+   * bloom after 0.4 s of quiet, and a 15-round burst caps the smg's bloom at its published ceiling.
+   * CHANGED by SPEC-weapon-identity §B2: 회복이 40 → **120 px/s** 가 되고 상한이 60 → 20px 이 되면서
+   * 완전 회복이 0.4 + 60/40 = 1.9초 → 0.4 + 20/120 = **0.57초** 로 내려왔다. 그래서 §D 의 "0.8초 쉬면
+   * 초기값으로" 가 이제 **글자 그대로 참**이다 — 9단계가 두 쪽으로 나눠 단언했던 것을 §D 의 원래 문장
+   * 하나로 되돌린다. 0.8초 창을 그대로 두고 거기서 이미 초기값일 것을 요구한다. */
+  check('A.§A3: 손을 떼고 0.8초면 간격이 초기값으로 돌아온다 (§B2: 블룸 회복 120 px/s — 0.4초 유예 + 20px/120 = 0.57초)',
+    gap800 < gapPeak - 5 && Math.abs(gap800 - gapStart) <= 1 && gapBack !== null && Math.abs(gapBack - gapStart) <= 1,
     { gapStart, gapPeak, gap800, gapBack });
   // ---- crosshairSpread: false 면 변하지 않는다 ----
   await api.call(page, 'setSetting', 'crosshairSpread', false);
@@ -12829,7 +12998,7 @@ async function suiteD(puppeteer, origin) {
   const A_BLOCKS = [
     ['ammo', (b) => suiteA12(b, origin, contentCss, contentJs)],             // ~106 s — 가장 긴 레인이고 벽시계가 곧 이 값이다
     ['rules', (b) => suiteA14Rules(b, origin, contentCss, contentJs)],       // ~78 s
-    ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~60 s
+    ['core', (b) => suiteA(b, origin, contentCss, contentJs)],               // ~72 s — §B 명중률 실측(미니건 1000발)이 60 → 72 s 로 올렸다
     ['combat', (b) => suiteA14(b, origin, contentCss, contentJs)],           // ~55 s
     ['depth', (b) => suiteA14Depth(b, origin, contentCss, contentJs)],       // ~43 s
     ['debris', (b) => suiteA14Debris(b, origin, contentCss, contentJs)],     // ~37 s

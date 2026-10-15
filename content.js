@@ -52,7 +52,7 @@
     hammer:   { id: 'hammer',   emoji: '🔨', name: 'weaponHammer',   kind: 'hammer',   damage: 65,  cooldownMs: 400,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     pistol:   { id: 'pistol',   emoji: '🔫', name: 'weaponPistol',   kind: 'gun',      damage: 25,  cooldownMs: 0,    radius: 0,   hold: false, input: 'click', mag: 12, reloadMs: 900 },
     smg:      { id: 'smg',      emoji: '💥', name: 'weaponSmg',      kind: 'gun',      damage: 22,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 70, mag: 30, reloadMs: 1400 },
-    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 5, reloadMs: 1900, spread: 25, scope: true },
+    sniper:   { id: 'sniper',   emoji: '🎯', name: 'weaponSniper',   kind: 'gun',      damage: 200, cooldownMs: 600,  radius: 0,   hold: false, input: 'click', mag: 4, reloadMs: 1900, spread: 25, scope: true },
     axe:      { id: 'axe',      emoji: '🪓', name: 'weaponAxe',      kind: 'hammer',   damage: 130, cooldownMs: 550,  radius: 0,   hold: false, input: 'click', mag: null, reloadMs: null },
     katana:    { id: 'katana',    emoji: '🗡️', name: 'weaponKatana',    kind: 'hammer',   damage: 60,  cooldownMs: 0,    radius: 0,   hold: false, input: 'drag', stabCooldownMs: 520, mag: null, reloadMs: null },
     bomb:     { id: 'bomb',     emoji: '💣', name: 'weaponBomb',     kind: 'bomb',     damage: 190, cooldownMs: 700,  radius: 240, hold: false, input: 'click', rings: [60, 130, 210], maxTargets: 10, mag: 3, reloadMs: 1800 },
@@ -76,7 +76,7 @@
      * the first round and `idleGraceMs` the 0.6 s 공회전 유예 that lets a re-press skip it. */
     minigun:  { id: 'minigun',  emoji: '⚙️', name: 'weaponMinigun', kind: 'gun',      damage: 26,  cooldownMs: 0,    radius: 0,   hold: true,  input: 'hold', tickMs: 60, mag: 300, reloadMs: 2600,
                 spinUpMs: 800, idleGraceMs: 600, fixedRounds: 20,
-                swapMs: 560, recoil: 0.45, bloom: 14, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 },
+                swapMs: 560, recoil: 0.45, bloom: 2.2, critChance: 0.05, knockback: 0.55, moveSpeed: 0.55, falloff: 0.42, pierce: 0 },
     /* ── SPEC-arsenal §C 상호작용 무기 ──────────────────────────────────────────────────────────────
      * All three are built on the displacement system, so what they publish here is not damage but the
      * physics the fire() entries hand to displaceEl(): `impulse` (충격포), `grabMaxMass` (견인 광선),
@@ -97,7 +97,7 @@
                 swapMs: 380, recoil: 0, bloom: 0, critChance: 0, knockback: 0, moveSpeed: 0.95, falloff: 0, pierce: 0 },
     rubber:   { id: 'rubber', emoji: '⚪', name: 'weaponRubber', kind: 'gun', damage: 18, cooldownMs: 260, radius: 0, hold: false, input: 'click', mag: 8, reloadMs: 1300,
                 bouncyMs: 6000, bounceRest: 0.85, collisionMul: 1.6,
-                swapMs: 210, recoil: 0.8, bloom: 4, critChance: 0.05, knockback: 1.2, moveSpeed: 1.05, falloff: 0.20, pierce: 0 },
+                swapMs: 210, recoil: 0.8, bloom: 3, critChance: 0.05, knockback: 1.2, moveSpeed: 1.05, falloff: 0.20, pierce: 0 },
     /* ── SPEC-arsenal §D 예능 무기 ──────────────────────────────────────────────────────────────────
      * "밸런스 밴드에서 제외하되 … 실효 화력이 중앙값의 25~50%, 그리고 각각 피해가 아닌 고유 효과를 하나씩."
      * `quirk` names that effect so the rule is a field rather than a promise — §D's own table, in the table.
@@ -108,9 +108,9 @@
     /* 틱 40 ms / 탄창 180: §D fixes the tick DAMAGE at 3 and says nothing about the rate, and 3 damage every
      * 70 ms put the 실효 화력 at 18 % of the 실전 중앙값 — under §D's own 25~50 % floor. §F7's rule ("피해량보다
      * 핸들링을 먼저 건드린다") says which number moves: the published 3 stays and the stream gets finer. */
-    watergun: { id: 'watergun', emoji: '💧', name: 'weaponWatergun', kind: 'gun', damage: 3, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 40, mag: 180, reloadMs: 1300,
+    watergun: { id: 'watergun', emoji: '💧', name: 'weaponWatergun', kind: 'gun', damage: 3, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 50, mag: 180, reloadMs: 1300,
                 quirk: 'wet', wetMs: 8000, coolMul: 2.5, splashR: 120,
-                swapMs: 200, recoil: 0.2, bloom: 5, critChance: 0.03, knockback: 0.3, moveSpeed: 1.05, falloff: 0.45, pierce: 0 },
+                swapMs: 200, recoil: 0.2, bloom: 1.5, critChance: 0.03, knockback: 0.3, moveSpeed: 1.05, falloff: 0.45, pierce: 0 },
     horn:     { id: 'horn', emoji: '🎺', name: 'weaponHorn', kind: 'gun', damage: 5, cooldownMs: 520, radius: 420, hold: false, input: 'click', mag: 6, reloadMs: 1500,
                 quirk: 'reflect', coneDeg: 90, coneImpulse: 520, rings: [120, 260, 400], maxTargets: 12,
                 swapMs: 260, recoil: 0.9, bloom: 0, critChance: 0.04, knockback: 1.5, moveSpeed: 1.05, falloff: 0, pierce: 0 },
@@ -133,7 +133,7 @@
      * itself is src/69-utility.js — it freezes the piece's own integrator state and clears its expiry. */
     nailgun:  { id: 'nailgun', emoji: '📌', name: 'weaponNailgun', kind: 'gun', damage: 19, cooldownMs: 0, radius: 0, hold: true, input: 'hold', tickMs: 100,
                 mag: 40, reloadMs: 1400, pinRadius: 130, pinMax: 6,
-                swapMs: 240, recoil: 0.9, bloom: 2, critChance: 0.07, knockback: 0.7, moveSpeed: 1.00, falloff: 0.18, pierce: 1 },
+                swapMs: 240, recoil: 0.9, bloom: 1.5, critChance: 0.07, knockback: 0.7, moveSpeed: 1.00, falloff: 0.18, pierce: 1 },
     /* 냉각총: "빙결. 받는 피해 ×1.8, 조각 수 ×2.5, 적은 2초 정지. SPA 리렌더도 묶는다."
      * 피해가 거의 없는 것이 설계다 — §E 가 "혼자 쓰면 가장 약하고 반드시 다른 무기와 같이 써야 한다" 고
      * 적었다. 물총의 젖음이 `ixCoolMul` 로 빙결을 2.5배로 만들어 두었으므로(8단계 §D) 물총 → 냉각총 →
@@ -9412,13 +9412,13 @@
   const WEAPON_STATS = {
     hammer:   { swapMs: 440, recoil: 1.4, bloom: 0, critChance: 0.12, knockback: 1.0, moveSpeed: 0.88, falloff: 0,    pierce: 0 },
     pistol:   { swapMs: 130, recoil: 0.7, bloom: 0, critChance: 0.10, knockback: 0.7, moveSpeed: 1.00, falloff: 0.25, pierce: 0 },
-    smg:      { swapMs: 280, recoil: 0.5, bloom: 6, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40, pierce: 0 },
+    smg:      { swapMs: 280, recoil: 0.5, bloom: 2, critChance: 0.06, knockback: 0.6, moveSpeed: 0.92, falloff: 0.40, pierce: 0 },
     sniper:   { swapMs: 320, recoil: 2.0, bloom: 0, critChance: 0.10, critChanceScoped: 0.25, knockback: 1.3, moveSpeed: 0.82, moveSpeedScoped: 0.45, falloff: 0, pierce: 2 },
     axe:      { swapMs: 430, recoil: 1.8, bloom: 0, critChance: 0.15, knockback: 1.4, moveSpeed: 0.60, falloff: 0,    pierce: 0 },
     katana:    { swapMs: 260, recoil: 1.0, bloom: 0, critChance: 0.20, knockback: 1.1, moveSpeed: 1.15, falloff: 0,    pierce: 0 },
     bomb:     { swapMs: 300, recoil: 1.2, bloom: 0, critChance: 0.08, knockback: 1.6, moveSpeed: 0.90, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
     rocket:   { swapMs: 380, recoil: 2.4, bloom: 0, critChance: 0.08, knockback: 2.0, moveSpeed: 0.92, falloff: 0,    pierce: 0, aoeIgnoresCover: true },
-    flame:    { swapMs: 340, recoil: 0.3, bloom: 3, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55, pierce: 0 },
+    flame:    { swapMs: 340, recoil: 0.3, bloom: 2, critChance: 0.05, knockback: 0.5, moveSpeed: 0.82, falloff: 0.55, pierce: 0 },
     collapse: { swapMs: 500, recoil: 2.6, bloom: 0, critChance: 0,    knockback: 1.2, moveSpeed: 1.00, falloff: 0,    pierce: PIERCE_ALL, aoeIgnoresCover: true }
   };
   for (const id of WEAPON_IDS) Object.assign(WEAPONS[id], WEAPON_STATS[id]);
@@ -9452,15 +9452,37 @@
    * tick, nothing to cancel on deactivate and nothing to drift: `aim.kick` /
    * `aim.bloom` are the values AT `aim.at`, and every read extrapolates. */
   const aim = { at: 0, kick: 0, bloom: 0 };
-  function resetAim() { aim.at = 0; aim.kick = 0; aim.bloom = 0; }
+  /* ── SPEC-weapon-identity §D 명중률 계측 ───────────────────────────────────
+   * 명중률은 쏴 봐야 아는 값이고, CDP 왕복으로 한 발씩 쏘면 틱 간격이 어긋나 측정이 제품이 아니라
+   * 하네스를 재게 된다. 그래서 페이지 안에서 세게 한다: `debug.traceShots` 를 켜면 shotPoint() 가
+   * 돌려준 **최종 착탄점**이 고리 버퍼에 쌓이고 `debug.shotTrace()` 가 그것을 가져가며 비운다.
+   * fireSmg / fireMinigun 의 기계적 ±9 · ±7 원뿔이 이미 더해진 뒤의 점이므로 "탄이 실제로 간 곳"
+   * 그 자체다 — 무기 표만 보는 tools/balance.js 의 pHit 이 상한인 이유가 바로 그 두 원뿔이다.
+   * 기본은 꺼짐이고, 버퍼는 resetAim()(restore · deactivate · 재장전 초기화)에서 비워진다. */
+  const SHOT_TRACE_MAX = 40000;
+  const shotTrace = [];
+  Object.assign(debug, {
+    traceShots: false,
+    shotTrace() { const out = shotTrace.slice(); shotTrace.length = 0; return out; }
+  });
+  function noteShotPoint(x, y) {
+    if (!debug.traceShots) return;
+    if (shotTrace.length >= SHOT_TRACE_MAX) shotTrace.shift();
+    shotTrace.push({ x, y });
+  }
+  function resetAim() { aim.at = 0; aim.kick = 0; aim.bloom = 0; shotTrace.length = 0; }
   function recoilKickNow(t) {
     if (!aim.at || debug.noSpread || debug.noRecoil) return 0;
     return aim.kick * (1 - clamp((t - aim.at) / 250, 0, 1));
   }
+  /* SPEC-weapon-identity §B2: 회복을 40 → 120 px/s 로 올렸다. 미니건이 상한에서 완전히 식는 데 3.5초가
+   * 걸렸고, 그 동안 "참다가 쏜다" 가 성립하지 않아 산포가 운용이 아니라 벌이었다. 120 px/s 면 어떤 무기든
+   * 손을 떼고 1초 안에 상한에서 0 으로 돌아온다 (0.4초 유예 + 최대 30px ÷ 120 = 0.65초). */
+  const BLOOM_RECOVER_PX_S = 120;
   function bloomNow(t) {
     if (!aim.at || debug.noSpread || debug.noBloom) return 0;
     const idle = (t - aim.at) - 400;            // 0.4 s of quiet before recovery starts
-    return idle <= 0 ? aim.bloom : Math.max(0, aim.bloom - 40 * idle / 1000);   // then 40 px/s
+    return idle <= 0 ? aim.bloom : Math.max(0, aim.bloom - BLOOM_RECOVER_PX_S * idle / 1000);
   }
   /* Called by each hitscan shot AFTER its aim point was computed: this shot's kick lands on the NEXT one. */
   function noteShot(id) {
@@ -9491,8 +9513,10 @@
    * same (concatenated) function scope, and the later declaration would silently win. */
   function shotPoint(x, y, id) {
     const s = spreadNow(id);
-    if (!(s > 0)) return { x, y };
-    return { x: clamp(x + gauss(s), 0, viewW()), y: clamp(y + gauss(s), 0, viewH()) };
+    if (!(s > 0)) { noteShotPoint(x, y); return { x, y }; }
+    const p = { x: clamp(x + gauss(s), 0, viewW()), y: clamp(y + gauss(s), 0, viewH()) };
+    noteShotPoint(p.x, p.y);
+    return p;
   }
 
   /* ── v1.5 §3: distance falloff ─────────────────────────────────────────────
@@ -10260,7 +10284,8 @@
     return el;
   }
   /* ══ SPEC-arsenal §B3 미니건 — 예열이 끝난 뒤의 연사 ══════════════════════════════════════════════
-   * 26 / 60ms = 433 a second, and 14 px of bloom a shot buys it. The 0.8 s 예열 and the 0.6 s 공회전 유예
+   * 26 / 60ms = 433 a second. SPEC-weapon-identity §B2 로 그 값을 사는 블룸이 14 → 2.2 px/발 이 됐다 —
+   * 상한 140px 에서 버튼을 4% 로 맞히던 것이 22px 에서 68% 가 된다. The 0.8 s 예열 and the 0.6 s 공회전 유예
    * are in the hold chain (src/78-altfire.js); by the time this runs the barrels are already up to speed. */
   function fireMinigun(x, y, c) {
     state.shots++;

@@ -173,13 +173,37 @@ const SECTION_HP = 253;
  * therefore be asked for a shot every 120 ms and no faster — that is the floor this model uses, and it
  * is the SAME constant the §D band check in test/e2e.js uses, so the two models never disagree. */
 const CLICK_FLOOR_MS = 120;
-/* §F3 handling: 유효산포. `spread` is the weapon's own cone; sustained fire adds bloom up to bloom × 10
- * (src/71-weapon-helpers.js noteShot/bloomNow). Half of that cap is the average a magazine spends at. */
+/* SPEC-weapon-identity §B1: 유효산포 σ. `spread` is the weapon's own cone; sustained fire adds bloom up to
+ * bloom × 10 (src/71-weapon-helpers.js noteShot/bloomNow).
+ *
+ * INTERPRETATION (보고에 적었다). 지속 사격의 **상한**을 쓴다. 9단계까지는 그 절반(평균)이었고 그 평균이
+ * handling 의 포화 상한과 짝이 되어 §A4 의 구멍을 만들었다. §A3 · §B2 의 표가 전부 상한 σ 로 계산되어
+ * 있고(미니건 bloom 14 → 140px), §F6-6 이 "샷건은 펠릿 보정값으로 본다" 고 단서를 단 것도 상한에서만
+ * 뜻이 있다 — 평균으로 보면 샷건은 보정 없이도 문턱을 넘어 그 문장이 죽는다. 그래서 σ = spread + bloom × 10.
+ *
+ * 이 σ 는 **무기 표가 발행하는 산포**다. 발사 시점에만 있는 두 가지 — 반동 킥(recoil × 6, 250ms 감쇠)과
+ * 기관단총/미니건 fire() 안의 기계적 ±9 / ±7 원뿔 — 은 표에 없으므로 여기 들어가지 않는다. 그래서 아래
+ * pHit 은 **상한**이고, 진짜로 쏴서 센 명중률은 그보다 조금 낮다. 그 차이는 test/e2e.js 의 실측 단언이 본다. */
 const BLOOM_CAP_MUL = 10;
-const BLOOM_AVG = 0.5;
-const SPREAD_REF = 120;        // §F3: (1 − min(0.35, 유효산포/120))
-const SPREAD_FLOOR = 0.35;
 const SWAP_REF = 2000;         // §F3: (1 − swapMs/2000)
+
+/* §B1: 기준 표적은 버튼 120×44 로 고정한다 — "가장 작고 가장 자주 겨누는 것". */
+const HIT_BOX = { w: 120, h: 44, label: '버튼 120×44' };
+/* Abramowitz–Stegun 7.1.26. |ε| ≤ 1.5e-7 — §B1 이 요구한 1e-7 정밀도를 만족한다. Math.erf 는 없다. */
+function erf(x) {
+  const s = x < 0 ? -1 : 1;
+  const z = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * z);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z);
+  return s * y;
+}
+/* §B1: pHit(W, 표적) = erf((w/2)/(σ√2)) × erf((h/2)/(σ√2)). 2차원 가우시안, x·y 가 독립이다
+ * (shotPoint() 가 gauss(s) 를 두 축에 따로 더한다 — src/71-weapon-helpers.js). */
+function pHitOf(sigma, box) {
+  if (!(sigma > 0)) return 1;
+  const k = sigma * Math.SQRT2;
+  return erf((box.w / 2) / k) * erf((box.h / 2) / k);
+}
 /* §F3: "연소는 dotDPS 를 가산". Only the two weapons that stack burn EVERY tick keep a target saturated;
  * a blast ignites once and the stack decays. The stack numbers come from src/77-burn.js itself. */
 const BURN_WEAPONS = { flame: 'BURN_FLAME_STACKS', laser: 'BURN_LASER_STACKS' };
@@ -192,6 +216,8 @@ const BANDS = {
   fun: { label: '예능', lo: 0.25, hi: 0.50 }
 };
 const BAND_EXEMPT = new Set(['collapse']);
+/* §F6-6 (SPEC-weapon-identity §B1): 실전 무기가 버튼을 맞힐 확률의 바닥. */
+const PHIT_MIN = 0.55;
 /* §F6 rule 3's own exemptions. 슬러그 is the shotgun's 보조 공격 and 충전 로켓 the rocket's, so both are
  * alt-fire rather than a weapon id — the rule below only ever looks at a weapon's BASE attack, which is
  * why neither needs naming here; 붕괴 does, because 전체 연쇄 IS its base attack. */
@@ -239,7 +265,30 @@ function hitDamage(W) {
   return num(W.damage, 0) * Math.max(1, num(W.pellets, 1));
 }
 
-/** §F3 burstDPS, single target. AoE's simultaneous targets are a ROLE (§F5), not a currency. */
+/** §B1 유효산포 σ — the spread the weapon has IN ITS OWN FIRING POSTURE.
+ * 지속 사격 무기는 블룸 상한에서 쏜다. 저격총은 **조준경 안에서** 쏜다 — src/71 의 spreadNow() 가
+ * `W.scope && state.scoped` 일 때 0 을 돌려주고, v1.2 A4 가 "조준 중에는 정확하다" 를 무기의 정체성으로
+ * 못박았다. 두 경우 모두 "그 무기가 실제로 쓰이는 상태" 라는 같은 규칙이다.
+ * INTERPRETATION (보고에 적었다): 이 규칙이 없으면 저격총이 **조준하지 않고 쏘는** 가정으로 평가되어,
+ * 산포를 지우는 기능을 가진 유일한 무기가 그 기능 때문에 벌을 받는다 — §A4 가 고친 것과 같은 종류의
+ * 모델 오류다. */
+function effSpread(W) {
+  if (W.scope) return 0;
+  return num(W.spread, 0) + num(W.bloom, 0) * BLOOM_CAP_MUL;
+}
+/** §B1 pHit(W, 버튼). 샷건 보정은 pHitEff() — 여기는 **펠릿 하나**의 확률이다. */
+function pHit(W, box) { return pHitOf(effSpread(W), box || HIT_BOX); }
+/* §B2 ※: 샷건은 펠릿 아홉이 **각자** 판정하므로 "한 발이라도 맞을 확률" 이 그 무기의 명중률이다.
+ * §F6-6 이 보는 값이 이것이다. burstDPS 는 이 값을 쓰지 않는다 — 기대 피해는 펠릿 수에 **선형**이고
+ * (hit 가 이미 damage × pellets 이다) 1 − (1 − p)^9 는 기대값이 아니라 "적어도 하나" 의 확률이다. */
+function pHitEff(W, box) {
+  const p = pHit(W, box);
+  const n = Math.max(1, num(W.pellets, 1));
+  return n > 1 ? 1 - Math.pow(1 - p, n) : p;
+}
+
+/** §F3 burstDPS, single target. AoE's simultaneous targets are a ROLE (§F5), not a currency.
+ * §B1: 이제 **맞는 탄만 센다** — × pHit(W, 버튼). 못 맞는 것이 밴드를 맞추는 공짜 손잡이였다(§A4). */
 function burstDPS(W, burn) {
   const d = hitDamage(W);
   if (!isFinite(d)) return Infinity;
@@ -251,7 +300,9 @@ function burstDPS(W, burn) {
      * credited with is the saturated one. */
     dot = num(burn.BURN_DOT_BASE, 0) + num(burn.BURN_MAX, 0) * num(burn.BURN_DOT_PER_STACK, 0);
   }
-  return (d * 1000) / intervalMs(W) + dot;
+  /* 연소는 명중한 탄이 붙이는 것이지만 포화 스택은 "틱마다 쌓는다" 가 전제다 — 명중률을 두 번 곱하지
+   * 않도록 §B1 의 공식을 글자 그대로 따른다: 직접 피해에만 곱하고 dotDPS 는 가산한다. */
+  return (d * 1000) / intervalMs(W) * pHit(W, HIT_BOX) + dot;
 }
 
 /** §F3 uptime — 재장전 · 과열 · 예열 · 쿨다운 are all already inside this one number. */
@@ -278,13 +329,15 @@ function heatUptime(W) {
   return Math.max(forced, natural);
 }
 
-/** §F3 handling = moveSpeed × (1 − swapMs/2000) × (1 − min(0.35, 유효산포/120)). */
-function effSpread(W) { return num(W.spread, 0) + num(W.bloom, 0) * BLOOM_CAP_MUL * BLOOM_AVG; }
+/** §B1 handling = moveSpeed × (1 − swapMs/2000). 산포 항은 **삭제됐다**.
+ * 산포는 이제 화력(burstDPS × pHit)에 들어간다. 한 축을 두 번 세면 포화 상한이 필요해지고, 그 상한이
+ * (1 − min(0.35, 유효산포/120)) 의 42px 바닥이다 — 미니건이 그 바닥에 앉아 "더 부정확해져도 점수가
+ * 안 내려가는" §A4 의 구멍을 썼다. */
 function handling(W, swapDefault, moveExp) {
   const move = num(W.moveSpeed, 1);
   const swap = num(W.swapMs, swapDefault);
   const m = moveExp === 0 ? 1 : Math.pow(move, moveExp == null ? 1 : moveExp);
-  return m * (1 - swap / SWAP_REF) * (1 - Math.min(SPREAD_FLOOR, effSpread(W) / SPREAD_REF));
+  return m * (1 - swap / SWAP_REF);
 }
 
 /** 처치 시간: the reference target's whole health, magazines and 예열 included. */
@@ -339,6 +392,10 @@ function model() {
       swapMs: num(W.swapMs, swapDefault),
       moveSpeed: num(W.moveSpeed, 1),
       spread: effSpread(W),
+      /* §B1: 발행된 산포 상한과 그 상한에서의 버튼 명중률. `pHitEff` 는 샷건 펠릿 보정이 들어간 값이고
+       * §F6-6 이 보는 것이 그쪽이다. */
+      pHit: pHit(W, HIT_BOX),
+      pHitEff: pHitEff(W, HIT_BOX),
       maxTargets: num(W.maxTargets, 1),
       burstDPS: b,
       rawDPS: b + num(W.utility, 0),
@@ -413,6 +470,10 @@ function renderArsenal(m) {
         swapMs: r.swapMs,
         moveSpeed: round(r.moveSpeed, 3),
         spread: round(r.spread, 2),
+        /* SPEC-weapon-identity §B1: 발행 산포 상한에서의 버튼(120×44) 명중률. `pHit` 은 조준점 한 발,
+         * `pHitEff` 는 샷건 펠릿 보정이 들어간 값이다. */
+        pHit: round(r.pHit, 4),
+        pHitEff: round(r.pHitEff, 4),
         pierce: W.pierce === 999 ? 999 : (W.pierce || 0),
         critChance: round(W.critChance == null ? 0.1 : W.critChance, 3),
         knockback: round(W.knockback == null ? 1 : W.knockback, 2),
@@ -497,6 +558,15 @@ function violations(rows, byId, median) {
   for (const r of rows) {
     if (r.moveSpeed < 0.5 - 1e-9 || r.moveSpeed > 1.25 + 1e-9) out.push({ rule: 5, id: r.id, msg: `moveSpeed ${r.moveSpeed} 가 [0.5, 1.25] 밖이다` });
   }
+  /* 6. SPEC-weapon-identity §B1: 실전 무기의 pHit(버튼 120×44) 이 0.55 미만이다.
+   * "지속 사격 무기가 작은 표적을 절반도 못 맞히면 그것은 역할이 아니라 결함이다." 샷건은 펠릿이 각자
+   * 판정하므로 펠릿 보정값(`pHitEff`)으로 본다 — §B2 의 ※ 가 그렇게 적어 두었다. */
+  for (const r of rows) {
+    if (r.cat !== 'field') continue;
+    if (r.pHitEff < PHIT_MIN - 1e-9) {
+      out.push({ rule: 6, id: r.id, msg: `실전 무기인데 ${HIT_BOX.label} 명중률이 ${pct(r.pHitEff)} — 문턱 ${pct(PHIT_MIN)} 미만이다 (유효산포 ${r.spread.toFixed(0)}px)` });
+    }
+  }
   /* §F5: "하나도 겹치면 안 된다." A role that is missing, unknown or shared is the same failure. */
   const seen = new Map();
   for (const r of rows) {
@@ -544,7 +614,18 @@ const ADJUSTMENTS = [
   { id: 'rubber', field: 'swapMs', from: 240, to: 210, why: '§F6-2. 냉각총이 들어오면서 고무탄을 세 축 전부에서 지배했다. 고무탄에게 남은 1등은 **손이 빠른 것** 이라 교체와 이동으로 풀었다.' },
   { id: 'rubber', field: 'moveSpeed', from: 1.00, to: 1.05, why: '위와 같은 이유.' },
   { id: 'squeaky', field: 'cooldownMs', from: 0, to: 170, why: '예능 밴드는 25~50% 인데 **64%** 였다. 피해 8 은 §D 가 못박았고 §D 가 뿅망치에 준 성격은 "가장 빠르게 휘두른다" 라 이동 1.20 · 교체 120ms 도 못 건드린다 — 남은 축이 간격이다. 170ms 는 무기고에서 가장 짧은 공격 간격이라 §D 의 그 문장은 여전히 참이다.' },
-  { id: 'chicken', field: 'cooldownMs', from: 0, to: 300, why: '예능 밴드 안에 있어야 하는데 **100%** 로 실전 한복판에 있었다. 피해 12 는 §D 가 못박았고 교체 110ms · 이동 1.25 는 "가장 빠르고 가볍다" 라 못 건드린다. 고무 치킨은 휘두를 때마다 출렁인다 — 간격이 그 값이다.' }
+  { id: 'chicken', field: 'cooldownMs', from: 0, to: 300, why: '예능 밴드 안에 있어야 하는데 **100%** 로 실전 한복판에 있었다. 피해 12 는 §D 가 못박았고 교체 110ms · 이동 1.25 는 "가장 빠르고 가볍다" 라 못 건드린다. 고무 치킨은 휘두를 때마다 출렁인다 — 간격이 그 값이다.' },
+  /* ── SPEC-weapon-identity §B2 (11단계): 명중률 교정 ─────────────────────────────────────────────
+   * §B3 이 "피해값은 하나도 바꾸지 않는다. 벗어나면 틱 간격과 탄창으로만 되돌린다" 고 했고 그대로 했다 —
+   * 아래에서 움직인 것은 `bloom` 넷 · `mag` 하나 · `tickMs` 하나뿐이고 `damage` 는 한 줄도 없다. */
+  { id: 'minigun', field: 'bloom', from: 14, to: 2.2, why: '§B2. 유효산포 140px 에서 **버튼을 4% 로 맞혔다**. §B2 표는 2.5(σ 25px)를 적었지만 그 값은 발행 명중률 61%, **실측 56%** 다 — fire() 안의 기계적 ±7px 원뿔과 반동 킥은 무기 표에 없어서 §B2 의 계산에 빠져 있었다. §D 가 요구한 "0.6초 지속 사격 뒤에도 60% 이상" 을 실제로 넘는 가장 큰 값이 **2.2** 다 (발행 68% · 실측 67%). §B2 가 적은 65% 와 3%p 안이다.' },
+  { id: 'smg', field: 'bloom', from: 6, to: 2, why: '§B2 표 그대로. 유효산포 60px → 20px, 버튼 명중률 20% → 73%.' },
+  { id: 'flame', field: 'bloom', from: 3, to: 2, why: '§B2 표 그대로. 30px → 20px, 51% → 73%.' },
+  { id: 'nailgun', field: 'bloom', from: 2, to: 1.5, why: '§B2 표 그대로. 20px → 15px, 73% → 86%.' },
+  { id: 'watergun', field: 'bloom', from: 5, to: 1.5, why: '§B2 가 `laser 5 → 1.5` 로 적은 줄의 **진짜 주인**이다. 레이저의 `bloom` 은 0 이고 유효산포 50px / 명중률 26% 를 들고 있던 것은 물총이다(§A3 의 σ 표가 그대로 가리킨다). 명세의 이름표가 어긋났을 뿐 수치는 정확해서, 수치를 따랐다. 50px → 15px.' },
+  { id: 'rubber', field: 'bloom', from: 4, to: 3, why: '§B2 가 `shotgun 4 → 3` 으로 적은 줄의 진짜 주인. 샷건의 `bloom` 도 0 이고 유효산포 40px / 36% 는 고무탄의 것이었다. 40px → 30px. 레이저 · 샷건 · 냉각총은 이미 `bloom: 0` 이라 **올리지 않았다** — 올리면 §B 가 하려는 일의 정반대가 된다.' },
+  { id: 'sniper', field: 'mag', from: 5, to: 4, why: '모델이 산포를 핸들링에서 빼면서 저격총의 `handling` 이 0.545 → 0.689 로 올랐고(산포 25px 이 더 이상 두 번 세이지 않는다) 중앙값의 **126%** 가 됐다. §B3 이 허락한 축은 틱 간격과 탄창이고, 틱(쿨다운 600)은 §A2 가 못박은 값이라 탄창만 남았다. 5 → 4 로 가동률 0.612 → 0.558, 115%. 탄창 6 이상은 §F6-3 의 "값싼 한 방" 문턱이라 애초에 올릴 수도 없었다.' },
+  { id: 'watergun', field: 'tickMs', from: 40, to: 50, why: '물총의 명중률이 26% → 86% 로 오르면서 `rawDPS` 가 19.6 → 64.3 이 되어 **나팔을 세 축 전부에서 지배**했다(§F6-2). §B3 이 허락한 축 그대로 틱만 40 → 50 — `rawDPS` 51.4 로 나팔(54.6) 아래에 둔다. 피해 3 은 §D 가 못박은 값이라 그대로다.' }
 ];
 
 /* ===================================================================== */
@@ -566,9 +647,10 @@ function printTable(m) {
   const lines = [];
   lines.push('SPEC-arsenal §F — 밸런스 (무기 ' + m.rows.length + '종, 실전 중앙값 ' + f1(m.median) + ')');
   lines.push('');
-  const head = ['무기', '범주', '역할', 'burstDPS', 'uptime', 'handling', 'effective', '효용', '환산', '중앙값비'];
+  const head = ['무기', '범주', '역할', 'σ', 'pHit', 'burstDPS', 'uptime', 'handling', 'effective', '효용', '환산', '중앙값비'];
   const body = m.rows.map((r) => [
     r.id, BANDS[r.cat] ? BANDS[r.cat].label : r.cat, ROLE_LABEL[r.role] || String(r.role),
+    f1(r.spread), pct(r.pHitEff),
     f1(r.burstDPS), f3(r.uptime), f3(r.handling), f1(r.effective),
     r.utility === 0 ? '—' : '+' + f1(r.utility), f1(r.rated), pct(r.ratio)
   ]);
@@ -613,16 +695,33 @@ function renderDoc(m) {
   L.push('```');
   L.push('interval  = hold ? tickMs : max(cooldownMs, ' + CLICK_FLOOR_MS + ')   // ' + CLICK_FLOOR_MS + 'ms 는 §A1 의 "짧게 누름" 경계');
   L.push('hit       = damage × (pellets | 1)                  // 샷건 한 발은 펠릿 아홉이고 한 번에 닿는다');
-  L.push('burstDPS  = hit × 1000 / interval + dotDPS          // 단일 표적. 연소는 가산한다');
+  L.push('pHit      = erf((w/2)/(σ√2)) × erf((h/2)/(σ√2))      // 2차원 가우시안. 기준 표적은 ' + HIT_BOX.label);
+  L.push('burstDPS  = hit × 1000 / interval × pHit + dotDPS   // 단일 표적. 맞는 탄만 센다. 연소는 가산한다');
   L.push('uptime    = 쏠 수 있는 시간 / 주기                     // 재장전 · 과열 · 예열 · 쿨다운');
-  L.push('handling  = moveSpeed × (1 − swapMs/2000) × (1 − min(0.35, 유효산포/120))');
-  L.push('유효산포   = spread + bloom × 10 × 0.5                // bloom 상한은 ×10 (src/71), 평균은 그 절반');
+  L.push('handling  = moveSpeed × (1 − swapMs/2000)           // 산포 항은 삭제됐다 (§B1)');
+  L.push('σ (유효산포) = spread + bloom × 10                     // 지속 사격 상한. 조준경 무기는 0');
   L.push('effective = burstDPS × uptime × handling');
   L.push('환산       = (burstDPS + utility) × uptime × handling   // §F4 의 "제공 효용 환산 후"');
   L.push('```');
   L.push('');
-  L.push('고른 해석 셋을 적어 둔다.');
+  L.push('고른 해석을 적어 둔다.');
   L.push('');
+  L.push('- **산포는 화력이지 핸들링이 아니다** (SPEC-weapon-identity §B1). 9단계의 `handling` 은 산포를');
+  L.push('  `(1 − min(0.35, 유효산포/120))` 로 한 번 세었고, 그 `min` 이 **유효산포 42px 에서 포화**했다.');
+  L.push('  미니건은 유효산포 70px 로 이미 그 바닥에 앉아 있었으므로 **더 부정확해져도 점수가 내려가지 않았다**');
+  L.push('  — 못 맞게 만드는 것이 밴드를 맞추는 공짜 손잡이였다. 이제 산포는 `burstDPS × pHit` 하나로만 들어가고');
+  L.push('  포화 상한은 없다.');
+  L.push('- **σ 는 그 무기가 실제로 쏘는 자세의 산포다.** 지속 사격 무기는 **블룸 상한**에서 쏜다(`bloom × 10`,');
+  L.push('  src/71 `noteShot`). 저격총은 **조준경 안에서** 쏘므로 0 이다 — src/71 의 `spreadNow()` 가');
+  L.push('  `W.scope && state.scoped` 에서 0 을 돌려주고 v1.2 A4 가 그것을 무기의 정체성으로 못박았다.');
+  L.push('  이 예외가 없으면 산포를 지우는 기능을 가진 유일한 무기가 그 기능 때문에 벌을 받는다.');
+  L.push('- **σ 는 무기 표가 발행하는 산포다.** 발사 시점에만 있는 둘 — 반동 킥(`recoil × 6`, 250ms 감쇠)과');
+  L.push('  `fireSmg` / `fireMinigun` 안의 기계적 ±9 · ±7 원뿔 — 은 표에 없으므로 여기 들어가지 않는다.');
+  L.push('  그래서 아래 `pHit` 은 **상한**이고 실제로 쏴서 센 명중률은 그보다 몇 %p 낮다. 그 차이는');
+  L.push('  `test/e2e.js` 의 실측 단언이 본다.');
+  L.push('- **샷건의 `pHit` 은 조준점 자체의 명중률이다.** 펠릿 아홉이 흩어지는 반경 72px(`pelletSpread`)은');
+  L.push('  조준 오차가 아니라 §E 가 샷건에 준 **역할**(밀집 다수 동시)이고, 첫 펠릿은 조준점에 정확히 간다');
+  L.push('  (src/76 `fireShotgun`). §F6-6 이 보는 값만 펠릿 보정 `1 − (1 − pHit)^pellets` 을 쓴다.');
   L.push('- **burstDPS 는 단일 표적이다.** §F2 의 기준 표적이 전부 요소 하나이고, 동시 타격 수를 곱하면');
   L.push('  폭탄 하나가 중앙값의 일곱 배가 되어 ±18% 밴드가 산술적으로 닫히지 않는다. 범위 무기의 동시');
   L.push('  타격은 통화가 아니라 **역할**이다 (§F5: 폭탄은 범위당 효율, 로켓은 단발 범위 최대).');
@@ -647,16 +746,19 @@ function renderDoc(m) {
     L.push('### ' + band.label + ' — 밴드 ' + pct(band.lo) + ' ~ ' + pct(band.hi) + (cat === 'field' ? ' (중앙값 ±18%)' : ''));
     L.push('');
     L.push(mdTable(
-      ['무기', '역할 (§F5)', 'burstDPS', 'uptime', 'handling', 'effective', '효용', '환산', '중앙값비'],
+      ['무기', '역할 (§F5)', 'σ', 'pHit(버튼)', 'burstDPS', 'uptime', 'handling', 'effective', '효용', '환산', '중앙값비'],
       rows.map((r) => [
         '`' + r.id + '`', ROLE_LABEL[r.role] || String(r.role),
+        f1(r.spread) + 'px', pct(r.pHitEff) + (r.pellets > 1 ? ' ※' : ''),
         f1(r.burstDPS), f3(r.uptime), f3(r.handling), f1(r.effective),
         r.utility === 0 ? '—' : '+' + f1(r.utility), f1(r.rated),
         (BAND_EXEMPT.has(r.id) ? '— (밴드 제외)' : pct(r.ratio))
       ]),
-      ['', '', 'r', 'r', 'r', 'r', 'r', 'r', 'r']));
+      ['', '', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r']));
     L.push('');
   }
+  L.push('`pHit` 은 ' + HIT_BOX.label + ' 명중률이다. ※ 는 펠릿 보정 `1 − (1 − pHit)^pellets` 이 들어간 값(샷건).');
+  L.push('');
   L.push('붕괴는 §F4 가 직접 뺐다 — "쿨다운으로 제한되는 특수기이므로 밴드 검사에서 제외한다".');
   L.push('');
 
@@ -697,15 +799,20 @@ function renderDoc(m) {
   }
   L.push('');
 
-  L.push('## §F6 — `--check` 가 잡는 다섯 가지');
+  L.push('## §F6 — `--check` 가 잡는 여섯 가지');
   L.push('');
   L.push('1. 실효 화력이 범주 밴드를 벗어난다');
   L.push('2. 같은 범주 안에서 다른 무기에 완전히 지배된다 (`burstDPS` · `uptime` · `handling` 모든 축에서 같거나 나쁨)');
   L.push('3. 큰 카드(' + BIG_CARD_HP + ')를 **값싼** 1회 타격으로 파괴한다 (붕괴 · 충전 로켓 · 슬러그 제외)');
   L.push('4. 실전 무기가 큰 섹션(' + SECTION_HP + ')을 4.5초 안에 못 지운다');
   L.push('5. `moveSpeed` 가 0.5 미만 또는 1.25 초과');
+  L.push('6. 실전 무기의 `pHit(' + HIT_BOX.label + ')` 이 ' + pct(PHIT_MIN) + ' 미만이다 (샷건은 펠릿 보정값으로 본다)');
   L.push('');
   L.push('여기에 §F5 역할 겹침 검사가 더해진다.');
+  L.push('');
+  L.push('6번은 SPEC-weapon-identity §B1 이 더한 것이다. **지속 사격 무기가 작은 표적을 절반도 못 맞히면');
+  L.push('그것은 역할이 아니라 결함이다** — 교정 전의 미니건은 ' + HIT_BOX.label + ' 을 **4%** 로 맞혔고,');
+  L.push('그런데도 모델은 그것을 벌하지 않았다. 이제 `bloom` 을 14 로 되돌리면 이 줄이 exit 1 이다.');
   L.push('');
   L.push('3번은 해석이 하나 들어갔다. 명세가 뺀 셋(붕괴 · 충전 로켓 · 슬러그)은 전부 **비싼 한 방**이다 —');
   L.push('쿨다운 2초짜리 탄창 1, 또는 탄약 2발을 쓰는 보조 공격. 그래서 "1회 타격" 을 **값이 싼 한 방**으로');
