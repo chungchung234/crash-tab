@@ -1940,3 +1940,28 @@ crs-hud:popover-open {
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPEC-weapon-identity §C4 못 박기 — 꿰맨 자국 (11단계)
+   USER 오리진이다. rlSeamFx() (src/72-roles.js) 가 left / top / width / transform 을
+   인라인으로 쓰므로 그 넷에는 !important 를 붙이지 않는다 — 붙이면 실밥이 태어난
+   자리에 얼어붙고 두 요소를 잇지 못한다. 이 파일이 이미 여러 번 그렇게 당했다.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.crs-seam {
+  position: fixed !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  z-index: 6 !important;
+  height: 2px !important;
+  border-radius: 1px !important;
+  background: repeating-linear-gradient(90deg, rgba(246, 250, 254, .92) 0 6px, rgba(246, 250, 254, 0) 6px 12px) !important;
+  box-shadow: 0 0 3px 1px rgba(20, 23, 28, .5) !important;
+  left: 0;
+  top: 0;
+  width: 0;
+  opacity: .9;
+}

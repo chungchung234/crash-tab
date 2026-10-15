@@ -25,6 +25,7 @@
     "69-utility.js",
     "70-break.js",
     "71-weapon-helpers.js",
+    "72-roles.js",
     "73-hit-resolution.js",
     "76-weapon-fire.js",
     "77-burn.js",

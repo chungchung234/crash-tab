@@ -184,7 +184,9 @@
    * pushing an invulnerable element into an enemy hurts the enemy and nothing else. */
   function collisionHit(el, relSpeed, ix, iy) {
     if (lungeImmune(el)) return 'none';   // SPEC-combat §D5: the charger pushes, it does not crash (see 88-archetypes.js)
-    return applyHit(el, clamp(Math.round(relSpeed / 14), 1, 60), 'hammer', ix, iy, { aoe: true, toward: { x: ix, y: iy } });
+    /* SPEC-weapon-identity §C3: `noVs` — 이 피해는 **물리가 내는 것**이지 지금 든 무기가 쏘는 것이
+     * 아니다. 등급 계수를 곱하면 들고 있는 무기를 바꾸는 것만으로 같은 충돌이 다르게 아프다. */
+    return applyHit(el, clamp(Math.round(relSpeed / 14), 1, 60), 'hammer', ix, iy, { aoe: true, noVs: true, toward: { x: ix, y: iy } });
   }
 
   /* applyHit — the single damage sink. opts: { crit, hold, win, aoe, slash, toward, pieces, textSplit, splitLine,

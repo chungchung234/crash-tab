@@ -40,6 +40,10 @@
    * the kind of trace CLAUDE.md forbids.
    * ===================================================================== */
 
+  /* SPEC-weapon-identity §C3 (MINIMAL EDIT, 보고에 적었다): 아래 두 곳의 applyHit 에 `weapon: W.id` 를
+   * 더했다. 등급 계수의 임자는 **쏜 무기**이고(src/72-roles.js), 충격포와 나팔은 디버그 훅으로도
+   * 발사되어 action() 을 지나지 않는 경로가 있다 — 그 경로에서는 손에 든 다른 무기의 계수가 붙었다.
+   * 둘 다 §C3 의 표에 없으므로(기본 1.0) 이 한 단어가 그 사고를 구조적으로 막는다. */
   /* ── the table extras ─────────────────────────────────────────────────────
    * DESTRUCTION (src/66-fracture.js) and CH_SHAPES (src/51-crosshair.js) are plain objects declared EARLIER
    * in the bundle, so the new rows are added here rather than by editing two files this workstream only
@@ -498,7 +502,7 @@
     for (const el of pushed) {
       if (!el.isConnected) continue;
       const crit = rollCrit('shockwave');
-      if (applyHit(el, rollDamage(W.damage, crit), 'bomb', x, y, { crit, aoe: true, radius: W.radius, toward: { x, y } }) !== 'none') hurt++;
+      if (applyHit(el, rollDamage(W.damage, crit), 'bomb', x, y, { crit, aoe: true, weapon: W.id, radius: W.radius, toward: { x, y } }) !== 'none') hurt++;
     }
     kick();
     return { pushed: pushed.length, hurt };
@@ -518,7 +522,7 @@
     for (const el of pushed) {
       if (!el.isConnected) continue;
       const crit = rollCrit('horn');
-      if (applyHit(el, rollDamage(W.damage, crit), 'gun', x, y, { crit, aoe: true, toward: { x, y } }) !== 'none') hurt++;
+      if (applyHit(el, rollDamage(W.damage, crit), 'gun', x, y, { crit, aoe: true, weapon: W.id, toward: { x, y } }) !== 'none') hurt++;
     }
     kick();
     return { pushed: pushed.length, flipped, hurt, angle: ang, radius: R, coneDeg: W.coneDeg };

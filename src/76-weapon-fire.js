@@ -10,6 +10,11 @@
     flash(x, y, 'hammer'); shake('hammer', { amp: crit ? 8.4 : 6 });
     drawCrack(x, y, 'hammer', { ink: 1 });
     if (el) applyHit(el, dmg, 'hammer', x, y, { crit });
+    /* SPEC-weapon-identity §C4 내리찍기 파동: 명중 지점에서 바깥으로 80px. **피해는 없다** — 이웃이
+     * 흔들릴 뿐이다. 변위 시스템(src/67-displace.js) 위에 그대로 올라가므로 새 물리 루프는 없고,
+     * 맞은 요소 자신은 뺀다(그쪽은 피해와 reactDamage 가 이미 맡고 있다). 피해 **뒤**에 거는 이유는
+     * 뿅망치의 찌그러짐과 같다: reactDamage() 가 cancelAnimsOf(el) 로 시작한다. */
+    rlWave(x, y, RL_WAVE_R, RL_WAVE_PUSH_PX, el);
     return el;
   }
   function firePistol(x, y) {
@@ -42,10 +47,13 @@
     noteShot('smg');
     if (interceptOrb(x, y)) return null;   // v1.2 A9: the tick is consumed by the orb
     const el = pickTarget(x, y, h ? h.cache : undefined);
+    /* SPEC-weapon-identity §C4 연사 누적: 같은 요소를 연속으로 맞히면 탄마다 +8%, 5발까지. 표적이
+     * 바뀌거나 빗나가면(el === null) 장부가 0 으로 돌아간다 — 그래서 한 틱에 **정확히 한 번** 부른다. */
+    const stack = rlStreakMul(el);
     let dmg = 0, crit = false, win = null;
     if (el) {
       if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('smg');
-      dmg = rollDamage(WEAPONS.smg.damage, crit, falloffMul('smg', x, y));
+      dmg = rollDamage(WEAPONS.smg.damage, crit, falloffMul('smg', x, y) * stack);
     }
     if (!h || n % 2 === 1) sfx('gun', { gain: 0.6, crit: !h && crit });   // one sound per 2 shots; a hold window's crit cue comes from holdWindow()
     flash(x, y, 'gun', { size: 32, dur: 100 });
@@ -298,10 +306,14 @@
     if (interceptOrb(x, y)) return null;   // this is also the one entry point into the pierce (§B2 관통 무제한)
     const el = pickTarget(x, y, h ? h.cache : undefined);
     lzSeverAt(el, x, y);                   // the element the beam just LEFT is the one whose crossing is complete
-    if (!el) return null;
+    if (!el) { rlDwellClear(); return null; }
     /* §B2 "누적 절단선이 요소를 가로지르면 그 궤적을 따라 나뉜다." Checked BEFORE the damage tick: a sever is
      * the cut finishing its job, not a coincidence of the element running out of hit points at that moment. */
-    if (lzTrySever(el, x, y)) return null;
+    if (lzTrySever(el, x, y)) { rlDwellClear(); return null; }
+    /* SPEC-weapon-identity §C4 지속 절단: 같은 지점을 0.4초 유지하면 **그 선을 따라** 분리한다.
+     * §B2 의 절단선이 "지나간 자취" 를 자르는 것과 짝이 되는 동작이다 — 저쪽은 끌어서, 이쪽은 버텨서.
+     * 멈추면(지점이나 표적이 바뀌면) rlDwellTick() 이 0 부터 다시 센다. */
+    if (rlDwellTick(el, x, y) >= rlDwellMs() && damageable(el)) { rlDwellClear(); rlLaserSever(el, x, y); return null; }
     let crit = false, win = null;
     if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('laser');
     const dmg = rollDamage(W.damage, crit, falloffMul('laser', x, y));
@@ -325,6 +337,11 @@
     const el = pickTarget(x, y, h ? h.cache : undefined);
     let dmg = 0, crit = false, win = null;
     if (el) {
+      /* SPEC-weapon-identity §C4 갈아내기: 명중할 때마다 그 요소의 `max` 를 0.6%씩, 최대 30% 깎는다.
+       * 피해 **앞**에 둔다 — 깎인 그릇이 이번 탄의 판정에도 쓰여야 "오래 갈면 작아진다" 가 느껴진다.
+       * 페이지에는 아무것도 쓰지 않는다: state.hp 의 숫자 하나이고, restore() 가 그 맵을 통째로 새로
+       * 만들면서 원래 값으로 돌아온다. */
+      rlGrind(el);
       if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('minigun');
       dmg = rollDamage(WEAPONS.minigun.damage, crit, falloffMul('minigun', x, y));
     }
@@ -469,6 +486,10 @@
       try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
       if (alive) ixMakeBouncy(el, W.bouncyMs);
     }
+    /* SPEC-weapon-identity §C4 도탄: **맞은 지점**에서 가장 가까운 다른 요소로 한 번 튕긴다, 피해 60%.
+     * 한 번뿐이다 — 튕긴 탄은 다시 튕기지 않는다. 아무것도 맞히지 못한 사격은 튕기지 않는다: 튕길
+     * 바닥이 없다. (명세의 "맞은 지점" 을 그대로 읽었다.) */
+    if (el) rlRicochet(el, x, y);
     return el;
   }
   /* §D 뿅망치: 피해 8. 맞은 요소가 찌그러졌다 튀어오른다. "뿅" 소리와 별 입자. 가장 빠르게 휘두른다. */
@@ -483,7 +504,17 @@
     shake('hammer', { amp: crit ? 2.6 : 1.8 });
     ixStars(x, y, randInt(4, 7));
     // 찌그러짐은 피해 **뒤**에 건다 — reactDamage() 가 cancelAnimsOf(el) 로 시작하기 때문이다 (ixSquash 주석)
-    if (el) { applyHit(el, dmg, 'hammer', x, y, { crit }); ixSquash(el); }
+    if (el) {
+      applyHit(el, dmg, 'hammer', x, y, { crit });
+      ixSquash(el);
+      /* SPEC-weapon-identity §C4 튕겨내기: "피해 8 + 맞은 요소가 **반대로 날아간다**(변위 강함)."
+       * §D 의 찌그러짐은 그대로 두고 밀어내기를 얹는다 — 뿅망치는 이제 피해를 주는 도구가 아니라
+       * **치워 내는** 장난감이다. 변위가 인라인 transform 을 빌리므로 §D 가 적었던 "인라인 transform 은
+       * 건드리지 않는다" 는 더 이상 참이 아니다; 그 자리는 clearMoved() 가 원래 값으로 되돌린다. */
+      let alive = false;
+      try { alive = el.isConnected && !el.hasAttribute('data-crs-broken'); } catch (e) { alive = false; }
+      if (alive) rlFling(el, x, y, RL_FLING_IMPULSE);
+    }
     return el;
   }
   /* §D 물총: 3/틱. 젖음 8초 — 처지고 글자가 번지고 색이 빠진다. 냉각 2.5배, 더 멀리 미끄러짐. 불을 끈다. */
@@ -562,10 +593,20 @@
     const hit = new Map();
     let first = null;
     for (let i = 0; i < W.pellets; i++) {
-      /* 첫 펠릿은 조준점 그대로, 나머지 여덟은 반경 R 의 원 안에 고르게 — 면적 균등이므로 sqrt. */
-      const a = rand(0, Math.PI * 2), d = i === 0 ? 0 : R * Math.sqrt(Math.random());
-      const px0 = clamp(x + Math.cos(a) * d, 0, viewW()), py0 = clamp(y + Math.sin(a) * d, 0, viewH());
-      const el = pickTarget(px0, py0, cache);
+      /* 첫 펠릿은 조준점 그대로, 나머지 여덟은 반경 R 의 원 안에 고르게 — 면적 균등이므로 sqrt.
+       * SPEC-weapon-identity §C4 펠릿 산개: 아홉이 **서로 다른 요소를 찾는다**. 이미 맞힌 요소에
+       * 떨어진 펠릿은 원뿔을 조금씩 넓히며 최대 네 번까지 다시 고른다 — 그래도 못 찾으면 거기 맞는다.
+       * 다시 고르는 것이지 없던 사거리를 주는 것이 아니다. */
+      let el = null, px0 = x, py0 = y;
+      for (let tries = 0; tries < 4; tries++) {
+        const exact = i === 0 && tries === 0;   // 바깥의 `first`(처음 맞은 요소)와 다른 것이다 — 가리지 않게 이름을 달리한다
+        const a = exact ? 0 : rand(0, Math.PI * 2), d = exact ? 0 : R * Math.sqrt(Math.random()) * (1 + tries * 0.3);
+        px0 = clamp(x + Math.cos(a) * d, 0, viewW()); py0 = clamp(y + Math.sin(a) * d, 0, viewH());
+        const cand = pickTarget(px0, py0, cache);
+        if (!cand) continue;
+        el = cand;
+        if (!hit.has(cand)) break;
+      }
       if (!el) continue;
       if (!first) first = el;
       const crit = rollCrit('shotgun');
@@ -597,7 +638,10 @@
     let crit = false, win = null;
     if (h) { win = holdWindow(el); crit = win.crit; } else crit = rollCrit('nailgun');
     const dmg = rollDamage(W.damage, crit, falloffMul('nailgun', x, y));
-    applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
+    /* SPEC-weapon-identity §C4 못 박기: 같은 요소에 못 **3개**를 박으면 맞닿은 이웃과 꿰맨다 —
+     * 그 뒤로는 둘이 같이 부서진다(실을 당기는 쪽은 applyHit 의 래퍼, src/72-roles.js). 부서진 요소에는
+     * 못을 박을 수 없으므로 'damaged' 일 때만 센다. */
+    if (applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win }) === 'damaged') rlNailHit(el);
     return el;
   }
   /* 냉각총: "빙결. 받는 피해 ×1.8, 조각 수 ×2.5, 적은 2초 정지."
@@ -620,7 +664,11 @@
     const dmg = rollDamage(W.damage, crit, falloffMul('freezegun', x, y));
     /* 얼리는 것이 먼저다. applyHit() 은 빙결 배수를 읽으므로, 이 순서라야 같은 틱의 4 도 ×1.8 을 받는다
      * — "받는 피해 ×1.8" 에 예외를 두지 않는다는 뜻이다. */
+    /* SPEC-weapon-identity §C4 서리 전파: **이미 얼어 있는** 요소에 맞히면 맞닿은 이웃으로 번진다.
+     * 얼리기 전에 묻는다 — 이번 틱이 처음 얼린 요소는 아직 "얼린 것을 또 때렸다" 가 아니다. */
+    const wasFrozen = fzIsFrozen(el);
     fzFreeze(el, W.freezePerTick, 0);
+    if (wasFrozen) rlFrostSpread(el, W);
     applyHit(el, dmg, 'gun', x, y, { crit, hold: !!h, win });
     return el;
   }

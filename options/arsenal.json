@@ -1,7 +1,7 @@
 {
   "generatedBy": "tools/balance.js --write",
   "loadoutMax": 10,
-  "median": 111.54,
+  "median": 103.545,
   "targets": [
     {
       "key": "word",
@@ -192,19 +192,19 @@
       "knockback": 1,
       "falloff": 0,
       "maxTargets": 1,
-      "burstDPS": 162.5,
+      "burstDPS": 142.19,
       "uptime": 1,
       "handling": 0.6864,
-      "effective": 111.54,
+      "effective": 97.6,
       "utility": 0,
-      "rated": 111.54,
-      "ratio": 1,
+      "rated": 97.6,
+      "ratio": 0.9426,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0.4,
-        "bigCard": 0.8,
-        "section": 1.2
+        "word": 0.84,
+        "button": 0.84,
+        "smallCard": 1.24,
+        "bigCard": 2.84,
+        "section": 3.64
       }
     },
     {
@@ -234,19 +234,19 @@
       "knockback": 0.7,
       "falloff": 0.25,
       "maxTargets": 1,
-      "burstDPS": 208.33,
+      "burstDPS": 203.13,
       "uptime": 0.6154,
       "handling": 0.935,
-      "effective": 119.87,
+      "effective": 116.88,
       "utility": 0,
-      "rated": 119.87,
-      "ratio": 1.0747,
+      "rated": 116.88,
+      "ratio": 1.1287,
       "ttk": {
-        "word": 0,
-        "button": 0.12,
-        "smallCard": 0.36,
-        "bigCard": 0.84,
-        "section": 1.2
+        "word": 0.25,
+        "button": 0.37,
+        "smallCard": 0.61,
+        "bigCard": 2.59,
+        "section": 3.07
       }
     },
     {
@@ -276,19 +276,19 @@
       "knockback": 0.6,
       "falloff": 0.4,
       "maxTargets": 1,
-      "burstDPS": 228.39,
+      "burstDPS": 211.26,
       "uptime": 0.6,
       "handling": 0.7912,
-      "effective": 108.42,
+      "effective": 100.29,
       "utility": 0,
-      "rated": 108.42,
-      "ratio": 0.972,
+      "rated": 100.29,
+      "ratio": 0.9686,
       "ttk": {
-        "word": 0,
-        "button": 0.07,
-        "smallCard": 0.28,
-        "bigCard": 0.56,
-        "section": 0.77
+        "word": 0.35,
+        "button": 0.42,
+        "smallCard": 0.63,
+        "bigCard": 1.19,
+        "section": 1.47
       }
     },
     {
@@ -305,7 +305,7 @@
       "tickMs": null,
       "hold": false,
       "input": "click",
-      "mag": 4,
+      "mag": 3,
       "reloadMs": 1900,
       "radius": 0,
       "swapMs": 320,
@@ -319,18 +319,18 @@
       "falloff": 0,
       "maxTargets": 1,
       "burstDPS": 333.33,
-      "uptime": 0.5581,
+      "uptime": 0.4865,
       "handling": 0.6888,
-      "effective": 128.15,
+      "effective": 111.7,
       "utility": 0,
-      "rated": 128.15,
-      "ratio": 1.1489,
+      "rated": 111.7,
+      "ratio": 1.0787,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0,
-        "bigCard": 0,
-        "section": 0.6
+        "word": 0.92,
+        "button": 0.92,
+        "smallCard": 0.92,
+        "bigCard": 0.92,
+        "section": 1.52
       }
     },
     {
@@ -360,19 +360,19 @@
       "knockback": 1.4,
       "falloff": 0,
       "maxTargets": 1,
-      "burstDPS": 236.36,
+      "burstDPS": 230.45,
       "uptime": 1,
       "handling": 0.471,
-      "effective": 111.33,
+      "effective": 108.54,
       "utility": 0,
-      "rated": 111.33,
-      "ratio": 0.9981,
+      "rated": 108.54,
+      "ratio": 1.0483,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0,
-        "bigCard": 0.55,
-        "section": 0.55
+        "word": 0.98,
+        "button": 0.98,
+        "smallCard": 0.98,
+        "bigCard": 1.53,
+        "section": 1.53
       }
     },
     {
@@ -402,19 +402,19 @@
       "knockback": 1.1,
       "falloff": 0,
       "maxTargets": 1,
-      "burstDPS": 115.38,
+      "burstDPS": 112.5,
       "uptime": 1,
       "handling": 1.0005,
-      "effective": 115.44,
+      "effective": 112.56,
       "utility": 0,
-      "rated": 115.44,
-      "ratio": 1.035,
+      "rated": 112.56,
+      "ratio": 1.087,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0.52,
-        "bigCard": 1.56,
-        "section": 2.08
+        "word": 0.78,
+        "button": 0.78,
+        "smallCard": 1.82,
+        "bigCard": 3.9,
+        "section": 4.94
       }
     },
     {
@@ -450,13 +450,13 @@
       "effective": 111.81,
       "utility": 0,
       "rated": 111.81,
-      "ratio": 1.0024,
+      "ratio": 1.0798,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0,
-        "bigCard": 0,
-        "section": 0.7
+        "word": 1,
+        "button": 1,
+        "smallCard": 1,
+        "bigCard": 1,
+        "section": 1.7
       }
     },
     {
@@ -486,19 +486,19 @@
       "knockback": 2,
       "falloff": 0,
       "maxTargets": 14,
-      "burstDPS": 216.67,
+      "burstDPS": 211.25,
       "uptime": 0.72,
       "handling": 0.7452,
-      "effective": 116.25,
+      "effective": 113.34,
       "utility": 0,
-      "rated": 116.25,
-      "ratio": 1.0422,
+      "rated": 113.34,
+      "ratio": 1.0946,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0,
-        "bigCard": 0,
-        "section": 0
+        "word": 1.58,
+        "button": 1.58,
+        "smallCard": 1.58,
+        "bigCard": 1.58,
+        "section": 1.58
       }
     },
     {
@@ -528,19 +528,19 @@
       "knockback": 0.5,
       "falloff": 0.55,
       "maxTargets": 1,
-      "burstDPS": 234.01,
+      "burstDPS": 239.46,
       "uptime": 0.5952,
       "handling": 0.6806,
-      "effective": 94.8,
+      "effective": 97.01,
       "utility": 0,
-      "rated": 94.8,
-      "ratio": 0.8499,
+      "rated": 97.01,
+      "ratio": 0.9369,
       "ttk": {
-        "word": 0.05,
-        "button": 0.1,
-        "smallCard": 0.3,
-        "bigCard": 0.6,
-        "section": 0.8
+        "word": 0.39,
+        "button": 0.49,
+        "smallCard": 0.69,
+        "bigCard": 1.39,
+        "section": 1.79
       }
     },
     {
@@ -578,11 +578,11 @@
       "rated": null,
       "ratio": null,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0,
-        "bigCard": 0,
-        "section": 0
+        "word": 2.5,
+        "button": 2.5,
+        "smallCard": 2.5,
+        "bigCard": 2.5,
+        "section": 2.5
       }
     },
     {
@@ -612,19 +612,19 @@
       "knockback": 0.4,
       "falloff": 0,
       "maxTargets": 1,
-      "burstDPS": 236,
+      "burstDPS": 230.5,
       "uptime": 0.4762,
       "handling": 0.875,
-      "effective": 98.33,
+      "effective": 96.04,
       "utility": 0,
-      "rated": 98.33,
-      "ratio": 0.8816,
+      "rated": 96.04,
+      "ratio": 0.9275,
       "ttk": {
-        "word": 0.05,
-        "button": 0.15,
-        "smallCard": 0.4,
-        "bigCard": 0.8,
-        "section": 1.1
+        "word": 0.35,
+        "button": 0.45,
+        "smallCard": 0.7,
+        "bigCard": 1.3,
+        "section": 1.7
       }
     },
     {
@@ -654,19 +654,19 @@
       "knockback": 0.55,
       "falloff": 0.42,
       "maxTargets": 1,
-      "burstDPS": 293.94,
+      "burstDPS": 301.29,
       "uptime": 0.8411,
       "handling": 0.396,
-      "effective": 97.91,
+      "effective": 100.36,
       "utility": 0,
-      "rated": 97.91,
-      "ratio": 0.8778,
+      "rated": 100.36,
+      "ratio": 0.9692,
       "ttk": {
-        "word": 0.8,
-        "button": 0.86,
-        "smallCard": 0.98,
-        "bigCard": 1.22,
-        "section": 1.34
+        "word": 1.48,
+        "button": 1.54,
+        "smallCard": 1.6,
+        "bigCard": 1.72,
+        "section": 1.84
       }
     },
     {
@@ -702,13 +702,13 @@
       "effective": 5.69,
       "utility": 150,
       "rated": 82.56,
-      "ratio": 0.7402,
+      "ratio": 0.7973,
       "ttk": {
-        "word": 0.9,
-        "button": 5.3,
-        "smallCard": 11.5,
-        "bigCard": 23,
-        "section": 32.7
+        "word": 2.16,
+        "button": 6.56,
+        "smallCard": 12.76,
+        "bigCard": 24.26,
+        "section": 33.96
       }
     },
     {
@@ -744,13 +744,13 @@
       "effective": 12.83,
       "utility": 100,
       "rated": 89.78,
-      "ratio": 0.8049,
+      "ratio": 0.867,
       "ttk": {
-        "word": 1.08,
-        "button": 2.58,
-        "smallCard": 5.88,
-        "bigCard": 10.98,
-        "section": 15.12
+        "word": 1.52,
+        "button": 3.02,
+        "smallCard": 6.32,
+        "bigCard": 11.42,
+        "section": 15.56
       }
     },
     {
@@ -786,13 +786,13 @@
       "effective": 20.51,
       "utility": 70,
       "rated": 60.99,
-      "ratio": 0.5468,
+      "ratio": 0.589,
       "ttk": {
-        "word": 0.26,
-        "button": 0.52,
-        "smallCard": 1.3,
-        "bigCard": 3.9,
-        "section": 4.94
+        "word": 0.73,
+        "button": 0.99,
+        "smallCard": 1.77,
+        "bigCard": 4.37,
+        "section": 5.41
       }
     },
     {
@@ -805,7 +805,7 @@
       "quirk": "squash",
       "damage": 8,
       "pellets": 1,
-      "cooldownMs": 170,
+      "cooldownMs": 185,
       "tickMs": null,
       "hold": false,
       "input": "click",
@@ -822,19 +822,19 @@
       "knockback": 0.9,
       "falloff": 0,
       "maxTargets": 1,
-      "burstDPS": 47.06,
+      "burstDPS": 43.24,
       "uptime": 1,
       "handling": 1.128,
-      "effective": 53.08,
+      "effective": 48.78,
       "utility": 0,
-      "rated": 53.08,
-      "ratio": 0.4759,
+      "rated": 48.78,
+      "ratio": 0.4711,
       "ttk": {
-        "word": 0.34,
-        "button": 0.85,
-        "smallCard": 2.04,
-        "bigCard": 3.74,
-        "section": 5.27
+        "word": 0.675,
+        "button": 1.23,
+        "smallCard": 2.525,
+        "bigCard": 4.375,
+        "section": 6.04
       }
     },
     {
@@ -870,13 +870,13 @@
       "effective": 42.48,
       "utility": 0,
       "rated": 42.48,
-      "ratio": 0.3809,
+      "ratio": 0.4103,
       "ttk": {
-        "word": 0.3,
-        "button": 0.7,
-        "smallCard": 1.6,
-        "bigCard": 3.05,
-        "section": 4.2
+        "word": 0.55,
+        "button": 0.95,
+        "smallCard": 1.85,
+        "bigCard": 3.3,
+        "section": 4.45
       }
     },
     {
@@ -912,13 +912,13 @@
       "effective": 5.93,
       "utility": 45,
       "rated": 33.69,
-      "ratio": 0.3021,
+      "ratio": 0.3254,
       "ttk": {
-        "word": 1.56,
-        "button": 5.66,
-        "smallCard": 14.38,
-        "bigCard": 27.72,
-        "section": 38
+        "word": 2.34,
+        "button": 6.44,
+        "smallCard": 15.16,
+        "bigCard": 28.5,
+        "section": 38.78
       }
     },
     {
@@ -954,13 +954,13 @@
       "effective": 47.25,
       "utility": 0,
       "rated": 47.25,
-      "ratio": 0.4236,
+      "ratio": 0.4563,
       "ttk": {
-        "word": 0.3,
-        "button": 0.9,
-        "smallCard": 2.4,
-        "bigCard": 4.5,
-        "section": 6.3
+        "word": 0.71,
+        "button": 1.31,
+        "smallCard": 2.81,
+        "bigCard": 4.91,
+        "section": 6.71
       }
     },
     {
@@ -990,19 +990,19 @@
       "knockback": 1.5,
       "falloff": 0.86,
       "maxTargets": 1,
-      "burstDPS": 292.5,
+      "burstDPS": 263.25,
       "uptime": 0.4878,
       "handling": 0.782,
-      "effective": 111.58,
+      "effective": 100.42,
       "utility": 0,
-      "rated": 111.58,
-      "ratio": 1.0003,
+      "rated": 100.42,
+      "ratio": 0.9698,
       "ttk": {
-        "word": 0,
-        "button": 0,
-        "smallCard": 0,
-        "bigCard": 0.4,
-        "section": 0.8
+        "word": 0.7,
+        "button": 0.7,
+        "smallCard": 1.1,
+        "bigCard": 1.9,
+        "section": 2.7
       }
     },
     {
@@ -1032,19 +1032,19 @@
       "knockback": 0.7,
       "falloff": 0.18,
       "maxTargets": 1,
-      "burstDPS": 162.92,
+      "burstDPS": 158.85,
       "uptime": 0.7407,
       "handling": 0.88,
-      "effective": 106.2,
+      "effective": 103.55,
       "utility": 0,
-      "rated": 106.2,
-      "ratio": 0.9521,
+      "rated": 103.55,
+      "ratio": 1,
       "ttk": {
-        "word": 0,
-        "button": 0.2,
-        "smallCard": 0.5,
-        "bigCard": 0.9,
-        "section": 1.3
+        "word": 0.34,
+        "button": 0.44,
+        "smallCard": 0.84,
+        "bigCard": 1.74,
+        "section": 2.24
       }
     },
     {
@@ -1080,13 +1080,13 @@
       "effective": 38.31,
       "utility": 90,
       "rated": 90.02,
-      "ratio": 0.8071,
+      "ratio": 0.8694,
       "ttk": {
-        "word": 0.24,
-        "button": 0.6,
-        "smallCard": 1.44,
-        "bigCard": 2.7,
-        "section": 3.78
+        "word": 0.64,
+        "button": 1,
+        "smallCard": 1.84,
+        "bigCard": 3.1,
+        "section": 4.18
       }
     },
     {
@@ -1122,7 +1122,7 @@
       "effective": 0,
       "utility": 150,
       "rated": 72.38,
-      "ratio": 0.6489,
+      "ratio": 0.699,
       "ttk": {
         "word": null,
         "button": null,

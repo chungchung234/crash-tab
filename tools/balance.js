@@ -140,6 +140,9 @@ function readArsenal() {
   const weapons = literalToData(sliceLiteral(prelude, 'WEAPONS', '{', '}'), preludeConsts);
   const stats = literalToData(sliceLiteral(helpers, 'WEAPON_STATS', '{', '}'), helperConsts);
   const roles = literalToData(sliceLiteral(prelude, 'WEAPON_ROLES', '{', '}'), preludeConsts);
+  /* SPEC-weapon-identity §C3 표적 등급 계수. `src/00-prelude.js` 가 `WEAPONS[id].vs` 로 붙이는 표를 같은
+   * 정적 파싱으로 읽는다 — §F6-7 · §F6-8 이 보는 것이 이 값이다. */
+  const vs = literalToData(sliceLiteral(prelude, 'WEAPON_VS', '{', '}'), preludeConsts);
   const presets = literalToData(sliceLiteral(prelude, 'PRESETS', '{', '}'), preludeConsts);
   const swapDefault = Number((/(?:const|let|var)\s+SWAP_MS\s*=\s*(\d+)/.exec(prelude) || [])[1] || 250);
   const loadoutMax = Number((/(?:const|let|var)\s+LOADOUT_MAX\s*=\s*(\d+)/.exec(prelude) || [])[1] || 10);
@@ -150,22 +153,49 @@ function readArsenal() {
     /* src/71 runs `Object.assign(WEAPONS[id], WEAPON_STATS[id])`, and `Object.assign(W, undefined)` is a
      * no-op — so a weapon with no WEAPON_STATS row keeps the stat block written inline in src/00. */
     out[id] = Object.assign({}, weapons[id], stats[id] || {}, roles[id] || {});
+    if (vs[id]) out[id].vs = vs[id];
   }
-  return { ids, weapons: out, roles, presets, swapDefault, loadoutMax, burn };
+  return { ids, weapons: out, roles, vs, presets, swapDefault, loadoutMax, burn };
 }
 
 /* ===================================================================== */
 /* 1. §F2 기준 표적 · §F3 공통 통화                                        */
 /* ===================================================================== */
 
-/* §F2. The five reference targets, max health. */
-const TARGETS = [
-  { key: 'word', hp: 19, label: '단어 조각' },
-  { key: 'button', hp: 44, label: '버튼' },
-  { key: 'smallCard', hp: 99, label: '작은 카드' },
-  { key: 'bigCard', hp: 184, label: '큰 카드' },
-  { key: 'section', hp: 253, label: '큰 섹션' }
+/* §F2. The five reference targets, max health.
+ *
+ * SPEC-weapon-identity §C2 groups them into FOUR grades by area (낱말 < 3,000 · 작은 것 ~20,000 ·
+ * 중간 ~150,000 · 큰 것 그 위) and §C3 multiplies a weapon's damage by `vs[grade]`. The mapping below is
+ * §C2's own prose read onto the five targets that already existed: 단어 조각 = 낱말, 버튼 = 작은 것,
+ * 카드 둘 = 중간 ("중간: 카드 · 이미지"), 큰 섹션 = 큰 것 ("큰 것: 섹션 · 큰 컨테이너"). INTERPRETATION
+ * (보고에 적었다): §C2 lists areas and §F2 lists hit points, and the two are not the same axis — the join
+ * is by what the target IS, which is what both texts name. */
+const GRADES = [
+  { key: 'word', label: '낱말', maxArea: 3000 },
+  { key: 'small', label: '작은 것', maxArea: 20000 },
+  { key: 'mid', label: '중간', maxArea: 150000 },
+  { key: 'large', label: '큰 것', maxArea: Infinity }
 ];
+/* `area` is the reference target's own px², and the grade is read off §C2's bands from it — the join is
+ * the product's own `ownHp()` (src/50-target.js: base = 20 + 0.35·√area, 텍스트 ×0.6), which inverts the
+ * five published hit points back onto the fixture geometry they came from almost exactly:
+ *   19 → ≈1,100 px² (단어 조각)      44 → ≈4,700 px² (버튼 120×44 = 5,280)
+ *   99 → ≈50,900 px² (작은 카드 320×~150)   184 → ≈220,000 px² (큰 카드 580×380 = 220,400)
+ *   253 → ≈443,000 px² (큰 섹션 1000×420 = 441,840)
+ * So 큰 카드 is a 큰 것 by §C2's own number, not a 중간 — the area decides, not the label. */
+const TARGETS = [
+  { key: 'word', hp: 19, area: 1120, label: '단어 조각' },
+  { key: 'button', hp: 44, area: 5280, label: '버튼' },
+  { key: 'smallCard', hp: 99, area: 50900, label: '작은 카드' },
+  { key: 'bigCard', hp: 184, area: 220400, label: '큰 카드' },
+  { key: 'section', hp: 253, area: 441840, label: '큰 섹션' }
+];
+function gradeForArea(area) {
+  for (const g of GRADES) if (area <= g.maxArea) return g.key;
+  return 'large';
+}
+for (const t of TARGETS) t.grade = gradeForArea(t.area);
+
 const BIG_CARD_HP = 184;
 const SECTION_HP = 253;
 
@@ -186,6 +216,7 @@ const CLICK_FLOOR_MS = 120;
  * pHit 은 **상한**이고, 진짜로 쏴서 센 명중률은 그보다 조금 낮다. 그 차이는 test/e2e.js 의 실측 단언이 본다. */
 const BLOOM_CAP_MUL = 10;
 const SWAP_REF = 2000;         // §F3: (1 − swapMs/2000)
+const SWAP_DEFAULT_MS = 250;   // src/00-prelude.js `SWAP_MS` — the fallback ttk() uses when none is passed
 
 /* §B1: 기준 표적은 버튼 120×44 로 고정한다 — "가장 작고 가장 자주 겨누는 것". */
 const HIT_BOX = { w: 120, h: 44, label: '버튼 120×44' };
@@ -264,6 +295,36 @@ function hitDamage(W) {
   if (W.damage === Infinity) return Infinity;
   return num(W.damage, 0) * Math.max(1, num(W.pellets, 1));
 }
+/* §C3: `WEAPONS[id].vs[grade]`, 기본 1.0. The product rounds the product of the two (src/72-roles.js
+ * `rlVsMul` → applyHit), so this model does too — a 65 damage hammer on a 큰 것 is 33, not 32.5. */
+function vsOf(W, grade) {
+  const t = W && W.vs;
+  const v = t && grade ? t[grade] : null;
+  return typeof v === 'number' && isFinite(v) && v > 0 ? v : 1;
+}
+function gradedHit(W, grade) {
+  const d = hitDamage(W);
+  if (!isFinite(d)) return d;
+  const m = vsOf(W, grade);
+  return m === 1 ? d : Math.max(1, Math.round(d * m));
+}
+/* §F3 의 통화에 들어가는 화력. §C3 이 등급마다 다른 계수를 주었으므로 **네 등급의 평균**을 쓴다.
+ *
+ * INTERPRETATION (보고에 적었다). 버튼 한 등급만 쓰는 것도 가능한 읽기였다 — §B1 이 pHit 의 기준 표적을
+ * 버튼으로 고정했으니까. 그러면 §C3 이 준 역할이 그대로 밴드 위반이 된다: 샷건(작은 것 1.4)과 권총(1.3)이
+ * 단숨에 140% · 142% 가 되고 로켓(0.7)과 미니건(0.8)이 73% · 71% 로 떨어진다. §C5 가 "밴드를 느슨하게
+ * 하지 않는다 — **성능은 같아도 된다. 역할이 달라야 한다**" 고 적었는데, 통화를 한 등급에 묶으면 역할이
+ * 곧 성능이 되어 그 문장이 성립하지 않는다. pHit 의 기준 표적이 버튼인 것은 **조준**(어디에 맞나)의
+ * 문제이고 등급 계수는 **표적**(무엇을 치나)의 문제라 축이 다르다. 평균이면 통화는 "이 무기가 페이지
+ * 전체를 상대로 내는 화력" 이 되고, 등급 간의 차이는 §F2 처치 시간표와 §F6-7 · §F6-8 이 본다. */
+function meanGradedHit(W) {
+  const d = hitDamage(W);
+  if (!isFinite(d)) return d;
+  let sum = 0;
+  for (const g of GRADES) sum += vsOf(W, g.key);
+  const m = sum / GRADES.length;
+  return m === 1 ? d : d * m;
+}
 
 /** §B1 유효산포 σ — the spread the weapon has IN ITS OWN FIRING POSTURE.
  * 지속 사격 무기는 블룸 상한에서 쏜다. 저격총은 **조준경 안에서** 쏜다 — src/71 의 spreadNow() 가
@@ -290,7 +351,7 @@ function pHitEff(W, box) {
 /** §F3 burstDPS, single target. AoE's simultaneous targets are a ROLE (§F5), not a currency.
  * §B1: 이제 **맞는 탄만 센다** — × pHit(W, 버튼). 못 맞는 것이 밴드를 맞추는 공짜 손잡이였다(§A4). */
 function burstDPS(W, burn) {
-  const d = hitDamage(W);
+  const d = meanGradedHit(W);
   if (!isFinite(d)) return Infinity;
   const key = BURN_WEAPONS[W.id];
   let dot = 0;
@@ -340,14 +401,22 @@ function handling(W, swapDefault, moveExp) {
   return m * (1 - swap / SWAP_REF);
 }
 
-/** 처치 시간: the reference target's whole health, magazines and 예열 included. */
-function ttk(W, hp) {
-  const d = hitDamage(W);
-  if (!isFinite(d)) return 0;                      // 붕괴
+/** 처치 시간: the reference target's whole health, magazines and 예열 included, with §C3's grade
+ * coefficient applied to every hit.
+ *
+ * INTERPRETATION (보고에 적었다). 9단계는 `(shots − 1) × interval` 로 셌다 — 한 방에 지우는 조합이
+ * **0초**, 표에서는 "즉시" 가 되고, §A2 가 센 "표의 절반이 즉시" 가 거기서 나왔다. 그건 모델의 눈금이
+ * 틀린 것이지 무기가 빠른 것이 아니다: 쿨다운 400ms 짜리 망치를 한 번 휘두르면 그 400ms 는 **당신의
+ * 시간**이고 그 동안 다른 아무것도 못 한다. §F3 이 `interval` 을 "공격 한 번이 드는 시간" 으로 정의해
+ * 두었으므로 n 번 치는 데 드는 시간은 n × interval 이다. 등급 계수만으로는 "즉시" 가 사라지지 않는다 —
+ * §C3 이 망치의 낱말 계수를 1.0 으로 못박았고 피해 65 는 §A2 가 못박았으므로 한 방은 한 방이다.
+ * SPEC-weapon-identity §E 가 요구한 "표에서 즉시가 사라진다" 는 눈금을 고쳐야만 참이 된다. */
+function ttk(W, hp, grade, swapDefault) {
+  const d = gradedHit(W, grade);
   if (!(d > 0)) return Infinity;                   // 중력탄 — 직접 피해 0
-  const shots = Math.ceil(hp / d);
+  const shots = isFinite(d) ? Math.ceil(hp / d) : 1;   // 붕괴: 한 번이면 끝난다. 그래도 한 번은 든다
   const iv = intervalMs(W);
-  let t = (shots - 1) * iv + num(W.spinUpMs, 0);
+  let t = shots * iv + num(W.spinUpMs, 0) + num(W.swapMs, swapDefault == null ? SWAP_DEFAULT_MS : swapDefault);
   if (W.heat) {
     const perSec = (num(W.heatPerTick, 0) * 1000) / Math.max(1, num(W.tickMs, 50));
     const fireMs = (num(W.heatMax, 100) / Math.max(1e-9, perSec)) * 1000;
@@ -411,7 +480,10 @@ function model() {
       modes: {},
       firstShotMs: num(W.swapMs, swapDefault) + num(W.spinUpMs, 0) + (W.hold ? num(W.tickMs, 0) : 0)
     };
-    for (const t of TARGETS) row.ttk[t.key] = ttk(W, t.hp);
+    for (const t of TARGETS) row.ttk[t.key] = ttk(W, t.hp, t.grade, swapDefault);
+    /* §F6-4 는 등급 계수를 **빼고** 본다 — 아래 violations() 의 주석 참조. */
+    row.ttkRawSection = ttk(W, SECTION_HP, null, swapDefault);
+    row.vs = W.vs || null;
     for (const k of Object.keys(MODES)) {
       const hh = handling(W, swapDefault, MODES[k].moveExp);
       row.modes[k] = { handling: hh, effective: (b + num(W.utility, 0)) * u * hh };
@@ -550,9 +622,16 @@ function violations(rows, byId, median) {
    * INTERPRETATION (보고에 적었다): 실전 범주에만 적용한다. §D 는 예능 무기에게 "실효 화력이 중앙값의
    * 25~50%" 를 요구하므로 예능이 4.5초 안에 큰 섹션을 지우면 그쪽 규칙과 정면으로 충돌하고, 특수 무기는
    * 애초에 피해로 일하지 않는다(중력탄은 직접 피해가 0 이다). "지속 사격" 은 실전 무기의 개념이다. */
+  /* SPEC-weapon-identity §C3 (11단계): 이 규칙은 등급 계수를 **빼고** 본다 (`ttkRawSection`).
+   * INTERPRETATION (보고에 적었다). §C3 은 다섯 무기(망치 0.5 · 권총 0.6 · 카타나 0.5 · 화염 0.6 ·
+   * 샷건 0.4)에게 큰 것을 **일부러** 못하게 만들라고 적었고, §F6-4 는 실전 무기가 큰 것을 지울 수
+   * 있어야 한다고 적었다. 계수를 넣어 재면 그 다섯이 전부 §F6-4 위반이 되어 §C 와 §F6-4 가 서로를
+   * 지운다. 두 문장이 묻는 것이 다르다고 읽었다 — §F6-4 는 "**할 수 있는가**"(지속 사격으로 큰 것을
+   * 끝낼 화력이 있는가)이고 §C3 은 "**얼마나 잘하는가**"다. 못하게 만드는 쪽은 §F6-7 이 반대편에서
+   * 강제한다. 등급 계수가 들어간 값은 아래 §F2 표가 그대로 보여 준다. */
   for (const r of rows) {
     if (r.cat !== 'field' || BAND_EXEMPT.has(r.id)) continue;
-    if (r.ttk.section > 4.5 + 1e-9) out.push({ rule: 4, id: r.id, msg: `큰 섹션(${SECTION_HP}) 처치 시간 ${r.ttk.section.toFixed(2)}초 > 4.5초` });
+    if (r.ttkRawSection > 4.5 + 1e-9) out.push({ rule: 4, id: r.id, msg: `큰 섹션(${SECTION_HP}) 처치 시간(등급 계수 제외) ${r.ttkRawSection.toFixed(2)}초 > 4.5초` });
   }
   /* 5. moveSpeed 가 0.5 미만 또는 1.25 초과 */
   for (const r of rows) {
@@ -566,6 +645,30 @@ function violations(rows, byId, median) {
     if (r.pHitEff < PHIT_MIN - 1e-9) {
       out.push({ rule: 6, id: r.id, msg: `실전 무기인데 ${HIT_BOX.label} 명중률이 ${pct(r.pHitEff)} — 문턱 ${pct(PHIT_MIN)} 미만이다 (유효산포 ${r.spread.toFixed(0)}px)` });
     }
+  }
+  /* 7. SPEC-weapon-identity §C3: 실전 무기는 `vs` 에 **1.0 미만인 등급이 최소 하나** 있어야 한다.
+   * "못하는 것이 없으면 잘하는 것도 느껴지지 않는다"(§C1). 등급표가 아예 없는 실전 무기도 같은 실패다 —
+   * 계수를 안 적는 것은 전부 1.0 을 적은 것과 같다. 붕괴만 뺀다: 피해가 Infinity 라 곱할 것이 없고
+   * §F4 가 이미 밴드 검사에서 뺐다. */
+  for (const r of rows) {
+    if (r.cat !== 'field' || BAND_EXEMPT.has(r.id)) continue;
+    const t = r.vs;
+    if (!t) { out.push({ rule: 7, id: r.id, msg: '실전 무기인데 §C3 등급 계수(`vs`)가 없다' }); continue; }
+    const vals = GRADES.map((g) => (typeof t[g.key] === 'number' ? t[g.key] : 1));
+    if (!vals.some((v) => v < 1 - 1e-9)) {
+      out.push({ rule: 7, id: r.id, msg: `등급 계수에 1.0 미만이 하나도 없다 — ${GRADES.map((g, i) => g.label + ' ' + vals[i]).join(' · ')}` });
+    }
+  }
+  /* 8. SPEC-weapon-identity §C3: **어떤 두 무기도 `vs` 네 값이 모두 같아서는 안 된다.**
+   * 등급표를 발행한 무기들끼리 본다 — 발행하지 않은 무기(특수 · 예능 · 붕괴)는 §C3 자신이 "기본 1.0"
+   * 이라고 적은 쪽이고, 그것들을 서로 비교하면 규칙이 "특수 무기 둘이 존재하면 실패" 가 되어 §C3 의
+   * 표가 다루지 않는 범주를 벌하게 된다. (보고에 적었다.) */
+  const vsSeen = new Map();
+  for (const r of rows) {
+    if (!r.vs) continue;
+    const key = GRADES.map((g) => (typeof r.vs[g.key] === 'number' ? r.vs[g.key] : 1)).join('/');
+    if (vsSeen.has(key)) out.push({ rule: 8, id: r.id, msg: `등급 계수 네 값이 ${vsSeen.get(key)} 와 완전히 같다 (${key})` });
+    else vsSeen.set(key, r.id);
   }
   /* §F5: "하나도 겹치면 안 된다." A role that is missing, unknown or shared is the same failure. */
   const seen = new Map();
@@ -625,7 +728,13 @@ const ADJUSTMENTS = [
   { id: 'watergun', field: 'bloom', from: 5, to: 1.5, why: '§B2 가 `laser 5 → 1.5` 로 적은 줄의 **진짜 주인**이다. 레이저의 `bloom` 은 0 이고 유효산포 50px / 명중률 26% 를 들고 있던 것은 물총이다(§A3 의 σ 표가 그대로 가리킨다). 명세의 이름표가 어긋났을 뿐 수치는 정확해서, 수치를 따랐다. 50px → 15px.' },
   { id: 'rubber', field: 'bloom', from: 4, to: 3, why: '§B2 가 `shotgun 4 → 3` 으로 적은 줄의 진짜 주인. 샷건의 `bloom` 도 0 이고 유효산포 40px / 36% 는 고무탄의 것이었다. 40px → 30px. 레이저 · 샷건 · 냉각총은 이미 `bloom: 0` 이라 **올리지 않았다** — 올리면 §B 가 하려는 일의 정반대가 된다.' },
   { id: 'sniper', field: 'mag', from: 5, to: 4, why: '모델이 산포를 핸들링에서 빼면서 저격총의 `handling` 이 0.545 → 0.689 로 올랐고(산포 25px 이 더 이상 두 번 세이지 않는다) 중앙값의 **126%** 가 됐다. §B3 이 허락한 축은 틱 간격과 탄창이고, 틱(쿨다운 600)은 §A2 가 못박은 값이라 탄창만 남았다. 5 → 4 로 가동률 0.612 → 0.558, 115%. 탄창 6 이상은 §F6-3 의 "값싼 한 방" 문턱이라 애초에 올릴 수도 없었다.' },
-  { id: 'watergun', field: 'tickMs', from: 40, to: 50, why: '물총의 명중률이 26% → 86% 로 오르면서 `rawDPS` 가 19.6 → 64.3 이 되어 **나팔을 세 축 전부에서 지배**했다(§F6-2). §B3 이 허락한 축 그대로 틱만 40 → 50 — `rawDPS` 51.4 로 나팔(54.6) 아래에 둔다. 피해 3 은 §D 가 못박은 값이라 그대로다.' }
+  { id: 'watergun', field: 'tickMs', from: 40, to: 50, why: '물총의 명중률이 26% → 86% 로 오르면서 `rawDPS` 가 19.6 → 64.3 이 되어 **나팔을 세 축 전부에서 지배**했다(§F6-2). §B3 이 허락한 축 그대로 틱만 40 → 50 — `rawDPS` 51.4 로 나팔(54.6) 아래에 둔다. 피해 3 은 §D 가 못박은 값이라 그대로다.' },
+  /* ── SPEC-weapon-identity §C3 (11단계): 등급 계수 ───────────────────────────────────────────────
+   * §C5 가 "피해값을 바꾸지 않는다" 고 다시 못박았고 그대로 했다 — `damage` 는 한 줄도 움직이지
+   * 않았다. 등급 계수가 통화에 들어오면서(네 등급의 평균) 실전 중앙값이 111.5 → 103.5 로 내려갔고,
+   * 그 결과 밴드를 벗어난 둘만 §C5 가 허락한 축(틱 간격 · 탄창 · 쿨다운)으로 되돌렸다. */
+  { id: 'sniper', field: 'mag', from: 4, to: 3, why: '§C3. 저격총의 등급 계수 평균은 1.0 이라(낱말 0.4 · 작은 것 1.0 · 중간 1.4 · 큰 것 1.2) 화력이 그대로인데 중앙값이 111.5 → 103.5 로 내려가 **124%** 가 됐다. 피해 200 과 쿨다운 600 은 §A2 가 못박았으므로 남은 축은 또 탄창이다. 4 → 3 으로 가동률 0.558 → 0.486, 108%. 볼트액션 세 발은 §F6-3 의 "값싼 한 방" 문턱(6)에서 가장 멀기도 하다.' },
+  { id: 'squeaky', field: 'cooldownMs', from: 170, to: 185, why: '§C3. 뿅망치는 등급 계수가 없어(예능은 §C3 의 표에 없다) 화력이 그대로인데 중앙값이 내려가 예능 밴드 25~50% 를 **51%** 로 넘었다. 9단계와 같은 축, 같은 이유 — 피해 8 은 §D 가 못박았고 이동 1.20 · 교체 120ms 는 "가장 빠르게 휘두른다" 라 못 건드린다. 185ms 도 여전히 무기고에서 가장 짧은 공격 간격이다.' }
 ];
 
 /* ===================================================================== */
@@ -694,9 +803,11 @@ function renderDoc(m) {
   L.push('');
   L.push('```');
   L.push('interval  = hold ? tickMs : max(cooldownMs, ' + CLICK_FLOOR_MS + ')   // ' + CLICK_FLOOR_MS + 'ms 는 §A1 의 "짧게 누름" 경계');
-  L.push('hit       = damage × (pellets | 1)                  // 샷건 한 발은 펠릿 아홉이고 한 번에 닿는다');
+  L.push('hit       = damage × (pellets | 1) × vs[등급]        // 샷건 한 발은 펠릿 아홉이고 한 번에 닿는다');
+  L.push('vs평균     = (vs.낱말 + vs.작은것 + vs.중간 + vs.큰것) / 4   // §F3 통화가 쓰는 등급 계수 (§C3)');
   L.push('pHit      = erf((w/2)/(σ√2)) × erf((h/2)/(σ√2))      // 2차원 가우시안. 기준 표적은 ' + HIT_BOX.label);
-  L.push('burstDPS  = hit × 1000 / interval × pHit + dotDPS   // 단일 표적. 맞는 탄만 센다. 연소는 가산한다');
+  L.push('burstDPS  = damage × pellets × vs평균 × 1000 / interval × pHit + dotDPS   // 맞는 탄만 센다');
+  L.push('처치 시간  = swapMs + 예열 + 필요한 공격 수 × interval + 재장전 · 과열   // 꺼내서 지울 때까지');
   L.push('uptime    = 쏠 수 있는 시간 / 주기                     // 재장전 · 과열 · 예열 · 쿨다운');
   L.push('handling  = moveSpeed × (1 − swapMs/2000)           // 산포 항은 삭제됐다 (§B1)');
   L.push('σ (유효산포) = spread + bloom × 10                     // 지속 사격 상한. 조준경 무기는 0');
@@ -732,6 +843,18 @@ function renderDoc(m) {
   L.push('  곱해도 0 이라, 곱셈으로 두면 특수 밴드가 구조적으로 닿을 수 없다. 그래서 `utility` 는 그 무기가');
   L.push('  로드아웃에 돌려주는 **초당 피해 환산값**이고 `burstDPS` 옆에 더한다. 각 숫자의 유도는');
   L.push('  `src/00-prelude.js` 의 `WEAPON_ROLES` 주석에 한 줄씩 적혀 있다.');
+  L.push('- **등급 계수는 통화에 네 등급의 평균으로 들어간다** (SPEC-weapon-identity §C3). 버튼 한 등급만');
+  L.push('  쓰는 읽기도 가능했지만 — §B1 이 pHit 의 기준 표적을 버튼으로 고정했으니까 — 그러면 §C3 이 준');
+  L.push('  역할이 그대로 밴드 위반이 된다: 샷건(작은 것 1.4)과 권총(1.3)이 140% · 142%, 로켓(0.7)과');
+  L.push('  미니건(0.8)이 73% · 71%. §C5 가 "**성능은 같아도 된다. 역할이 달라야 한다**" 고 적었는데 통화를');
+  L.push('  한 등급에 묶으면 역할이 곧 성능이 되어 그 문장이 성립하지 않는다. pHit 의 기준 표적이 버튼인');
+  L.push('  것은 **조준**의 문제이고 등급 계수는 **표적**의 문제라 축이 다르다.');
+  L.push('- **처치 시간은 n 번째 공격까지가 아니라 n 번의 공격이다.** 9단계는 `(공격 수 − 1) × interval` 로');
+  L.push('  셌고, 그래서 한 방에 지우는 조합이 **0초 = "즉시"** 로 적혔다 — §A2 가 센 "표의 절반이 즉시" 가');
+  L.push('  거기서 나왔다. 쿨다운 400ms 짜리 망치를 한 번 휘두르면 그 400ms 는 **당신의 시간**이고 그 동안');
+  L.push('  다른 아무것도 못 한다. 무기를 꺼내는 `swapMs` 도 같은 이유로 들어간다 — §F8 이 이미 그 값을');
+  L.push('  `arcade 반응` 으로 따로 발행하고 있었다. 등급 계수만으로는 "즉시" 가 사라지지 않는다: §C3 이');
+  L.push('  망치의 낱말 계수를 1.0 으로 못박았고 피해 65 는 §A2 가 못박았으므로 한 방은 한 방이다.');
   L.push('');
 
   L.push('## §F4 · §F5 — 실효 화력과 역할');
@@ -771,7 +894,31 @@ function renderDoc(m) {
     m.rows.map((r) => ['`' + r.id + '`'].concat(TARGETS.map((t) => ttkStr(r.ttk[t.key])))),
     ['', 'r', 'r', 'r', 'r', 'r']));
   L.push('');
-  L.push('§F6-4 는 실전 무기가 큰 섹션(' + SECTION_HP + ')을 4.5초 안에 지울 것을 요구한다.');
+  L.push('§F6-4 는 실전 무기가 큰 섹션(' + SECTION_HP + ')을 4.5초 안에 지울 것을 요구한다 — 그 검사만은');
+  L.push('**등급 계수를 빼고** 본다(아래 §F6 주석 참조).');
+  L.push('');
+  L.push('표적의 **등급**(§C2, 면적으로 가른다)과 그 등급에 곱해진 계수가 위 숫자에 이미 들어가 있다:');
+  L.push('');
+  L.push(mdTable(['기준 표적', '면적(px²)', '등급'],
+    TARGETS.map((t) => [t.label + ' ' + t.hp, String(t.area), GRADES.filter((g) => g.key === t.grade).map((g) => g.label)[0] || t.grade]),
+    ['', 'r', '']));
+  L.push('');
+  L.push('## §C3 — 표적 등급 계수');
+  L.push('');
+  L.push('> "무기의 정체성은 \'무엇을 잘하는가\'가 아니라 **\'무엇을 못하는가\'** 다." (§C1)');
+  L.push('');
+  L.push('`WEAPONS[id].vs` 는 약속이 아니라 필드다. §F6-7 이 1.0 미만을 하나도 갖지 않은 실전 무기를 잡고,');
+  L.push('§F6-8 이 네 값이 완전히 같은 두 무기를 잡는다.');
+  L.push('');
+  L.push(mdTable(['무기', '범주'].concat(GRADES.map((g) => g.label)).concat(['평균']),
+    m.rows.filter((r) => r.vs).map((r) => ['`' + r.id + '`', BANDS[r.cat] ? BANDS[r.cat].label : r.cat]
+      .concat(GRADES.map((g) => { const v = typeof r.vs[g.key] === 'number' ? r.vs[g.key] : 1; return (v < 1 ? '**' + v.toFixed(1) + '**' : v.toFixed(1)); }))
+      .concat([(GRADES.reduce((a, g) => a + (typeof r.vs[g.key] === 'number' ? r.vs[g.key] : 1), 0) / GRADES.length).toFixed(3)])),
+    ['', '', 'r', 'r', 'r', 'r', 'r']));
+  L.push('');
+  L.push('굵은 값이 그 무기가 **못하는 것**이다. 계수표가 없는 무기(붕괴 · 특수 · 예능)는 네 등급 전부 1.0 —');
+  L.push('§C3 의 표가 실전 13종만 적었고 §C3 자신이 "기본 1.0" 이라고 썼다. 붕괴는 피해가 Infinity 라');
+  L.push('곱할 것이 없고 §F4 가 이미 밴드 검사에서 뺐으므로 §F6-7 에서도 뺀다.');
   L.push('');
 
   L.push('## §F8 — 모드별 보정');
@@ -799,7 +946,7 @@ function renderDoc(m) {
   }
   L.push('');
 
-  L.push('## §F6 — `--check` 가 잡는 여섯 가지');
+  L.push('## §F6 — `--check` 가 잡는 여덟 가지');
   L.push('');
   L.push('1. 실효 화력이 범주 밴드를 벗어난다');
   L.push('2. 같은 범주 안에서 다른 무기에 완전히 지배된다 (`burstDPS` · `uptime` · `handling` 모든 축에서 같거나 나쁨)');
@@ -807,6 +954,8 @@ function renderDoc(m) {
   L.push('4. 실전 무기가 큰 섹션(' + SECTION_HP + ')을 4.5초 안에 못 지운다');
   L.push('5. `moveSpeed` 가 0.5 미만 또는 1.25 초과');
   L.push('6. 실전 무기의 `pHit(' + HIT_BOX.label + ')` 이 ' + pct(PHIT_MIN) + ' 미만이다 (샷건은 펠릿 보정값으로 본다)');
+  L.push('7. 실전 무기의 §C3 등급 계수에 **1.0 미만인 등급이 하나도 없다** (계수표 자체가 없는 것도 같은 실패)');
+  L.push('8. **어떤 두 무기의 등급 계수 네 값이 전부 같다**');
   L.push('');
   L.push('여기에 §F5 역할 겹침 검사가 더해진다.');
   L.push('');
@@ -822,6 +971,15 @@ function renderDoc(m) {
   L.push('');
   L.push('4번도 하나 들어갔다. **실전 범주에만** 적용한다 — 예능 무기가 4.5초 안에 큰 섹션을 지우면');
   L.push('§D 의 "실효 화력이 중앙값의 25~50%" 와 정면으로 충돌하고, 특수 무기는 애초에 피해로 일하지 않는다.');
+  L.push('그리고 11단계부터 4번은 **등급 계수를 빼고** 잰다 — §C3 이 다섯 무기에게 큰 것을 일부러 못하게');
+  L.push('만들라고 적었으므로, 계수를 넣어 재면 그 다섯이 전부 4번 위반이 되어 §C 와 §F6-4 가 서로를 지운다.');
+  L.push('4번은 "할 수 있는가" 를 묻고 §C3 은 "얼마나 잘하는가" 를 정한다. 못하게 만드는 쪽은 7번이 맡는다.');
+  L.push('');
+  L.push('7번과 8번은 SPEC-weapon-identity §C3 이 더한 것이다. **"못하는 것이 없으면 잘하는 것도 느껴지지');
+  L.push('않는다"**(§C1) 를 산문이 아니라 검사로 만든 둘이다 — 계수가 전부 1.0 인 실전 무기를 넣으면 7번이,');
+  L.push('두 무기의 계수 네 값을 같게 만들면 8번이 exit 1 이다. 8번은 **계수표를 발행한 무기들끼리** 본다:');
+  L.push('§C3 의 표는 실전 13종만 적었고 발행하지 않은 쪽은 §C3 자신이 "기본 1.0" 이라고 쓴 쪽이라,');
+  L.push('그것들을 서로 비교하면 "특수 무기가 둘 이상 존재하면 실패" 가 된다.');
   L.push('');
   if (m.violations.length) {
     L.push('> **현재 위반 ' + m.violations.length + '건** — `node tools/balance.js --check` 가 exit 1 이다.');
