@@ -993,7 +993,8 @@
    *   clone compare    400 descendants                  → 150
    *   enemy selection  900 ms (SPEC-combat §B3 — was 1500) → 2500 ms
    *   concurrent enemies  up to 7 (§B3 — was 5)         → 2
-   *   particles        40 live (ships as 40, not 60)    → 30
+   *   particles        40 live (ships as 40, not 60)    → 30   (fire · material puff · damage numbers · row flashes)
+   *   break particles  60 live (SPEC-destruction §B3)   → 30
    *   crack strands    ×1.0                             → ×0.7
    *   canvas DPR       max 2                            → max 1.5                                        */
   const PERF_PIECE_CAP = 80;
@@ -1003,6 +1004,7 @@
   const PERF_SELECT_MS = 2500, SELECT_MS = 900;   // SPEC-combat §B3: 선정 간격 1500 → 900 ms
   const PERF_MAX_HOSTILES = 2;
   const PERF_PARTICLE_CAP = 30, PARTICLE_CAP = 40;
+  const PERF_FRAG_CAP = 30, FRAG_CAP = 60;   // SPEC-destruction §B3: 전체 상한 60, 성능 모드 절반
   const PERF_CRACK_MUL = 0.7;
   const PERF_DPR = 1.5, QUALITY_DPR = 2;
 
@@ -1093,7 +1095,12 @@
   function textTokenCap() { return perfOn() ? PERF_TEXT_TOKENS : TEXT_TOKENS; }
   function cloneCapFor(base) { return perfOn() ? Math.min(base, PERF_CLONE_CAP) : base; }
   function selectIntervalMs() { return perfOn() ? PERF_SELECT_MS : SELECT_MS; }
+  /* The two particle caps — the ONLY places the numbers live. particleCap() bounds every node ledger that
+   * fxNode() (src/35-effects.js) feeds except the §B3 break-particle pool: the fire / smoke / star / splash
+   * ledger `state.fire`, the material puff `matFx`, the floating damage numbers `state.dmgNodes` and the
+   * archetype row flashes `archNodes`. fragCap() is the §B3 pool `fragFx`, which has its own larger figure. */
   function particleCap() { return perfOn() ? PERF_PARTICLE_CAP : PARTICLE_CAP; }
+  function fragCap() { return perfOn() ? PERF_FRAG_CAP : FRAG_CAP; }
   function crackRayMul() { return perfOn() ? PERF_CRACK_MUL : 1; }
   function perfDprMax() { return perfOn() ? PERF_DPR : QUALITY_DPR; }
 
@@ -2053,40 +2060,17 @@
   /* ── the puff a break throws off (§5: panel = dust, glass = sparkle, paper = fibres, metal = sparks) ──
    * Plain fading divs in our own root, capped, tracked, and swept by clearCanvas() — restore() cancels every
    * animation, so the nodes are removed by hand there rather than by the finish handler. */
-  const MATFX_CAP = 40;
   const matFx = [];
   function clearMatFx() {
     for (const n of matFx) { try { n.remove(); } catch (e) { /* ignore */ } }
     matFx.length = 0;
   }
+  /* The routine is fxPuff() (src/35-effects.js), shared with fracParticles(); the cap is particleCap() like
+   * every other ledger, so performance mode brings this one down too (it used to be a private 40). */
   function matBurst(mat, x, y) {
-    if (!root || reducedMotion()) return;
     const P = matOf(mat).puff;
     if (!P) return;
-    const n = randInt(P.n[0], P.n[1]);
-    for (let i = 0; i < n; i++) {
-      const s = rand(P.size[0], P.size[1]);
-      const node = mk('div', 'crs-matfx');
-      node.style.left = px(x + rand(-14, 14) - s / 2);
-      node.style.top = px(y + rand(-14, 14) - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      node.style.borderRadius = P.round ? '50%' : '1px';
-      node.style.background = P.color;
-      if (P.round) node.style.filter = 'blur(1.5px)';
-      root.append(node);
-      matFx.push(node);
-      while (matFx.length > MATFX_CAP) { const old = matFx.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = matFx.indexOf(node); if (k >= 0) matFx.splice(k, 1); };
-      const dur = rand(P.life[0], P.life[1]);
-      try {
-        const a = trackAnim(node.animate([
-          { transform: 'translate(0px, 0px) scale(1)', opacity: 0.95 },
-          { transform: 'translate(' + px(rand(-18, 18)) + ', ' + px(-rand(P.rise[0], P.rise[1])) + ') scale(' + rand(0.3, 0.8).toFixed(2) + ')', opacity: 0 }
-        ], { duration: dur, easing: 'ease-out', fill: 'forwards' }));
-        a.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, dur + 300);
-    }
+    fxPuff(P, x, y, { cls: 'crs-matfx', ledger: matFx, cap: particleCap, blur: P.round ? 1.5 : 0, scatter: 14, drift: 18, grow: [0.3, 0.8], alpha: 0.95, reduced: 'skip' });
   }
 
   /* Debris physics a piece inherits from the element it came off (§5 column 3), read by addPiece()/tickFrame(). */
@@ -2133,6 +2117,82 @@
     later(kill, 1200);
     root.append(n);
   }
+  /* ===================================================================== */
+  /* fxNode — the one way a short-lived effect node is born, tracked and killed */
+  /* ===================================================================== */
+  /* Nine effect functions used to carry their own copy of "make the node, append it, push it on a ledger,
+   * trim the ledger to a cap, build a kill closure, trackAnim(node.animate(...)) with a finish listener, and
+   * later(kill, dur + N)". The copies had drifted apart in three ways (docs: SPEC-settings §2.2 caps, §3.1):
+   *   · the 40-node cap was written three times and only one of them asked performance mode;
+   *   · one ledger (`archNodes`) had no cap at all;
+   *   · some copies handed `scaleMs(dur)` to the animation and others handed it the raw `dur` while the kill
+   *     timer — later() — always scales, so under `debug.timeScale = 0.2` the node was removed before its
+   *     animation was half over.
+   * Here the animation length and the safety timer are scaled by the SAME call, always, so they cannot disagree.
+   *
+   *   cls       class name (mk() adds data-crs)
+   *   o.style   { left: '12px', 'font-size': … } — CSSOM only (camelCase keys by assignment, dashed keys by
+   *             setProperty), never setAttribute('style') (CLAUDE.md: 금지 목록)
+   *   o.setup   fn(node) run before the node is appended (text content and the like)
+   *   o.ledger  array the node is pushed on and spliced out of; o.cap is a number or a function returning one
+   *             (omit it for an uncapped ledger). The OLDEST nodes are dropped to make room.
+   *   o.keyframes / o.dur / o.easing   the animation. `dur` is AUTHORED milliseconds and is scaled here.
+   *   o.linger  extra authored ms the safety timer waits past `dur` before removing a node whose finish event
+   *             never came (default 300).
+   * Returns the node, or null with no root. The caller owns any reduced-motion decision. */
+  function fxNode(cls, o) {
+    if (!root) return null;
+    const n = mk('div', cls);
+    const st = o.style;
+    if (st) for (const k in st) { if (k.indexOf('-') >= 0) n.style.setProperty(k, st[k]); else n.style[k] = st[k]; }
+    if (o.setup) o.setup(n);
+    root.append(n);
+    const ledger = o.ledger;
+    if (ledger) {
+      ledger.push(n);
+      const cap = typeof o.cap === 'function' ? o.cap() : o.cap;
+      if (cap > 0) while (ledger.length > cap) { const old = ledger.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
+    }
+    const kill = () => {
+      try { n.remove(); } catch (e) { /* ignore */ }
+      if (ledger) { const k = ledger.indexOf(n); if (k >= 0) ledger.splice(k, 1); }
+    };
+    const dur = o.dur > 0 ? o.dur : 400;
+    try {
+      const a = trackAnim(n.animate(o.keyframes, { duration: scaleMs(dur), easing: o.easing || 'ease-out', fill: 'forwards' }));
+      a.addEventListener('finish', kill);
+    } catch (e) { /* ignore */ }
+    later(kill, dur + (o.linger != null ? o.linger : 300));
+    return n;
+  }
+  /* The one puff routine. A material's break dust (src/32-material.js) and the weapon's own particle kind
+   * (src/66-fracture.js) were the same function with different numbers; those numbers are the arguments now.
+   *   P  { n: [lo, hi], size: [lo, hi], rise: [lo, hi], life: [lo, hi], color, round }
+   *   o  { cls, ledger, cap, blur (px), scatter (± px at birth), drift (± px sideways), grow: [lo, hi] (end
+   *        scale), alpha (start opacity), reduced: 'skip' | 'mote' }
+   * Reduced motion (SPEC-settings §3.1): 'skip' makes nothing; 'mote' makes ONE static mote that only fades.
+   * Returns how many particles were made. */
+  function fxPuff(P, x, y, o) {
+    if (!root || !P) return 0;
+    const reduced = reducedMotion();
+    if (reduced && o.reduced === 'skip') return 0;
+    const n = reduced ? 1 : randInt(P.n[0], P.n[1]);
+    for (let i = 0; i < n; i++) {
+      const s = rand(P.size[0], P.size[1]);
+      const style = {
+        left: px(x + (reduced ? 0 : rand(-o.scatter, o.scatter)) - s / 2),
+        top: px(y + (reduced ? 0 : rand(-o.scatter, o.scatter)) - s / 2),
+        width: px(s), height: px(s), borderRadius: P.round ? '50%' : '1px', background: P.color
+      };
+      if (o.blur > 0) style.filter = 'blur(' + o.blur + 'px)';
+      const kf = reduced
+        ? [{ opacity: 0.8 }, { opacity: 0 }]
+        : [{ transform: 'translate(0px, 0px) scale(1)', opacity: o.alpha },
+          { transform: 'translate(' + px(rand(-o.drift, o.drift)) + ', ' + px(-rand(P.rise[0], P.rise[1])) + ') scale(' + rand(o.grow[0], o.grow[1]).toFixed(2) + ')', opacity: 0 }];
+      fxNode(o.cls, { style, ledger: o.ledger, cap: o.cap, keyframes: kf, dur: rand(P.life[0], P.life[1]) });
+    }
+    return n;
+  }
   /* One rising puff of smoke. SPEC-destruction §E4 ("60~500ms 중심에서 연기가 피어오른다") and §F3
    * ("연기가 피어오른다 — 요소당 초당 1.5개") are the same thing seen twice, so they share one node type.
    * Tracked in `state.fire` so the existing particle cap, the restore() sweep and the §9 "흔적 없음"
@@ -2141,25 +2201,38 @@
     if (!root || reducedMotion()) return null;
     opts = opts || {};
     const s = opts.size || rand(14, 30);
-    const n = mk('div', 'crs-smoke');
-    n.style.left = px(x - s / 2); n.style.top = px(y - s / 2);
-    n.style.width = px(s); n.style.height = px(s); n.style.borderRadius = '50%';
-    n.style.background = 'radial-gradient(circle, rgba(58,52,48,.5) 0%, rgba(58,52,48,.26) 50%, rgba(58,52,48,0) 72%)';
-    root.append(n);
-    state.fire.push(n);
-    while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(n); if (k >= 0) state.fire.splice(k, 1); };
-    const dur = opts.dur || rand(600, 1000);
-    try {
-      const a = trackAnim(n.animate([
+    return fxNode('crs-smoke', {
+      style: {
+        left: px(x - s / 2), top: px(y - s / 2), width: px(s), height: px(s), borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(58,52,48,.5) 0%, rgba(58,52,48,.26) 50%, rgba(58,52,48,0) 72%)'
+      },
+      ledger: state.fire, cap: particleCap,
+      keyframes: [
         { transform: 'translateY(0px) scale(.6)', opacity: 0.55 },
         { transform: 'translateY(' + px(-rand(34, 72)) + ') scale(1.5)', opacity: 0 }
-      ], { duration: dur, easing: 'ease-out', fill: 'forwards' }));
-      a.addEventListener('finish', kill);
-    } catch (e) { /* ignore */ }
-    later(kill, dur + 400);
-    return n;
+      ],
+      dur: opts.dur || rand(600, 1000), linger: 400
+    });
   }
+  /* Test-only read-back and driver for the effect ledgers (same family as debug.perf / debug.burning). Lengths,
+   * not node counts, so a test can compare a ledger with the cap that is supposed to bound it. */
+  debug.fxLedgers = () => ({
+    fire: state.fire.length, matFx: matFx.length, dmg: state.dmgNodes.length, arch: archNodes.length, frag: fragFx.length,
+    particleCap: particleCap(), fragCap: fragCap()
+  });
+  /* kind: 'fire' | 'mat' | 'dmg' | 'frag' | 'row' (`sel` picks the row element a flash covers). Makes `count`
+   * of that effect at (x, y) through the same functions the product calls. Returns the number asked for. */
+  debug.fxSpawn = (kind, count, x, y, sel) => {
+    const row = kind === 'row' ? doc.querySelector(sel || 'body *') : null;
+    for (let i = 0; i < count; i++) {
+      if (kind === 'fire') spawnFire(x, y, 1);
+      else if (kind === 'mat') matBurst('panel', x, y);
+      else if (kind === 'dmg') spawnDmg(x, y, 1, false);
+      else if (kind === 'frag') fracParticles('dust', x, y);
+      else if (kind === 'row') flashRow(row);
+    }
+    return count;
+  };
   function shake(mode, opts) {
     let a = (opts && opts.amp != null) ? opts.amp : (mode === 'bomb' || mode === 'collapse' ? 12 : (mode === 'gun' ? 2 : 6));
     if (reducedMotion()) a = 0;   // SPEC-settings §3.1: reduced motion means amplitude 0, OS- or setting-driven
@@ -6989,7 +7062,6 @@
   /* ===================================================================== */
   /* §B3 particles — one shared pool for every weapon                        */
   /* ===================================================================== */
-  const FRAG_CAP = 60, FRAG_CAP_PERF = 30;        // §B3: 전체 상한 60, 성능 모드 절반
   const FRAG_KIND = {
     dust:  { n: [6, 10], size: [5, 12], rise: [10, 26], life: [420, 700], color: 'rgba(206,202,192,.70)', round: true,  blur: 1.6 },
     smoke: { n: [7, 12], size: [16, 34], rise: [26, 60], life: [620, 950], color: 'rgba(64,60,56,.52)',   round: true,  blur: 4 },
@@ -6997,66 +7069,31 @@
     ash:   { n: [8, 14], size: [3, 7],  rise: [8, 22],  life: [520, 900], color: 'rgba(40,36,32,.75)',    round: false, blur: 0.6 }
   };
   const fragFx = [];
-  function fragCap() { return perfOn() ? FRAG_CAP_PERF : FRAG_CAP; }
   function clearFracFx() {
     for (const n of fragFx) { try { n.remove(); } catch (e) { /* ignore */ } }
     fragFx.length = 0;
   }
-  function fragTrim() {
-    while (fragFx.length > fragCap()) { const old = fragFx.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-  }
   /* §B3 + SPEC-settings §3.1: reduced motion gets ONE static mote that just fades — the break still reads as
-   * dusty, nothing travels. */
+   * dusty, nothing travels. The routine itself is fxPuff() (src/35-effects.js), shared with matBurst(). */
   function fracParticles(kind, x, y) {
     const P = FRAG_KIND[kind];
-    if (!root || !P) return 0;
-    const reduced = reducedMotion();
-    const n = reduced ? 1 : randInt(P.n[0], P.n[1]);
-    for (let i = 0; i < n; i++) {
-      const s = rand(P.size[0], P.size[1]);
-      const node = mk('div', 'crs-frag');
-      node.style.left = px(x + (reduced ? 0 : rand(-16, 16)) - s / 2);
-      node.style.top = px(y + (reduced ? 0 : rand(-16, 16)) - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      node.style.borderRadius = P.round ? '50%' : '1px';
-      node.style.background = P.color;
-      if (P.blur > 0) node.style.filter = 'blur(' + P.blur + 'px)';
-      root.append(node);
-      fragFx.push(node);
-      fragTrim();
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = fragFx.indexOf(node); if (k >= 0) fragFx.splice(k, 1); };
-      const dur = rand(P.life[0], P.life[1]);
-      try {
-        const kf = reduced
-          ? [{ opacity: 0.8 }, { opacity: 0 }]
-          : [{ transform: 'translate(0px, 0px) scale(1)', opacity: 0.92 },
-            { transform: 'translate(' + px(rand(-26, 26)) + ', ' + px(-rand(P.rise[0], P.rise[1])) + ') scale(' + rand(0.35, 1.5).toFixed(2) + ')', opacity: 0 }];
-        const a = trackAnim(node.animate(kf, { duration: dur, easing: 'ease-out', fill: 'forwards' }));
-        a.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, dur + 300);
-    }
-    return n;
+    if (!P) return 0;
+    return fxPuff(P, x, y, { cls: 'crs-frag', ledger: fragFx, cap: fragCap, blur: P.blur, scatter: 16, drift: 26, grow: [0.35, 1.5], alpha: 0.92, reduced: 'mote' });
   }
   /* §B3 `ember`: a 350 ms tail behind a rocket shard. Its own node so the piece's transform stays the
    * physics transform and nothing competes for it. */
   function fracTrail(x, y) {
     if (!root || reducedMotion()) return null;
-    const n = mk('div', 'crs-trail');
     const s = rand(10, 20);
-    n.style.left = px(x - s / 2); n.style.top = px(y - s / 2);
-    n.style.width = px(s); n.style.height = px(s * 2.2);
-    n.style.borderRadius = '50%';
-    n.style.background = 'radial-gradient(circle, rgba(255,209,102,.95) 0%, rgba(255,107,53,.75) 45%, rgba(255,107,53,0) 72%)';
-    root.append(n);
-    fragFx.push(n); fragTrim();
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = fragFx.indexOf(n); if (k >= 0) fragFx.splice(k, 1); };
-    try {
-      const a = trackAnim(n.animate([{ opacity: 0.95, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.3) translateY(14px)' }], { duration: 350, easing: 'ease-out', fill: 'forwards' }));
-      a.addEventListener('finish', kill);
-    } catch (e) { /* ignore */ }
-    later(kill, 700);
-    return n;
+    return fxNode('crs-trail', {
+      style: {
+        left: px(x - s / 2), top: px(y - s / 2), width: px(s), height: px(s * 2.2), borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(255,209,102,.95) 0%, rgba(255,107,53,.75) 45%, rgba(255,107,53,0) 72%)'
+      },
+      ledger: fragFx, cap: fragCap,
+      keyframes: [{ opacity: 0.95, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.3) translateY(14px)' }],
+      dur: 350
+    });
   }
 
   /* ===================================================================== */
@@ -8257,22 +8294,16 @@
     let n = 0;
     for (let i = 0; i < count; i++) {
       const s = rand(9, 17);
-      const node = mk('div', 'crs-star');
-      node.style.left = px(x - s / 2); node.style.top = px(y - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      root.append(node);
-      state.fire.push(node);
-      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(node); if (k >= 0) state.fire.splice(k, 1); };
       const a = rand(0, Math.PI * 2), d = rand(26, 62);
-      try {
-        const an = trackAnim(node.animate([
+      fxNode('crs-star', {
+        style: { left: px(x - s / 2), top: px(y - s / 2), width: px(s), height: px(s) },
+        ledger: state.fire, cap: particleCap,
+        keyframes: [
           { transform: 'translate(0px, 0px) rotate(0deg) scale(.5)', opacity: 1 },
           { transform: 'translate(' + px(Math.cos(a) * d) + ', ' + px(Math.sin(a) * d - 14) + ') rotate(' + Math.round(rand(-220, 220)) + 'deg) scale(1.1)', opacity: 0 }
-        ], { duration: scaleMs(IX_STAR_MS), easing: 'ease-out', fill: 'forwards' }));
-        an.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, IX_STAR_MS + 350);
+        ],
+        dur: IX_STAR_MS, linger: 350
+      });
       n++;
     }
     return n;
@@ -8284,21 +8315,16 @@
     let n = 0;
     for (let i = 0; i < count; i++) {
       const s = rand(5, 11);
-      const node = mk('div', 'crs-splash');
-      node.style.left = px(x - s / 2); node.style.top = px(y - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      root.append(node);
-      state.fire.push(node);
-      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(node); if (k >= 0) state.fire.splice(k, 1); };
-      try {
-        const an = trackAnim(node.animate([
+      const dur = rand(260, 420);
+      fxNode('crs-splash', {
+        style: { left: px(x - s / 2), top: px(y - s / 2), width: px(s), height: px(s) },
+        ledger: state.fire, cap: particleCap,
+        keyframes: [
           { transform: 'translate(0px, 0px) scale(1)', opacity: 0.9 },
           { transform: 'translate(' + px(rand(-26, 26)) + ', ' + px(rand(10, 44)) + ') scale(.4)', opacity: 0 }
-        ], { duration: scaleMs(rand(260, 420)), easing: 'ease-in', fill: 'forwards' }));
-        an.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, 900);
+        ],
+        dur, easing: 'ease-in', linger: 900 - dur   // the old fixed 900 ms safety timer
+      });
       n++;
     }
     return n;
@@ -10298,7 +10324,7 @@
     try { const b = weaponBtn(state.weapon); if (b) trackAnim(b.animate([{ borderColor: '#ff6b6b' }, { borderColor: 'rgba(255,255,255,.1)' }], { duration: 120 })); } catch (e) { /* ignore */ }
   }
 
-  /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, cap 40 --- */
+  /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, capped by particleCap() (40; 30 in performance mode) --- */
   function dmgText(n, dmg, crit, tag) { n.textContent = (tag ? tag + ' ' : '') + '-' + dmg + (crit ? '!' : ''); }
   /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) }
    * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page.
@@ -10309,32 +10335,26 @@
     opts = opts || {};
     const op = opts.opacity != null ? clamp(+opts.opacity, 0, 1) : 1;
     const dur = opts.dur > 0 ? opts.dur : 650;
-    const n = mk('div', 'crs-dmg');
-    if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag);
-    n.style.left = px(x); n.style.top = px(y);
-    n.style.font = '700 ' + (opts.size || (crit ? 18 : 14)) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-    n.style.color = opts.color || (crit ? '#ffd166' : '#fff');
-    n.style.textShadow = '0 1px 2px rgba(0,0,0,.8)';
-    n.style.transform = 'translate(-50%, -50%)';
-    root.append(n);
-    state.dmgNodes.push(n);
-    while (state.dmgNodes.length > 40) { const old = state.dmgNodes.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const i = state.dmgNodes.indexOf(n); if (i >= 0) state.dmgNodes.splice(i, 1); };
-    try {
-      const base = 'translate(-50%, -50%) ';
-      /* SPEC-settings §3.1: "피해 숫자가 이동 없이 페이드만" — reduced motion keeps the number (the
-       * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
-       * centring transform the node already carries is left exactly where it is. */
-      const kf = reducedMotion()
-        ? [{ opacity: op }, { opacity: op, offset: 0.35 }, { opacity: 0 }]
-        : (crit
-          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: op, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: op * 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
-          : [{ transform: base + 'translateY(0px)', opacity: op }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
-      const a = trackAnim(n.animate(kf, { duration: dur, easing: 'ease-out', fill: 'forwards' }));
-      a.addEventListener('finish', kill);
-    } catch (e) { /* ignore */ }
-    later(kill, 1500);
-    return n;
+    const base = 'translate(-50%, -50%) ';
+    /* SPEC-settings §3.1: "피해 숫자가 이동 없이 페이드만" — reduced motion keeps the number (the
+     * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
+     * centring transform the node already carries is left exactly where it is. */
+    const kf = reducedMotion()
+      ? [{ opacity: op }, { opacity: op, offset: 0.35 }, { opacity: 0 }]
+      : (crit
+        ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: op, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: op * 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
+        : [{ transform: base + 'translateY(0px)', opacity: op }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
+    return fxNode('crs-dmg', {
+      style: {
+        left: px(x), top: px(y),
+        font: '700 ' + (opts.size || (crit ? 18 : 14)) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+        color: opts.color || (crit ? '#ffd166' : '#fff'),
+        textShadow: '0 1px 2px rgba(0,0,0,.8)', transform: 'translate(-50%, -50%)'
+      },
+      setup: (n) => { if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag); },
+      ledger: state.dmgNodes, cap: particleCap,   // was a literal 40 that ignored performance mode
+      keyframes: kf, dur, linger: 850
+    });
   }
   /* Where a number goes: pointer ± 8 px (click), alternating 24 px left/right of the pointer (hold windows; ≥ 42 px
    * between consecutive centres so a 25 px glyph run never collides with the previous window's number),
@@ -10958,19 +10978,15 @@
     if (!root) return;
     for (let i = 0; i < count; i++) {
       const s = rand(12, 26);
-      const n = mk('div', 'crs-fire');
-      n.style.left = px(x + rand(-10, 10) - s / 2); n.style.top = px(y + rand(-10, 10) - s / 2);
-      n.style.width = px(s); n.style.height = px(s); n.style.borderRadius = '50%';
-      n.style.background = 'radial-gradient(circle, #ffd166 0%, #ff6b35 45%, rgba(255,107,53,0) 72%)';
-      root.append(n);
-      state.fire.push(n);
-      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(n); if (k >= 0) state.fire.splice(k, 1); };
-      try {
-        const an = trackAnim(n.animate([{ transform: 'translateY(0px) scale(1)', opacity: 0.95 }, { transform: 'translateY(' + px(-rand(30, 60)) + ') scale(.4)', opacity: 0 }], { duration: rand(350, 500), easing: 'ease-out', fill: 'forwards' }));
-        an.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, 1000);
+      fxNode('crs-fire', {
+        style: {
+          left: px(x + rand(-10, 10) - s / 2), top: px(y + rand(-10, 10) - s / 2), width: px(s), height: px(s), borderRadius: '50%',
+          background: 'radial-gradient(circle, #ffd166 0%, #ff6b35 45%, rgba(255,107,53,0) 72%)'
+        },
+        ledger: state.fire, cap: particleCap,
+        keyframes: [{ transform: 'translateY(0px) scale(1)', opacity: 0.95 }, { transform: 'translateY(' + px(-rand(30, 60)) + ') scale(.4)', opacity: 0 }],
+        dur: rand(350, 500), linger: 650   // the old fixed 1000 ms safety timer
+      });
     }
   }
   /* SPEC-destruction §F6: 화염방사기는 틱 피해 15 → 8, 틱당 스택 9. "즉시 화력 최하위, 20초 누적 화력
@@ -14822,16 +14838,11 @@
     if (!root || !row) return;
     const r = rectOf(row);
     if (!r || r.width < 1) return;
-    const n = mk('div', 'crs-row-flash');
-    n.style.left = px(r.left); n.style.top = px(r.top); n.style.width = px(r.width); n.style.height = px(r.height);
-    root.append(n);
-    archNodes.push(n);
-    const kill = () => { const i = archNodes.indexOf(n); if (i >= 0) archNodes.splice(i, 1); try { n.remove(); } catch (e) { /* ignore */ } };
-    try {
-      const a = trackAnim(n.animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 260, easing: 'ease-out', fill: 'forwards' }));
-      a.addEventListener('finish', kill);
-    } catch (e) { /* ignore */ }
-    later(kill, 500);
+    fxNode('crs-row-flash', {
+      style: { left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height) },
+      ledger: archNodes, cap: particleCap,   // used to be uncapped: only teardown ever emptied it
+      keyframes: [{ opacity: 0.9 }, { opacity: 0 }], dur: 260, linger: 240
+    });
   }
 
   /* ---- §D3 지원형: 공격 안 함. 복구 + 보호막 ---- */
@@ -15637,15 +15648,12 @@
     const cx = (ex.left + ex.right) / 2, cy = (ex.top + ex.bottom) / 2;
     const near = Math.abs(p.x - cx) <= (ex.right - ex.left) && Math.abs(p.y - cy) <= (ex.bottom - ex.top);   // within 2× the expanded rect
     if (root) {   // shockwave ring from the rect to +60 px over 300 ms
-      const ring = mk('div', 'crs-warn crs-slam');
-      ring.style.left = px(r.left); ring.style.top = px(r.top); ring.style.width = px(r.width); ring.style.height = px(r.height);
-      root.append(ring); state.warns.push(ring);
-      const kill = () => { try { ring.remove(); } catch (e) { /* ignore */ } const i = state.warns.indexOf(ring); if (i >= 0) state.warns.splice(i, 1); };
-      try {
-        const a = trackAnim(ring.animate([{ left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height), opacity: 0.95 }, { left: px(r.left - 60), top: px(r.top - 60), width: px(r.width + 120), height: px(r.height + 120), opacity: 0 }], { duration: 300, easing: 'ease-out', fill: 'forwards' }));
-        a.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, 600);
+      fxNode('crs-warn crs-slam', {
+        style: { left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height) },
+        ledger: state.warns,   // the warn ledger is swept by teardown and has no cap of its own
+        keyframes: [{ left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height), opacity: 0.95 }, { left: px(r.left - 60), top: px(r.top - 60), width: px(r.width + 120), height: px(r.height + 120), opacity: 0 }],
+        dur: 300
+      });
     }
     shake('bomb', { amp: near ? 10 : 3, dur: 300 });
     sfx('rumble', { gain: near ? 1 : 0.5 });

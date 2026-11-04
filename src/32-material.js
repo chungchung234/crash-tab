@@ -125,40 +125,17 @@
   /* ── the puff a break throws off (§5: panel = dust, glass = sparkle, paper = fibres, metal = sparks) ──
    * Plain fading divs in our own root, capped, tracked, and swept by clearCanvas() — restore() cancels every
    * animation, so the nodes are removed by hand there rather than by the finish handler. */
-  const MATFX_CAP = 40;
   const matFx = [];
   function clearMatFx() {
     for (const n of matFx) { try { n.remove(); } catch (e) { /* ignore */ } }
     matFx.length = 0;
   }
+  /* The routine is fxPuff() (src/35-effects.js), shared with fracParticles(); the cap is particleCap() like
+   * every other ledger, so performance mode brings this one down too (it used to be a private 40). */
   function matBurst(mat, x, y) {
-    if (!root || reducedMotion()) return;
     const P = matOf(mat).puff;
     if (!P) return;
-    const n = randInt(P.n[0], P.n[1]);
-    for (let i = 0; i < n; i++) {
-      const s = rand(P.size[0], P.size[1]);
-      const node = mk('div', 'crs-matfx');
-      node.style.left = px(x + rand(-14, 14) - s / 2);
-      node.style.top = px(y + rand(-14, 14) - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      node.style.borderRadius = P.round ? '50%' : '1px';
-      node.style.background = P.color;
-      if (P.round) node.style.filter = 'blur(1.5px)';
-      root.append(node);
-      matFx.push(node);
-      while (matFx.length > MATFX_CAP) { const old = matFx.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = matFx.indexOf(node); if (k >= 0) matFx.splice(k, 1); };
-      const dur = rand(P.life[0], P.life[1]);
-      try {
-        const a = trackAnim(node.animate([
-          { transform: 'translate(0px, 0px) scale(1)', opacity: 0.95 },
-          { transform: 'translate(' + px(rand(-18, 18)) + ', ' + px(-rand(P.rise[0], P.rise[1])) + ') scale(' + rand(0.3, 0.8).toFixed(2) + ')', opacity: 0 }
-        ], { duration: dur, easing: 'ease-out', fill: 'forwards' }));
-        a.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, dur + 300);
-    }
+    fxPuff(P, x, y, { cls: 'crs-matfx', ledger: matFx, cap: particleCap, blur: P.round ? 1.5 : 0, scatter: 14, drift: 18, grow: [0.3, 0.8], alpha: 0.95, reduced: 'skip' });
   }
 
   /* Debris physics a piece inherits from the element it came off (§5 column 3), read by addPiece()/tickFrame(). */

@@ -373,16 +373,11 @@
     if (!root || !row) return;
     const r = rectOf(row);
     if (!r || r.width < 1) return;
-    const n = mk('div', 'crs-row-flash');
-    n.style.left = px(r.left); n.style.top = px(r.top); n.style.width = px(r.width); n.style.height = px(r.height);
-    root.append(n);
-    archNodes.push(n);
-    const kill = () => { const i = archNodes.indexOf(n); if (i >= 0) archNodes.splice(i, 1); try { n.remove(); } catch (e) { /* ignore */ } };
-    try {
-      const a = trackAnim(n.animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 260, easing: 'ease-out', fill: 'forwards' }));
-      a.addEventListener('finish', kill);
-    } catch (e) { /* ignore */ }
-    later(kill, 500);
+    fxNode('crs-row-flash', {
+      style: { left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height) },
+      ledger: archNodes, cap: particleCap,   // used to be uncapped: only teardown ever emptied it
+      keyframes: [{ opacity: 0.9 }, { opacity: 0 }], dur: 260, linger: 240
+    });
   }
 
   /* ---- §D3 지원형: 공격 안 함. 복구 + 보호막 ---- */

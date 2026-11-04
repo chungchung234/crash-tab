@@ -20,7 +20,8 @@
    *   clone compare    400 descendants                  → 150
    *   enemy selection  900 ms (SPEC-combat §B3 — was 1500) → 2500 ms
    *   concurrent enemies  up to 7 (§B3 — was 5)         → 2
-   *   particles        40 live (ships as 40, not 60)    → 30
+   *   particles        40 live (ships as 40, not 60)    → 30   (fire · material puff · damage numbers · row flashes)
+   *   break particles  60 live (SPEC-destruction §B3)   → 30
    *   crack strands    ×1.0                             → ×0.7
    *   canvas DPR       max 2                            → max 1.5                                        */
   const PERF_PIECE_CAP = 80;
@@ -30,6 +31,7 @@
   const PERF_SELECT_MS = 2500, SELECT_MS = 900;   // SPEC-combat §B3: 선정 간격 1500 → 900 ms
   const PERF_MAX_HOSTILES = 2;
   const PERF_PARTICLE_CAP = 30, PARTICLE_CAP = 40;
+  const PERF_FRAG_CAP = 30, FRAG_CAP = 60;   // SPEC-destruction §B3: 전체 상한 60, 성능 모드 절반
   const PERF_CRACK_MUL = 0.7;
   const PERF_DPR = 1.5, QUALITY_DPR = 2;
 
@@ -120,7 +122,12 @@
   function textTokenCap() { return perfOn() ? PERF_TEXT_TOKENS : TEXT_TOKENS; }
   function cloneCapFor(base) { return perfOn() ? Math.min(base, PERF_CLONE_CAP) : base; }
   function selectIntervalMs() { return perfOn() ? PERF_SELECT_MS : SELECT_MS; }
+  /* The two particle caps — the ONLY places the numbers live. particleCap() bounds every node ledger that
+   * fxNode() (src/35-effects.js) feeds except the §B3 break-particle pool: the fire / smoke / star / splash
+   * ledger `state.fire`, the material puff `matFx`, the floating damage numbers `state.dmgNodes` and the
+   * archetype row flashes `archNodes`. fragCap() is the §B3 pool `fragFx`, which has its own larger figure. */
   function particleCap() { return perfOn() ? PERF_PARTICLE_CAP : PARTICLE_CAP; }
+  function fragCap() { return perfOn() ? PERF_FRAG_CAP : FRAG_CAP; }
   function crackRayMul() { return perfOn() ? PERF_CRACK_MUL : 1; }
   function perfDprMax() { return perfOn() ? PERF_DPR : QUALITY_DPR; }
 
