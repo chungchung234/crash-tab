@@ -919,71 +919,85 @@ function rgbToHsvCone(r, g, b) {
   return [s * mx * Math.cos(rad), s * mx * Math.sin(rad), mx];
 }
 
+/* §G4 는 48×48 을 적었지만 **HUD 가 실제로 그리는 크기는 26×26** 이다(실측: 버튼 65×32 안의
+ * svg 26×26). 검사가 보는 크기와 사용자가 보는 크기가 다르면 그 사이에서 그림이 밀린다 —
+ * 그래서 두 크기를 다 본다. 48 은 아이콘 LOD 가 설계된 크기, 26 은 사용자가 실제로 보는 크기다. */
+const R18_SIZES = [48, 26];
+
 rule('R18', 'weapon-icon-distinct', (r, ctx) => {
   const sheetRel = 'tools/weapon-sheet.js';
   if (!isFile(path.join(ctx.root, sheetRel))) { r.skip(sheetRel + ' does not exist'); return; }
-  const res = require('child_process').spawnSync(process.execPath, [path.join(ctx.root, sheetRel), '--r18'],
-    { cwd: ctx.root, encoding: 'utf8', timeout: 120000 });
-  if (res.status === 2) { r.skip('puppeteer is not installed — ' + sheetRel + ' --r18 cannot rasterise (npm install)'); return; }
-  if (res.status !== 0) {
-    r.fail(sheetRel + ' --r18 exited ' + res.status + ': ' + String(res.stderr || res.error || '').trim().split('\n').slice(0, 3).join(' / '));
-    return;
-  }
-  let meta;
-  try { meta = JSON.parse(String(res.stdout).trim().split('\n').pop()); }
-  catch (e) { r.fail(sheetRel + ' --r18 printed something that is not JSON: ' + String(res.stdout).slice(0, 160)); return; }
-  const png = path.join(ctx.root, meta.path);
-  if (!isFile(png)) { r.fail('the raster was not written: ' + meta.path); return; }
-  const img = pngPixels(fs.readFileSync(png));
-  const cell = meta.cell, ids = meta.ids;
-  if (img.height !== cell || img.width !== cell * ids.length) {
-    r.fail('raster is ' + img.width + '×' + img.height + ', expected ' + (cell * ids.length) + '×' + cell);
-    return;
-  }
-  const tiles = ids.map((id, i) => {
-    const x0 = i * cell;
-    const mask = new Uint8Array(cell * cell);
-    let n = 0, cx = 0, cy = 0, cv = 0;
-    for (let y = 0; y < cell; y++) {
-      for (let x = 0; x < cell; x++) {
-        const o = (y * img.width + (x0 + x)) * 4;
-        if (img.data[o + 3] < R18_ALPHA) continue;
-        mask[y * cell + x] = 1;
-        n++;
-        const c = rgbToHsvCone(img.data[o], img.data[o + 1], img.data[o + 2]);
-        cx += c[0]; cy += c[1]; cv += c[2];
+  let skipped = null;
+  for (const px of R18_SIZES) {
+    let failedHere = false;
+    const SKIP = (m) => { skipped = m; };
+    const FAIL = (m) => { failedHere = true; r.fail(m); };
+    const NOTE = (m) => r.note(m);
+    const DETAIL = (m) => r.detail(m);
+      const res = require('child_process').spawnSync(process.execPath, [path.join(ctx.root, sheetRel), '--r18', '--r18-px=' + px],
+        { cwd: ctx.root, encoding: 'utf8', timeout: 120000 });
+      if (res.status === 2) { SKIP('puppeteer is not installed — ' + sheetRel + ' --r18 cannot rasterise (npm install)'); return; }
+      if (res.status !== 0) {
+        FAIL(sheetRel + ' --r18 exited ' + res.status + ': ' + String(res.stderr || res.error || '').trim().split('\n').slice(0, 3).join(' / '));
+        return;
       }
-    }
-    return { id, mask, n, c: n ? [cx / n, cy / n, cv / n] : [0, 0, 0] };
-  });
-  /* 아무것도 안 그려진 아이콘은 쌍 비교 이전의 실패다 — 빈 타일끼리는 자카드 거리가 0 이라
-   * "둘 다 비어 있다" 가 "둘이 똑같다" 로 조용히 통과할 수도 있다. */
-  for (const t of tiles) if (t.n < 16) r.fail('`' + t.id + '` icon covers only ' + t.n + ' px at ' + cell + '×' + cell + ' — it is effectively blank');
-  let worst = null;
-  const fails = [];
-  for (let i = 0; i < tiles.length; i++) {
-    for (let j = i + 1; j < tiles.length; j++) {
-      const a = tiles[i], b = tiles[j];
-      let inter = 0, uni = 0;
-      for (let k = 0; k < a.mask.length; k++) { const p = a.mask[k], q = b.mask[k]; if (p && q) inter++; if (p || q) uni++; }
-      const sil = uni ? 1 - inter / uni : 0;
-      let s2 = 0;
-      for (let k = 0; k < 3; k++) { const d = a.c[k] - b.c[k]; s2 += d * d; }
-      const col = Math.sqrt(s2);
-      /* 통과 여유: 두 문턱 중 **더 많이 넘은 쪽**이 그 쌍을 구해 준다(둘 다 밑돌아야 실패이므로). */
-      const margin = Math.max(sil / R18_SILHOUETTE_MIN, col / R18_COLOUR_MIN);
-      if (!worst || margin < worst.margin) worst = { a: a.id, b: b.id, sil, col, margin };
-      if (sil < R18_SILHOUETTE_MIN && col < R18_COLOUR_MIN) fails.push({ a: a.id, b: b.id, sil, col });
-    }
-  }
-  for (const f of fails) {
-    r.fail('`' + f.a + '` and `' + f.b + '` are not told apart at ' + cell + '×' + cell
-      + ' — silhouette ' + f.sil.toFixed(3) + ' (need ' + R18_SILHOUETTE_MIN + ') AND colour ' + f.col.toFixed(3) + ' (need ' + R18_COLOUR_MIN + ')');
-  }
-  if (!r.failed()) {
-    const pairs = tiles.length * (tiles.length - 1) / 2;
-    r.note(pairs + ' icon pair(s) of ' + tiles.length + ' weapons are distinguishable at ' + cell + '×' + cell);
-    if (worst) r.detail('closest pair: ' + worst.a + ' / ' + worst.b + ' — silhouette ' + worst.sil.toFixed(3) + ', colour ' + worst.col.toFixed(3) + ' (' + worst.margin.toFixed(2) + '× the threshold it passes on)');
+      let meta;
+      try { meta = JSON.parse(String(res.stdout).trim().split('\n').pop()); }
+      catch (e) { FAIL(sheetRel + ' --r18 printed something that is not JSON: ' + String(res.stdout).slice(0, 160)); return; }
+      const png = path.join(ctx.root, meta.path);
+      if (!isFile(png)) { FAIL('the raster was not written: ' + meta.path); return; }
+      const img = pngPixels(fs.readFileSync(png));
+      const cell = meta.cell, ids = meta.ids;
+      if (img.height !== cell || img.width !== cell * ids.length) {
+        FAIL('raster is ' + img.width + '×' + img.height + ', expected ' + (cell * ids.length) + '×' + cell);
+        return;
+      }
+      const tiles = ids.map((id, i) => {
+        const x0 = i * cell;
+        const mask = new Uint8Array(cell * cell);
+        let n = 0, cx = 0, cy = 0, cv = 0;
+        for (let y = 0; y < cell; y++) {
+          for (let x = 0; x < cell; x++) {
+            const o = (y * img.width + (x0 + x)) * 4;
+            if (img.data[o + 3] < R18_ALPHA) continue;
+            mask[y * cell + x] = 1;
+            n++;
+            const c = rgbToHsvCone(img.data[o], img.data[o + 1], img.data[o + 2]);
+            cx += c[0]; cy += c[1]; cv += c[2];
+          }
+        }
+        return { id, mask, n, c: n ? [cx / n, cy / n, cv / n] : [0, 0, 0] };
+      });
+      /* 아무것도 안 그려진 아이콘은 쌍 비교 이전의 실패다 — 빈 타일끼리는 자카드 거리가 0 이라
+       * "둘 다 비어 있다" 가 "둘이 똑같다" 로 조용히 통과할 수도 있다. */
+      for (const t of tiles) if (t.n < 16) FAIL('`' + t.id + '` icon covers only ' + t.n + ' px at ' + cell + '×' + cell + ' — it is effectively blank');
+      let worst = null;
+      const fails = [];
+      for (let i = 0; i < tiles.length; i++) {
+        for (let j = i + 1; j < tiles.length; j++) {
+          const a = tiles[i], b = tiles[j];
+          let inter = 0, uni = 0;
+          for (let k = 0; k < a.mask.length; k++) { const p = a.mask[k], q = b.mask[k]; if (p && q) inter++; if (p || q) uni++; }
+          const sil = uni ? 1 - inter / uni : 0;
+          let s2 = 0;
+          for (let k = 0; k < 3; k++) { const d = a.c[k] - b.c[k]; s2 += d * d; }
+          const col = Math.sqrt(s2);
+          /* 통과 여유: 두 문턱 중 **더 많이 넘은 쪽**이 그 쌍을 구해 준다(둘 다 밑돌아야 실패이므로). */
+          const margin = Math.max(sil / R18_SILHOUETTE_MIN, col / R18_COLOUR_MIN);
+          if (!worst || margin < worst.margin) worst = { a: a.id, b: b.id, sil, col, margin };
+          if (sil < R18_SILHOUETTE_MIN && col < R18_COLOUR_MIN) fails.push({ a: a.id, b: b.id, sil, col });
+        }
+      }
+      for (const f of fails) {
+        FAIL('`' + f.a + '` and `' + f.b + '` are not told apart at ' + cell + '×' + cell
+          + ' — silhouette ' + f.sil.toFixed(3) + ' (need ' + R18_SILHOUETTE_MIN + ') AND colour ' + f.col.toFixed(3) + ' (need ' + R18_COLOUR_MIN + ')');
+      }
+      if (!failedHere) {
+        const pairs = tiles.length * (tiles.length - 1) / 2;
+        NOTE(pairs + ' icon pair(s) of ' + tiles.length + ' weapons are distinguishable at ' + cell + '×' + cell);
+        if (worst) DETAIL('closest pair: ' + worst.a + ' / ' + worst.b + ' — silhouette ' + worst.sil.toFixed(3) + ', colour ' + worst.col.toFixed(3) + ' (' + worst.margin.toFixed(2) + '× the threshold it passes on)');
+      }
+    if (skipped) { r.skip(skipped); return; }
   }
 });
 

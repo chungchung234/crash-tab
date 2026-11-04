@@ -98,7 +98,10 @@ const BG_LIGHT = '#e9ecf1';
  * 한 장에 한 줄로 굽는다. 아이콘마다 스크린샷을 찍으면 23번의 왕복이 되고, 그 시간이 validate 를
  * 느리게 만들어 결국 아무도 안 돌리게 된다. 자르는 쪽은 R18 이 한다. */
 async function bakeR18(browser, ids, boot) {
-  const CELL = 48;
+  /* §G4 는 48×48 을 적었지만 **HUD 가 실제로 그리는 크기는 26×26** 이다(실측). 검사가 보는
+   * 크기와 사용자가 보는 크기가 다르면 그 사이에서 그림이 밀린다. R18 이 두 크기를 다 보게
+   * `--r18-px=<n>` 으로 받는다. 기본 48, 검사는 48 과 26 을 차례로 돌린다. */
+  const CELL = Number(process.env.CRS_R18_PX || (process.argv.find((a) => a.startsWith('--r18-px=')) || '').slice(9) || 48);
   const page = await browser.newPage();
   await page.setViewport({ width: ids.length * CELL, height: CELL, deviceScaleFactor: 1 });
   await page.setContent('<!doctype html><meta charset="utf-8"><body></body>');
