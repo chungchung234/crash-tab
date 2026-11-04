@@ -50,13 +50,15 @@
   }
   /* Page-space area when `el` is a valid hostile candidate right now, else null (selectTick and forceAttack share it). */
   function hostileArea(el) {
-    if (!el || el.nodeType !== 1 || !el.isConnected || isOurs(el)) return null;
-    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
-    if (SKIP_WALK_TAGS.has(tagOf(el)) || hostileSkip(el)) return null;
-    const s = gcs(el); if (!s || s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) < 0.05) return null;
-    const r = rectOf(el); if (!r || r.width < 1 || r.height < 1) return null;
+    if (!el || el.nodeType !== 1 || !el.isConnected) return null;
+    if (hostileSkip(el)) return null;
     const vw = viewW(), vh = viewH();
-    if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null;
+    const r = rectOf(el);
+    /* 적격 판정은 elementQualify() (src/50-target.js) 한 벌이다. 여기는 트리를 걷는 것이 아니라 요소
+     * **하나**가 지금 적이 될 수 있느냐를 묻는 자리라, "제 상자가 없다(1)" 는 거절이다 —
+     * `visibility: hidden` 인 것도 크기 0 인 것도 눈에 보이지 않으니 적이 될 수 없다. 합치기 전에
+     * 이 자리가 그 둘을 버리던 것과 같은 답이다(판정이 세 값으로 바뀌었을 뿐 결과는 그대로다). */
+    if (elementQualify(el, { rect: r, vw, vh }) !== 2) return null;
     const m = scopeMag();
     const area = (r.width / m) * (r.height / m);
     /* SPEC-combat §D2: 요소 종류가 적을 정한다. An element the §D3 table NAMES — a button, a link, a
