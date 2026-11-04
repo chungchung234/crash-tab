@@ -1965,3 +1965,64 @@ crs-hud:popover-open {
   width: 0;
   opacity: .9;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPEC-weapon-identity §F2 보조 공격 문법 — 조준(steady)과 장전(chamber)의 표식 (12단계)
+
+   §F2 의 핵심 규칙은 "차오르는 링은 charge 에만 쓴다" 이다. 그래서 이 둘에게는 링이
+   없고, 준비가 끝났다는 사실을 말할 것이 조준점 자신밖에 없다 — 아래 두 묶음이 그것이다.
+
+   USER 오리진이다. 여기 있는 것은 전부 **JS 가 쓰지도 애니메이션하지도 않는** 속성이고
+   (src/51-crosshair.js 는 클래스만 토글한다), 그래서 !important 를 붙여도 CLAUDE.md 가
+   적어 둔 함정에 걸리지 않는다. 바뀌는 쪽은 클래스지 스타일이 아니다.
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* §F2 조준: "조준점 팔이 안쪽으로 모이고, 다 모이면 중심 점이 밝아진다."
+   팔이 모이는 것은 chGap() 래퍼(src/78-altfire.js)가 이미 하고, 여기는 그 마지막 한 가지다.
+   커지는 것이 아니라 **밝아지는** 것이 요점이라 크기는 3px → 5px 로만 늘리고 번짐을 준다. */
+.crs-crosshair.crs-ch-steady .crs-ch-dot {
+  width: 5px !important;
+  height: 5px !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 6px 2px var(--crs-ch-c, #fff) !important;
+}
+/* §F2 장전: "조준점 중앙에 그 탄의 표식." 세 무기가 넣는 탄이 서로 다르므로 모양도 다르다. */
+.crs-ch-chamber {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  pointer-events: none !important;
+  box-sizing: border-box !important;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  transform: translate(-50%, -50%) !important;
+}
+.crs-ch-chamber.crs-ch-chamber-on { display: block !important; }
+.crs-ch-chamber.crs-ch-chamber-slug {
+  /* 슬러그: 펠릿 아홉을 하나로 뭉친 한 덩어리 — 뭉툭하고 두껍다 */
+  width: 7px !important;
+  height: 5px !important;
+  border-radius: 2.5px !important;
+  background: var(--crs-ch-c, #fff) !important;
+  box-shadow: 0 0 4px 1px rgba(0, 0, 0, .55) !important;
+}
+.crs-ch-chamber.crs-ch-chamber-spike {
+  /* 대못: 가늘고 길다. 박아 넣는 것이지 날아가는 것이 아니다 */
+  width: 2px !important;
+  height: 13px !important;
+  border-radius: 1px !important;
+  background: var(--crs-ch-c, #fff) !important;
+  box-shadow: 0 0 4px 1px rgba(0, 0, 0, .55) !important;
+}
+.crs-ch-chamber.crs-ch-chamber-over {
+  /* 과압탄: 속이 빈 두꺼운 테 — 터질 것이 들어 있다는 뜻이다 */
+  width: 11px !important;
+  height: 11px !important;
+  border-radius: 50% !important;
+  border: 3px solid var(--crs-ch-c, #fff) !important;
+  background: transparent !important;
+  box-shadow: 0 0 4px 1px rgba(0, 0, 0, .55) !important;
+}

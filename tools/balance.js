@@ -147,6 +147,12 @@ function readArsenal() {
   const swapDefault = Number((/(?:const|let|var)\s+SWAP_MS\s*=\s*(\d+)/.exec(prelude) || [])[1] || 250);
   const loadoutMax = Number((/(?:const|let|var)\s+LOADOUT_MAX\s*=\s*(\d+)/.exec(prelude) || [])[1] || 10);
   const burn = numericConsts(stripComments(readSrc('77-burn.js')));
+  /* SPEC-weapon-identity §F 보조 공격 문법. §F4 는 "`charge` 인 무기 중 `kind: 'gun'` 은 없다" 를 검사로
+   * 만들라고 적었고, 그러려면 `ALTS` 표(src/78-altfire.js)와 `WEAPONS` 의 `kind` 를 **같은 자리에서**
+   * 봐야 한다. 무기 표와 똑같이 정적으로 읽는다 — `fuel: FIREBOMB_FUEL` 처럼 상수를 값으로 쓰는 줄이
+   * 있으므로 src/77 의 숫자 상수도 같이 넘긴다. */
+  const altSrc = stripComments(readSrc('78-altfire.js'));
+  const alts = literalToData(sliceLiteral(altSrc, 'ALTS', '{', '}'), Object.assign({}, preludeConsts, burn, numericConsts(altSrc)));
   const out = {};
   for (const id of ids) {
     if (!weapons[id]) throw new Error('balance.js: WEAPON_IDS names `' + id + '` but WEAPONS has no such row');
@@ -155,7 +161,7 @@ function readArsenal() {
     out[id] = Object.assign({}, weapons[id], stats[id] || {}, roles[id] || {});
     if (vs[id]) out[id].vs = vs[id];
   }
-  return { ids, weapons: out, roles, vs, presets, swapDefault, loadoutMax, burn };
+  return { ids, weapons: out, roles, vs, alts, presets, swapDefault, loadoutMax, burn };
 }
 
 /* ===================================================================== */
@@ -440,7 +446,7 @@ const MODES = {
 };
 
 function model() {
-  const { ids, weapons, presets, swapDefault, loadoutMax, burn, roles } = readArsenal();
+  const { ids, weapons, presets, swapDefault, loadoutMax, burn, roles, alts } = readArsenal();
   const rows = ids.map((id) => {
     const W = Object.assign({ id }, weapons[id]);
     const b = burstDPS(W, burn);
@@ -450,6 +456,11 @@ function model() {
       id,
       cat: W.cat || 'field',
       role: W.role || null,
+      kind: W.kind || null,
+      /* 반경 0 = 총구에서 한 점으로 나간다. §F6-9 가 "총기" 를 가려내는 데 쓴다 (아래 주석). */
+      radius: (W.radius === Infinity || W.radius === '__INFINITY__') ? Infinity : num(W.radius, 0),
+      /* SPEC-weapon-identity §F2 의 보조 공격 문법. §F6-9 가 보는 칸이 이것과 위의 둘이다. */
+      altType: (alts[id] && alts[id].type) || null,
       quirk: W.quirk || null,
       utility: num(W.utility, 0),
       damage: W.damage,
@@ -501,7 +512,7 @@ function model() {
     : (fieldVals[fieldVals.length / 2 - 1] + fieldVals[fieldVals.length / 2]) / 2) : 0;
   for (const r of rows) r.ratio = median > 0 ? r.rated / median : 0;
 
-  return { ids, rows, byId, weapons, roles, presets, median, loadoutMax, burn, swapDefault, violations: violations(rows, byId, median) };
+  return { ids, rows, byId, weapons, roles, alts, presets, median, loadoutMax, burn, swapDefault, violations: violations(rows, byId, median) };
 }
 
 /* ---- SPEC-product §1 무기 비교표 — options/arsenal.json ----------------------------------------
@@ -670,6 +681,26 @@ function violations(rows, byId, median) {
     if (vsSeen.has(key)) out.push({ rule: 8, id: r.id, msg: `등급 계수 네 값이 ${vsSeen.get(key)} 와 완전히 같다 (${key})` });
     else vsSeen.set(key, r.id);
   }
+  /* 9. SPEC-weapon-identity §F4: **`charge` 인 무기 중 `kind: 'gun'` 은 없다.**
+   * "이 한 줄이 '총기가 모은다'를 구조적으로 막는다" — §F1 이 적은 결함(산탄총·못총·고무탄총이
+   * 에너지를 모은다)이 다시 들어오는 길을 데이터 쪽에서 닫는 규칙이다. 권총을 `charge` 로 되돌리면
+   * 여기서 exit 1 이 난다.
+   *
+   * INTERPRETATION (보고에 적었다). §F2 의 charge 열은 "근접 5 · 폭탄 · 충격포 · 중력탄 · **나팔**" 인데
+   * 나팔의 `kind` 는 표에서 `'gun'` 이다. 두 문장을 그대로 두면 서로를 지운다. `kind` 는 무기 분류가
+   * 아니라 **파괴·연출 계열**(src/66-fracture.js 가 `W.kind === mode` 로 쓰는 값)이고, 나팔이 거기서
+   * 총과 같은 칸에 있는 것은 금관악기라서가 아니라 균열·섬광 모양을 공유하기 때문이다. 그래서 §F4 가
+   * 말하는 "총기" 를 **총구에서 한 점으로 나가는 것** 으로 읽는다 — `kind: 'gun'` 이면서 `radius` 가 0 인
+   * 무기. 나팔(반경 420 · 원뿔)과 충격포·중력탄 같은 면 무기는 애초에 §F1 이 문제 삼은 "기계식 총기" 가
+   * 아니다. 이 해석에서도 §F1 이 이름을 적은 넷(권총·산탄총·못총·고무탄총)은 전부 radius 0 이라 규칙에
+   * 정면으로 걸린다. 나팔의 `kind` 를 고치는 쪽은 택하지 않았다 — 그러면 파괴 프로필이 조용히 사라진다. */
+  for (const r of rows) {
+    if (r.altType !== 'charge') continue;
+    if (r.kind !== 'gun') continue;
+    if (r.radius > 0) continue;   // 면 무기: §F1 이 말한 기계식 총기가 아니다 (위 주석)
+    out.push({ rule: 9, id: r.id, msg: `보조 공격이 \`charge\` 인데 한 점으로 쏘는 총기다 (kind: 'gun', radius 0) — §F2 는 총기에게 charge 를 주지 않는다` });
+  }
+
   /* §F5: "하나도 겹치면 안 된다." A role that is missing, unknown or shared is the same failure. */
   const seen = new Map();
   for (const r of rows) {
@@ -946,7 +977,7 @@ function renderDoc(m) {
   }
   L.push('');
 
-  L.push('## §F6 — `--check` 가 잡는 여덟 가지');
+  L.push('## §F6 — `--check` 가 잡는 아홉 가지');
   L.push('');
   L.push('1. 실효 화력이 범주 밴드를 벗어난다');
   L.push('2. 같은 범주 안에서 다른 무기에 완전히 지배된다 (`burstDPS` · `uptime` · `handling` 모든 축에서 같거나 나쁨)');
@@ -956,6 +987,7 @@ function renderDoc(m) {
   L.push('6. 실전 무기의 `pHit(' + HIT_BOX.label + ')` 이 ' + pct(PHIT_MIN) + ' 미만이다 (샷건은 펠릿 보정값으로 본다)');
   L.push('7. 실전 무기의 §C3 등급 계수에 **1.0 미만인 등급이 하나도 없다** (계수표 자체가 없는 것도 같은 실패)');
   L.push('8. **어떤 두 무기의 등급 계수 네 값이 전부 같다**');
+  L.push('9. 보조 공격이 `charge` 인데 **한 점으로 쏘는 총기**다 (`kind: \'gun\'` · `radius` 0)');
   L.push('');
   L.push('여기에 §F5 역할 겹침 검사가 더해진다.');
   L.push('');
@@ -980,6 +1012,13 @@ function renderDoc(m) {
   L.push('두 무기의 계수 네 값을 같게 만들면 8번이 exit 1 이다. 8번은 **계수표를 발행한 무기들끼리** 본다:');
   L.push('§C3 의 표는 실전 13종만 적었고 발행하지 않은 쪽은 §C3 자신이 "기본 1.0" 이라고 쓴 쪽이라,');
   L.push('그것들을 서로 비교하면 "특수 무기가 둘 이상 존재하면 실패" 가 된다.');
+  L.push('');
+  L.push('9번은 SPEC-weapon-identity §F4 가 더한 것이다. 7단계가 보조 공격 문법을 하나로 통일하면서');
+  L.push('**권총이 에너지를 모으고 산탄총·못총·고무탄총이 에너지를 모았다.** §F2 가 문법을 셋으로 가르고');
+  L.push('(`charge` 모은다 · `steady` 조준이 가라앉는다 · `chamber` 다른 것을 장전한다), 이 줄이 그 결정을');
+  L.push('데이터에서 지킨다 — 권총을 `charge` 로 되돌리면 exit 1 이다. "총기" 는 **총구에서 한 점으로');
+  L.push('나가는 것**(`kind: \'gun\'` 이면서 `radius` 0)으로 읽었다: `kind` 는 무기 분류가 아니라 파괴·연출');
+  L.push('계열이고, §F2 가 charge 로 적은 나팔이 거기서만 총과 같은 칸에 있기 때문이다.');
   L.push('');
   if (m.violations.length) {
     L.push('> **현재 위반 ' + m.violations.length + '건** — `node tools/balance.js --check` 가 exit 1 이다.');

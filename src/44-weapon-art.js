@@ -37,7 +37,13 @@
     accent: ['#ff7a7d', '#e5484d', '#86232a'],   // the one hot colour: warheads, plungers
     hot:    ['#ffe08a', '#ffb224', '#e5484d'],   // flame / spark core
     dark:   ['#3a4049', '#262a31', '#14171c'],   // near-black bodies, bores, holes
-    gloss:  ['#f6fafe', '#f2f6fd', '#ffe9b0']    // specular whites: ground edges, flame core
+    gloss:  ['#f6fafe', '#f2f6fd', '#ffe9b0'],   // specular whites: ground edges, flame core
+    /* SPEC-weapon-identity §G3: "물총 — 몸체를 **청록**으로, 탱크를 투명한 물색으로. 드릴 색을 버린다."
+     * §G2 가 "빨간 몸체 + 파란 탱크 = 전동 드릴" 이라고 적었고, 그 조합이 정확히 공구의 색이다.
+     * 팔레트에 청록이 없어서 몸체가 `accent`(빨강)를 쓰고 있었다 — 재질을 하나 더하는 것이 §1 의
+     * 3단계 음영을 지키면서 §G3 가 시킨 색을 내는 유일한 길이다. §G5 가 지키라고 한 "재질 음영 SVG"
+     * 라는 결정은 그대로다. 바뀌는 것은 이 한 무기의 **색**뿐이다. */
+    aqua:   ['#8fe6e4', '#2bb8bf', '#125a66']    // 물총 몸체 · 노즐: 공구가 아니라 물건이라는 신호
   };
   /* Flat helpers for the 1–3 px slivers that do the modelling. */
   const RIM = 'rgba(255,255,255,.55)';           // §1 림 라이트
@@ -683,12 +689,18 @@
         poly([[128, 88], [142, 88], [138, 104], [128, 100]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
         artRect(174, 56, 26, 28, c.cyl('metal', 'v'), 4, { 'data-part': 'collar' }),
         artRect(175.4, 57.4, 3, 25, RIM2, 1.5),
+        /* ── SPEC-weapon-identity §G3: "앞에 발광 렌즈와 가는 빔 선을 넣는다. 레이저는 빛이 보여야 한다."
+         * §G2 는 이 그림을 "줄무늬 상자" 라고 불렀다. 레이저라고 말하는 조각이 렌즈 안의 작은 점과
+         * 몽툭한 분홍 막대뿐이었고, 그 막대는 총열 굵기라 총열의 연장으로 읽혔다. 빛으로 보이려면
+         * 세 가지가 필요하다 — **퍼지는 후광**, **흰 심이 든 가는 선**, 그리고 선이 그림 밖으로
+         * **나간다**는 사실(빔은 끝나지 않는다). 그 셋을 넣는다. */
+        artCircle(206, 70, 25, 'rgba(255,77,157,.18)', { 'data-part': 'halo' }),
         artCircle(206, 70, 17, c.cyl('metal', 'd'), { 'data-part': 'lens-ring' }),
         artCircle(206, 70, 11, ART.dark[2]),
-        artCircle(206, 70, 8, c.glow('accent'), { 'data-part': 'emitter' }),
-        artCircle(203, 66, 3.2, ART.gloss[0]),
-        artRect(200, 66, 36, 8, 'rgba(255,77,157,.55)', 4, { 'data-part': 'beam' }),
-        artRect(206, 68.2, 32, 3.4, ART.gloss[1], 1.7),
+        artCircle(206, 70, 9, c.glow('accent'), { 'data-part': 'emitter' }),
+        artCircle(206, 70, 4, ART.gloss[0]),
+        artRect(206, 66.5, 34, 7, 'rgba(255,77,157,.5)', 3.5, { 'data-part': 'beam' }),
+        artRect(206, 68.8, 34, 2.4, ART.gloss[1], 1.2, { 'data-part': 'beam-core' }),
         artRect(84, 54, 4, 34, 'rgba(255,255,255,.1)', 2),
         artRect(166, 54, 6, 34, SEAM2, 2),
         artRect(30, 88, 34, 6, c.mat('dark', 'v'), 2, { 'data-part': 'latch' }),
@@ -701,9 +713,11 @@
         artRect(28, 11, 4, 7, c.cyl('metal', 'h'), 1, { 'data-part': 'fin' }),
         artRect(14, 17, 22, 12, c.mat('metal', 'd'), 2, { 'data-part': 'body' }),
         poly([[18, 29], [26, 29], [24, 42], [17, 42]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
-        artCircle(40, 23, 6, c.cyl('metal', 'd'), { 'data-part': 'lens-ring' }),
-        artCircle(40, 23, 3, c.glow('accent'), { 'data-part': 'emitter' }),
-        artRect(14, 18, 20, 1.6, RIM2, 0.8)
+        artCircle(38, 23, 6, c.cyl('metal', 'd'), { 'data-part': 'lens-ring' }),
+        artCircle(38, 23, 3.2, c.glow('accent'), { 'data-part': 'emitter' }),
+        /* §G3: 48 px 에서도 빔이 보여야 한다. 렌즈에서 그림 끝까지 나가는 가는 선 하나가
+         * "이것은 빛을 쏜다" 를 말하는 가장 싼 방법이고, 회색 덩어리 일곱 중에서 이 무기를 뽑아낸다. */
+        artRect(38, 21.6, 10, 2.8, 'rgba(255,77,157,.85)', 1.4, { 'data-part': 'beam' })
       ]
     },
 
@@ -714,16 +728,35 @@
     minigun: {
       detail: (c) => {
         const barrels = svgNode('g', { 'data-part': 'barrels' });
-        /* six tubes, 60° apart around the axis at (150, 70); the two at the back are drawn first so the
-         * front pair overlaps them and the cluster reads as a cylinder rather than a flower */
-        const order = [3, 2, 4, 1, 5, 0];
-        for (const k of order) {
-          const a = k * 60 * DEG;
-          const off = Math.round(Math.sin(a) * 15 * 10) / 10;
-          const depth = Math.cos(a);
-          const shade = depth > 0.3 ? 'metal' : 'dark';
-          barrels.append(artRect(150, 64.5 + off, 82, 11, c.cyl(shade, 'h'), 5, { 'data-part': 'barrel' }));
-          barrels.append(artRect(226, 65.5 + off, 8, 9, ART.dark[2], 4));
+        /* ── SPEC-weapon-identity §G3: "총열을 세로로 벌리고 앞쪽 둘에 하이라이트를 줘 원통 다발로
+         * 읽히게 한다. 총열 끝에 구멍(어두운 원)을 찍는다."
+         *
+         * §G2 가 "6연장 총열이 평행선으로 뭉개져 환기구로 보인다" 고 적은 그림이 여기 있었다. 왜
+         * 그랬는지는 숫자가 말한다 — 각도가 k·60° 라 sin 이 0 · ±0.866 **세 값**뿐이었고, 여섯 개가
+         * 세 줄에 둘씩 겹쳐 앉았다. 길이도 두께도 전부 같았으니 남는 것은 평행선 세 줄, 즉 환기구다.
+         *
+         * 세 가지를 고친다.
+         *   1) 각도에 15° 를 더해 sin 이 여섯 **다른** 값이 되게 한다 — 총열이 세로로 벌어진다.
+         *   2) 깊이(cos)로 길이·두께·명암을 함께 움직인다. 앞쪽 총열은 길고 굵고 밝고, 뒤쪽은 짧고
+         *      가늘고 어둡다. 총구 끝이 직선이 아니라 **타원**을 그리는 것이 원통 다발의 신호다.
+         *   3) 음영 축을 'h'(길이 방향)에서 'v'(축을 가로지르는 방향)로 바꾼다. 옆에서 본 원통은
+         *      가로가 아니라 **세로로** 밝아졌다 어두워진다 — 'h' 가 바로 그 평평한 핀 느낌의 출처다.
+         * 그리고 총열마다 끝에 어두운 원(구멍)을 찍는다. 구멍이 없으면 그냥 막대다. */
+        const spin = [];
+        for (let k = 0; k < 6; k++) {
+          const a = (k * 60 + 15) * DEG;
+          spin.push({ off: Math.round(Math.sin(a) * 24 * 10) / 10, depth: Math.cos(a) });
+        }
+        spin.sort((p, q) => p.depth - q.depth);       // 뒤에서 앞으로: 앞쪽이 뒤쪽을 덮는다
+        for (const b of spin) {
+          const h = Math.round((7.6 + b.depth * 2.2) * 10) / 10;        // 가까울수록 굵다
+          const x2 = Math.round((228 + b.depth * 8) * 10) / 10;         // 총구 끝이 타원을 그린다
+          const y = Math.round((70 + b.off) * 10) / 10;
+          const shade = b.depth > 0.5 ? 'metal' : (b.depth < -0.5 ? 'dark' : 'rubber');
+          barrels.append(artRect(150, y - h / 2, x2 - 150, h, c.cyl(shade, 'v'), h / 2, { 'data-part': 'barrel' }));
+          /* §G3 "앞쪽 둘에 하이라이트": 앞으로 나온 총열의 윗면에만 림 라이트가 앉는다 */
+          if (b.depth > 0.5) barrels.append(artRect(170, y - h / 2 + 1, x2 - 180, 1.8, RIM, 0.9));
+          barrels.append(artCircle(x2 - h * 0.42, y, h * 0.34, ART.dark[2], { 'data-part': 'bore' }));
         }
         return [
           artRect(26, 44, 44, 52, c.mat('dark', 'd'), 6, { 'data-part': 'drum' }),
@@ -738,7 +771,7 @@
           artRect(92, 50, 58, 12, c.mat('dark', 'v'), 3, { 'data-part': 'motor' }),
           artRect(92, 51, 58, 2.2, RIM2, 1.1),
           barrels,
-          artCircle(150, 70, 19, c.cyl('metal', 'v'), { 'data-part': 'hub' }),
+          artCircle(150, 70, 21, c.cyl('metal', 'v'), { 'data-part': 'hub' }),
           artCircle(150, 70, 6.5, ART.dark[2]),
           artPath('M133,58 A19,19 0 0 1 162,55 L158,59 A14,14 0 0 0 136,61 Z', RIM),
           artRect(96, 100, 14, 30, c.mat('rubber', 'd'), 4, { 'data-part': 'grip' }),
@@ -751,21 +784,27 @@
       /* §2: the icon is DRAWN FRESH, not a small detail drawing. Six barrels are six grey smudges at 24 px,
        * so three survive instead — and the budget (≤ 12 drawn nodes, the <g> included) is what forces the
        * choice, which is exactly the point of having two LODs. */
+      /* §2: the icon is DRAWN FRESH, not a small detail drawing. Six barrels are six grey smudges at 48 px,
+       * so three survive instead — and the budget (≤ 12 drawn nodes, the <g> included) is what forces the
+       * choice, which is exactly the point of having two LODs.
+       * §G3 는 여기도 고친다: 세 총열의 **길이와 명암을 다르게** 주고 (같으면 48 px 에서도 핀이다)
+       * 가장 앞 총열 끝에 어두운 구멍을 찍어 "총구" 라고 말한다. */
       icon: (c) => {
         const barrels = svgNode('g', { 'data-part': 'barrels' });
-        for (const k of [1, 2, 0]) {
-          const off = (k - 1) * 5;
-          barrels.append(artRect(28, 21.5 + off, 18, 4, c.cyl(k === 0 ? 'metal' : 'dark', 'h'), 2, { 'data-part': 'barrel' }));
+        /* 간격이 요점이다. 48 px 에서 4 px 짜리 막대 셋이 1 px 떨어져 있으면 그것은 막대 하나로
+         * 보이고, 그 하나가 §G2 가 본 "환기구" 다. 2.5 px 씩 띄우고 길이를 다 다르게 준다. */
+        for (const b of [{ y: 12.6, len: 13, shade: 'dark' }, { y: 28.8, len: 15, shade: 'rubber' }, { y: 20.6, len: 20, shade: 'metal' }]) {
+          barrels.append(artRect(27, b.y, b.len, 4.6, c.cyl(b.shade, 'v'), 2.3, { 'data-part': 'barrel' }));
         }
         return [
-          artRect(3, 14, 12, 17, c.mat('dark', 'd'), 3, { 'data-part': 'drum' }),
-          artCircle(9, 22, 4, c.cyl('metal', 'd'), { 'data-part': 'drum-hub' }),
-          artRect(14, 13, 16, 19, c.mat('metal', 'd'), 3, { 'data-part': 'receiver' }),
-          artRect(14, 14, 16, 2, RIM, 1),
+          artRect(2, 14, 11, 17, c.mat('dark', 'd'), 3, { 'data-part': 'drum' }),
+          artCircle(7.5, 22.5, 3.6, c.cyl('metal', 'd'), { 'data-part': 'drum-hub' }),
+          artRect(12, 13, 14, 19, c.mat('metal', 'd'), 3, { 'data-part': 'receiver' }),
+          artRect(12, 14, 14, 2, RIM, 1),
           barrels,
-          artCircle(29, 23, 6.5, c.cyl('metal', 'v'), { 'data-part': 'hub' }),
-          artCircle(29, 23, 2.4, ART.dark[2]),
-          artRect(20, 32, 6, 11, c.mat('rubber', 'd'), 2, { 'data-part': 'grip' })
+          artCircle(25, 22.9, 6.4, c.cyl('metal', 'v'), { 'data-part': 'hub' }),
+          artCircle(45.4, 22.9, 1.9, ART.dark[2], { 'data-part': 'bore' }),
+          artRect(18, 32, 6, 11, c.mat('rubber', 'd'), 2, { 'data-part': 'grip' })
         ];
       }
     },
@@ -866,10 +905,15 @@
       ]
     },
 
-    /* ───────── 고무탄 · SPEC-arsenal §C ─────────
-     * A break-action launcher with a fat white round sitting in the open breech — the ROUND is the picture,
-     * because what the weapon does is leave that rubber on whatever it touches. Short, wide bore, and a
-     * bounce trace behind the muzzle so the silhouette reads "this comes back". */
+    /* ───────── 고무탄 · SPEC-arsenal §C / SPEC-weapon-identity §G3 ─────────
+     * §G2: "큰 흰 렌즈 + 나무 손잡이 = **손전등**." 그 진단이 맞다. 흰 원반 하나가 그림의 한가운데를
+     * 차지하고 있었고(열린 약실의 흰 고무탄이라는 뜻이었다), 48 px 에서는 그것이 전부였다 — 손전등의
+     * 실루엣이란 정확히 "긴 몸통 끝의 밝은 원" 이다.
+     *
+     * §G3 대로 고친다: **렌즈를 없애고 굵은 회색 총열 + 주황 고무탄 띠**. 주황은 이 무기가 무엇인지
+     * 말하는 색이다 — 비살상탄은 실제로 주황으로 표시하고, 팔레트의 `hot` 이 이미 그 주황을 갖고 있다.
+     * 총열 끝의 주황 띠 하나와 수평 탄창에 물린 주황 탄 셋이 그림의 주인공이 되고, 흰 원반은 사라진다.
+     * 되돌아오는 궤적(bounce)은 §C 가 준 정체성이므로 그대로 둔다. */
     rubber: {
       detail: (c) => [
         poly([[20, 78], [58, 68], [62, 96], [24, 104]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
@@ -882,34 +926,43 @@
         poly([[70, 102], [98, 102], [92, 132], [68, 132]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
         poly([[70, 102], [98, 102], [97.2, 105.6], [69.4, 105.6]], RIM2),
         poly([[100, 100], [114, 100], [110, 116], [100, 112]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
-        artRect(98, 56, 76, 50, c.cyl('metal', 'v'), 8, { 'data-part': 'barrel' }),
-        artRect(99.4, 57.6, 73, 4, RIM, 2),
-        artRect(98, 100, 76, 4, SEAM2),
-        artRect(108, 64, 20, 8, c.mat('dark', 'v'), 2, { 'data-part': 'breech' }),
-        artCircle(140, 81, 20, ART.dark[2], { 'data-part': 'chamber' }),
-        artCircle(140, 81, 15, c.glow('gloss'), { 'data-part': 'round' }),
-        artCircle(134, 75, 4.6, ART.gloss[0]),
-        artRect(174, 60, 24, 42, c.cyl('metal', 'v'), 5, { 'data-part': 'muzzle' }),
-        artRect(175.4, 61.6, 3, 38, RIM2, 1.5),
-        artEllipse(198, 81, 5, 20, ART.dark[2], { 'data-part': 'bore' }),
-        artEllipse(197, 81, 2.4, 15, c.mat('gloss', 'v')),
-        artPath('M206,54 Q226,66 212,80 Q228,94 208,108 L212,102 Q220,92 206,80 Q220,68 210,58 Z', 'rgba(246,250,254,.5)', { 'data-part': 'bounce' }),
-        artCircle(230, 54, 5, 'rgba(246,250,254,.75)', { 'data-part': 'bounce-dot' }),
-        artCircle(232, 108, 4, 'rgba(246,250,254,.5)', { 'data-part': 'bounce-dot' }),
+        /* 굵은 회색 총열 하나. 전보다 낮고 길어서 "통" 이 아니라 "총열" 로 읽힌다 */
+        artRect(98, 62, 86, 36, c.cyl('metal', 'v'), 7, { 'data-part': 'barrel' }),
+        artRect(99.4, 63.6, 83, 3.6, RIM, 1.8),
+        artRect(98, 92, 86, 3.4, SEAM2),
+        artRect(106, 68, 18, 7, c.mat('dark', 'v'), 2, { 'data-part': 'breech' }),
+        /* 주황 고무탄 띠 — 총열을 두르는 비살상탄 표시. 그림에서 가장 눈에 띄는 한 조각이다 */
+        artRect(150, 60, 20, 40, c.cyl('hot', 'v'), 4, { 'data-part': 'band' }),
+        artRect(151.4, 61.4, 2.8, 36, RIM2, 1.4),
+        /* 수평 탄창에 물린 주황 탄 셋. "흰 원반 하나" 자리를 대신한다 */
+        artRect(104, 100, 64, 13, c.mat('dark', 'v'), 4, { 'data-part': 'magazine' }),
+        artRect(105, 101, 62, 2, RIM2, 1),
+        artCircle(116, 106, 5.2, c.cyl('hot', 'v'), { 'data-part': 'round' }),
+        artCircle(134, 106, 5.2, c.cyl('hot', 'v'), { 'data-part': 'round' }),
+        artCircle(152, 106, 5.2, c.cyl('hot', 'v'), { 'data-part': 'round' }),
+        artRect(184, 64, 18, 32, c.cyl('metal', 'v'), 4, { 'data-part': 'muzzle' }),
+        artEllipse(202, 80, 4.5, 16, ART.dark[2], { 'data-part': 'bore' }),
+        artEllipse(201, 80, 2.2, 12, c.cyl('hot', 'v'), { 'data-part': 'loaded' }),
+        artPath('M208,56 Q228,68 214,82 Q230,96 210,110 L214,104 Q222,94 208,82 Q222,70 212,60 Z', 'rgba(255,178,36,.55)', { 'data-part': 'bounce' }),
+        artCircle(232, 56, 5, 'rgba(255,178,36,.8)', { 'data-part': 'bounce-dot' }),
+        artCircle(234, 110, 4, 'rgba(255,178,36,.55)', { 'data-part': 'bounce-dot' }),
         artRect(60, 70, 18, 6, c.mat('dark', 'v'), 2, { 'data-part': 'plate' }),
         artRect(60, 70.6, 18, 1.8, RIM2, 0.9),
-        artCircle(66, 88, 3.2, ART.dark[2]),
-        artCircle(76, 88, 3.2, ART.dark[2])
+        artCircle(66, 88, 3.2, ART.dark[2])
       ],
+      /* 48 px 에서는 주황 하나만 살아남으면 된다 — 그 색이 이 무기의 이름이다. 흰 원반을 빼고
+       * 총열의 주황 띠와 장전된 주황 탄구멍을 넣는다. */
       icon: (c) => [
         poly([[2, 24], [13, 20], [14, 31], [3, 34]], c.mat('wood', 'd'), { 'data-part': 'stock' }),
         artRect(12, 18, 10, 14, c.mat('metal', 'd'), 2, { 'data-part': 'receiver' }),
         poly([[15, 32], [23, 32], [21, 43], [14, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
-        artRect(21, 17, 18, 16, c.cyl('metal', 'v'), 4, { 'data-part': 'barrel' }),
-        artCircle(30, 25, 6, ART.dark[2], { 'data-part': 'chamber' }),
-        artCircle(30, 25, 4, c.glow('gloss'), { 'data-part': 'round' }),
-        artRect(38, 18, 7, 14, c.cyl('metal', 'v'), 2, { 'data-part': 'muzzle' }),
-        artEllipse(45, 25, 1.8, 6, ART.dark[2], { 'data-part': 'bore' })
+        artRect(20, 19, 22, 12, c.cyl('metal', 'v'), 4, { 'data-part': 'barrel' }),
+        artRect(20, 20, 20, 1.6, RIM, 0.8),
+        artRect(33, 17, 7, 16, c.cyl('hot', 'v'), 2, { 'data-part': 'band' }),
+        artRect(16, 31, 20, 7, c.mat('dark', 'v'), 2, { 'data-part': 'magazine' }),
+        artCircle(21, 34.5, 2.6, c.cyl('hot', 'v'), { 'data-part': 'round' }),
+        artCircle(29, 34.5, 2.6, c.cyl('hot', 'v'), { 'data-part': 'round' }),
+        artEllipse(43, 25, 2, 5, ART.dark[2], { 'data-part': 'bore' })
       ]
     },
 
@@ -966,24 +1019,24 @@
      * blue is an rgba tint over the palette rather than a new colour — §9.4 keeps literal fills to ART. */
     watergun: {
       detail: (c) => [
-        artPath('M62,22 Q118,10 172,24 L176,52 Q118,40 58,52 Z', c.mat('gloss', 'd'), { 'data-part': 'tank' }),
+        artPath('M62,22 Q118,10 172,24 L176,52 Q118,40 58,52 Z', 'rgba(143,230,228,.52)', { 'data-part': 'tank' }),
         artPath('M62,22 Q118,10 172,24 L172,28 Q118,15 62,27 Z', RIM),
-        artPath('M60,38 Q118,27 174,39 L176,52 Q118,40 58,52 Z', 'rgba(74,180,230,.55)', { 'data-part': 'water' }),
+        artPath('M60,38 Q118,27 174,39 L176,52 Q118,40 58,52 Z', 'rgba(43,184,191,.78)', { 'data-part': 'water' }),
         artCircle(96, 32, 4, 'rgba(255,255,255,.6)', { 'data-part': 'bubble' }),
         artCircle(132, 29, 3, 'rgba(255,255,255,.5)', { 'data-part': 'bubble' }),
         artRect(108, 14, 20, 10, c.mat('rubber', 'd'), 3, { 'data-part': 'cap' }),
         artRect(108, 14.8, 20, 2, RIM2, 1),
-        artRect(54, 50, 118, 44, c.mat('accent', 'd'), 9, { 'data-part': 'body' }),
+        artRect(54, 50, 118, 44, c.mat('aqua', 'd'), 9, { 'data-part': 'body' }),
         artRect(54, 51.6, 118, 3.4, RIM, 1.7),
         artRect(54, 90, 118, 4, SEAM),
-        artRect(66, 58, 76, 10, 'rgba(74,180,230,.45)', 3, { 'data-part': 'stripe' }),
+        artRect(66, 58, 76, 10, 'rgba(246,250,254,.5)', 3, { 'data-part': 'stripe' }),
         poly([[62, 94], [96, 94], [88, 130], [58, 130]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
         poly([[62, 94], [96, 94], [95.2, 97.6], [61.4, 97.6]], RIM2),
         poly([[98, 92], [112, 92], [108, 108], [98, 104]], c.mat('dark', 'd'), { 'data-part': 'trigger' }),
         artRect(112, 96, 60, 12, c.cyl('rubber', 'h'), 6, { 'data-part': 'pump' }),
         artRect(113, 97, 58, 2.6, RIM2, 1.3),
         artRect(150, 100, 34, 6, c.cyl('metal', 'h'), 3, { 'data-part': 'pump-rod' }),
-        artRect(172, 56, 34, 32, c.cyl('accent', 'v'), 6, { 'data-part': 'barrel' }),
+        artRect(172, 56, 34, 32, c.cyl('aqua', 'v'), 6, { 'data-part': 'barrel' }),
         artRect(173.4, 57.4, 3, 29, RIM2, 1.5),
         artCircle(208, 72, 15, c.cyl('metal', 'd'), { 'data-part': 'nozzle' }),
         artCircle(208, 72, 8, ART.dark[2]),
@@ -996,9 +1049,9 @@
         artRect(64, 74.6, 22, 1.8, RIM2, 0.9)
       ],
       icon: (c) => [
-        artPath('M12,6 Q24,2 36,7 L37,14 Q24,9 11,14 Z', c.mat('gloss', 'd'), { 'data-part': 'tank' }),
-        artPath('M11,11 Q24,6 37,11 L37,14 Q24,9 11,14 Z', 'rgba(74,180,230,.55)', { 'data-part': 'water' }),
-        artRect(9, 14, 27, 14, c.mat('accent', 'd'), 3, { 'data-part': 'body' }),
+        artPath('M12,6 Q24,2 36,7 L37,14 Q24,9 11,14 Z', 'rgba(143,230,228,.45)', { 'data-part': 'tank' }),
+        artPath('M11,11 Q24,6 37,11 L37,14 Q24,9 11,14 Z', 'rgba(43,184,191,.85)', { 'data-part': 'water' }),
+        artRect(9, 14, 27, 14, c.mat('aqua', 'd'), 3, { 'data-part': 'body' }),
         artRect(9, 15, 27, 1.8, RIM, 0.9),
         poly([[12, 28], [21, 28], [19, 43], [11, 43]], c.mat('rubber', 'd'), { 'data-part': 'grip' }),
         artRect(22, 30, 17, 4, c.cyl('rubber', 'h'), 2, { 'data-part': 'pump' }),

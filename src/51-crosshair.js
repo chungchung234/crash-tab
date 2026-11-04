@@ -115,7 +115,12 @@
     xhair.dash = mk('div', 'crs-ch-dash');
     xhair.shape = mk('div', 'crs-ch-shape');
     xhair.hint = mk('span', 'crs-ch-hint');
-    n.append(xhair.dot, xhair.ring, xhair.dash, xhair.shape, xhair.hint);
+    /* ── SPEC-weapon-identity §F2 장전(`chamber`) ──────────────────────────────────────────────────
+     * "조준점 중앙에 그 탄의 표식." 차오르는 링이 없는 문법이므로 **중앙의 한 조각**이 준비 완료를
+     * 혼자 말한다. 셋 다 같은 노드를 쓰고 클래스만 바뀐다 — 슬러그는 뭉툭한 한 덩어리, 대못은 가는
+     * 세로 침, 과압탄은 두꺼운 테의 고리. 모양이 다른 것이 요점이다(어떤 탄이 들어갔는가). */
+    xhair.chamber = mk('div', 'crs-ch-chamber');
+    n.append(xhair.dot, xhair.ring, xhair.dash, xhair.shape, xhair.hint, xhair.chamber);
     /* §A6: the marker node exists only when the setting allows one, so `hitmarker: false` is "no node",
      * not "a node that never animates" — a count is a far harder assertion than an opacity. */
     if (chHitmarkerOn()) {
@@ -144,6 +149,7 @@
     xhair.node = n;
     xhair.sig = ''; xhair.state = ''; xhair.gap = -1; xhair.armLen = -1; xhair.shown = false;
     xhair.ringOn = false; xhair.ringKind = ''; xhair.hintAt = 0; xhair.hintText = ''; xhair.shapeKind = '';
+    xhair.steadyOn = false; xhair.chamberKind = ''; xhair.steadyNode = null; xhair.chamberNode = null;
     return n;
   }
   function chSetPulse(on) {
@@ -159,6 +165,7 @@
     const n = xhair.node;
     xhair.node = null; xhair.arms = []; xhair.dot = null; xhair.ring = null; xhair.dash = null;
     xhair.shape = null; xhair.hit = null; xhair.hitLines = []; xhair.hitRing = null; xhair.hint = null; xhair.hpNum = null;
+    xhair.chamber = null; xhair.steadyOn = false; xhair.chamberKind = ''; xhair.steadyNode = null; xhair.chamberNode = null;
     xhair.sig = ''; xhair.state = ''; xhair.shown = false; xhair.gap = -1; xhair.armLen = -1; xhair.shapeKind = '';
     /* The health bar belongs to `.crs-target` when there is no crosshair to hang it under — put it back
      * before the node goes, or `crosshair: 'off'` would destroy it along with the drawing. */
@@ -317,6 +324,41 @@
     const wantDot = !!sh.dot && st !== 'dim';
     try { n.classList.toggle('crs-ch-nodot', !wantDot); } catch (e) { /* ignore */ }
     chSetPulse(st === 'lock');
+  }
+
+  /* ---- SPEC-weapon-identity §F2: 조준(`steady`)과 장전(`chamber`)의 표식 ------------------------------
+   * 둘 다 **링을 쓰지 않는** 문법이다(§F2 핵심 규칙: 차오르는 링은 charge 에만). 그래서 준비가 끝났다는
+   * 사실을 말할 것이 조준점 자신밖에 없고, 아래 두 함수가 그것을 쓴다. src/78-altfire.js 가 호출하지만
+   * 조준점의 노드를 만지는 일이므로 코드는 조준점 쪽에 둔다 — 노드의 수명을 아는 것이 여기뿐이다.
+   *
+   * 클래스만 토글한다. 실제 밝기·모양은 content.css 의 `.crs-ch-steady` / `.crs-ch-chamber-*` 가 쥐고
+   * 있고, JS 가 애니메이션하지 않는 속성이므로 USER 오리진의 `!important` 함정(CLAUDE.md)에 걸리지 않는다. */
+  /* 두 함수 모두 **어느 노드에 썼는지**를 같이 기억한다. 조준점은 무기·배율·모드가 바뀌면 통째로 다시
+   * 만들어지고, 그때 "값은 그대로인데 노드가 새것" 인 상태가 생긴다 — 값만 비교하면 그 프레임에서
+   * 조용히 아무것도 안 쓰고 표식이 영영 사라진다. 노드가 바뀌었으면 다시 쓴다. */
+  function chSteadyMark(on) {
+    const want = !!on, n = xhair.node;
+    if (want === xhair.steadyOn && n === xhair.steadyNode) return;
+    xhair.steadyOn = want; xhair.steadyNode = n;
+    if (!n) return;
+    try { n.classList.toggle('crs-ch-steady', want); } catch (e) { /* ignore */ }
+  }
+  function chSteadyMarkOn() { return !!xhair.steadyOn && !!(xhair.node && xhair.node.isConnected); }
+  /* `kind` 는 'slug' · 'spike' · 'over' 중 하나이거나, 표식을 지우려면 falsy. */
+  function chChamberMark(kind) {
+    const want = kind ? String(kind) : '';
+    const c = xhair.chamber;
+    if (want === xhair.chamberKind && c === xhair.chamberNode) return;
+    if (c) {
+      try {
+        for (const k of ['slug', 'spike', 'over']) c.classList.toggle('crs-ch-chamber-' + k, want === k);
+        c.classList.toggle('crs-ch-chamber-on', !!want);
+      } catch (e) { /* ignore */ }
+    }
+    xhair.chamberKind = want; xhair.chamberNode = c;
+  }
+  function chChamberMarkOn() {
+    return !!(xhair.chamberKind && xhair.chamber && xhair.chamber.isConnected) ? xhair.chamberKind : null;
   }
 
   /* ---- §A7 the readiness ring --------------------------------------------------------------------- */
@@ -713,6 +755,8 @@
       dot: !!sh.dot && xhair.state !== 'dim', shape: xhair.shapeKind, radius: xhair.radius,
       spread: +chSpreadNow().toFixed(2), scale: chScale(), mode: chMode(),
       ring: xhair.ringOn ? xhair.ringKind : null, hint: xhair.hintText, hintBright: xhair.hintBright,
+      /* §F2: 세 문법이 조준점에 남기는 서로 다른 흔적 — 링(charge) · 밝아진 중심 점(steady) · 탄 표식(chamber). */
+      steady: chSteadyMarkOn(), chamber: chChamberMarkOn(),
       hit: !!xhair.hit, hp: barOn ? { w: Math.round(parseFloat(bar.style.width) || 0), max: xhair.hpMax, now: xhair.hpNow, approx: bar.classList.contains('crs-ch-hp-approx'), opacity: bar.style.opacity } : null,
       hpNumber: xhair.hpNum ? xhair.hpNum.textContent : '',
       targetMarker: targetMarkerMode(), hostileMarker: hostileMarkerMode()

@@ -18,6 +18,12 @@
  *   node tools/weapon-sheet.js              both sheets
  *   node tools/weapon-sheet.js hammer axe   only those ids (same file names)
  *   node tools/weapon-sheet.js --light      light ground instead of dark
+ *   node tools/weapon-sheet.js --r18        SPEC-weapon-identity §G4 용 래스터만 만든다:
+ *                                           아이콘을 **투명 배경 위 진짜 48×48** 로 한 줄에 굽고
+ *                                           test/out/weapons-r18.png 에 쓴 뒤 id 순서를 JSON 으로
+ *                                           표준출력에 찍는다. tools/validate.js 의 R18 이 이것을
+ *                                           읽어 쌍마다 실루엣·색을 비교한다. puppeteer 가 없으면
+ *                                           exit 2 — R18 은 그때 SKIP 한다(FAIL 이 아니다).
  *
  * Zero npm dependencies; puppeteer is resolved exactly the way test/e2e.js does.
  * src/44-weapon-art.js is evaluated directly (not content.js), so the loop never
@@ -64,7 +70,16 @@ const SHIM =
    * tools/validate.js 가 이 목록과 아트의 자유 변수를 대조한다(R17). */
   "  const DEG = Math.PI / 180;\n" +
   "  const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);\n" +
-  "  const rand = (a, b) => a + Math.random() * (b - a);\n";
+  "  const rand = (a, b) => a + Math.random() * (b - a);\n" +
+  /* 아래 다섯은 §4 의 그리기 경로가 아니라 HUD 쪽 함수들(statLine · syncWeaponArt · syncAmmoArt)이
+   * 번들의 다른 모듈에서 빌려 쓰는 이름이다. 이 하네스는 그 함수들을 부르지 않지만, R18 이 "자유
+   * 변수가 전부 심 또는 prelude 에 있다" 를 검사하는 이상 **빌려 쓰는 것은 전부 여기 있어야 한다** —
+   * 그래야 "아직 안 부르니까 괜찮다" 가 아니라 "불러도 괜찮다" 가 된다. 전부 무해한 더미다. */
+  "  const msg = (k) => String(k);\n" +
+  "  const weaponLabel = (id) => String(id);\n" +
+  "  const swapMsOf = () => 250;\n" +
+  "  const slotOf = () => -1;\n" +
+  "  const slotKey = () => '';\n";
 
 function bootSource() {
   const src = fs.readFileSync(path.join(ROOT, 'src', '44-weapon-art.js'), 'utf8');
@@ -74,6 +89,45 @@ function bootSource() {
 
 const BG_DARK = '#191d25';
 const BG_LIGHT = '#e9ecf1';
+
+/* ── SPEC-weapon-identity §G4: 48×48 래스터 ───────────────────────────────────────────────────────
+ * "아이콘 48×48 을 실제로 래스터화해 쌍마다 비교한다." 그러려면 **투명 배경** 위에 구워야 한다 —
+ * 실루엣 비교가 보는 것이 알파 채널이고, 바탕색이 칠해져 있으면 모든 아이콘의 알파가 1 이 되어
+ * 자카드 거리가 전부 0 이 된다(즉 검사가 아무것도 안 한다).
+ *
+ * 한 장에 한 줄로 굽는다. 아이콘마다 스크린샷을 찍으면 23번의 왕복이 되고, 그 시간이 validate 를
+ * 느리게 만들어 결국 아무도 안 돌리게 된다. 자르는 쪽은 R18 이 한다. */
+async function bakeR18(browser, ids, boot) {
+  const CELL = 48;
+  const page = await browser.newPage();
+  await page.setViewport({ width: ids.length * CELL, height: CELL, deviceScaleFactor: 1 });
+  await page.setContent('<!doctype html><meta charset="utf-8"><body></body>');
+  const err = await page.evaluate((code) => { try { eval(code); return null; } catch (e) { return String(e && e.stack || e); } }, boot);
+  if (err) throw new Error('module failed to evaluate:\n' + err);
+  await page.evaluate((ids2, cell) => {
+    document.documentElement.style.background = 'transparent';
+    document.body.style.margin = '0';
+    document.body.style.background = 'transparent';
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    document.body.append(row);
+    for (const id of ids2) {
+      const c = document.createElement('div');
+      c.style.width = cell + 'px';
+      c.style.height = cell + 'px';
+      c.style.overflow = 'hidden';          /* 48×48 밖은 아이콘이 아니다 — 잘린다 */
+      c.style.flex = '0 0 auto';
+      /* lod 를 'icon' 으로 **명시**한다. 크기로 고르게 두면 48 은 DETAIL_MIN(64) 미만이라 지금은
+       * 우연히 맞지만, 그 상수가 움직이는 날 검사가 조용히 다른 그림을 보게 된다. */
+      c.append(window.__art.weaponArt(id, cell, 'icon'));
+      row.append(c);
+    }
+  }, ids, CELL);
+  const out = path.join(OUT, 'weapons-r18.png');
+  await page.screenshot({ path: out, omitBackground: true });
+  await page.close();
+  return { path: out, cell: CELL, ids };
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -85,7 +139,7 @@ async function main() {
   const fg = light ? '#333a45' : '#c9d2e0';
 
   const puppeteer = resolvePuppeteer();
-  if (!puppeteer) { console.error('weapon-sheet: puppeteer not found'); process.exit(2); }
+  if (!puppeteer) { console.error('weapon-sheet: puppeteer not found'); process.exit(2); }   /* exit 2 는 "못 돌렸다" 다 — R18 이 SKIP 과 FAIL 을 이것으로 가른다 */
   fs.mkdirSync(OUT, { recursive: true });
 
   const browser = await puppeteer.launch({
@@ -94,6 +148,20 @@ async function main() {
   });
   try {
     const boot = bootSource();
+
+    /* ---------- §G4: the R18 raster, and nothing else ---------- */
+    if (args.includes('--r18')) {
+      const p0 = await browser.newPage();
+      await p0.setContent('<!doctype html><meta charset="utf-8"><body></body>');
+      const e0 = await p0.evaluate((code) => { try { eval(code); return null; } catch (e) { return String(e && e.stack || e); } }, boot);
+      if (e0) { console.error('weapon-sheet: module failed to evaluate:\n' + e0); process.exit(1); }
+      const all = await p0.evaluate(() => window.__art.ids);
+      await p0.close();
+      const pick = want.length ? all.filter((i) => want.includes(i)) : all;
+      const baked = await bakeR18(browser, pick, boot);
+      process.stdout.write(JSON.stringify({ path: path.relative(ROOT, baked.path), cell: baked.cell, ids: baked.ids }) + '\n');
+      return;
+    }
 
     /* ---------- sheet 1: detail LOD at 200 px ---------- */
     const p1 = await browser.newPage();
