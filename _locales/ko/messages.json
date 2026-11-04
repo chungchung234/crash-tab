@@ -104,7 +104,7 @@
     "description": "Exit smash mode"
   },
   "hudHint": {
-    "message": "클릭해서 화면을 부수세요",
+    "message": "클릭해서 요소를 부수세요",
     "description": "HUD hint"
   },
   "hudHintHold": {

@@ -411,7 +411,7 @@
     btnMute: "음소거",
     btnRestore: "복구",
     btnExit: "종료",
-    hudHint: "클릭해서 화면을 부수세요",
+    hudHint: "클릭해서 요소를 부수세요",
     hudHintHold: "꾹 눌러서 발사",
     hudHintDrag: "드래그해서 베기",
     hudHintCollapse: "복구(Z)로 되돌릴 수 있어요",
