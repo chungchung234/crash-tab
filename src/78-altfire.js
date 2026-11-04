@@ -971,7 +971,6 @@
   const LZ_CUT_MAX = 60;              // §B2: 충돌 지점의 궤적을 기록해(최대 60점)
   const LZ_COOL_MS = 600;             // §B2: 0.6초에 걸쳐 흰 고열 → 주황 → 검은 흉터
 
-  function lzHeat() { return lz.heat; }
   function lzOverheated() { return now() < lz.overheatUntil; }
   function lzHeatRatio() { return clamp(lz.heat / WEAPONS.laser.heatMax, 0, 1); }
   function lzAddHeat(n) {

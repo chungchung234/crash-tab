@@ -261,12 +261,8 @@
   }
   /* Light text (relative luminance > 0.6, alpha ≥ 0.5) — such words vanish over a light page once they leave their dark box. */
   function isLightColor(color) {
-    const m = /rgba?\(([^)]+)\)/.exec(color || '');
-    if (!m) return false;
-    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
-    if (p.length < 3 || (p.length >= 4 && p[3] < 0.5)) return false;
-    const lin = (c) => { c = clamp(c, 0, 255) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
-    return 0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2]) > 0.6;
+    const c = parseColor(color);
+    return !!c && c.a >= 0.5 && relLuminance(c) > 0.6;
   }
   /* A23 piece styling. `scaleY` = rect.height / offsetHeight of the target (≠ 1 under transform: scale /
    * html zoom ancestors): the span lives in our unscaled root, so the font metrics themselves are scaled

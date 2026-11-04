@@ -15,22 +15,9 @@
   function inspectActive() { return !!(inspect.on && state.active); }
 
   /* ---- colour maths (the §7 assertion is "대비비가 손계산과 ±0.05") ---- */
-  function inspectColor(str) {
-    const m = /rgba?\(([^)]+)\)/.exec(str || '');
-    if (!m) return null;
-    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(Number);
-    if (p.length < 3 || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2])) return null;
-    const a = p.length >= 4 && isFinite(p[3]) ? p[3] : 1;
-    return { r: p[0], g: p[1], b: p[2], a };
-  }
   function inspectOver(top, under) {
     const a = clamp(top.a, 0, 1);
     return { r: top.r * a + under.r * (1 - a), g: top.g * a + under.g * (1 - a), b: top.b * a + under.b * (1 - a), a: 1 };
-  }
-  /* WCAG 2.x relative luminance, exactly as the recommendation states it. */
-  function inspectLum(c) {
-    const f = (v) => { v = clamp(v, 0, 255) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
-    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
   }
   /* The background a reader actually sees behind this element: the first opaque ancestor background with
    * every translucent layer above it composited back down onto it, and the canvas (white) underneath. */
@@ -39,7 +26,7 @@
     let n = el, guard = 0;
     while (n && n.nodeType === 1 && guard++ < 40) {
       const s = gcs(n);
-      const c = s ? inspectColor(s.backgroundColor) : null;
+      const c = s ? parseColor(s.backgroundColor) : null;
       if (c && c.a > 0) { stack.push(c); if (c.a >= 1) break; }
       n = parentOf(n);
     }
@@ -48,7 +35,7 @@
     return base;
   }
   function inspectRatio(fg, bg) {
-    const l1 = inspectLum(fg), l2 = inspectLum(bg);
+    const l1 = relLuminance(fg), l2 = relLuminance(bg);
     const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
     return (hi + 0.05) / (lo + 0.05);
   }
@@ -139,7 +126,7 @@
     const fontPx = parseFloat(s.fontSize) || 0;
     const weight = parseInt(s.fontWeight, 10) || (s.fontWeight === 'bold' ? 700 : 400);
     const bg = inspectBgOf(el);
-    const fgRaw = inspectColor(s.color) || { r: 0, g: 0, b: 0, a: 1 };
+    const fgRaw = parseColor(s.color) || { r: 0, g: 0, b: 0, a: 1 };
     const fg = fgRaw.a < 1 ? inspectOver(fgRaw, bg) : fgRaw;
     const ratio = inspectRatio(fg, bg);
     const h = hpOf(el);

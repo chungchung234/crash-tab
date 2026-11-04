@@ -40,13 +40,25 @@
   function viewW() { return docEl.clientWidth || win.innerWidth; }
   function viewH() { return docEl.clientHeight || win.innerHeight; }
   function isOurs(n) { return !!(n && n.nodeType === 1 && n.closest && n.closest('[data-crs]')); }
+  /* One reader for a computed `rgb()` / `rgba()` string (comma or space syntax): { r, g, b, a } with `a` 1 when
+   * absent or unreadable, or null when it is not a colour function with three finite channels. */
+  function parseColor(str) {
+    const m = /rgba?\(([^)]+)\)/.exec(str || '');
+    if (!m) return null;
+    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(Number);
+    if (p.length < 3 || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2])) return null;
+    return { r: p[0], g: p[1], b: p[2], a: p.length >= 4 && isFinite(p[3]) ? p[3] : 1 };
+  }
+  /* WCAG 2.x relative luminance of { r, g, b } (0–255), exactly as the recommendation states it. */
+  function relLuminance(c) {
+    const f = (v) => { v = clamp(v, 0, 255) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  }
   function alphaOf(color) {
     if (!color) return 1;
     if (color === 'transparent') return 0;
-    const m = /rgba?\(([^)]+)\)/.exec(color);
-    if (!m) return 1;
-    const parts = m[1].split(/[\s,\/]+/).filter(Boolean);
-    return parts.length >= 4 ? parseFloat(parts[3]) : 1;
+    const c = parseColor(color);
+    return c ? c.a : 1;
   }
   function mk(tag, cls) {
     const n = doc.createElement(tag);

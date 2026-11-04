@@ -49,9 +49,8 @@
    * One class on <html> drives the stripe pattern and the solid hover / hostile outlines (content.css,
    * `/* settings *\/` block); the ⚠ glyph and the always-visible health numbers are composed here. */
   const HC_CLASS = 'crs-hcm';
-  function highContrast() { return settingBool('highContrastMarkers'); }
   function a11yContrastSync() {
-    try { docEl.classList.toggle(HC_CLASS, !!(state.active && highContrast())); } catch (e) { /* ignore */ }
+    try { docEl.classList.toggle(HC_CLASS, !!(state.active && chHighContrast())); } catch (e) { /* ignore */ }
   }
   function a11yContrastChanged() {
     a11yContrastSync();
@@ -64,7 +63,7 @@
     setHostileLabelBase(rec);
     if (!rec || !rec.label) return;
     try {
-      if (!highContrast()) { if (rec.aura) rec.aura.classList.remove('crs-hc'); return; }
+      if (!chHighContrast()) { if (rec.aura) rec.aura.classList.remove('crs-hc'); return; }
       if (rec.aura) rec.aura.classList.add('crs-hc');
       const h = hpOf(rec.el);
       rec.label.textContent = '⚠ ' + rec.label.textContent + ' ' + Math.max(0, Math.round(h.hp)) + '/' + h.max;
@@ -370,7 +369,7 @@
   }
   debug.a11y = () => ({
     reduced: reducedMotion(), setting: settingsGet('reduceMotion'),
-    highContrast: highContrast(), keyboardAim: keyboardAim(),
+    highContrast: chHighContrast(), keyboardAim: keyboardAim(),
     cursor: kbAim.node && kbAim.node.isConnected ? { x: Math.round(kbAim.x), y: Math.round(kbAim.y) } : null,
     live: a11yLive ? a11yLive.textContent : null,
     koDialog: hudEls.ko ? hudEls.ko.getAttribute('role') : null

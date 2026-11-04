@@ -129,7 +129,7 @@
     safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
       const storedLoadout = migrateWeaponIds(res.crsLoadout);   // §8.1: a stored 'sword' becomes 'katana' on read
-      if (!state.loadoutTouched && isPermutation(storedLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
+      if (!state.loadoutTouched && isLoadout(storedLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
         setLoadout(storedLoadout, { preset: (p === 'custom' || PRESETS[p]) ? p : 'custom', silent: true });
       }
@@ -351,16 +351,8 @@
     cycleMode,
     // SPEC-material §4: where the rubble lives — 'document' (default, scrolls with the page) | 'viewport'
     get debrisAnchor() { return state.debrisAnchor; },
-    setDebrisAnchor: (v) => setDebrisAnchor(v),
-    setDebrisLife: (ms) => {
-      ms = +ms;
-      if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;
-      state.debrisLifeMs = ms;
-      for (const p of state.pieces) if (p.resting) p.expireAt = ms > 0 ? now() + ms + rand(-DEBRIS_JITTER, DEBRIS_JITTER) : 0;
-      scheduleDebrisSweep();
-      safe(() => chrome.storage.sync.set({ crsDebrisLifeMs: ms, crsDebrisLife: ms }));
-      return state.debrisLifeMs;
-    }
+    setDebrisAnchor: (v) => setDebrisAnchor(v)
+    // api.setDebrisLife is defined below, in the settings section (it needs settingsMirror).
   };
   window.__crashScreen = api;
 

@@ -118,7 +118,6 @@
     }
     return n;
   }
-  function hitRepairBeamsWithin(x, y, R) { return hitRepairBeams(x, y, R); }
   function hitRepairBeamsAlong(x1, y1, x2, y2, R) {
     let n = 0;
     for (const rp of state.repairs.slice()) {
