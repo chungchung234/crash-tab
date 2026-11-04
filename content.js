@@ -346,13 +346,25 @@
   function viewW() { return docEl.clientWidth || win.innerWidth; }
   function viewH() { return docEl.clientHeight || win.innerHeight; }
   function isOurs(n) { return !!(n && n.nodeType === 1 && n.closest && n.closest('[data-crs]')); }
+  /* One reader for a computed `rgb()` / `rgba()` string (comma or space syntax): { r, g, b, a } with `a` 1 when
+   * absent or unreadable, or null when it is not a colour function with three finite channels. */
+  function parseColor(str) {
+    const m = /rgba?\(([^)]+)\)/.exec(str || '');
+    if (!m) return null;
+    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(Number);
+    if (p.length < 3 || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2])) return null;
+    return { r: p[0], g: p[1], b: p[2], a: p.length >= 4 && isFinite(p[3]) ? p[3] : 1 };
+  }
+  /* WCAG 2.x relative luminance of { r, g, b } (0–255), exactly as the recommendation states it. */
+  function relLuminance(c) {
+    const f = (v) => { v = clamp(v, 0, 255) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  }
   function alphaOf(color) {
     if (!color) return 1;
     if (color === 'transparent') return 0;
-    const m = /rgba?\(([^)]+)\)/.exec(color);
-    if (!m) return 1;
-    const parts = m[1].split(/[\s,\/]+/).filter(Boolean);
-    return parts.length >= 4 ? parseFloat(parts[3]) : 1;
+    const c = parseColor(color);
+    return c ? c.a : 1;
   }
   function mk(tag, cls) {
     const n = doc.createElement(tag);
@@ -7178,32 +7190,23 @@
     n.style.left = px(minX); n.style.top = px(minY); n.style.width = px(w); n.style.height = px(h);
     let svg;
     try {
-      svg = doc.createElementNS(SVG_NS, 'svg');
-      svg.setAttribute('width', String(Math.round(w)));
-      svg.setAttribute('height', String(Math.round(h)));
-      svg.setAttribute('viewBox', '0 0 ' + Math.round(w) + ' ' + Math.round(h));
-      const defs = doc.createElementNS(SVG_NS, 'defs');
-      const grad = doc.createElementNS(SVG_NS, 'linearGradient');
+      const hR = Math.round(h);
+      svg = svgNode('svg', { width: Math.round(w), height: hR, viewBox: '0 0 ' + Math.round(w) + ' ' + hR });   // svgNode: src/44-weapon-art.js
+      const defs = svgNode('defs');
       const gid = 'crs-cres-' + Math.round(rand(1e6, 9e6));
-      grad.setAttribute('id', gid);
-      grad.setAttribute('gradientUnits', 'userSpaceOnUse');
-      grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
-      grad.setAttribute('x2', '0'); grad.setAttribute('y2', String(Math.round(h)));
+      const grad = svgNode('linearGradient', { id: gid, gradientUnits: 'userSpaceOnUse', x1: 0, y1: 0, x2: 0, y2: hR });
       for (const [off, col] of [['0', 'rgba(255,255,255,.95)'], ['1', 'rgba(255,255,255,0)']]) {
-        const s = doc.createElementNS(SVG_NS, 'stop');
-        s.setAttribute('offset', off); s.setAttribute('stop-color', col);
-        grad.append(s);
+        grad.append(svgNode('stop', { offset: off, 'stop-color': col }));
       }
       defs.append(grad); svg.append(defs);
       // the crescent itself: the curve out, and the same curve back with an 18 px belly
       const bx = (cu.cx - minX), by = (cu.cy - minY);
       const a = Math.atan2(cu.y2 - cu.y1, cu.x2 - cu.x1);
       const ox = -Math.sin(a) * 18, oy = Math.cos(a) * 18;
-      const path = doc.createElementNS(SVG_NS, 'path');
-      path.setAttribute('d', 'M' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) +
+      const path = svgNode('path', { d: 'M' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) +
         ' Q' + bx.toFixed(1) + ',' + by.toFixed(1) + ' ' + (cu.x2 - minX).toFixed(1) + ',' + (cu.y2 - minY).toFixed(1) +
-        ' Q' + (bx + ox).toFixed(1) + ',' + (by + oy).toFixed(1) + ' ' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) + ' Z');
-      path.setAttribute('fill', 'url(#' + gid + ')');
+        ' Q' + (bx + ox).toFixed(1) + ',' + (by + oy).toFixed(1) + ' ' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) + ' Z',
+        fill: 'url(#' + gid + ')' });
       svg.append(path);
       n.append(svg);
     } catch (e) { return null; }
@@ -8620,7 +8623,6 @@
   const utWells = [];                 // { x, y, R, until, pull, orbPull, node, pulled }
   let utWellLastT = 0;
 
-  function gwActive() { return utWells.length > 0; }
   function gwSpawn(x, y, R, ms, pullMul) {
     const W = WEAPONS.gravity;
     const w = {
@@ -9185,12 +9187,8 @@
   }
   /* Light text (relative luminance > 0.6, alpha ≥ 0.5) — such words vanish over a light page once they leave their dark box. */
   function isLightColor(color) {
-    const m = /rgba?\(([^)]+)\)/.exec(color || '');
-    if (!m) return false;
-    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
-    if (p.length < 3 || (p.length >= 4 && p[3] < 0.5)) return false;
-    const lin = (c) => { c = clamp(c, 0, 255) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
-    return 0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2]) > 0.6;
+    const c = parseColor(color);
+    return !!c && c.a >= 0.5 && relLuminance(c) > 0.6;
   }
   /* A23 piece styling. `scaleY` = rect.height / offsetHeight of the target (≠ 1 under transform: scale /
    * html zoom ancestors): the span lives in our unscaled root, so the font metrics themselves are scaled
@@ -12543,7 +12541,6 @@
   const LZ_CUT_MAX = 60;              // §B2: 충돌 지점의 궤적을 기록해(최대 60점)
   const LZ_COOL_MS = 600;             // §B2: 0.6초에 걸쳐 흰 고열 → 주황 → 검은 흉터
 
-  function lzHeat() { return lz.heat; }
   function lzOverheated() { return now() < lz.overheatUntil; }
   function lzHeatRatio() { return clamp(lz.heat / WEAPONS.laser.heatMax, 0, 1); }
   function lzAddHeat(n) {
@@ -13596,15 +13593,13 @@
   /* --- loadouts (A6, rewritten by SPEC-arsenal §B1) ---
    * The loadout used to be a PERMUTATION of the whole weapon table. With 12 weapons and 10 number keys it
    * cannot be: §B1 makes it "무기고에서 고른 최대 10개의 순서 있는 목록" — a subset, no duplicates, length
-   * 1–10. isPermutation() keeps its name and its callers (loadPrefs' stored-array guard is the only other
-   * one) but now answers that question; isLoadout() is the name the new code reads better with. */
+   * 1–10. isLoadout() answers that question (it was called isPermutation() while the list was a permutation). */
   function isLoadout(ids) {
     if (!Array.isArray(ids) || ids.length < 1 || ids.length > LOADOUT_MAX) return false;
     const seen = new Set();
     for (const id of ids) { if (!WEAPON_IDS.includes(id) || seen.has(id)) return false; seen.add(id); }
     return true;
   }
-  function isPermutation(ids) { return isLoadout(ids); }
   /* §B1: 무기고 — every weapon that exists, in table order. Not the loadout and never reordered. */
   function arsenalList() { return WEAPON_IDS.slice(); }
   function inLoadout(id) { return state.loadout.indexOf(id) >= 0; }
@@ -15191,7 +15186,6 @@
   function orbGone(o) { if (!o) return; orbVisualsRemove(o); if (o.rec && !o.launched && o.rec.phase === 'windup') o.rec.phase = 'idle'; }
   /* §D4 "폭발 무기의 범위 안에 든 투사체는 소멸한다" and "전부 요격 가능하다" both come down to one radius per
    * kind — 유도탄's is 1.3× (src/88-archetypes.js), everything else keeps the 18 px this build shipped. */
-  function orbHitRadius(o) { return orbInterceptR(o); }
   function removeOrbAt(i) { const o = state.orbs[i]; state.orbs.splice(i, 1); orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } }
   function clearOrbs() { for (const o of state.orbs) { orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } } state.orbs.length = 0; }
   function orbStep(t, dt) {
@@ -15252,21 +15246,21 @@
   }
   function interceptOrb(x, y) {
     hitRepairBeams(x, y, 14);   // v1.4 §3.1: a shot across a repair beam delays it 0.4 s — it never absorbs the shot
-    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= orbHitRadius(o)) { popOrb(o); return true; } }
+    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= orbInterceptR(o)) { popOrb(o); return true; } }
     schedulePierce(x, y);       // v1.4 §10.3: the shot reaches the page, so it can also go THROUGH it
     return false;
   }
   function interceptOrbsWithin(x, y, R) {
-    hitRepairBeamsWithin(x, y, R);      // v1.4 §3.1
+    hitRepairBeams(x, y, R);      // v1.4 §3.1
     scheduleBlastThroughCover(x, y, R); // v1.4 §10.3: a blast reaches what is hiding behind cover
     let n = 0;
-    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R + (orbHitRadius(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
+    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R + (orbInterceptR(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
     return n;
   }
   function interceptOrbsAlong(x1, y1, x2, y2, R) {
     hitRepairBeamsAlong(x1, y1, x2, y2, R);   // v1.4 §3.1
     let n = 0;
-    for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R + (orbHitRadius(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
+    for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R + (orbInterceptR(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
     return n;
   }
   /* T2 charger: 700 ms telegraph (aura pulse 150 ms + expanding warn ring), then SLAM (rect + 60 px). */
@@ -15801,12 +15795,11 @@
   /* Geometry: a `.crs-selfbox` wrapper is translated onto the pointer and holds four same-sized layers. The RING
    * itself is `.crs-self` — a conic-gradient disc with its middle punched out by a radial-gradient mask, so the
    * painted arc runs clockwise from 12 o'clock for exactly hp/max of the circle. CSSOM only; no SVG. */
-  function selfColor(ratio) { return fillColor(ratio); }
   /* `force` (SPEC-combat §B1) paints the gauge in one flat colour instead of the health palette — the dim grey
    * the aim point wears over an invulnerable target. */
   function ringGradient(ratio, force) {
     const deg = clamp(ratio, 0, 1) * 360;
-    const c = force || selfColor(ratio);
+    const c = force || fillColor(ratio);
     return 'conic-gradient(from 0deg, ' + c + ' 0deg, ' + c + ' ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) 360deg)';
   }
   /* A 60°-wide (or `span`-wide) coloured window centred on `deg`, used for the damage wedge and the graze arc. */
@@ -16934,7 +16927,6 @@
     }
     return n;
   }
-  function hitRepairBeamsWithin(x, y, R) { return hitRepairBeams(x, y, R); }
   function hitRepairBeamsAlong(x1, y1, x2, y2, R) {
     let n = 0;
     for (const rp of state.repairs.slice()) {
@@ -17456,9 +17448,8 @@
    * One class on <html> drives the stripe pattern and the solid hover / hostile outlines (content.css,
    * `/* settings *\/` block); the ⚠ glyph and the always-visible health numbers are composed here. */
   const HC_CLASS = 'crs-hcm';
-  function highContrast() { return settingBool('highContrastMarkers'); }
   function a11yContrastSync() {
-    try { docEl.classList.toggle(HC_CLASS, !!(state.active && highContrast())); } catch (e) { /* ignore */ }
+    try { docEl.classList.toggle(HC_CLASS, !!(state.active && chHighContrast())); } catch (e) { /* ignore */ }
   }
   function a11yContrastChanged() {
     a11yContrastSync();
@@ -17471,7 +17462,7 @@
     setHostileLabelBase(rec);
     if (!rec || !rec.label) return;
     try {
-      if (!highContrast()) { if (rec.aura) rec.aura.classList.remove('crs-hc'); return; }
+      if (!chHighContrast()) { if (rec.aura) rec.aura.classList.remove('crs-hc'); return; }
       if (rec.aura) rec.aura.classList.add('crs-hc');
       const h = hpOf(rec.el);
       rec.label.textContent = '⚠ ' + rec.label.textContent + ' ' + Math.max(0, Math.round(h.hp)) + '/' + h.max;
@@ -17777,7 +17768,7 @@
   }
   debug.a11y = () => ({
     reduced: reducedMotion(), setting: settingsGet('reduceMotion'),
-    highContrast: highContrast(), keyboardAim: keyboardAim(),
+    highContrast: chHighContrast(), keyboardAim: keyboardAim(),
     cursor: kbAim.node && kbAim.node.isConnected ? { x: Math.round(kbAim.x), y: Math.round(kbAim.y) } : null,
     live: a11yLive ? a11yLive.textContent : null,
     koDialog: hudEls.ko ? hudEls.ko.getAttribute('role') : null
@@ -18875,22 +18866,9 @@
   function inspectActive() { return !!(inspect.on && state.active); }
 
   /* ---- colour maths (the §7 assertion is "대비비가 손계산과 ±0.05") ---- */
-  function inspectColor(str) {
-    const m = /rgba?\(([^)]+)\)/.exec(str || '');
-    if (!m) return null;
-    const p = m[1].split(/[\s,\/]+/).filter(Boolean).map(Number);
-    if (p.length < 3 || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2])) return null;
-    const a = p.length >= 4 && isFinite(p[3]) ? p[3] : 1;
-    return { r: p[0], g: p[1], b: p[2], a };
-  }
   function inspectOver(top, under) {
     const a = clamp(top.a, 0, 1);
     return { r: top.r * a + under.r * (1 - a), g: top.g * a + under.g * (1 - a), b: top.b * a + under.b * (1 - a), a: 1 };
-  }
-  /* WCAG 2.x relative luminance, exactly as the recommendation states it. */
-  function inspectLum(c) {
-    const f = (v) => { v = clamp(v, 0, 255) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
-    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
   }
   /* The background a reader actually sees behind this element: the first opaque ancestor background with
    * every translucent layer above it composited back down onto it, and the canvas (white) underneath. */
@@ -18899,7 +18877,7 @@
     let n = el, guard = 0;
     while (n && n.nodeType === 1 && guard++ < 40) {
       const s = gcs(n);
-      const c = s ? inspectColor(s.backgroundColor) : null;
+      const c = s ? parseColor(s.backgroundColor) : null;
       if (c && c.a > 0) { stack.push(c); if (c.a >= 1) break; }
       n = parentOf(n);
     }
@@ -18908,7 +18886,7 @@
     return base;
   }
   function inspectRatio(fg, bg) {
-    const l1 = inspectLum(fg), l2 = inspectLum(bg);
+    const l1 = relLuminance(fg), l2 = relLuminance(bg);
     const hi = Math.max(l1, l2), lo = Math.min(l1, l2);
     return (hi + 0.05) / (lo + 0.05);
   }
@@ -18999,7 +18977,7 @@
     const fontPx = parseFloat(s.fontSize) || 0;
     const weight = parseInt(s.fontWeight, 10) || (s.fontWeight === 'bold' ? 700 : 400);
     const bg = inspectBgOf(el);
-    const fgRaw = inspectColor(s.color) || { r: 0, g: 0, b: 0, a: 1 };
+    const fgRaw = parseColor(s.color) || { r: 0, g: 0, b: 0, a: 1 };
     const fg = fgRaw.a < 1 ? inspectOver(fgRaw, bg) : fgRaw;
     const ratio = inspectRatio(fg, bg);
     const h = hpOf(el);
@@ -19550,7 +19528,7 @@
     safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
       const storedLoadout = migrateWeaponIds(res.crsLoadout);   // §8.1: a stored 'sword' becomes 'katana' on read
-      if (!state.loadoutTouched && isPermutation(storedLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
+      if (!state.loadoutTouched && isLoadout(storedLoadout)) {   // a stored array that is not a valid permutation is ignored (A6)
         const p = res.crsLoadoutPreset;
         setLoadout(storedLoadout, { preset: (p === 'custom' || PRESETS[p]) ? p : 'custom', silent: true });
       }
@@ -19772,16 +19750,8 @@
     cycleMode,
     // SPEC-material §4: where the rubble lives — 'document' (default, scrolls with the page) | 'viewport'
     get debrisAnchor() { return state.debrisAnchor; },
-    setDebrisAnchor: (v) => setDebrisAnchor(v),
-    setDebrisLife: (ms) => {
-      ms = +ms;
-      if (!isFinite(ms) || ms < 0) return state.debrisLifeMs;
-      state.debrisLifeMs = ms;
-      for (const p of state.pieces) if (p.resting) p.expireAt = ms > 0 ? now() + ms + rand(-DEBRIS_JITTER, DEBRIS_JITTER) : 0;
-      scheduleDebrisSweep();
-      safe(() => chrome.storage.sync.set({ crsDebrisLifeMs: ms, crsDebrisLife: ms }));
-      return state.debrisLifeMs;
-    }
+    setDebrisAnchor: (v) => setDebrisAnchor(v)
+    // api.setDebrisLife is defined below, in the settings section (it needs settingsMirror).
   };
   window.__crashScreen = api;
 

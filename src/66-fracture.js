@@ -676,32 +676,23 @@
     n.style.left = px(minX); n.style.top = px(minY); n.style.width = px(w); n.style.height = px(h);
     let svg;
     try {
-      svg = doc.createElementNS(SVG_NS, 'svg');
-      svg.setAttribute('width', String(Math.round(w)));
-      svg.setAttribute('height', String(Math.round(h)));
-      svg.setAttribute('viewBox', '0 0 ' + Math.round(w) + ' ' + Math.round(h));
-      const defs = doc.createElementNS(SVG_NS, 'defs');
-      const grad = doc.createElementNS(SVG_NS, 'linearGradient');
+      const hR = Math.round(h);
+      svg = svgNode('svg', { width: Math.round(w), height: hR, viewBox: '0 0 ' + Math.round(w) + ' ' + hR });   // svgNode: src/44-weapon-art.js
+      const defs = svgNode('defs');
       const gid = 'crs-cres-' + Math.round(rand(1e6, 9e6));
-      grad.setAttribute('id', gid);
-      grad.setAttribute('gradientUnits', 'userSpaceOnUse');
-      grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
-      grad.setAttribute('x2', '0'); grad.setAttribute('y2', String(Math.round(h)));
+      const grad = svgNode('linearGradient', { id: gid, gradientUnits: 'userSpaceOnUse', x1: 0, y1: 0, x2: 0, y2: hR });
       for (const [off, col] of [['0', 'rgba(255,255,255,.95)'], ['1', 'rgba(255,255,255,0)']]) {
-        const s = doc.createElementNS(SVG_NS, 'stop');
-        s.setAttribute('offset', off); s.setAttribute('stop-color', col);
-        grad.append(s);
+        grad.append(svgNode('stop', { offset: off, 'stop-color': col }));
       }
       defs.append(grad); svg.append(defs);
       // the crescent itself: the curve out, and the same curve back with an 18 px belly
       const bx = (cu.cx - minX), by = (cu.cy - minY);
       const a = Math.atan2(cu.y2 - cu.y1, cu.x2 - cu.x1);
       const ox = -Math.sin(a) * 18, oy = Math.cos(a) * 18;
-      const path = doc.createElementNS(SVG_NS, 'path');
-      path.setAttribute('d', 'M' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) +
+      const path = svgNode('path', { d: 'M' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) +
         ' Q' + bx.toFixed(1) + ',' + by.toFixed(1) + ' ' + (cu.x2 - minX).toFixed(1) + ',' + (cu.y2 - minY).toFixed(1) +
-        ' Q' + (bx + ox).toFixed(1) + ',' + (by + oy).toFixed(1) + ' ' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) + ' Z');
-      path.setAttribute('fill', 'url(#' + gid + ')');
+        ' Q' + (bx + ox).toFixed(1) + ',' + (by + oy).toFixed(1) + ' ' + (cu.x1 - minX).toFixed(1) + ',' + (cu.y1 - minY).toFixed(1) + ' Z',
+        fill: 'url(#' + gid + ')' });
       svg.append(path);
       n.append(svg);
     } catch (e) { return null; }

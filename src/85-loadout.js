@@ -1,15 +1,13 @@
   /* --- loadouts (A6, rewritten by SPEC-arsenal §B1) ---
    * The loadout used to be a PERMUTATION of the whole weapon table. With 12 weapons and 10 number keys it
    * cannot be: §B1 makes it "무기고에서 고른 최대 10개의 순서 있는 목록" — a subset, no duplicates, length
-   * 1–10. isPermutation() keeps its name and its callers (loadPrefs' stored-array guard is the only other
-   * one) but now answers that question; isLoadout() is the name the new code reads better with. */
+   * 1–10. isLoadout() answers that question (it was called isPermutation() while the list was a permutation). */
   function isLoadout(ids) {
     if (!Array.isArray(ids) || ids.length < 1 || ids.length > LOADOUT_MAX) return false;
     const seen = new Set();
     for (const id of ids) { if (!WEAPON_IDS.includes(id) || seen.has(id)) return false; seen.add(id); }
     return true;
   }
-  function isPermutation(ids) { return isLoadout(ids); }
   /* §B1: 무기고 — every weapon that exists, in table order. Not the loadout and never reordered. */
   function arsenalList() { return WEAPON_IDS.slice(); }
   function inLoadout(id) { return state.loadout.indexOf(id) >= 0; }

@@ -68,12 +68,11 @@
   /* Geometry: a `.crs-selfbox` wrapper is translated onto the pointer and holds four same-sized layers. The RING
    * itself is `.crs-self` — a conic-gradient disc with its middle punched out by a radial-gradient mask, so the
    * painted arc runs clockwise from 12 o'clock for exactly hp/max of the circle. CSSOM only; no SVG. */
-  function selfColor(ratio) { return fillColor(ratio); }
   /* `force` (SPEC-combat §B1) paints the gauge in one flat colour instead of the health palette — the dim grey
    * the aim point wears over an invulnerable target. */
   function ringGradient(ratio, force) {
     const deg = clamp(ratio, 0, 1) * 360;
-    const c = force || selfColor(ratio);
+    const c = force || fillColor(ratio);
     return 'conic-gradient(from 0deg, ' + c + ' 0deg, ' + c + ' ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) ' + deg.toFixed(2) + 'deg, rgba(255,255,255,.16) 360deg)';
   }
   /* A 60°-wide (or `span`-wide) coloured window centred on `deg`, used for the damage wedge and the graze arc. */

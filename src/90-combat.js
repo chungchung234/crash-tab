@@ -365,7 +365,6 @@
   function orbGone(o) { if (!o) return; orbVisualsRemove(o); if (o.rec && !o.launched && o.rec.phase === 'windup') o.rec.phase = 'idle'; }
   /* §D4 "폭발 무기의 범위 안에 든 투사체는 소멸한다" and "전부 요격 가능하다" both come down to one radius per
    * kind — 유도탄's is 1.3× (src/88-archetypes.js), everything else keeps the 18 px this build shipped. */
-  function orbHitRadius(o) { return orbInterceptR(o); }
   function removeOrbAt(i) { const o = state.orbs[i]; state.orbs.splice(i, 1); orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } }
   function clearOrbs() { for (const o of state.orbs) { orbGone(o); try { o.node.remove(); } catch (e) { /* ignore */ } } state.orbs.length = 0; }
   function orbStep(t, dt) {
@@ -426,21 +425,21 @@
   }
   function interceptOrb(x, y) {
     hitRepairBeams(x, y, 14);   // v1.4 §3.1: a shot across a repair beam delays it 0.4 s — it never absorbs the shot
-    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= orbHitRadius(o)) { popOrb(o); return true; } }
+    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= orbInterceptR(o)) { popOrb(o); return true; } }
     schedulePierce(x, y);       // v1.4 §10.3: the shot reaches the page, so it can also go THROUGH it
     return false;
   }
   function interceptOrbsWithin(x, y, R) {
-    hitRepairBeamsWithin(x, y, R);      // v1.4 §3.1
+    hitRepairBeams(x, y, R);      // v1.4 §3.1
     scheduleBlastThroughCover(x, y, R); // v1.4 §10.3: a blast reaches what is hiding behind cover
     let n = 0;
-    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R + (orbHitRadius(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
+    for (const o of state.orbs.slice()) { if (Math.hypot(o.x - x, o.y - y) <= R + (orbInterceptR(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
     return n;
   }
   function interceptOrbsAlong(x1, y1, x2, y2, R) {
     hitRepairBeamsAlong(x1, y1, x2, y2, R);   // v1.4 §3.1
     let n = 0;
-    for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R + (orbHitRadius(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
+    for (const o of state.orbs.slice()) { const q = nearestOnSegment(x1, y1, x2, y2, o.x, o.y); if (Math.hypot(q.x - o.x, q.y - o.y) <= R + (orbInterceptR(o) - ORB_INTERCEPT_R)) { popOrb(o); n++; } }
     return n;
   }
   /* T2 charger: 700 ms telegraph (aura pulse 150 ms + expanding warn ring), then SLAM (rect + 60 px). */

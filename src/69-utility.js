@@ -271,7 +271,6 @@
   const utWells = [];                 // { x, y, R, until, pull, orbPull, node, pulled }
   let utWellLastT = 0;
 
-  function gwActive() { return utWells.length > 0; }
   function gwSpawn(x, y, R, ms, pullMul) {
     const W = WEAPONS.gravity;
     const w = {
