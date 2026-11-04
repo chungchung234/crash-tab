@@ -372,13 +372,13 @@
     while (queue.length && out.length < 60 && visited < 2000) {
       const el = queue.shift(); visited++;
       if (!el || el.nodeType !== 1) continue;
-      const tag = tagOf(el);
-      if (SKIP_WALK_TAGS.has(tag) || isOurs(el) || el.hasAttribute('data-crs-broken')) continue;
-      const s = gcs(el); if (!s || s.display === 'none' || parseFloat(s.opacity) < 0.05) continue;   // invisible subtree: nothing to show
-      const r = rectOf(el); if (!r) continue;
-      const empty = r.width < 1 || r.height < 1;
-      if (empty || s.display === 'contents' || s.visibility === 'hidden') { descend(el); continue; }
-      if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
+      /* 적격 판정은 elementQualify() (src/50-target.js) 한 벌이다. 이 자리의 규칙이 **정본**이고 —
+       * 붕괴와 적 선정이라는 제품의 두 큰 경로가 쓰는 판정이다 — hpQualify · hostileArea · kbTargets
+       * 세 벌이 거기서 갈려 있었다. 식은 글자 그대로 옮겼다: 같은 순서, 같은 세 값. */
+      const r = rectOf(el);
+      const q = elementQualify(el, { rect: r, vw, vh });
+      if (q === 0) continue;
+      if (q === 1) { descend(el); continue; }   // 제 상자가 없는 래퍼: 자식이 el 의 자식이다
       const area = r.width * r.height;
       if (area <= limit) {
         // `r` rides along so the §2.3 memo can re-measure the distance from a new point without re-walking

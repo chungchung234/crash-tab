@@ -4910,6 +4910,96 @@
     if (effectiveOpacity(el, env.op, 0) < 0.05) return false;
     return true;
   }
+  /* ── 화면 밖 판정 한 벌 ──────────────────────────────────────────────────────────────────
+   * `r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh` 가 네 군데에 따로 적혀 있었다
+   * (walkCandidatesRaw · hostileArea · kbTargets · 그리고 여기). 식이 같으므로 한 벌만 둔다 —
+   * 네 곳이 "화면 밖" 을 서로 다르게 읽기 시작하면 조용히 갈라진다. */
+  function rectOffscreen(r, vw, vh) {
+    if (!r) return true;
+    const w = vw != null ? vw : viewW(), h = vh != null ? vh : viewH();
+    return r.right <= 0 || r.bottom <= 0 || r.left >= w || r.top >= h;
+  }
+
+  /* ── 요소 적격 판정 한 벌 (검수 결함: 네 벌이 갈려 있었다) ──────────────────────────────────
+   * 정본은 walkCandidates() (walkCandidatesRaw, src/76-weapon-fire.js) 의 규칙이다. 그것이 붕괴와
+   * 적 선정이라는 **제품의 두 큰 경로**가 쓰는 판정이고, 세 값(아니다 / 통과한다 / 상자다)을 구분해
+   * `visibility: hidden` 과 크기 0 짜리 래퍼를 **버리지 않고 통과해 자식을 본다** — 보이지 않는 포장지
+   * 안의 보이는 내용물에 닿는 유일한 읽기다. 갈라져 있던 것:
+   *   hpQualify (src/50-target.js)      — 같은 세 값. 뷰포트 교차만 뺐다 (아래 opts.viewport).
+   *   hostileArea (src/90-combat.js)    — `visibility: hidden` · 크기 0 을 **버렸다**.
+   *   kbTargets (src/96-a11y.js)        — 같이 버렸고, 게다가 평면 스캔이라 shadow root 를 못 뚫었다.
+   * 세 값을 그대로 돌려주고, "통과한다(1)" 를 어떻게 쓸지는 호출처가 정한다: 트리를 걷는 쪽은 자식으로
+   * 내려가고, 요소 하나를 묻는 쪽(hostileArea)은 그 요소 자신은 대상이 아니므로 거절한다.
+   *   0 = 후보가 아니다 · 1 = 제 상자가 없다, 통과해서 자식을 본다 · 2 = 진짜 상자다
+   * opts.rect      — 이미 잰 rect. 호출처가 그 rect 를 계속 쓰므로 두 번 재지 않는다.
+   * opts.vw/opts.vh— 루프 밖에서 한 번 잰 뷰포트.
+   * opts.viewport === false — 뷰포트 교차 판정을 하지 않는다. hpQualify 만 그렇게 묻는다: 합산은 첫
+   *   접촉 때 한 번 계산해 영구 캐시하므로(§C4) 스크롤 위치가 그 숫자를 정하면 안 된다. */
+  function elementQualify(el, opts) {
+    if (!el || el.nodeType !== 1) return 0;
+    if (SKIP_WALK_TAGS.has(tagOf(el)) || isOurs(el)) return 0;
+    try { if (el.hasAttribute('data-crs-broken')) return 0; } catch (e) { return 0; }
+    const s = gcs(el);
+    if (!s || s.display === 'none' || parseFloat(s.opacity) < 0.05) return 0;   // 안 보이는 가지: 보여 줄 것이 없다
+    const r = (opts && opts.rect) || rectOf(el);
+    if (!r) return 0;
+    if (r.width < 1 || r.height < 1 || s.display === 'contents' || s.visibility === 'hidden') return 1;
+    if (!(opts && opts.viewport === false) && rectOffscreen(r, opts && opts.vw, opts && opts.vh)) return 0;
+    return 2;
+  }
+
+  /* ── 승격 규칙 한 벌 (검수 결함: 두 벌이었고 규칙이 달랐다) ─────────────────────────────────
+   * 원시 elementsFromPoint 후보 하나를 "맞은 대상" 으로 푸는 규칙. 앞에서 맞힌 한 발(pickPhysical)과
+   * 관통으로 뒤에서 맞힌 한 발(normaliseBehind, src/73-hit-resolution.js)이 각자 한 벌씩 들고 있었고
+   * `display: inline` 에서 갈렸다 — 앞은 가장 가까운 **블록** 조상을 찾아 그 넓이가 60000·mag² 미만일
+   * 때만 채택했고, 뒤는 부모로 그냥 올라갔다. 그래서 270,000px² 문단 안의 인라인 링크를 앞에서 맞히면
+   * 링크 자신이, 관통으로 뒤에서 맞히면 부모 문단이 대상이 됐다. 같은 링크, 같은 한 발, 다른 결과다.
+   *
+   * 정본은 **앞쪽(pickPhysical) 규칙**이다. 이유: 그것이 조준 상자와 체력 막대가 그려지는 답이고
+   * (showTarget → debug.pickAt → §D1 포커스), 곧 플레이어가 눈으로 보고 쏘는 답이다. 넓이 문턱이
+   * 있는 쪽이 의도도 분명하다 — 큰 문단 안의 링크를 문단으로 바꿔 버리면 "링크를 조준했는데 문단이
+   * 맞는다"가 되고, 그건 앞에서는 이미 일어나지 않던 일이다. 보이지 않는 뒤쪽을 보이는 앞쪽에 맞춘다.
+   * (반대로 맞췄다면 앞쪽 — 보이는 쪽 — 의 동작이 바뀌었을 것이다.)
+   *
+   * opts.exclude(el) — true 면 그 요소를 쓰지 않는다. 관통이 "이미 맞은 사슬" 을 넘긴다: 적대 조상으로
+   *   올려붙일 때도, 마지막에 돌려줄 때도 같은 술어를 본다. 앞쪽은 넘기지 않는다. */
+  function resolveAimTarget(el, opts) {
+    if (!el) return null;
+    const exclude = (opts && opts.exclude) || null;
+    const mag = scopeMag(), mag2 = mag * mag;   // 문턱은 2× 본문 변환과 같이 커진다 (v1.2 A3)
+    const body = doc.body;
+    // SVG: 바깥쪽 <svg> 를 통째로 하나로 본다
+    if (el.ownerSVGElement) { let s = el; while (s.ownerSVGElement) s = s.ownerSVGElement; el = s; }
+    for (let guard = 0; guard < 40 && el; guard++) {
+      const p = parentOf(el);
+      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
+      const r = rectOf(el); if (!r) break;
+      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
+      const s = gcs(el);
+      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) {
+        // 가장 가까운 블록 조상을 찾아 — 그것이 작을 때만 채택한다
+        let blk = p, bs = gcs(blk);
+        while (blk && blk !== body && blk !== docEl && bs && bs.display === 'inline') { blk = parentOf(blk); bs = blk ? gcs(blk) : null; }
+        if (blk && blk !== body && blk !== docEl) {
+          const br = rectOf(blk);
+          if (br && br.width * br.height < 60000 * mag2) { el = blk; continue; }
+        }
+      }
+      break;
+    }
+    if (!el || el === body || el === docEl) return null;
+    // v1.2: 적대 요소는 한 덩어리로 싸운다 — 자손에 맞은 한 발은 적대 요소 자신에게 떨어진다
+    if (state.hostiles.size) {
+      for (const h of state.hostiles.keys()) {
+        if (h !== el && h.contains(el) && !(exclude && exclude(h))) { el = h; break; }
+      }
+    }
+    const r = rectOf(el);
+    if (!r || r.width * r.height > 0.8 * viewW() * viewH() * mag2) return null;
+    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
+    return (exclude && exclude(el)) ? null : el;
+  }
+
   /* A8 step 1 rule (d): a full-viewport transparent overlay. */
   function isOverlay(el, env) {
     const r = rectOf(el), s = gcs(el);
@@ -4952,38 +5042,10 @@
     }
     let list;
     try { list = doc.elementsFromPoint(x, y); } catch (e) { return null; }
-    let el = pickFromList(list, null, x, y, env, 0);
+    const el = pickFromList(list, null, x, y, env, 0);
     if (!el) return null;
-    const vw = env.vw, vh = env.vh;
-    const mag = scopeMag(), mag2 = mag * mag;   // thresholds scale with the 2× body transform (v1.2 A3)
-    // SVG: treat the outermost <svg> atomically
-    if (el.ownerSVGElement) { let s = el; while (s.ownerSVGElement) s = s.ownerSVGElement; el = s; }
-    const body = doc.body;
-    // walk-up rules
-    for (let guard = 0; guard < 40 && el; guard++) {
-      const p = parentOf(el);
-      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
-      const r = rectOf(el); if (!r) break;
-      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
-      const s = gcs(el);
-      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) {
-        // find the nearest block ancestor; take it if it is small
-        let blk = p, bs = gcs(blk);
-        while (blk && blk !== body && blk !== docEl && bs && bs.display === 'inline') { blk = parentOf(blk); bs = blk ? gcs(blk) : null; }
-        if (blk && blk !== body && blk !== docEl) {
-          const br = rectOf(blk);
-          if (br && br.width * br.height < 60000 * mag2) { el = blk; continue; }
-        }
-      }
-      break;
-    }
-    if (!el || el === body || el === docEl) return null;
-    // v1.2: a hostile element fights as a unit — a hit on any of its descendants lands on the hostile itself
-    if (state.hostiles.size) { for (const h of state.hostiles.keys()) { if (h !== el && h.contains(el)) { el = h; break; } } }
-    const r = rectOf(el);
-    if (!r || r.width * r.height > 0.8 * vw * vh * mag2) return null;
-    if (el.hasAttribute('data-crs-broken')) return null;
-    return el;
+    // 승격 · 적대 덩어리 · 마지막 거름망은 resolveAimTarget() 한 벌이다 (관통도 같은 것을 부른다)
+    return resolveAimTarget(el, null);
   }
 
   /* ── SPEC-combat §D1: 적만 포커싱 ────────────────────────────────────────────────────────
@@ -5075,23 +5137,14 @@
    * WeakMap it counts for, in restore() (src/99-api.js). */
   let hpCalcs = 0;
 
-  /* walkCandidates()'s eligibility rules (src/76-weapon-fire.js), with ONE deliberate omission: the
+  /* The ONE eligibility rule — elementQualify() above — with ONE deliberate omission: the
    * viewport-intersection test. An aggregate is computed once and never recomputed (§C4), so letting the
    * scroll position decide which children count would freeze a different number into the cache depending on
-   * where the page happened to be when the player first touched the element.
+   * where the page happened to be when the player first touched the element. That omission is the only
+   * legitimate difference among the four callers, so it is the only one carried as an option.
    * 0 = not a descendant at all · 1 = no box of its own, look through it (walkCandidates' descend())
    * · 2 = a real box, judge it by area. */
-  function hpQualify(el) {
-    if (!el || el.nodeType !== 1) return 0;
-    if (SKIP_WALK_TAGS.has(tagOf(el)) || isOurs(el)) return 0;
-    try { if (el.hasAttribute('data-crs-broken')) return 0; } catch (e) { return 0; }
-    const s = gcs(el);
-    if (!s || s.display === 'none' || parseFloat(s.opacity) < 0.05) return 0;
-    const r = rectOf(el);
-    if (!r) return 0;
-    if (r.width < 1 || r.height < 1 || s.display === 'contents' || s.visibility === 'hidden') return 1;
-    return 2;
-  }
+  function hpQualify(el) { return elementQualify(el, { viewport: false }); }
   function hpChildren(el) {
     const out = [];
     try { if (el.shadowRoot) for (const c of el.shadowRoot.children) out.push(c); } catch (e) { /* ignore */ }
@@ -10477,27 +10530,14 @@
     }
     return false;
   }
-  /* pickTarget()'s own walk-up rules, applied to one raw elementsFromPoint candidate: promote past boxes too
-   * small to aim at and past inline wrappers, and let a hostile component answer for its descendants. Kept
-   * here rather than in src/50-target.js (another workstream's file) — the rules are the same five lines. */
+  /* 승격 규칙은 이제 한 벌이다 — resolveAimTarget() (src/50-target.js). 전에는 여기에 두 번째 벌이
+   * 있었고 주석은 "the rules are the same five lines" 라고 적어 놨지만 거짓이었다: `display: inline` 에서
+   * 앞쪽은 블록 조상의 넓이를 보고 뒤쪽은 부모로 그냥 올라갔다. 270,000px² 문단 안의 인라인 링크가
+   * 앞에서는 링크로, 관통으로 뒤에서는 문단으로 풀렸다. 그 파일이 50 이라 modules.json 의 적재 순서상
+   * 여기보다 먼저 들어오므로 거기 두는 것이 안전하다. 관통만의 차이 — 이미 맞은 사슬은 두 번 맞지
+   * 않는다 — 는 exclude 옵션으로 넘긴다. */
   function normaliseBehind(el, hit) {
-    const mag = scopeMag(), mag2 = mag * mag;
-    const body = doc.body;
-    for (let guard = 0; guard < 40 && el; guard++) {
-      const p = parentOf(el);
-      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
-      const r = rectOf(el); if (!r) break;
-      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
-      const s = gcs(el);
-      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) { el = p; continue; }
-      break;
-    }
-    if (!el || el === doc.body || el === docEl) return null;
-    if (state.hostiles.size) { for (const h of state.hostiles.keys()) { if (h !== el && h.contains(el) && !piercedAlready(h, hit)) { el = h; break; } } }
-    const r = rectOf(el);
-    if (!r || r.width * r.height > 0.8 * viewW() * viewH() * mag2) return null;
-    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
-    return piercedAlready(el, hit) ? null : el;
+    return resolveAimTarget(el, { exclude: (e) => piercedAlready(e, hit) });
   }
   function pierceTargets(x, y, front, n) {
     const out = [], hit = front ? [front] : [];
@@ -10572,6 +10612,27 @@
     }
     return k;
   }
+
+  /* ── 검수: 이 지점에서 관통이 실제로 고르는 층들 ─────────────────────────────────────────
+   * "앞에서 맞힌 대상과 뒤에서 맞힌 대상이 같은 규칙으로 풀린다"는 **재야 하는** 것이지 코드를 읽고
+   * 믿을 것이 아니다 — 전에는 승격 루프가 두 벌이었고 주석은 같다고 적혀 있었다. debug.pickAt() 이 앞을,
+   * 이것이 뒤를 말한다. 아무것도 쏘지 않고 아무것도 바꾸지 않는다: pierceTargets() 의 답만 적어 준다.
+   * `front` 는 pickTarget() 의 raw 답(noLock — 페이지에 묻는 질문이므로 §D1 포커싱을 끈다)이고,
+   * `layers` 는 그 앞장 뒤로 실제로 풀린 요소들이다. */
+  debug.pierceAt = (x, y, n) => {
+    const front = pickTarget(+x, +y, null, { noLock: true });
+    const want = Math.max(1, Math.min(PIERCE_MAX_LAYERS, n > 0 ? Math.round(n) : 2));
+    const desc = (el) => {
+      if (!el) return null;
+      let cls = '';
+      try { cls = typeof el.className === 'string' ? el.className : ''; } catch (e) { cls = ''; }
+      const r = rectOf(el) || { left: 0, top: 0, width: 0, height: 0 };
+      return { tag: tagOf(el).toUpperCase(), id: el.id || null, cls: cls.slice(0, 60), rect: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) } };
+    };
+    let layers = [];
+    try { layers = pierceTargets(+x, +y, front, want) || []; } catch (e) { layers = []; }
+    return { want, front: desc(front), layers: layers.map(desc) };
+  };
 
 // ── 76-weapon-fire.js ──
 // ── the nine fire() entries (melee/gun/bomb/rocket/flame/katana) + collapse chain ──
@@ -10948,13 +11009,13 @@
     while (queue.length && out.length < 60 && visited < 2000) {
       const el = queue.shift(); visited++;
       if (!el || el.nodeType !== 1) continue;
-      const tag = tagOf(el);
-      if (SKIP_WALK_TAGS.has(tag) || isOurs(el) || el.hasAttribute('data-crs-broken')) continue;
-      const s = gcs(el); if (!s || s.display === 'none' || parseFloat(s.opacity) < 0.05) continue;   // invisible subtree: nothing to show
-      const r = rectOf(el); if (!r) continue;
-      const empty = r.width < 1 || r.height < 1;
-      if (empty || s.display === 'contents' || s.visibility === 'hidden') { descend(el); continue; }
-      if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
+      /* 적격 판정은 elementQualify() (src/50-target.js) 한 벌이다. 이 자리의 규칙이 **정본**이고 —
+       * 붕괴와 적 선정이라는 제품의 두 큰 경로가 쓰는 판정이다 — hpQualify · hostileArea · kbTargets
+       * 세 벌이 거기서 갈려 있었다. 식은 글자 그대로 옮겼다: 같은 순서, 같은 세 값. */
+      const r = rectOf(el);
+      const q = elementQualify(el, { rect: r, vw, vh });
+      if (q === 0) continue;
+      if (q === 1) { descend(el); continue; }   // 제 상자가 없는 래퍼: 자식이 el 의 자식이다
       const area = r.width * r.height;
       if (area <= limit) {
         // `r` rides along so the §2.3 memo can re-measure the distance from a new point without re-walking
@@ -15075,13 +15136,15 @@
   }
   /* Page-space area when `el` is a valid hostile candidate right now, else null (selectTick and forceAttack share it). */
   function hostileArea(el) {
-    if (!el || el.nodeType !== 1 || !el.isConnected || isOurs(el)) return null;
-    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
-    if (SKIP_WALK_TAGS.has(tagOf(el)) || hostileSkip(el)) return null;
-    const s = gcs(el); if (!s || s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) < 0.05) return null;
-    const r = rectOf(el); if (!r || r.width < 1 || r.height < 1) return null;
+    if (!el || el.nodeType !== 1 || !el.isConnected) return null;
+    if (hostileSkip(el)) return null;
     const vw = viewW(), vh = viewH();
-    if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) return null;
+    const r = rectOf(el);
+    /* 적격 판정은 elementQualify() (src/50-target.js) 한 벌이다. 여기는 트리를 걷는 것이 아니라 요소
+     * **하나**가 지금 적이 될 수 있느냐를 묻는 자리라, "제 상자가 없다(1)" 는 거절이다 —
+     * `visibility: hidden` 인 것도 크기 0 인 것도 눈에 보이지 않으니 적이 될 수 없다. 합치기 전에
+     * 이 자리가 그 둘을 버리던 것과 같은 답이다(판정이 세 값으로 바뀌었을 뿐 결과는 그대로다). */
+    if (elementQualify(el, { rect: r, vw, vh }) !== 2) return null;
     const m = scopeMag();
     const area = (r.width / m) * (r.height / m);
     /* SPEC-combat §D2: 요소 종류가 적을 정한다. An element the §D3 table NAMES — a button, a link, a
@@ -17728,24 +17791,41 @@
     kbAim.at = -1;
     kbPlace();
   }
-  /* Tab / Shift+Tab walk the aimable candidates in DOCUMENT order and snap the cursor to the middle of each. */
+  /* Tab / Shift+Tab walk the aimable candidates in DOCUMENT order and snap the cursor to the middle of each.
+   *
+   * ── 접근성 결함이었다: 이 목록만 shadow root 를 못 뚫었다 ───────────────────────────────────
+   * 전에는 `doc.body.querySelectorAll('*')` 평면 스캔이었다. querySelectorAll 은 shadow 경계를 넘지
+   * 않으므로 **키보드 조준만** 웹컴포넌트 안의 요소에 영영 닿지 못했다 — 마우스 경로는 세 곳에서 전부
+   * 뚫는데(pickFromList, src/50-target.js · hpChildren, 같은 파일 · walkCandidatesRaw 의 descend(),
+   * src/76-weapon-fire.js) 키보드만 못 닿으면 그 페이지는 키보드로 못 부순다. 그래서 같은 규칙으로
+   * 맞춘다: 열린 shadow root 의 자식을 호스트 **자리에서** 이어 본다.
+   *
+   * 문서 순서는 유지한다 — querySelectorAll('*') 과 같은 깊이 우선 전위 순회다. BFS 로 바꾸면 Tab 이
+   * 가는 차례가 통째로 달라진다(§3.3 은 "DOCUMENT order" 를 말한다).
+   *
+   * 적격 판정은 elementQualify() (src/50-target.js) 한 벌이다. 여기도 요소 하나하나를 묻는 자리라
+   * 조준 대상이 되는 것은 "진짜 상자(2)" 뿐이고, 24 × 14 하한과 0.8·화면 상한은 여기만의 규칙이라
+   * (조준 가능한 크기) 그대로 둔다.
+   * **거절한 요소의 자식으로도 내려간다.** 평면 스캔은 걸러낸 요소의 자손도 전부 훑었으므로 — 화면 밖
+   * 컨테이너 안에 절대 배치된 화면 안 자식이 목록에 들어 있었다 — 가지를 치면 전과 다른 답이 된다.
+   * 유일하게 가지를 치는 곳은 우리 오버레이다(그 밑은 전부 우리 것이라 평면 스캔도 전부 걸러냈다). */
+  const KB_WALK_DEPTH = 100;   // 적대 페이지가 재귀를 바닥내지 못하게 하는 상한일 뿐이다
   function kbTargets() {
     const out = [];
     const vw = viewW(), vh = viewH();
-    let list = [];
-    try { list = doc.body ? doc.body.querySelectorAll('*') : []; } catch (e) { list = []; }
-    for (const el of list) {
-      if (out.length >= 200) break;
-      if (isOurs(el) || SKIP_WALK_TAGS.has(tagOf(el))) continue;
-      try { if (el.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+    const body = doc.body;
+    if (!body) return out;
+    const visit = (el, depth) => {
+      if (out.length >= 200 || depth > KB_WALK_DEPTH) return;
+      if (!el || el.nodeType !== 1) return;
+      if (isOurs(el)) return;   // 우리 오버레이 밑은 전부 우리 것이다 — 더 내려갈 이유가 없다
       const r = rectOf(el);
-      if (!r || r.width < 24 || r.height < 14) continue;
-      if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
-      if (r.width * r.height > 0.8 * vw * vh) continue;
-      const s = gcs(el);
-      if (!s || s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) < 0.05) continue;
-      out.push(el);
-    }
+      if (elementQualify(el, { rect: r, vw, vh }) === 2
+        && r.width >= 24 && r.height >= 14 && r.width * r.height <= 0.8 * vw * vh) out.push(el);
+      try { if (el.shadowRoot) for (const c of el.shadowRoot.children) visit(c, depth + 1); } catch (e) { /* ignore */ }
+      try { for (const c of el.children) visit(c, depth + 1); } catch (e) { /* ignore */ }
+    };
+    for (const c of body.children) visit(c, 0);
     return out;
   }
   function kbCycle(back) {
@@ -17977,6 +18057,22 @@
     live: a11yLive ? a11yLive.textContent : null,
     koDialog: hudEls.ko ? hudEls.ko.getAttribute('role') : null
   });
+  /* ── 검수: 키보드 조준이 실제로 닿는 목록 ────────────────────────────────────────────────
+   * (x, y) 를 주면 같은 지점에서 **마우스 경로**가 푸는 요소가 그 목록 안에 있는지도 같이 답한다 —
+   * id 비교가 아니라 `indexOf` 로 재는 노드 동일성이다. 그래야 "키보드가 shadow root 안에 닿는다" 가
+   * 가정이 아니라 측정이 된다. 아무것도 바꾸지 않는다. */
+  debug.kbTargets = (x, y) => {
+    const list = kbTargets();
+    const inShadow = (el) => { try { return el.getRootNode() !== doc; } catch (e) { return false; } };
+    const hit = (x != null && y != null) ? pickTarget(+x, +y, null, { noLock: true }) : null;
+    return {
+      n: list.length,
+      items: list.map((el) => ({ tag: tagOf(el).toUpperCase(), id: el.id || null, shadow: inShadow(el) })),
+      shadowN: list.filter(inShadow).length,
+      hitIndex: hit ? list.indexOf(hit) : -1,
+      hit: hit ? { tag: tagOf(hit).toUpperCase(), id: hit.id || null, shadow: inShadow(hit) } : null,
+    };
+  };
 
 // ── 96-custom.js ──
   /* =====================================================================

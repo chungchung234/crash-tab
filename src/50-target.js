@@ -27,6 +27,96 @@
     if (effectiveOpacity(el, env.op, 0) < 0.05) return false;
     return true;
   }
+  /* ── 화면 밖 판정 한 벌 ──────────────────────────────────────────────────────────────────
+   * `r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh` 가 네 군데에 따로 적혀 있었다
+   * (walkCandidatesRaw · hostileArea · kbTargets · 그리고 여기). 식이 같으므로 한 벌만 둔다 —
+   * 네 곳이 "화면 밖" 을 서로 다르게 읽기 시작하면 조용히 갈라진다. */
+  function rectOffscreen(r, vw, vh) {
+    if (!r) return true;
+    const w = vw != null ? vw : viewW(), h = vh != null ? vh : viewH();
+    return r.right <= 0 || r.bottom <= 0 || r.left >= w || r.top >= h;
+  }
+
+  /* ── 요소 적격 판정 한 벌 (검수 결함: 네 벌이 갈려 있었다) ──────────────────────────────────
+   * 정본은 walkCandidates() (walkCandidatesRaw, src/76-weapon-fire.js) 의 규칙이다. 그것이 붕괴와
+   * 적 선정이라는 **제품의 두 큰 경로**가 쓰는 판정이고, 세 값(아니다 / 통과한다 / 상자다)을 구분해
+   * `visibility: hidden` 과 크기 0 짜리 래퍼를 **버리지 않고 통과해 자식을 본다** — 보이지 않는 포장지
+   * 안의 보이는 내용물에 닿는 유일한 읽기다. 갈라져 있던 것:
+   *   hpQualify (src/50-target.js)      — 같은 세 값. 뷰포트 교차만 뺐다 (아래 opts.viewport).
+   *   hostileArea (src/90-combat.js)    — `visibility: hidden` · 크기 0 을 **버렸다**.
+   *   kbTargets (src/96-a11y.js)        — 같이 버렸고, 게다가 평면 스캔이라 shadow root 를 못 뚫었다.
+   * 세 값을 그대로 돌려주고, "통과한다(1)" 를 어떻게 쓸지는 호출처가 정한다: 트리를 걷는 쪽은 자식으로
+   * 내려가고, 요소 하나를 묻는 쪽(hostileArea)은 그 요소 자신은 대상이 아니므로 거절한다.
+   *   0 = 후보가 아니다 · 1 = 제 상자가 없다, 통과해서 자식을 본다 · 2 = 진짜 상자다
+   * opts.rect      — 이미 잰 rect. 호출처가 그 rect 를 계속 쓰므로 두 번 재지 않는다.
+   * opts.vw/opts.vh— 루프 밖에서 한 번 잰 뷰포트.
+   * opts.viewport === false — 뷰포트 교차 판정을 하지 않는다. hpQualify 만 그렇게 묻는다: 합산은 첫
+   *   접촉 때 한 번 계산해 영구 캐시하므로(§C4) 스크롤 위치가 그 숫자를 정하면 안 된다. */
+  function elementQualify(el, opts) {
+    if (!el || el.nodeType !== 1) return 0;
+    if (SKIP_WALK_TAGS.has(tagOf(el)) || isOurs(el)) return 0;
+    try { if (el.hasAttribute('data-crs-broken')) return 0; } catch (e) { return 0; }
+    const s = gcs(el);
+    if (!s || s.display === 'none' || parseFloat(s.opacity) < 0.05) return 0;   // 안 보이는 가지: 보여 줄 것이 없다
+    const r = (opts && opts.rect) || rectOf(el);
+    if (!r) return 0;
+    if (r.width < 1 || r.height < 1 || s.display === 'contents' || s.visibility === 'hidden') return 1;
+    if (!(opts && opts.viewport === false) && rectOffscreen(r, opts && opts.vw, opts && opts.vh)) return 0;
+    return 2;
+  }
+
+  /* ── 승격 규칙 한 벌 (검수 결함: 두 벌이었고 규칙이 달랐다) ─────────────────────────────────
+   * 원시 elementsFromPoint 후보 하나를 "맞은 대상" 으로 푸는 규칙. 앞에서 맞힌 한 발(pickPhysical)과
+   * 관통으로 뒤에서 맞힌 한 발(normaliseBehind, src/73-hit-resolution.js)이 각자 한 벌씩 들고 있었고
+   * `display: inline` 에서 갈렸다 — 앞은 가장 가까운 **블록** 조상을 찾아 그 넓이가 60000·mag² 미만일
+   * 때만 채택했고, 뒤는 부모로 그냥 올라갔다. 그래서 270,000px² 문단 안의 인라인 링크를 앞에서 맞히면
+   * 링크 자신이, 관통으로 뒤에서 맞히면 부모 문단이 대상이 됐다. 같은 링크, 같은 한 발, 다른 결과다.
+   *
+   * 정본은 **앞쪽(pickPhysical) 규칙**이다. 이유: 그것이 조준 상자와 체력 막대가 그려지는 답이고
+   * (showTarget → debug.pickAt → §D1 포커스), 곧 플레이어가 눈으로 보고 쏘는 답이다. 넓이 문턱이
+   * 있는 쪽이 의도도 분명하다 — 큰 문단 안의 링크를 문단으로 바꿔 버리면 "링크를 조준했는데 문단이
+   * 맞는다"가 되고, 그건 앞에서는 이미 일어나지 않던 일이다. 보이지 않는 뒤쪽을 보이는 앞쪽에 맞춘다.
+   * (반대로 맞췄다면 앞쪽 — 보이는 쪽 — 의 동작이 바뀌었을 것이다.)
+   *
+   * opts.exclude(el) — true 면 그 요소를 쓰지 않는다. 관통이 "이미 맞은 사슬" 을 넘긴다: 적대 조상으로
+   *   올려붙일 때도, 마지막에 돌려줄 때도 같은 술어를 본다. 앞쪽은 넘기지 않는다. */
+  function resolveAimTarget(el, opts) {
+    if (!el) return null;
+    const exclude = (opts && opts.exclude) || null;
+    const mag = scopeMag(), mag2 = mag * mag;   // 문턱은 2× 본문 변환과 같이 커진다 (v1.2 A3)
+    const body = doc.body;
+    // SVG: 바깥쪽 <svg> 를 통째로 하나로 본다
+    if (el.ownerSVGElement) { let s = el; while (s.ownerSVGElement) s = s.ownerSVGElement; el = s; }
+    for (let guard = 0; guard < 40 && el; guard++) {
+      const p = parentOf(el);
+      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
+      const r = rectOf(el); if (!r) break;
+      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
+      const s = gcs(el);
+      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) {
+        // 가장 가까운 블록 조상을 찾아 — 그것이 작을 때만 채택한다
+        let blk = p, bs = gcs(blk);
+        while (blk && blk !== body && blk !== docEl && bs && bs.display === 'inline') { blk = parentOf(blk); bs = blk ? gcs(blk) : null; }
+        if (blk && blk !== body && blk !== docEl) {
+          const br = rectOf(blk);
+          if (br && br.width * br.height < 60000 * mag2) { el = blk; continue; }
+        }
+      }
+      break;
+    }
+    if (!el || el === body || el === docEl) return null;
+    // v1.2: 적대 요소는 한 덩어리로 싸운다 — 자손에 맞은 한 발은 적대 요소 자신에게 떨어진다
+    if (state.hostiles.size) {
+      for (const h of state.hostiles.keys()) {
+        if (h !== el && h.contains(el) && !(exclude && exclude(h))) { el = h; break; }
+      }
+    }
+    const r = rectOf(el);
+    if (!r || r.width * r.height > 0.8 * viewW() * viewH() * mag2) return null;
+    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
+    return (exclude && exclude(el)) ? null : el;
+  }
+
   /* A8 step 1 rule (d): a full-viewport transparent overlay. */
   function isOverlay(el, env) {
     const r = rectOf(el), s = gcs(el);
@@ -69,38 +159,10 @@
     }
     let list;
     try { list = doc.elementsFromPoint(x, y); } catch (e) { return null; }
-    let el = pickFromList(list, null, x, y, env, 0);
+    const el = pickFromList(list, null, x, y, env, 0);
     if (!el) return null;
-    const vw = env.vw, vh = env.vh;
-    const mag = scopeMag(), mag2 = mag * mag;   // thresholds scale with the 2× body transform (v1.2 A3)
-    // SVG: treat the outermost <svg> atomically
-    if (el.ownerSVGElement) { let s = el; while (s.ownerSVGElement) s = s.ownerSVGElement; el = s; }
-    const body = doc.body;
-    // walk-up rules
-    for (let guard = 0; guard < 40 && el; guard++) {
-      const p = parentOf(el);
-      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
-      const r = rectOf(el); if (!r) break;
-      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
-      const s = gcs(el);
-      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) {
-        // find the nearest block ancestor; take it if it is small
-        let blk = p, bs = gcs(blk);
-        while (blk && blk !== body && blk !== docEl && bs && bs.display === 'inline') { blk = parentOf(blk); bs = blk ? gcs(blk) : null; }
-        if (blk && blk !== body && blk !== docEl) {
-          const br = rectOf(blk);
-          if (br && br.width * br.height < 60000 * mag2) { el = blk; continue; }
-        }
-      }
-      break;
-    }
-    if (!el || el === body || el === docEl) return null;
-    // v1.2: a hostile element fights as a unit — a hit on any of its descendants lands on the hostile itself
-    if (state.hostiles.size) { for (const h of state.hostiles.keys()) { if (h !== el && h.contains(el)) { el = h; break; } } }
-    const r = rectOf(el);
-    if (!r || r.width * r.height > 0.8 * vw * vh * mag2) return null;
-    if (el.hasAttribute('data-crs-broken')) return null;
-    return el;
+    // 승격 · 적대 덩어리 · 마지막 거름망은 resolveAimTarget() 한 벌이다 (관통도 같은 것을 부른다)
+    return resolveAimTarget(el, null);
   }
 
   /* ── SPEC-combat §D1: 적만 포커싱 ────────────────────────────────────────────────────────
@@ -192,23 +254,14 @@
    * WeakMap it counts for, in restore() (src/99-api.js). */
   let hpCalcs = 0;
 
-  /* walkCandidates()'s eligibility rules (src/76-weapon-fire.js), with ONE deliberate omission: the
+  /* The ONE eligibility rule — elementQualify() above — with ONE deliberate omission: the
    * viewport-intersection test. An aggregate is computed once and never recomputed (§C4), so letting the
    * scroll position decide which children count would freeze a different number into the cache depending on
-   * where the page happened to be when the player first touched the element.
+   * where the page happened to be when the player first touched the element. That omission is the only
+   * legitimate difference among the four callers, so it is the only one carried as an option.
    * 0 = not a descendant at all · 1 = no box of its own, look through it (walkCandidates' descend())
    * · 2 = a real box, judge it by area. */
-  function hpQualify(el) {
-    if (!el || el.nodeType !== 1) return 0;
-    if (SKIP_WALK_TAGS.has(tagOf(el)) || isOurs(el)) return 0;
-    try { if (el.hasAttribute('data-crs-broken')) return 0; } catch (e) { return 0; }
-    const s = gcs(el);
-    if (!s || s.display === 'none' || parseFloat(s.opacity) < 0.05) return 0;
-    const r = rectOf(el);
-    if (!r) return 0;
-    if (r.width < 1 || r.height < 1 || s.display === 'contents' || s.visibility === 'hidden') return 1;
-    return 2;
-  }
+  function hpQualify(el) { return elementQualify(el, { viewport: false }); }
   function hpChildren(el) {
     const out = [];
     try { if (el.shadowRoot) for (const c of el.shadowRoot.children) out.push(c); } catch (e) { /* ignore */ }

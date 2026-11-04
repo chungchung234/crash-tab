@@ -125,24 +125,41 @@
     kbAim.at = -1;
     kbPlace();
   }
-  /* Tab / Shift+Tab walk the aimable candidates in DOCUMENT order and snap the cursor to the middle of each. */
+  /* Tab / Shift+Tab walk the aimable candidates in DOCUMENT order and snap the cursor to the middle of each.
+   *
+   * ── 접근성 결함이었다: 이 목록만 shadow root 를 못 뚫었다 ───────────────────────────────────
+   * 전에는 `doc.body.querySelectorAll('*')` 평면 스캔이었다. querySelectorAll 은 shadow 경계를 넘지
+   * 않으므로 **키보드 조준만** 웹컴포넌트 안의 요소에 영영 닿지 못했다 — 마우스 경로는 세 곳에서 전부
+   * 뚫는데(pickFromList, src/50-target.js · hpChildren, 같은 파일 · walkCandidatesRaw 의 descend(),
+   * src/76-weapon-fire.js) 키보드만 못 닿으면 그 페이지는 키보드로 못 부순다. 그래서 같은 규칙으로
+   * 맞춘다: 열린 shadow root 의 자식을 호스트 **자리에서** 이어 본다.
+   *
+   * 문서 순서는 유지한다 — querySelectorAll('*') 과 같은 깊이 우선 전위 순회다. BFS 로 바꾸면 Tab 이
+   * 가는 차례가 통째로 달라진다(§3.3 은 "DOCUMENT order" 를 말한다).
+   *
+   * 적격 판정은 elementQualify() (src/50-target.js) 한 벌이다. 여기도 요소 하나하나를 묻는 자리라
+   * 조준 대상이 되는 것은 "진짜 상자(2)" 뿐이고, 24 × 14 하한과 0.8·화면 상한은 여기만의 규칙이라
+   * (조준 가능한 크기) 그대로 둔다.
+   * **거절한 요소의 자식으로도 내려간다.** 평면 스캔은 걸러낸 요소의 자손도 전부 훑었으므로 — 화면 밖
+   * 컨테이너 안에 절대 배치된 화면 안 자식이 목록에 들어 있었다 — 가지를 치면 전과 다른 답이 된다.
+   * 유일하게 가지를 치는 곳은 우리 오버레이다(그 밑은 전부 우리 것이라 평면 스캔도 전부 걸러냈다). */
+  const KB_WALK_DEPTH = 100;   // 적대 페이지가 재귀를 바닥내지 못하게 하는 상한일 뿐이다
   function kbTargets() {
     const out = [];
     const vw = viewW(), vh = viewH();
-    let list = [];
-    try { list = doc.body ? doc.body.querySelectorAll('*') : []; } catch (e) { list = []; }
-    for (const el of list) {
-      if (out.length >= 200) break;
-      if (isOurs(el) || SKIP_WALK_TAGS.has(tagOf(el))) continue;
-      try { if (el.hasAttribute('data-crs-broken')) continue; } catch (e) { continue; }
+    const body = doc.body;
+    if (!body) return out;
+    const visit = (el, depth) => {
+      if (out.length >= 200 || depth > KB_WALK_DEPTH) return;
+      if (!el || el.nodeType !== 1) return;
+      if (isOurs(el)) return;   // 우리 오버레이 밑은 전부 우리 것이다 — 더 내려갈 이유가 없다
       const r = rectOf(el);
-      if (!r || r.width < 24 || r.height < 14) continue;
-      if (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue;
-      if (r.width * r.height > 0.8 * vw * vh) continue;
-      const s = gcs(el);
-      if (!s || s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) < 0.05) continue;
-      out.push(el);
-    }
+      if (elementQualify(el, { rect: r, vw, vh }) === 2
+        && r.width >= 24 && r.height >= 14 && r.width * r.height <= 0.8 * vw * vh) out.push(el);
+      try { if (el.shadowRoot) for (const c of el.shadowRoot.children) visit(c, depth + 1); } catch (e) { /* ignore */ }
+      try { for (const c of el.children) visit(c, depth + 1); } catch (e) { /* ignore */ }
+    };
+    for (const c of body.children) visit(c, 0);
     return out;
   }
   function kbCycle(back) {
@@ -374,3 +391,19 @@
     live: a11yLive ? a11yLive.textContent : null,
     koDialog: hudEls.ko ? hudEls.ko.getAttribute('role') : null
   });
+  /* ── 검수: 키보드 조준이 실제로 닿는 목록 ────────────────────────────────────────────────
+   * (x, y) 를 주면 같은 지점에서 **마우스 경로**가 푸는 요소가 그 목록 안에 있는지도 같이 답한다 —
+   * id 비교가 아니라 `indexOf` 로 재는 노드 동일성이다. 그래야 "키보드가 shadow root 안에 닿는다" 가
+   * 가정이 아니라 측정이 된다. 아무것도 바꾸지 않는다. */
+  debug.kbTargets = (x, y) => {
+    const list = kbTargets();
+    const inShadow = (el) => { try { return el.getRootNode() !== doc; } catch (e) { return false; } };
+    const hit = (x != null && y != null) ? pickTarget(+x, +y, null, { noLock: true }) : null;
+    return {
+      n: list.length,
+      items: list.map((el) => ({ tag: tagOf(el).toUpperCase(), id: el.id || null, shadow: inShadow(el) })),
+      shadowN: list.filter(inShadow).length,
+      hitIndex: hit ? list.indexOf(hit) : -1,
+      hit: hit ? { tag: tagOf(hit).toUpperCase(), id: hit.id || null, shadow: inShadow(hit) } : null,
+    };
+  };

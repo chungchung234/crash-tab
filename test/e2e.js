@@ -4225,6 +4225,73 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
   }
 
   // =============================================================================================
+  // §3.3 — 키보드 조준이 shadow root 를 뚫는다 (접근성 결함이었다)
+  //
+  // kbTargets() 만 `doc.body.querySelectorAll('*')` 평면 스캔이었다. querySelectorAll 은 shadow
+  // 경계를 넘지 않으므로 **키보드 조준만** 웹컴포넌트 안의 요소에 영영 닿지 못했다 — 마우스 경로는
+  // 세 곳에서 전부 뚫는다(pickFromList · hpChildren, src/50-target.js · walkCandidatesRaw 의
+  // descend(), src/76-weapon-fire.js). 키보드로만 쓰는 사람에게는 그 페이지가 통째로 없는 것이다.
+  //
+  // 픽스처에는 웹컴포넌트가 없으므로 여기서 만든다. 같은 요소에 **두 경로가 다 닿는지**를 묻고,
+  // 같다는 것을 id 비교가 아니라 노드 동일성으로 잰다 — debug.kbTargets(x, y) 가 같은 지점의 마우스
+  // 답이 그 목록의 몇 번째인지(hitIndex) 를 목록 자신에게 물어서 답한다.
+  // =============================================================================================
+  {
+    const h = await openSettingsPage();
+    const { page: p } = h;
+
+    const shadowLab = await p.evaluate(() => {
+      const host = document.createElement('div');
+      host.id = 'aim-wc-host';
+      for (const [k, v] of [['position', 'fixed'], ['left', '60px'], ['top', '60px'], ['width', '300px'], ['height', '200px'], ['z-index', '3']]) host.style.setProperty(k, v);
+      document.body.appendChild(host);
+      const sr = host.attachShadow({ mode: 'open' });
+      const box = document.createElement('div');
+      box.id = 'aim-shadow-box';
+      for (const [k, v] of [['position', 'absolute'], ['left', '20px'], ['top', '20px'], ['width', '220px'], ['height', '140px'], ['background', '#dff0d8']]) box.style.setProperty(k, v);
+      box.textContent = 'shadow 안의 카드';
+      sr.appendChild(box);
+      const r = box.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2) };
+    });
+    check('A.a11y 6 (전제): shadow root 안의 카드가 220 × 140 으로 실제 화면에 자리를 잡았다 — 24 × 14 조준 하한을 넘는다',
+      shadowLab.w === 220 && shadowLab.h === 140 && shadowLab.cx > 0 && shadowLab.cy > 0, shadowLab);
+
+    await api.call(p, 'setSetting', 'keyboardAim', true);
+    await sleep(60);
+    const kbProbe = await p.evaluate((pt) => window.__crashScreen.debug.kbTargets(pt.cx, pt.cy), shadowLab);
+    const kbShadowItem = (kbProbe.items || []).find((it) => it.id === 'aim-shadow-box');
+    check('A.a11y 6 (§3.3): 키보드 조준 후보 목록이 shadow root 안의 요소에 닿는다 — #aim-shadow-box 가 목록에 있고 shadow: true 로 잡힌다 (평면 querySelectorAll 시절에는 영영 없었다)',
+      !!kbShadowItem && kbShadowItem.shadow === true && kbProbe.shadowN >= 1,
+      { kbShadowItem, shadowN: kbProbe.shadowN, n: kbProbe.n, lab: shadowLab });
+    check('A.a11y 6 (§3.3): 같은 요소에 마우스 경로도 닿고, 그 둘이 **같은 노드**다 — 같은 지점의 pickTarget 결과가 키보드 목록 안에 indexOf 로 잡힌다 (id 비교가 아니다)',
+      kbProbe.hitIndex >= 0 && !!kbProbe.hit && kbProbe.hit.id === 'aim-shadow-box' && kbProbe.hit.shadow === true,
+      { hitIndex: kbProbe.hitIndex, hit: kbProbe.hit, n: kbProbe.n });
+
+    // ---- Tab 이 정말 거기로 간다: 가상 커서가 그 카드 안으로 들어올 때까지 Tab 을 민다 ----------
+    const tabWalk = await (async () => {
+      const seen = [];
+      for (let i = 0; i < 220; i++) {
+        await p.keyboard.press('Tab');
+        const c = await p.evaluate(() => { const a = window.__crashScreen.debug.a11y(); return a.cursor; });
+        if (!c) break;
+        seen.push(c);
+        if (c.x >= shadowLab.cx - 120 && c.x <= shadowLab.cx + 120 && c.y >= shadowLab.cy - 80 && c.y <= shadowLab.cy + 80) {
+          const landed = await p.evaluate(() => window.__crashScreen.debug.kbTargets().items.length);
+          return { hit: true, i, cursor: c, listN: landed };
+        }
+      }
+      return { hit: false, tries: seen.length, last: seen[seen.length - 1] || null };
+    })();
+    check('A.a11y 6 (§3.3): Tab 순회가 실제로 그 shadow 카드 위에 가상 커서를 세운다 (목록에 있을 뿐 아니라 키보드로 도달한다)',
+      tabWalk.hit === true, { tabWalk, lab: shadowLab });
+
+    await p.evaluate(() => { const n = document.getElementById('aim-wc-host'); if (n) n.remove(); });
+    await api.call(p, 'setSetting', 'keyboardAim', false);
+    await closeSettingsPage(h);
+  }
+
+  // =============================================================================================
   // SPEC-product §2 누적 통계 · §6 사용자 정의 무기 — the CONTENT-SCRIPT half.
   //
   // The options page itself is suite D (it needs the real extension to exist at a
@@ -9901,6 +9968,147 @@ async function suiteA14Depth(browser, origin, contentCss, contentJs) {
   await api.debug(page, { noCrit: true, noCooldown: true, forceCrit: false, noSpread: true, noAttacks: true, fastReload: true, infiniteAmmo: false, noRepair: true, noFalloff: true, noInvuln: true, noDisplaceCollide: false, noPartial: true });
   await api.restore(page);
   await sleep(80);
+
+  // ══ 승격 루프는 한 벌이다 — 앞에서 맞힌 대상 == 관통으로 뒤에서 맞힌 대상 ═════════════════
+  /* 검수 결함이었다: pickPhysical(src/50-target.js)과 normaliseBehind(src/73-hit-resolution.js)가
+   * 각자 승격 루프를 들고 있었고 `display: inline` 에서 갈렸다 — 앞은 가장 가까운 블록 조상을 찾아
+   * 그 넓이가 60000px² 미만일 때만 채택했고, 뒤는 부모로 그냥 올라갔다. 그래서 큰 문단 안의 인라인
+   * 링크를 **앞에서** 맞히면 링크 자신이, **관통으로 뒤에서** 맞히면 부모 문단이 대상이 됐다.
+   * 같은 링크, 같은 한 발, 다른 결과.
+   *
+   * 실험대를 스스로 세운다(픽스처에 없는 모양이다). 좌표가 스크롤에 흔들리지 않게 전부 fixed 다.
+   *   #aim-para  760 × 440 = 334,400px² — 승격 문턱 60000px² 의 다섯 배가 넘는다. 그래서 그 안의
+   *              인라인 링크는 **문단으로 올라가서는 안 된다**.
+   *   #aim-link  그 문단 안의 인라인 <a>. 24 × 14 하한을 넘겨야 크기 때문에 올라가지 않으므로
+   *              글자 크기를 키우고 길이를 준다 — 그 실측치를 단언 메시지가 직접 말한다.
+   *   #aim-cover 링크 위를 덮는 블록. 이것이 있으면 앞장은 이 덮개이고, 링크는 **관통 1층**이 된다.
+   * 앞의 답은 debug.pickAt(), 뒤의 답은 debug.pierceAt() 이 말한다. 둘 다 아무것도 쏘지 않는다. */
+  await api.setMode(page, 'rampage');   // §D1 적만 포커싱을 끈 raw 페이지 답을 묻는다
+  await sleep(40);
+  const walkLab = await page.evaluate(() => {
+    const old = document.getElementById('aim-walkup-lab');
+    if (old) old.remove();
+    const el = (tag, id) => { const n = document.createElement(tag); n.id = id; return n; };
+    const put = (n, pairs) => { for (const k of Object.keys(pairs)) n.style.setProperty(k, pairs[k]); };
+    const lab = el('div', 'aim-walkup-lab');
+    put(lab, { position: 'fixed', left: '40px', top: '40px', width: '760px', height: '520px', 'z-index': '3' });
+    const para = el('p', 'aim-para');
+    put(para, { position: 'absolute', left: '0px', top: '60px', width: '760px', height: '440px', margin: '0', padding: '0', background: '#eef3ff', 'font-size': '20px', 'line-height': '1.6' });
+    para.appendChild(document.createTextNode('큰 문단의 앞부분 '));
+    const link = el('a', 'aim-link');
+    link.href = '#aim-walkup';
+    link.textContent = '인라인 링크 하나';
+    para.appendChild(link);
+    para.appendChild(document.createTextNode(' 그리고 뒷부분. '.repeat(40)));
+    lab.appendChild(para);
+    document.body.appendChild(lab);
+    const pr = para.getBoundingClientRect(), lr = link.getBoundingClientRect();
+    return {
+      paraArea: Math.round(pr.width * pr.height),
+      link: { w: Math.round(lr.width), h: Math.round(lr.height), cx: Math.round(lr.left + lr.width / 2), cy: Math.round(lr.top + lr.height / 2) },
+      linkDisplay: getComputedStyle(link).display,
+    };
+  });
+  check('A.§aim 0 (전제): 실험대가 성립한다 — 문단 넓이 > 60000px², 그 안의 <a> 는 computed display: inline 이고 24 × 14 하한을 넘는다 (넘지 못하면 크기 때문에 올라가서 단언이 다른 것을 재게 된다)',
+    walkLab.paraArea > 60000 && walkLab.linkDisplay === 'inline' && walkLab.link.w >= 24 && walkLab.link.h >= 14, walkLab);
+
+  // ---- 앞에서 맞힌 답: 덮개 없이 링크 한가운데 ------------------------------------------------
+  const aimFront = await page.evaluate((p) => window.__crashScreen.debug.pickAt(p.cx, p.cy), walkLab.link);
+  check('A.§aim 1: 334,400px² 짜리 문단 안의 인라인 링크를 앞에서 맞히면 대상은 링크 자신이다 (블록 조상이 60000px² 문턱보다 크므로 문단으로 올라가지 않는다)',
+    !!aimFront && aimFront.tag === 'A' && aimFront.id === 'aim-link', { aimFront, lab: walkLab });
+
+  // ---- 뒤에서 맞힌 답: 같은 지점을 덮개로 가리고 관통 1층을 읽는다 -----------------------------
+  const coverOk = await page.evaluate((p) => {
+    const lab = document.getElementById('aim-walkup-lab');
+    const cover = document.createElement('div');
+    cover.id = 'aim-cover';
+    for (const [k, v] of [['position', 'fixed'], ['left', String(p.cx - 70) + 'px'], ['top', String(p.cy - 45) + 'px'],
+      ['width', '140px'], ['height', '90px'], ['background', '#ffd9d9'], ['z-index', '4']]) cover.style.setProperty(k, v);
+    lab.appendChild(cover);
+    /* elementsFromPoint 는 **우리 오버레이도** 돌려준다 (조준점·HUD 는 그 지점 위에 떠 있다).
+     * 제품은 isOurs() 로 걸러내므로 전제도 같은 것을 걸러낸 뒤에 본다 — 안 그러면 "맨 앞" 이
+     * 우리 자신이 되고, 그건 CLAUDE.md 가 적어 둔 바로 그 측정 결함이다. */
+    const raw = document.elementsFromPoint(p.cx, p.cy);
+    const name = (n) => n.tagName + (n.id ? '#' + n.id : '');
+    const ours = (n) => !!(n.closest && n.closest('[data-crs]'));
+    return { rawStack: raw.slice(0, 6).map((n) => name(n) + (ours(n) ? ' (ours)' : '')), pageStack: raw.filter((n) => !ours(n)).slice(0, 4).map(name) };
+  }, walkLab.link);
+  const aimCovered = await page.evaluate((p) => window.__crashScreen.debug.pickAt(p.cx, p.cy), walkLab.link);
+  check('A.§aim 2 (전제): 덮개가 정말 앞장이다 — 같은 지점의 앞 대상이 #aim-cover 로 바뀌고, 우리 오버레이를 뺀 페이지 스택의 맨 앞도 그것이며 링크가 그 바로 뒤에 있다',
+    !!aimCovered && aimCovered.id === 'aim-cover'
+    && coverOk.pageStack[0] === 'DIV#aim-cover' && coverOk.pageStack[1] === 'A#aim-link',
+    { aimCovered, pageStack: coverOk.pageStack, rawStack: coverOk.rawStack });
+
+  const aimBehind = await page.evaluate((p) => window.__crashScreen.debug.pierceAt(p.cx, p.cy, 2), walkLab.link);
+  const behind0 = aimBehind && aimBehind.layers && aimBehind.layers[0];
+  check('A.§aim 3 (승격 루프 한 벌): 같은 링크를 관통으로 뒤에서 맞힌 대상이 앞에서 맞힌 대상과 **같다** — 둘 다 A#aim-link (합치기 전에는 뒤가 P#aim-para 였다)',
+    !!behind0 && !!aimFront && behind0.tag === aimFront.tag && behind0.id === aimFront.id && behind0.id === 'aim-link',
+    { front: aimFront, behind: behind0, layers: aimBehind && aimBehind.layers, pierceFront: aimBehind && aimBehind.front, lab: walkLab });
+
+  // 실험대를 걷는다 — 뒤에 오는 teardown 이 깨끗한 페이지를 본다
+  await page.evaluate(() => { const n = document.getElementById('aim-walkup-lab'); if (n) n.remove(); });
+  await sleep(40);
+
+  // ══ 적격 판정 한 벌 — 네 호출처가 **전과 같은 답**을 낸다 ═════════════════════════════════
+  /* walkCandidates(정본) · hpQualify · hostileArea · kbTargets 가 네 벌로 갈려 있었다. 합치면서
+   * 유일하게 남긴 차이는 hpQualify 의 "뷰포트 교차만 뺀다" 이고(§C4 캐시가 스크롤 위치에 좌우되면
+   * 안 된다), `visibility: hidden` 과 크기 0 을 **통과해 자식을 본다 / 그 요소 자신은 거절한다** 로
+   * 갈라 읽던 것은 호출처가 세 값 중 무엇을 쓰느냐로 남겼다. 그 두 가지를 여기서 직접 잰다. */
+  await page.evaluate(() => {
+    for (const id of ['qual-on', 'qual-off', 'qual-hidden', 'qual-empty', 'qual-enemy']) { const n = document.getElementById(id); if (n) n.remove(); }
+    const put = (n, pairs) => { for (const k of Object.keys(pairs)) n.style.setProperty(k, pairs[k]); return n; };
+    const box = (id, extra) => put(Object.assign(document.createElement('div'), { id }), Object.assign({ width: '400px', height: '300px', background: '#f3f3f7' }, extra));
+    const card = (extra) => put(document.createElement('div'), Object.assign({ width: '200px', height: '60px', background: '#cfe3ff' }, extra || {}));
+    // (1) 뷰포트 교차 면제: 똑같은 그릇 둘 — 하나는 화면 안, 하나는 한참 아래. 합산은 같아야 한다.
+    const on = box('qual-on', { position: 'fixed', left: '40px', top: '40px', 'z-index': '3' });
+    on.appendChild(card());
+    const off = box('qual-off', { position: 'absolute', left: '40px', top: '4000px' });
+    off.appendChild(card());
+    // (2) "통과한다(1)": visibility: hidden 래퍼 안의 **보이는** 카드는 여전히 합산에 들어간다.
+    //     visibility 는 상속되므로 카드에 visible 을 되돌려 준다 — 그게 현실의 그 모양이다.
+    const hidden = box('qual-hidden', { position: 'absolute', left: '480px', top: '4000px' });
+    const wrap = put(document.createElement('div'), { visibility: 'hidden', width: '240px', height: '100px' });
+    wrap.appendChild(card({ visibility: 'visible' }));
+    hidden.appendChild(wrap);
+    // (3) 대조군: 같은 그릇, 같은 숨은 래퍼, 안은 비었다.
+    const empty = box('qual-empty', { position: 'absolute', left: '920px', top: '4000px' });
+    empty.appendChild(put(document.createElement('div'), { visibility: 'hidden', width: '240px', height: '100px' }));
+    for (const n of [on, off, hidden, empty]) document.body.appendChild(n);
+  });
+  await sleep(60);
+  const qOn = await api.hpOf(page, '#qual-on');
+  const qOff = await api.hpOf(page, '#qual-off');
+  check('A.§qual 1 (hpQualify 의 정당한 차이): 합산은 뷰포트 교차를 보지 않는다 — 화면 밖 4000px 아래에 있는 똑같은 그릇이 화면 안의 것과 **같은 max** 를 낸다 (§C4: 한 번 계산해 영구 캐시하므로 스크롤 위치가 숫자를 정하면 안 된다)',
+    qOn.max === qOff.max && qOn.own === qOff.own && qOn.max > qOn.own, { onScreen: qOn, offScreen: qOff });
+  const qHidden = await api.hpOf(page, '#qual-hidden');
+  const qEmpty = await api.hpOf(page, '#qual-empty');
+  check('A.§qual 2 (세 값 중 "통과한다"): `visibility: hidden` 래퍼는 버려지지 않고 **통과된다** — 그 안의 보이는 카드가 그릇의 합산에 들어가고, 같은 래퍼가 비어 있는 대조군보다 max 가 크다',
+    qHidden.own === qEmpty.own && qHidden.max > qEmpty.max && qEmpty.max === qEmpty.own,
+    { withCard: qHidden, emptyWrapper: qEmpty });
+
+  // (4) hostileArea 는 요소 **하나**를 묻는 자리라 "통과한다" 가 거절이다 — 안 보이는 것은 적이 못 된다.
+  await setCombatMode('survival');
+  await sleep(150);
+  await resetScene(400, 400);
+  await page.evaluate(() => {
+    const n = document.createElement('div');
+    n.id = 'qual-enemy';
+    for (const [k, v] of [['position', 'fixed'], ['left', '300px'], ['top', '200px'], ['width', '300px'], ['height', '200px'], ['background', '#ffe8cc'], ['z-index', '3'], ['visibility', 'hidden']]) n.style.setProperty(k, v);
+    n.textContent = '적 후보';
+    document.body.appendChild(n);
+  });
+  await sleep(60);
+  const enemyHidden = await force('#qual-enemy', 'forceAttack');
+  await page.evaluate(() => { document.getElementById('qual-enemy').style.setProperty('visibility', 'visible'); });
+  await sleep(60);
+  const enemyVisible = await force('#qual-enemy', 'forceAttack');
+  check('A.§qual 3 (hostileArea 는 "통과한다" 를 거절로 읽는다): 300 × 200 = 60,000px² 로 T1 바닥을 넘는 요소라도 `visibility: hidden` 이면 적이 되지 못하고(null), 같은 요소를 보이게 하면 바로 적이 된다 — 합치기 전과 같은 답이다',
+    enemyHidden === null && !!enemyVisible && enemyVisible !== 'missing:forceAttack', { hidden: enemyHidden, visible: enemyVisible });
+
+  await setCombatMode('rampage');
+  await api.restore(page);
+  await page.evaluate(() => { for (const id of ['qual-on', 'qual-off', 'qual-hidden', 'qual-empty', 'qual-enemy']) { const n = document.getElementById(id); if (n) n.remove(); } });
+  await sleep(60);
 
   await combatTeardown(ctx);
 }

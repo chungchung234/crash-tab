@@ -322,27 +322,14 @@
     }
     return false;
   }
-  /* pickTarget()'s own walk-up rules, applied to one raw elementsFromPoint candidate: promote past boxes too
-   * small to aim at and past inline wrappers, and let a hostile component answer for its descendants. Kept
-   * here rather than in src/50-target.js (another workstream's file) — the rules are the same five lines. */
+  /* 승격 규칙은 이제 한 벌이다 — resolveAimTarget() (src/50-target.js). 전에는 여기에 두 번째 벌이
+   * 있었고 주석은 "the rules are the same five lines" 라고 적어 놨지만 거짓이었다: `display: inline` 에서
+   * 앞쪽은 블록 조상의 넓이를 보고 뒤쪽은 부모로 그냥 올라갔다. 270,000px² 문단 안의 인라인 링크가
+   * 앞에서는 링크로, 관통으로 뒤에서는 문단으로 풀렸다. 그 파일이 50 이라 modules.json 의 적재 순서상
+   * 여기보다 먼저 들어오므로 거기 두는 것이 안전하다. 관통만의 차이 — 이미 맞은 사슬은 두 번 맞지
+   * 않는다 — 는 exclude 옵션으로 넘긴다. */
   function normaliseBehind(el, hit) {
-    const mag = scopeMag(), mag2 = mag * mag;
-    const body = doc.body;
-    for (let guard = 0; guard < 40 && el; guard++) {
-      const p = parentOf(el);
-      if (!p || p === body || p === docEl || p.nodeType !== 1) break;
-      const r = rectOf(el); if (!r) break;
-      if (r.width < 24 * mag || r.height < 14 * mag) { el = p; continue; }
-      const s = gcs(el);
-      if (s && s.display === 'inline' && !REPLACED_TAGS.has(tagOf(el))) { el = p; continue; }
-      break;
-    }
-    if (!el || el === doc.body || el === docEl) return null;
-    if (state.hostiles.size) { for (const h of state.hostiles.keys()) { if (h !== el && h.contains(el) && !piercedAlready(h, hit)) { el = h; break; } } }
-    const r = rectOf(el);
-    if (!r || r.width * r.height > 0.8 * viewW() * viewH() * mag2) return null;
-    try { if (el.hasAttribute('data-crs-broken')) return null; } catch (e) { return null; }
-    return piercedAlready(el, hit) ? null : el;
+    return resolveAimTarget(el, { exclude: (e) => piercedAlready(e, hit) });
   }
   function pierceTargets(x, y, front, n) {
     const out = [], hit = front ? [front] : [];
@@ -417,3 +404,24 @@
     }
     return k;
   }
+
+  /* ── 검수: 이 지점에서 관통이 실제로 고르는 층들 ─────────────────────────────────────────
+   * "앞에서 맞힌 대상과 뒤에서 맞힌 대상이 같은 규칙으로 풀린다"는 **재야 하는** 것이지 코드를 읽고
+   * 믿을 것이 아니다 — 전에는 승격 루프가 두 벌이었고 주석은 같다고 적혀 있었다. debug.pickAt() 이 앞을,
+   * 이것이 뒤를 말한다. 아무것도 쏘지 않고 아무것도 바꾸지 않는다: pierceTargets() 의 답만 적어 준다.
+   * `front` 는 pickTarget() 의 raw 답(noLock — 페이지에 묻는 질문이므로 §D1 포커싱을 끈다)이고,
+   * `layers` 는 그 앞장 뒤로 실제로 풀린 요소들이다. */
+  debug.pierceAt = (x, y, n) => {
+    const front = pickTarget(+x, +y, null, { noLock: true });
+    const want = Math.max(1, Math.min(PIERCE_MAX_LAYERS, n > 0 ? Math.round(n) : 2));
+    const desc = (el) => {
+      if (!el) return null;
+      let cls = '';
+      try { cls = typeof el.className === 'string' ? el.className : ''; } catch (e) { cls = ''; }
+      const r = rectOf(el) || { left: 0, top: 0, width: 0, height: 0 };
+      return { tag: tagOf(el).toUpperCase(), id: el.id || null, cls: cls.slice(0, 60), rect: { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) } };
+    };
+    let layers = [];
+    try { layers = pierceTargets(+x, +y, front, want) || []; } catch (e) { layers = []; }
+    return { want, front: desc(front), layers: layers.map(desc) };
+  };
