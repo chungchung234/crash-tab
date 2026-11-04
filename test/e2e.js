@@ -4544,6 +4544,110 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
     }
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // fxNode (src/35-effects.js) — the one effect-node routine, and the three drifts it closed:
+  //   1. the particle cap was written three times and only `state.fire` asked performance mode;
+  //   2. `archNodes` (row flashes) had no cap at all;
+  //   3. some effects handed the RAW duration to the animation while the kill timer scaled it, so under
+  //      debug.timeScale < 1 the node was removed before its animation had finished.
+  // Each page is its own: a ledger left full by the previous block would make "≤ cap" pass for free, so
+  // every check also asserts the ledger REACHED the cap (the spawner really did overflow it).
+  // ---------------------------------------------------------------------------------------------
+  {
+    const overflow = (p) => p.evaluate(() => {
+      const d = window.__crashScreen.debug;
+      for (const kind of ['fire', 'mat', 'dmg', 'frag']) d.fxSpawn(kind, 120, 300, 200);
+      d.fxSpawn('row', 120, 0, 0, '#cluster .leaf');
+      return { ledgers: d.fxLedgers(), dom: { fire: document.querySelectorAll('.crs-fire').length, mat: document.querySelectorAll('.crs-matfx').length, dmg: document.querySelectorAll('.crs-dmg').length, row: document.querySelectorAll('.crs-row-flash').length, frag: document.querySelectorAll('.crs-frag').length } };
+    });
+
+    // ---- 1 + 2: quality mode — every ledger sits at ITS cap, never above ---------------------------
+    {
+      const h = await openSettingsPage();
+      const p = h.page;
+      await api.call(p, 'setSetting', 'perfMode', 'quality');
+      const q = await overflow(p);
+      const L = q.ledgers;
+      check('A.fxpool 1 (quality): 불꽃·재질 먼지·피해 숫자·행 깜빡임이 모두 particleCap() = 40 에 정확히 걸린다 (넘치지도, 안 차지도 않는다)',
+        L.particleCap === 40 && L.fire === 40 && L.matFx === 40 && L.dmg === 40 && L.arch === 40, q);
+      check('A.fxpool 1 (quality): §B3 파편 풀은 fragCap() = 60 에 걸리고 DOM 노드 수도 원장과 같다',
+        L.fragCap === 60 && L.frag === 60 && q.dom.frag === 60 && q.dom.fire === 40 && q.dom.mat === 40 && q.dom.dmg === 40 && q.dom.row === 40, q);
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      const left = await api.count(p, '[data-crs]');
+      check('A.fxpool 1 (흔적 없음): 비운 뒤 [data-crs] 0개', left === 0, left);
+      await closeSettingsPage(h);
+    }
+
+    // ---- 1 + 2: performance mode — the SAME four ledgers all come down to 30 (only state.fire used to) --
+    {
+      const h = await openSettingsPage();
+      const p = h.page;
+      await api.call(p, 'setSetting', 'perfMode', 'performance');
+      const mode = await poll(async () => { const s = await api.stats(p); return s.perf && s.perf.mode === 'performance' ? s.perf.mode : null; }, 1500, 30);
+      const q = await overflow(p);
+      const L = q.ledgers;
+      check('A.fxpool 2 (performance): 성능 모드로 바뀌었다 (전제)', mode === 'performance', mode);
+      check('A.fxpool 2 (performance): 불꽃 · 재질 먼지 · 피해 숫자 · 행 깜빡임 원장이 전부 30 에 걸린다 — 전에는 불꽃만 30 이고 나머지는 40 이었다',
+        L.particleCap === 30 && L.fire === 30 && L.matFx === 30 && L.dmg === 30 && L.arch === 30, q);
+      check('A.fxpool 2 (performance): 파편 풀도 절반(30)이고 DOM 노드 수가 원장과 같다',
+        L.fragCap === 30 && L.frag === 30 && q.dom.frag === 30 && q.dom.fire === 30 && q.dom.mat === 30 && q.dom.dmg === 30 && q.dom.row === 30, q);
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await closeSettingsPage(h);
+    }
+
+    // ---- 3: debug.timeScale 0.2 — no node is removed before its animation has finished ------------------
+    {
+      const h = await openSettingsPage();
+      const p = h.page;
+      await api.call(p, 'setSetting', 'perfMode', 'quality');
+      await setTimeScale(p, 0.2);
+      /* A MutationObserver callback runs as a microtask right after the removal, so the animation's playState
+       * read there is the state AT removal: 'finished' means the finish handler removed it, anything else
+       * means the safety timer (or a trim) got there first. */
+      const r = await p.evaluate(async () => {
+        const d = window.__crashScreen.debug;
+        const root = document.querySelector('.crs-root');
+        const anims = new Map();      // node -> { cls, dur, anim }
+        const gone = [];              // { cls, state, dur, at }
+        const t0 = performance.now();
+        const mo = new MutationObserver((recs) => {
+          for (const rec of recs) for (const n of rec.removedNodes) {
+            const info = anims.get(n);
+            if (info) gone.push({ cls: info.cls, state: info.anim.playState, dur: info.dur, life: Math.round(performance.now() - info.at) });
+          }
+        });
+        mo.observe(root, { childList: true });
+        const spawn = (kind, cls) => {
+          const before = new Set(root.querySelectorAll('.' + cls));
+          d.fxSpawn(kind, 1, 300, 200, '#cluster .leaf');
+          for (const n of root.querySelectorAll('.' + cls)) {
+            if (before.has(n)) continue;
+            const a = n.getAnimations()[0];
+            if (a) anims.set(n, { cls, anim: a, dur: a.effect.getComputedTiming().duration, at: performance.now() });
+          }
+        };
+        for (const [kind, cls] of [['fire', 'crs-fire'], ['mat', 'crs-matfx'], ['dmg', 'crs-dmg'], ['frag', 'crs-frag'], ['row', 'crs-row-flash']]) spawn(kind, cls);
+        const made = anims.size;
+        const deadline = performance.now() + 2500;
+        while (gone.length < made && performance.now() < deadline) await new Promise((res) => setTimeout(res, 25));
+        mo.disconnect();
+        return { made, gone, elapsed: Math.round(performance.now() - t0), scale: d.timeScaleNow() };
+      });
+      await setTimeScale(p, 1);
+      const classes = new Set(r.gone.map((g) => g.cls));
+      const early = r.gone.filter((g) => g.state !== 'finished');
+      const longest = Math.max(0, ...r.gone.filter((g) => g.cls === 'crs-fire').map((g) => g.dur));
+      check('A.fxpool 3 (timeScale 0.2): 다섯 종류가 모두 만들어졌고 전부 스스로 사라졌다 (전제 — 빈 통과 방지)',
+        r.scale === 0.2 && r.made >= 5 && r.gone.length === r.made && classes.size === 5, r);
+      check('A.fxpool 3 (timeScale 0.2): 어떤 입자 노드도 애니메이션이 끝나기 전에 치워지지 않는다 — 전에는 불꽃·재질·파편·연기가 타이머에 먼저 잘렸다',
+        early.length === 0, { early, gone: r.gone });
+      check('A.fxpool 3 (timeScale 0.2): 애니메이션 길이도 같은 배율로 줄었다 (불꽃 350–500 ms → ≤ 101 ms)',
+        longest > 0 && longest <= 101, { longest });
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await closeSettingsPage(h);
+    }
+  }
+
 }
 
 // ---------------------------------------------------------------------------

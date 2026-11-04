@@ -244,19 +244,15 @@
     if (!root) return;
     for (let i = 0; i < count; i++) {
       const s = rand(12, 26);
-      const n = mk('div', 'crs-fire');
-      n.style.left = px(x + rand(-10, 10) - s / 2); n.style.top = px(y + rand(-10, 10) - s / 2);
-      n.style.width = px(s); n.style.height = px(s); n.style.borderRadius = '50%';
-      n.style.background = 'radial-gradient(circle, #ffd166 0%, #ff6b35 45%, rgba(255,107,53,0) 72%)';
-      root.append(n);
-      state.fire.push(n);
-      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(n); if (k >= 0) state.fire.splice(k, 1); };
-      try {
-        const an = trackAnim(n.animate([{ transform: 'translateY(0px) scale(1)', opacity: 0.95 }, { transform: 'translateY(' + px(-rand(30, 60)) + ') scale(.4)', opacity: 0 }], { duration: rand(350, 500), easing: 'ease-out', fill: 'forwards' }));
-        an.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, 1000);
+      fxNode('crs-fire', {
+        style: {
+          left: px(x + rand(-10, 10) - s / 2), top: px(y + rand(-10, 10) - s / 2), width: px(s), height: px(s), borderRadius: '50%',
+          background: 'radial-gradient(circle, #ffd166 0%, #ff6b35 45%, rgba(255,107,53,0) 72%)'
+        },
+        ledger: state.fire, cap: particleCap,
+        keyframes: [{ transform: 'translateY(0px) scale(1)', opacity: 0.95 }, { transform: 'translateY(' + px(-rand(30, 60)) + ') scale(.4)', opacity: 0 }],
+        dur: rand(350, 500), linger: 650   // the old fixed 1000 ms safety timer
+      });
     }
   }
   /* SPEC-destruction §F6: 화염방사기는 틱 피해 15 → 8, 틱당 스택 9. "즉시 화력 최하위, 20초 누적 화력

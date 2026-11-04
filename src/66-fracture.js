@@ -206,7 +206,6 @@
   /* ===================================================================== */
   /* §B3 particles — one shared pool for every weapon                        */
   /* ===================================================================== */
-  const FRAG_CAP = 60, FRAG_CAP_PERF = 30;        // §B3: 전체 상한 60, 성능 모드 절반
   const FRAG_KIND = {
     dust:  { n: [6, 10], size: [5, 12], rise: [10, 26], life: [420, 700], color: 'rgba(206,202,192,.70)', round: true,  blur: 1.6 },
     smoke: { n: [7, 12], size: [16, 34], rise: [26, 60], life: [620, 950], color: 'rgba(64,60,56,.52)',   round: true,  blur: 4 },
@@ -214,66 +213,31 @@
     ash:   { n: [8, 14], size: [3, 7],  rise: [8, 22],  life: [520, 900], color: 'rgba(40,36,32,.75)',    round: false, blur: 0.6 }
   };
   const fragFx = [];
-  function fragCap() { return perfOn() ? FRAG_CAP_PERF : FRAG_CAP; }
   function clearFracFx() {
     for (const n of fragFx) { try { n.remove(); } catch (e) { /* ignore */ } }
     fragFx.length = 0;
   }
-  function fragTrim() {
-    while (fragFx.length > fragCap()) { const old = fragFx.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-  }
   /* §B3 + SPEC-settings §3.1: reduced motion gets ONE static mote that just fades — the break still reads as
-   * dusty, nothing travels. */
+   * dusty, nothing travels. The routine itself is fxPuff() (src/35-effects.js), shared with matBurst(). */
   function fracParticles(kind, x, y) {
     const P = FRAG_KIND[kind];
-    if (!root || !P) return 0;
-    const reduced = reducedMotion();
-    const n = reduced ? 1 : randInt(P.n[0], P.n[1]);
-    for (let i = 0; i < n; i++) {
-      const s = rand(P.size[0], P.size[1]);
-      const node = mk('div', 'crs-frag');
-      node.style.left = px(x + (reduced ? 0 : rand(-16, 16)) - s / 2);
-      node.style.top = px(y + (reduced ? 0 : rand(-16, 16)) - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      node.style.borderRadius = P.round ? '50%' : '1px';
-      node.style.background = P.color;
-      if (P.blur > 0) node.style.filter = 'blur(' + P.blur + 'px)';
-      root.append(node);
-      fragFx.push(node);
-      fragTrim();
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = fragFx.indexOf(node); if (k >= 0) fragFx.splice(k, 1); };
-      const dur = rand(P.life[0], P.life[1]);
-      try {
-        const kf = reduced
-          ? [{ opacity: 0.8 }, { opacity: 0 }]
-          : [{ transform: 'translate(0px, 0px) scale(1)', opacity: 0.92 },
-            { transform: 'translate(' + px(rand(-26, 26)) + ', ' + px(-rand(P.rise[0], P.rise[1])) + ') scale(' + rand(0.35, 1.5).toFixed(2) + ')', opacity: 0 }];
-        const a = trackAnim(node.animate(kf, { duration: dur, easing: 'ease-out', fill: 'forwards' }));
-        a.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, dur + 300);
-    }
-    return n;
+    if (!P) return 0;
+    return fxPuff(P, x, y, { cls: 'crs-frag', ledger: fragFx, cap: fragCap, blur: P.blur, scatter: 16, drift: 26, grow: [0.35, 1.5], alpha: 0.92, reduced: 'mote' });
   }
   /* §B3 `ember`: a 350 ms tail behind a rocket shard. Its own node so the piece's transform stays the
    * physics transform and nothing competes for it. */
   function fracTrail(x, y) {
     if (!root || reducedMotion()) return null;
-    const n = mk('div', 'crs-trail');
     const s = rand(10, 20);
-    n.style.left = px(x - s / 2); n.style.top = px(y - s / 2);
-    n.style.width = px(s); n.style.height = px(s * 2.2);
-    n.style.borderRadius = '50%';
-    n.style.background = 'radial-gradient(circle, rgba(255,209,102,.95) 0%, rgba(255,107,53,.75) 45%, rgba(255,107,53,0) 72%)';
-    root.append(n);
-    fragFx.push(n); fragTrim();
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const k = fragFx.indexOf(n); if (k >= 0) fragFx.splice(k, 1); };
-    try {
-      const a = trackAnim(n.animate([{ opacity: 0.95, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.3) translateY(14px)' }], { duration: 350, easing: 'ease-out', fill: 'forwards' }));
-      a.addEventListener('finish', kill);
-    } catch (e) { /* ignore */ }
-    later(kill, 700);
-    return n;
+    return fxNode('crs-trail', {
+      style: {
+        left: px(x - s / 2), top: px(y - s / 2), width: px(s), height: px(s * 2.2), borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(255,209,102,.95) 0%, rgba(255,107,53,.75) 45%, rgba(255,107,53,0) 72%)'
+      },
+      ledger: fragFx, cap: fragCap,
+      keyframes: [{ opacity: 0.95, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.3) translateY(14px)' }],
+      dur: 350
+    });
   }
 
   /* ===================================================================== */

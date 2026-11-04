@@ -474,15 +474,12 @@
     const cx = (ex.left + ex.right) / 2, cy = (ex.top + ex.bottom) / 2;
     const near = Math.abs(p.x - cx) <= (ex.right - ex.left) && Math.abs(p.y - cy) <= (ex.bottom - ex.top);   // within 2× the expanded rect
     if (root) {   // shockwave ring from the rect to +60 px over 300 ms
-      const ring = mk('div', 'crs-warn crs-slam');
-      ring.style.left = px(r.left); ring.style.top = px(r.top); ring.style.width = px(r.width); ring.style.height = px(r.height);
-      root.append(ring); state.warns.push(ring);
-      const kill = () => { try { ring.remove(); } catch (e) { /* ignore */ } const i = state.warns.indexOf(ring); if (i >= 0) state.warns.splice(i, 1); };
-      try {
-        const a = trackAnim(ring.animate([{ left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height), opacity: 0.95 }, { left: px(r.left - 60), top: px(r.top - 60), width: px(r.width + 120), height: px(r.height + 120), opacity: 0 }], { duration: 300, easing: 'ease-out', fill: 'forwards' }));
-        a.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, 600);
+      fxNode('crs-warn crs-slam', {
+        style: { left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height) },
+        ledger: state.warns,   // the warn ledger is swept by teardown and has no cap of its own
+        keyframes: [{ left: px(r.left), top: px(r.top), width: px(r.width), height: px(r.height), opacity: 0.95 }, { left: px(r.left - 60), top: px(r.top - 60), width: px(r.width + 120), height: px(r.height + 120), opacity: 0 }],
+        dur: 300
+      });
     }
     shake('bomb', { amp: near ? 10 : 3, dur: 300 });
     sfx('rumble', { gain: near ? 1 : 0.5 });

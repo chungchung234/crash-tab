@@ -13,7 +13,7 @@
     try { const b = weaponBtn(state.weapon); if (b) trackAnim(b.animate([{ borderColor: '#ff6b6b' }, { borderColor: 'rgba(255,255,255,.1)' }], { duration: 120 })); } catch (e) { /* ignore */ }
   }
 
-  /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, cap 40 --- */
+  /* --- floating damage numbers (A5 item 1): "-65", crit "-130!" in gold, rise 44 px over 650 ms, capped by particleCap() (40; 30 in performance mode) --- */
   function dmgText(n, dmg, crit, tag) { n.textContent = (tag ? tag + ' ' : '') + '-' + dmg + (crit ? '!' : ''); }
   /* opts (v1.2): { tag: '헤드샷!' prefix, color, text: literal text instead of "-dmg" (kill / player damage) }
    * opts.size (v1.3 §3.5): explicit px — player damage is drawn at 24 px, not the 14 px of a chip of page.
@@ -24,32 +24,26 @@
     opts = opts || {};
     const op = opts.opacity != null ? clamp(+opts.opacity, 0, 1) : 1;
     const dur = opts.dur > 0 ? opts.dur : 650;
-    const n = mk('div', 'crs-dmg');
-    if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag);
-    n.style.left = px(x); n.style.top = px(y);
-    n.style.font = '700 ' + (opts.size || (crit ? 18 : 14)) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-    n.style.color = opts.color || (crit ? '#ffd166' : '#fff');
-    n.style.textShadow = '0 1px 2px rgba(0,0,0,.8)';
-    n.style.transform = 'translate(-50%, -50%)';
-    root.append(n);
-    state.dmgNodes.push(n);
-    while (state.dmgNodes.length > 40) { const old = state.dmgNodes.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-    const kill = () => { try { n.remove(); } catch (e) { /* ignore */ } const i = state.dmgNodes.indexOf(n); if (i >= 0) state.dmgNodes.splice(i, 1); };
-    try {
-      const base = 'translate(-50%, -50%) ';
-      /* SPEC-settings §3.1: "피해 숫자가 이동 없이 페이드만" — reduced motion keeps the number (the
-       * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
-       * centring transform the node already carries is left exactly where it is. */
-      const kf = reducedMotion()
-        ? [{ opacity: op }, { opacity: op, offset: 0.35 }, { opacity: 0 }]
-        : (crit
-          ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: op, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: op * 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
-          : [{ transform: base + 'translateY(0px)', opacity: op }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
-      const a = trackAnim(n.animate(kf, { duration: dur, easing: 'ease-out', fill: 'forwards' }));
-      a.addEventListener('finish', kill);
-    } catch (e) { /* ignore */ }
-    later(kill, 1500);
-    return n;
+    const base = 'translate(-50%, -50%) ';
+    /* SPEC-settings §3.1: "피해 숫자가 이동 없이 페이드만" — reduced motion keeps the number (the
+     * information) and drops the 44 px rise and the crit pop. No `transform` key at all, so the inline
+     * centring transform the node already carries is left exactly where it is. */
+    const kf = reducedMotion()
+      ? [{ opacity: op }, { opacity: op, offset: 0.35 }, { opacity: 0 }]
+      : (crit
+        ? [{ transform: base + 'translateY(0px) scale(1.4)', opacity: op, offset: 0 }, { transform: base + 'translateY(-8px) scale(1)', opacity: op * 0.95, offset: 0.18 }, { transform: base + 'translateY(-44px) scale(1)', opacity: 0, offset: 1 }]
+        : [{ transform: base + 'translateY(0px)', opacity: op }, { transform: base + 'translateY(-44px)', opacity: 0 }]);
+    return fxNode('crs-dmg', {
+      style: {
+        left: px(x), top: px(y),
+        font: '700 ' + (opts.size || (crit ? 18 : 14)) + 'px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+        color: opts.color || (crit ? '#ffd166' : '#fff'),
+        textShadow: '0 1px 2px rgba(0,0,0,.8)', transform: 'translate(-50%, -50%)'
+      },
+      setup: (n) => { if (opts.text != null) n.textContent = opts.text; else dmgText(n, dmg, crit, opts.tag); },
+      ledger: state.dmgNodes, cap: particleCap,   // was a literal 40 that ignored performance mode
+      keyframes: kf, dur, linger: 850
+    });
   }
   /* Where a number goes: pointer ± 8 px (click), alternating 24 px left/right of the pointer (hold windows; ≥ 42 px
    * between consecutive centres so a 25 px glyph run never collides with the previous window's number),

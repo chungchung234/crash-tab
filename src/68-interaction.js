@@ -322,22 +322,16 @@
     let n = 0;
     for (let i = 0; i < count; i++) {
       const s = rand(9, 17);
-      const node = mk('div', 'crs-star');
-      node.style.left = px(x - s / 2); node.style.top = px(y - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      root.append(node);
-      state.fire.push(node);
-      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(node); if (k >= 0) state.fire.splice(k, 1); };
       const a = rand(0, Math.PI * 2), d = rand(26, 62);
-      try {
-        const an = trackAnim(node.animate([
+      fxNode('crs-star', {
+        style: { left: px(x - s / 2), top: px(y - s / 2), width: px(s), height: px(s) },
+        ledger: state.fire, cap: particleCap,
+        keyframes: [
           { transform: 'translate(0px, 0px) rotate(0deg) scale(.5)', opacity: 1 },
           { transform: 'translate(' + px(Math.cos(a) * d) + ', ' + px(Math.sin(a) * d - 14) + ') rotate(' + Math.round(rand(-220, 220)) + 'deg) scale(1.1)', opacity: 0 }
-        ], { duration: scaleMs(IX_STAR_MS), easing: 'ease-out', fill: 'forwards' }));
-        an.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, IX_STAR_MS + 350);
+        ],
+        dur: IX_STAR_MS, linger: 350
+      });
       n++;
     }
     return n;
@@ -349,21 +343,16 @@
     let n = 0;
     for (let i = 0; i < count; i++) {
       const s = rand(5, 11);
-      const node = mk('div', 'crs-splash');
-      node.style.left = px(x - s / 2); node.style.top = px(y - s / 2);
-      node.style.width = px(s); node.style.height = px(s);
-      root.append(node);
-      state.fire.push(node);
-      while (state.fire.length > particleCap()) { const old = state.fire.shift(); try { old.remove(); } catch (e) { /* ignore */ } }
-      const kill = () => { try { node.remove(); } catch (e) { /* ignore */ } const k = state.fire.indexOf(node); if (k >= 0) state.fire.splice(k, 1); };
-      try {
-        const an = trackAnim(node.animate([
+      const dur = rand(260, 420);
+      fxNode('crs-splash', {
+        style: { left: px(x - s / 2), top: px(y - s / 2), width: px(s), height: px(s) },
+        ledger: state.fire, cap: particleCap,
+        keyframes: [
           { transform: 'translate(0px, 0px) scale(1)', opacity: 0.9 },
           { transform: 'translate(' + px(rand(-26, 26)) + ', ' + px(rand(10, 44)) + ') scale(.4)', opacity: 0 }
-        ], { duration: scaleMs(rand(260, 420)), easing: 'ease-in', fill: 'forwards' }));
-        an.addEventListener('finish', kill);
-      } catch (e) { /* ignore */ }
-      later(kill, 900);
+        ],
+        dur, easing: 'ease-in', linger: 900 - dur   // the old fixed 900 ms safety timer
+      });
       n++;
     }
     return n;
