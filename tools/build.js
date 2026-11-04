@@ -10,9 +10,16 @@
  *                                   summary if content.js on disk differs
  *   node tools/build.js --quiet     suppress the per-module listing
  *
- * This is a PURE concatenation step (spec A2): it does not parse or alter
- * module source in any way beyond wrapping it in banners and the existing
- * v1 bootstrap shell. Pure Node, zero dependencies, no source maps.
+ * This is a concatenation step (spec A2): it does not parse or alter module
+ * source beyond wrapping it in banners and the existing v1 bootstrap shell,
+ * and filling two generated-table markers:
+ *   /*@SETTINGS_SCHEMA@*\/  <- settings-schema.json
+ *   /*@KO_FALLBACK@*\/      <- the strings of _locales/ko/messages.json whose
+ *                           keys are listed in src/ko-fallback-keys.json
+ * Pure Node, zero dependencies, no source maps.
+ *
+ * Also usable as a library (tools/validate.js R19 does): require('./build.js')
+ * exposes koFallbackLiteral(root) and koFallbackKeys(root).
  */
 
 const fs = require('fs');
@@ -24,6 +31,7 @@ const MODULES_JSON = path.join(SRC_DIR, 'modules.json');
 const SETTINGS_SCHEMA_JSON = path.join(REPO_ROOT, 'settings-schema.json');
 const CONTENT_JS = path.join(REPO_ROOT, 'content.js');
 const SETTINGS_MARKER = '/*@SETTINGS_SCHEMA@*/';
+const KO_MARKER = '/*@KO_FALLBACK@*/';
 
 /* Generated-file header. Must stay byte-for-byte deterministic across builds
  * of the same input (no timestamps) so `--check` is stable, and must contain
@@ -179,6 +187,59 @@ function inlineSettingsSchema(body, quiet) {
 }
 
 /* ===================================================================== */
+/* 3b. Korean fallback table, generated from _locales/ko                  */
+/* ===================================================================== */
+
+/* The e2e harness and a page whose extension context has died have no chrome.i18n, so content.js carries a
+ * Korean fallback table. The STRINGS must live only in _locales/ko/messages.json; src/ko-fallback-keys.json
+ * says which keys the content script needs, and this step copies the text across. Both are read at build
+ * time, so a locale edit followed by a rebuild moves the table, and an edit without a rebuild is caught by
+ * --check (content.js is a generated file). Throws Error (not process.exit) so validate.js can report it. */
+function koFallbackKeys(root) {
+  const doc = readJSON(path.join(root || REPO_ROOT, 'src', 'ko-fallback-keys.json'));
+  const keys = doc && doc.keys;
+  if (!Array.isArray(keys) || keys.length === 0) throw new Error('src/ko-fallback-keys.json has no non-empty `keys` array');
+  const seen = new Set();
+  for (const k of keys) {
+    if (typeof k !== 'string' || !k) throw new Error('src/ko-fallback-keys.json: non-string key ' + JSON.stringify(k));
+    if (seen.has(k)) throw new Error('src/ko-fallback-keys.json: duplicate key "' + k + '"');
+    seen.add(k);
+  }
+  return keys;
+}
+
+function koFallbackLiteral(root) {
+  const keys = koFallbackKeys(root);
+  const ko = readJSON(path.join(root || REPO_ROOT, '_locales', 'ko', 'messages.json'));
+  const lines = [];
+  for (const k of keys) {
+    const entry = ko[k];
+    if (!entry || typeof entry.message !== 'string') {
+      throw new Error('src/ko-fallback-keys.json lists "' + k + '" but _locales/ko/messages.json has no message for it');
+    }
+    if (/\$/.test(entry.message) || entry.placeholders) {
+      /* chrome.i18n expands $name$ / $$; the raw fallback would print them literally. */
+      throw new Error('"' + k + '" uses $ placeholders; the fallback table cannot reproduce chrome.i18n substitution');
+    }
+    const name = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k) ? k : JSON.stringify(k);
+    lines.push('    ' + name + ': ' + JSON.stringify(entry.message));
+  }
+  return '{\n' + lines.join(',\n') + '\n  }';
+}
+
+function inlineKoFallback(body) {
+  const n = body.split(KO_MARKER).length - 1;
+  if (n === 0) {
+    process.stdout.write('build.js: note: no ' + KO_MARKER + ' marker in src/ — Korean fallback table not generated.\n');
+    return body;
+  }
+  if (n > 1) fail(['the ' + KO_MARKER + ' marker appears ' + n + ' times in src/ (expected exactly once)']);
+  let literal;
+  try { literal = koFallbackLiteral(); } catch (e) { fail([e.message]); }
+  return body.split(KO_MARKER).join(literal);
+}
+
+/* ===================================================================== */
 /* 4. assemble the full file                                              */
 /* ===================================================================== */
 
@@ -186,6 +247,7 @@ function assemble(srcDir, modulesJsonPath, quiet) {
   const list = loadModuleList(srcDir, modulesJsonPath);
   let body = buildBody(srcDir, list, quiet);
   body = inlineSettingsSchema(body, quiet);
+  body = inlineKoFallback(body);
   return GENERATED_HEADER + SHELL_PREFIX + body + '\n' + SHELL_SUFFIX;
 }
 
@@ -282,4 +344,6 @@ function main() {
     ' (' + Buffer.byteLength(expected, 'utf8') + ' bytes)\n');
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { koFallbackKeys, koFallbackLiteral, KO_MARKER };
