@@ -489,8 +489,7 @@
    * property, no pinned piece. It runs BEFORE the base so the base's own node sweep and piece sweep see an
    * already quiet module — and the frozen element's two inline properties go back while it is still the
    * element we saved them from. */
-  const utRestoreBase = restore;
-  restore = function () { utResetAll(); return utRestoreBase(); };
+  onRestore('utility', () => { utResetAll(); });
   function utResetAll() {
     utFrostClear();
     gwClear();

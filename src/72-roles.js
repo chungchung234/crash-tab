@@ -374,8 +374,7 @@
    * restore() 보다 먼저 돌아 장부와 실밥을 치운다. 갈아낸 `max` 는 restore() 가 state.hp 를 통째로
    * 새 WeakMap 으로 바꾸면서 사라지고, 다음 접촉에서 DOM 으로부터 다시 계산된다 — §D 의
    * "`max` 가 원래 값으로" 가 그렇게 성립한다. */
-  const rlRestoreBase = restore;
-  restore = function () { rlResetAll(); return rlRestoreBase(); };
+  onRestore('roles', () => { rlResetAll(); });
   function rlResetAll() {
     rlFiring = '';
     rlStreakClear();

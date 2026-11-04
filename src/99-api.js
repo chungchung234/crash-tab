@@ -26,7 +26,9 @@
     hudEls.aPulse = null; hudEls.aPulseKey = '';
     hudEls.pPulse = null; hudEls.pPulseOn = false;
   }
-  function restore() {
+  /* 본체다. 바깥의 restore() (src/20-state.js §1.5) 가 등록된 콜백들 사이에서 이것을 부른다 —
+   * 예전에는 여덟 겹의 래퍼가 이 선언의 바인딩을 차례로 덮어썼다. */
+  function restoreCore() {
     stopHold(true);
     cancelSlash();
     cancelCollapse();
@@ -197,7 +199,8 @@
       throw e;
     }
   }
-  function deactivate(silent) {
+  /* 본체다 — restore() 와 같은 이유로 바깥의 deactivate() (src/20-state.js §1.5) 가 부른다. */
+  function deactivateCore(silent) {
     if (!state.active && !shield) return;
     const wasActive = state.active;
     cancelCollapse();
@@ -366,8 +369,11 @@
   /* uses for updateHud). The originals are kept in ONE object so this      */
   /* block adds exactly one new top-level name.                             */
   /* ═════════════════════════════════════════════════════════════════════ */
+  /* deactivate / restore 는 여기 없다: 그 둘은 재할당이 아니라 src/20-state.js §1.5 의 등록부로
+   * 간다 (이 파일이 마지막으로 실리므로 이 층은 예전 체인의 가장 바깥이었고, 등록부에서는 앞
+   * 단계의 맨 처음 · 뒤 단계의 맨 마지막이 같은 자리다). */
   const SETTINGS_BASE = {
-    stats, activate, deactivate, restore,
+    stats, activate,
     setWeapon, setMuted, setPlayMode, setDebrisAnchor, setWeaponOption, setLoadout
   };
 
@@ -470,27 +476,26 @@
     try { perfStart(); } catch (e) { /* ignore */ }
     try { a11yStart(); } catch (e) { /* ignore */ }
   };
-  deactivate = function (silent) {
+  onDeactivate('settings', () => {
     try { a11yStop(); } catch (e) { /* ignore */ }
     try { perfStop(); } catch (e) { /* ignore */ }
-    const r = SETTINGS_BASE.deactivate(silent);
+  });
+  afterDeactivate('settings', () => {
     /* belt and braces: restore() re-armed nothing we own, but clearTimers() only empties the SET */
     untrack(state.perfTimer); state.perfTimer = 0;
-    return r;
-  };
+  });
   /* restore() runs clearTimers(), which takes the 10 s perf sample with it; re-arm while still active. */
-  restore = function () {
-    SETTINGS_BASE.restore();
+  afterRestore('settings', () => {
     if (!state.active) return;
     try { perfArm(); } catch (e) { /* ignore */ }
     try { a11yStart(); } catch (e) { /* ignore */ }
-  };
+  });
 
-  /* `api` captured activate / restore / stats BY VALUE in its object literal, so the wrappers above have to
-   * be published too. (deactivate and toggle are reached through arrows / a binding lookup and follow on
-   * their own; weapons / smashAt / … were never wrapped.) */
+  /* `api` captured activate / stats BY VALUE in its object literal, so the wrapper above has to be
+   * published too. (deactivate and toggle are reached through arrows / a binding lookup and follow on their
+   * own; weapons / smashAt / … were never wrapped.) `restore` is no longer wrapped at all — it is one
+   * declaration in src/20-state.js now, so what `api` captured is already the dispatcher. */
   api.activate = activate;
-  api.restore = restore;
 
   /* One storage read and one chrome.storage.onChanged subscription per page, before the first activate(). */
   settingsBoot();

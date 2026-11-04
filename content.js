@@ -628,6 +628,88 @@
   }
   function sendState(active) { safe(() => chrome.runtime.sendMessage({ type: 'crash:state', active: !!active })); }
 
+  /* ===================================================================== */
+  /* 1.5 생애 주기 등록부 — restore() 와 deactivate()                        */
+  /* ===================================================================== */
+  /* 이 둘은 "치워라" 라는 **한 가지 일**이고, 뒤에 실리는 모듈들은 전부 "내 것도 치워
+   * 줘" 를 말한다. 예전에는 그것을 **바인딩 재할당**으로 말했다 — 번들이 하나의 클로저라
+   * 뒤 모듈이 앞 모듈의 함수를 감쌀 수 있기 때문이다. restore 는 8겹, deactivate 는
+   * 5겹까지 쌓였고 두 가지가 나빴다.
+   *   1. 누가 바깥인지를 modules.json 의 순서가 정했다 — 파일 하나를 옮기면 실행 순서가
+   *      조용히 뒤집힌다. 아무도 그걸 적어 두지 않았다.
+   *   2. 중간에서 하나가 던지면 바깥쪽 겹이 통째로 돌지 않았다. 이 둘은 **무흔적 계약**의
+   *      핵심이므로, 그건 곧 페이지에 흔적이 남는다는 뜻이다.
+   *
+   * 래퍼가 아니라 콜백 목록이 맞다. 단계는 둘이고, 그 둘이 예전 체인의 안/밖을 그대로
+   * 옮긴 것이다 (재할당 체인에 추적을 박아 실측한 순서와 같다):
+   *
+   *   onRestore / onDeactivate       — 본체 **앞**. **적재 역순**으로 돈다. 나중에 올라온
+   *       층이 먼저 내려간다 — 생성의 역순 해체다. 예전 체인에서 가장 바깥 래퍼(= 가장
+   *       늦게 실린 모듈)의 선작업이 먼저 돌던 것과 같은 순서다.
+   *   afterRestore / afterDeactivate — 본체 **뒤**. **적재 순서**로 돈다. 가장 안쪽 래퍼의
+   *       후작업이 먼저 돌던 것과 같다. 본체가 던져도 돈다(finally) — src/96.2 의 통계
+   *       표본이 try/finally 로 그렇게 하고 있었고, 이제 전부가 그렇다.
+   *
+   * 콜백 하나가 던져도 나머지는 전부 돈다. 던진 것은 state.lastError 에 남는다.
+   * 래퍼 체인은 이걸 못 했다 — 그게 1번보다 조용한 고장이었다.
+   *
+   * 본체는 src/99-api.js 의 restoreCore() / deactivateCore() 다 (선언이므로 호이스팅된다.
+   * src/22-perf.js 가 src/92-tick.js 의 tickFrame 을 집는 것과 같은 장치다). */
+  const LIFE_HOOKS = { restore: [], restoreAfter: [], deactivate: [], deactivateAfter: [], probe: null, ran: [] };
+  function hookAdd(phase, tag, fn) { LIFE_HOOKS[phase].push({ tag, fn }); return fn; }
+  function onRestore(tag, fn) { return hookAdd('restore', tag, fn); }
+  function afterRestore(tag, fn) { return hookAdd('restoreAfter', tag, fn); }
+  function onDeactivate(tag, fn) { return hookAdd('deactivate', tag, fn); }
+  function afterDeactivate(tag, fn) { return hookAdd('deactivateAfter', tag, fn); }
+  /* down=true 는 적재 역순(해체), false 는 적재 순서(재무장). 하나가 던져도 나머지가 돈다. */
+  function hookRun(phase, down, arg) {
+    const list = LIFE_HOOKS[phase];
+    const n = list.length;
+    for (let k = 0; k < n; k++) {
+      const h = list[down ? n - 1 - k : k];
+      try { h.fn(arg); } catch (e) { state.lastError = String((e && e.stack) || e); }
+    }
+  }
+  function restore() {
+    hookRun('restore', true);
+    try { return restoreCore(); }
+    finally { hookRun('restoreAfter', false); }
+  }
+  function deactivate(silent) {
+    hookRun('deactivate', true, silent);
+    try { return deactivateCore(silent); }
+    finally { hookRun('deactivateAfter', false, silent); }
+  }
+  /* ── 단언이 보는 창 ───────────────────────────────────────────────────────
+   * hooks(): 각 단계를 **실행 순서대로** 이름으로 돌려준다. 등록이 하나라도 빠지면 길이가
+   * 어긋나고, 순서가 뒤집히면 이름 차례가 어긋난다 — 옮기다 흘린 것을 단언이 직접 잡는다. */
+  debug.hooks = () => ({
+    restore: LIFE_HOOKS.restore.map((h) => h.tag).reverse(),
+    restoreAfter: LIFE_HOOKS.restoreAfter.map((h) => h.tag),
+    deactivate: LIFE_HOOKS.deactivate.map((h) => h.tag).reverse(),
+    deactivateAfter: LIFE_HOOKS.deactivateAfter.map((h) => h.tag)
+  });
+  /* 던지는 콜백 하나가 나머지를 막지 않는다는 것도 단언이 **직접** 보게 한다: 한 단계에
+   * 표식 · 던지는 것 · 표식 셋을 끼우고, 실제로 돈 것을 순서대로 돌려준다. 떼어낼 수 있으므로
+   * 등록 수 단언과 서로 방해하지 않는다. */
+  debug.hookProbeOn = (phase) => {
+    debug.hookProbeOff();
+    if (!Array.isArray(LIFE_HOOKS[phase])) return null;
+    hookAdd(phase, 'probe-1', () => { LIFE_HOOKS.ran.push('one'); });
+    hookAdd(phase, 'probe-throw', () => { LIFE_HOOKS.ran.push('throw'); throw new Error('crs hook probe'); });
+    hookAdd(phase, 'probe-2', () => { LIFE_HOOKS.ran.push('two'); });
+    LIFE_HOOKS.probe = { phase, n: 3 };
+    return debug.hooks();
+  };
+  debug.hookProbeRan = () => LIFE_HOOKS.ran.slice();
+  debug.hookProbeOff = () => {
+    const p = LIFE_HOOKS.probe;
+    if (p) LIFE_HOOKS[p.phase].splice(LIFE_HOOKS[p.phase].length - p.n, p.n);
+    LIFE_HOOKS.probe = null;
+    LIFE_HOOKS.ran = [];
+    return debug.hooks();
+  };
+
 // ── 21-settings.js ──
   /* ===================================================================== */
   /* 1b. Settings (SPEC-settings §1)                                        */
@@ -6212,13 +6294,10 @@
   // The <html> class is ours, so it goes when we do — nothing of ours may outlive a deactivate.
   /* AFTER the base, never before: deactivate() runs restore() while `state.active` is still true, and
    * restore()'s updateHud() would build the crosshair (and re-add the class) all over again. */
-  const deactivateChBase = deactivate;
-  deactivate = function (silent) {
-    const r = deactivateChBase(silent);
+  afterDeactivate('crosshair', () => {
     try { clearCrosshair(); } catch (e) { /* ignore */ }
     try { docEl.classList.remove('crs-aim'); } catch (e) { /* ignore */ }
-    return r;
-  };
+  });
 
   /* ---- debug surface (SPEC-crosshair §D is written against these) --------------------------------- */
   debug.crosshair = () => {
@@ -8540,9 +8619,10 @@
   };
   /* restore() (Z / Escape / deactivate) must leave NOTHING of ours: no node, no timer, no borrowed filter,
    * no state flag. It runs BEFORE the base so the base's own node sweep and clearMoved() see an already
-   * quiet module — and the wet filter is put back while the element is still the element we saved it from. */
-  const ixRestoreBase = restore;
-  restore = function () { ixResetAll(); return ixRestoreBase(); };
+   * quiet module — and the wet filter is put back while the element is still the element we saved it from.
+   * 등록부(src/20-state.js §1.5)에 **등록**한다 — 예전에는 restore 바인딩을 재할당해 감쌌고, 그러면
+   * 누가 먼저 도는지를 modules.json 의 순서가 말없이 정했다. */
+  onRestore('interaction', () => { ixResetAll(); });
   function ixClearStates() {
     for (const el of Array.from(ixWetEls.keys())) ixUnwet(el);
     ixWetEls.clear();
@@ -9136,8 +9216,7 @@
    * property, no pinned piece. It runs BEFORE the base so the base's own node sweep and piece sweep see an
    * already quiet module — and the frozen element's two inline properties go back while it is still the
    * element we saved them from. */
-  const utRestoreBase = restore;
-  restore = function () { utResetAll(); return utRestoreBase(); };
+  onRestore('utility', () => { utResetAll(); });
   function utResetAll() {
     utFrostClear();
     gwClear();
@@ -10258,8 +10337,7 @@
    * restore() 보다 먼저 돌아 장부와 실밥을 치운다. 갈아낸 `max` 는 restore() 가 state.hp 를 통째로
    * 새 WeakMap 으로 바꾸면서 사라지고, 다음 접촉에서 DOM 으로부터 다시 계산된다 — §D 의
    * "`max` 가 원래 값으로" 가 그렇게 성립한다. */
-  const rlRestoreBase = restore;
-  restore = function () { rlResetAll(); return rlRestoreBase(); };
+  onRestore('roles', () => { rlResetAll(); });
   function rlResetAll() {
     rlFiring = '';
     rlStreakClear();
@@ -13393,8 +13471,7 @@
   updateAmmoHud = function () { const r = altAmmoHudBase(); altHeatHud(); return r; };
   /* restore() (Z / Escape / deactivate) must leave NOTHING of ours: no node, no timer, no reserved round.
    * It runs BEFORE the base so the base's own node sweep and clearTimers() see an already-quiet module. */
-  const altRestoreBase = restore;
-  restore = function () { altResetAll(); return altRestoreBase(); };
+  onRestore('altfire', () => { altResetAll(); });
   function altResetAll() {
     altCancel('restore');
     altEnd();
@@ -18498,7 +18575,12 @@
     startedAt: 0,
     exiting: false,      // true while deactivate() is running, so its internal restore() is not a 복구
     snap: null,          // last-sampled counter values (the product's counters reset on restore/activate)
-    d: null              // pending deltas
+    d: null,             // pending deltas
+    /* 전·후 콜백 둘로 갈라진 두 래퍼가 서로에게 넘기던 지역 변수. 예전에는 한 클로저 안의
+     * `wasActive` / `user` 였다 — 등록부에서는 앞 단계가 적고 뒤 단계가 읽는다. 둘 다 재진입하지
+     * 않는다(restore 는 자기를 부르지 않고, deactivate 는 비활성이면 곧장 돌아선다). */
+    exitWasActive: false,
+    restoreUser: false
   };
   function lifeEnabled() { return settingsGet('collectLocalStats') === true; }
   function lifeOrigin() {
@@ -18726,11 +18808,12 @@
     });
   }
 
-  /* ---- lifecycle wrappers ------------------------------------------------------------
-   * The same binding-rewrite device src/99-api.js uses: the bundle is one closure and a function
-   * declaration's binding is writable, so this layer nests INSIDE the wrappers src/97, src/98 and
-   * src/99 add later (they capture whatever `activate` / `restore` / `deactivate` are when they run). */
-  const LIFE_BASE = { activate, deactivate, restore };
+  /* ---- lifecycle ----------------------------------------------------------------------
+   * activate() 는 아직 재할당이다 (등록부가 다루는 것은 restore / deactivate 둘뿐이다).
+   * restore / deactivate 는 src/20-state.js §1.5 의 등록부로 옮겼다: 이 층이 src/97 · src/98 ·
+   * src/99 의 **안쪽**에 있던 것은 그 셋이 나중에 실려 더 바깥을 감쌌기 때문이고, 등록부에서는
+   * 적재 순서가 그 자리를 그대로 준다 — 앞 단계는 적재 역순, 뒤 단계는 적재 순서. */
+  const LIFE_BASE = { activate };
   activate = function () {
     LIFE_BASE.activate();
     try { lifeStart(); } catch (e) { /* 통계가 활성화를 막는 일은 없다 */ }
@@ -18739,35 +18822,34 @@
    * sample has to be taken BEFORE it runs. Taking it after was good for exactly one wrong answer: every
    * session recorded 0 damage and 0 broken, because the only two moments §2 writes at — a 복구 and the
    * 종료 (which calls restore() on its way out) — are both on the far side of that reset. */
-  deactivate = function (silent) {
-    const wasActive = state.active;
-    if (wasActive) { try { lifeSample(); } catch (e) { /* ignore */ } }
+  onDeactivate('stats', () => {
+    LIFE.exitWasActive = state.active;
+    if (LIFE.exitWasActive) { try { lifeSample(); } catch (e) { /* ignore */ } }
     LIFE.exiting = true;
-    try {
-      return LIFE_BASE.deactivate(silent);
-    } finally {
-      LIFE.exiting = false;
-      if (wasActive) { try { lifeStop(); } catch (e) { /* ignore */ } }
-      else if (LIFE.timer) { try { clearT(LIFE.timer); } catch (e) { /* ignore */ } LIFE.timer = 0; }
-    }
-  };
-  restore = function () {
+  });
+  /* 뒤 단계는 본체가 던져도 돈다 — 예전 래퍼의 try/finally 가 하던 일이고, 등록부가 모든 뒤
+   * 단계에 대해 그렇게 한다. LIFE.exiting 이 켜진 채로 남으면 다음 복구가 집계되지 않는다. */
+  afterDeactivate('stats', () => {
+    LIFE.exiting = false;
+    if (LIFE.exitWasActive) { try { lifeStop(); } catch (e) { /* ignore */ } }
+    else if (LIFE.timer) { try { clearT(LIFE.timer); } catch (e) { /* ignore */ } LIFE.timer = 0; }
+  });
+  onRestore('stats', () => {
     /* deactivate() calls restore() on its way out; that is an EXIT, not a 복구, and counting it would
      * make §2's 복구 비율 (복구 / (복구 + 종료)) read 0.5 for someone who never pressed Z. */
-    const user = state.active && !LIFE.exiting;
-    if (user) { try { lifeSample(); } catch (e) { /* ignore */ } }
-    const r = LIFE_BASE.restore();
-    if (user && lifeEnabled()) {
-      try {
-        lifeDeltas().totalRestores++;
-        /* the counters are back at zero now; the snapshot has to follow them or the next sample would
-         * read the whole of the next 복구 as a decrease and add it twice */
-        if (LIFE.snap) { LIFE.snap.damage = 0; LIFE.snap.broken = 0; LIFE.snap.kills = Math.max(0, state.player.kills || 0); }
-        lifeArm();
-      } catch (e) { /* ignore */ }
-    }
-    return r;
-  };
+    LIFE.restoreUser = state.active && !LIFE.exiting;
+    if (LIFE.restoreUser) { try { lifeSample(); } catch (e) { /* ignore */ } }
+  });
+  afterRestore('stats', () => {
+    if (!LIFE.restoreUser || !lifeEnabled()) return;
+    try {
+      lifeDeltas().totalRestores++;
+      /* the counters are back at zero now; the snapshot has to follow them or the next sample would
+       * read the whole of the next 복구 as a decrease and add it twice */
+      if (LIFE.snap) { LIFE.snap.damage = 0; LIFE.snap.broken = 0; LIFE.snap.kills = Math.max(0, state.player.kills || 0); }
+      lifeArm();
+    } catch (e) { /* ignore */ }
+  });
 
 // ── 97-challenge.js ──
   /* ===================================================================== */
@@ -19170,27 +19252,24 @@
   /* ---- lifecycle ---------------------------------------------------------------------------------
    * restore() clears every tracked timer, so the challenge tick is re-armed behind it exactly as the perf
    * sample and the a11y layer are (src/99-api.js). deactivate() ends the run outright. */
-  const restoreChal = restore;
-  restore = function () {
-    restoreChal();
+  afterRestore('challenge', () => {
     progressSeen = 0;        // restore() zeroed state.damageDealt; the cumulative total keeps what it had
     if (!state.active) return;
     chalArm();
     chalHud();
     bossBarSync();
-  };
-  const deactivateChal = deactivate;
-  deactivate = function (silent) {
+  });
+  onDeactivate('challenge', () => {
     challengeStop(true);
     chalResultClose();
     untrack(chal.timer); chal.timer = 0;
     progressSave();          // whatever is still owed goes to disk before the page lets go
     untrack(progressData.timer); progressData.timer = 0;
-    const r = deactivateChal(silent);
+  });
+  afterDeactivate('challenge', () => {
     untrack(state.bossTimer); state.bossTimer = 0;
     state.bossRespawnAt = 0; state.slowmoUntil = 0; state.bossNodes = null;
-    return r;
-  };
+  });
 
   debug.challengeRecordsReset = () => { for (const id of CHAL_IDS) delete chalRecords[id]; return true; };
   debug.setProgress = (n) => {
@@ -19732,11 +19811,7 @@
     if (r && !(opts && opts.silent)) replayRecord('weapon', [r]);
     return r;
   };
-  const restoreReplay = restore;
-  restore = function () {
-    replayRecord('restore', []);
-    return restoreReplay();
-  };
+  onRestore('inspect', () => { replayRecord('restore', []); });
   const reloadReplay = reloadNow;
   reloadNow = function () {
     const r = reloadReplay();
@@ -19745,14 +19820,12 @@
   };
 
   /* ---- lifecycle: nothing here may outlive the session (§7 무흔적) ---- */
-  const deactivateInspect = deactivate;
-  deactivate = function (silent) {
+  onDeactivate('inspect', () => {
     replayStop();
     inspect.on = false;
     inspectClear();
     try { docEl.classList.remove('crs-inspect-on'); } catch (e) { /* ignore */ }
-    return deactivateInspect(silent);
-  };
+  });
 
   debug.inspectAt = (x, y) => {
     const el = pickPhysical(+x, +y, null, { noLock: true });
@@ -19810,7 +19883,9 @@
     hudEls.aPulse = null; hudEls.aPulseKey = '';
     hudEls.pPulse = null; hudEls.pPulseOn = false;
   }
-  function restore() {
+  /* 본체다. 바깥의 restore() (src/20-state.js §1.5) 가 등록된 콜백들 사이에서 이것을 부른다 —
+   * 예전에는 여덟 겹의 래퍼가 이 선언의 바인딩을 차례로 덮어썼다. */
+  function restoreCore() {
     stopHold(true);
     cancelSlash();
     cancelCollapse();
@@ -19981,7 +20056,8 @@
       throw e;
     }
   }
-  function deactivate(silent) {
+  /* 본체다 — restore() 와 같은 이유로 바깥의 deactivate() (src/20-state.js §1.5) 가 부른다. */
+  function deactivateCore(silent) {
     if (!state.active && !shield) return;
     const wasActive = state.active;
     cancelCollapse();
@@ -20150,8 +20226,11 @@
   /* uses for updateHud). The originals are kept in ONE object so this      */
   /* block adds exactly one new top-level name.                             */
   /* ═════════════════════════════════════════════════════════════════════ */
+  /* deactivate / restore 는 여기 없다: 그 둘은 재할당이 아니라 src/20-state.js §1.5 의 등록부로
+   * 간다 (이 파일이 마지막으로 실리므로 이 층은 예전 체인의 가장 바깥이었고, 등록부에서는 앞
+   * 단계의 맨 처음 · 뒤 단계의 맨 마지막이 같은 자리다). */
   const SETTINGS_BASE = {
-    stats, activate, deactivate, restore,
+    stats, activate,
     setWeapon, setMuted, setPlayMode, setDebrisAnchor, setWeaponOption, setLoadout
   };
 
@@ -20254,27 +20333,26 @@
     try { perfStart(); } catch (e) { /* ignore */ }
     try { a11yStart(); } catch (e) { /* ignore */ }
   };
-  deactivate = function (silent) {
+  onDeactivate('settings', () => {
     try { a11yStop(); } catch (e) { /* ignore */ }
     try { perfStop(); } catch (e) { /* ignore */ }
-    const r = SETTINGS_BASE.deactivate(silent);
+  });
+  afterDeactivate('settings', () => {
     /* belt and braces: restore() re-armed nothing we own, but clearTimers() only empties the SET */
     untrack(state.perfTimer); state.perfTimer = 0;
-    return r;
-  };
+  });
   /* restore() runs clearTimers(), which takes the 10 s perf sample with it; re-arm while still active. */
-  restore = function () {
-    SETTINGS_BASE.restore();
+  afterRestore('settings', () => {
     if (!state.active) return;
     try { perfArm(); } catch (e) { /* ignore */ }
     try { a11yStart(); } catch (e) { /* ignore */ }
-  };
+  });
 
-  /* `api` captured activate / restore / stats BY VALUE in its object literal, so the wrappers above have to
-   * be published too. (deactivate and toggle are reached through arrows / a binding lookup and follow on
-   * their own; weapons / smashAt / … were never wrapped.) */
+  /* `api` captured activate / stats BY VALUE in its object literal, so the wrapper above has to be
+   * published too. (deactivate and toggle are reached through arrows / a binding lookup and follow on their
+   * own; weapons / smashAt / … were never wrapped.) `restore` is no longer wrapped at all — it is one
+   * declaration in src/20-state.js now, so what `api` captured is already the dispatcher. */
   api.activate = activate;
-  api.restore = restore;
 
   /* One storage read and one chrome.storage.onChanged subscription per page, before the first activate(). */
   settingsBoot();
