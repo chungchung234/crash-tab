@@ -75,17 +75,19 @@ CSS 를 병합할 때는 규칙 본문 안에서 충돌이 나면 중괄호가 �
 ## 테스트
 
 ```bash
-node test/e2e.js                      # 전체, 106초, 1147 단언
-CRS_BLOCKS=ammo node test/e2e.js      # 106초 — 탄창·저격경·로드아웃·보조 공격·무기고
-CRS_BLOCKS=rules node test/e2e.js     # 76초  — 모드·적만 피해·적만 포커싱·아키타입·투사체
-CRS_BLOCKS=core node test/e2e.js      # 60초  — 픽스처·주입·HP·무기 아트·재질·조준점·파괴
-CRS_BLOCKS=combat node test/e2e.js    # 56초  — 드론·락온·복구·보스
-CRS_BLOCKS=depth node test/e2e.js     # 42초  — 깊이·관통·변위·상호작용
-CRS_BLOCKS=debris node test/e2e.js    # 38초  — 파편 수명
-CRS_BLOCKS=settings node test/e2e.js  # 17초  — 스키마·성능 가드·접근성·통계
-CRS_BLOCKS=roles node test/e2e.js     # 6초   — 표적 등급 계수·§C4 액션·무흔적 (11단계)
-CRS_SUITES=D node test/e2e.js         # 12초  — 옵션 페이지 (실제 확장 로드)
+node test/e2e.js                      # 전체, 116초, 1233 단언
+CRS_BLOCKS=ammo node test/e2e.js      # 가장 긴 레인 — 벽시계가 곧 이 블록 시간이다
+CRS_BLOCKS=rules node test/e2e.js     # 모드·적만 피해·적만 포커싱·아키타입·투사체
+CRS_BLOCKS=core node test/e2e.js      # 픽스처·주입·HP·무기 아트·재질·조준점·파괴·명중률
+CRS_BLOCKS=combat node test/e2e.js    # 드론·락온·복구·보스
+CRS_BLOCKS=depth node test/e2e.js     # 깊이·관통·변위·상호작용·조준 승격
+CRS_BLOCKS=debris node test/e2e.js    # 파편 수명
+CRS_BLOCKS=settings node test/e2e.js  # 스키마·성능 가드·접근성·통계·키보드 조준
+CRS_BLOCKS=roles node test/e2e.js     # 표적 등급 계수·액션 분화
+CRS_SUITES=D node test/e2e.js         # 옵션 페이지 (실제 확장 로드)
 ```
+
+블록 시간은 작업마다 바뀐다. **재면서 고쳐라** — `--- <블록> finished in` 줄이 찍힌다.
 
 블록이 커지면 **다시 재서** `A_BLOCKS` 큐 순서를 고친다(긴 것부터).
 
