@@ -496,11 +496,7 @@
     if (r && !(opts && opts.silent)) replayRecord('weapon', [r]);
     return r;
   };
-  const restoreReplay = restore;
-  restore = function () {
-    replayRecord('restore', []);
-    return restoreReplay();
-  };
+  onRestore('inspect', () => { replayRecord('restore', []); });
   const reloadReplay = reloadNow;
   reloadNow = function () {
     const r = reloadReplay();
@@ -509,14 +505,12 @@
   };
 
   /* ---- lifecycle: nothing here may outlive the session (§7 무흔적) ---- */
-  const deactivateInspect = deactivate;
-  deactivate = function (silent) {
+  onDeactivate('inspect', () => {
     replayStop();
     inspect.on = false;
     inspectClear();
     try { docEl.classList.remove('crs-inspect-on'); } catch (e) { /* ignore */ }
-    return deactivateInspect(silent);
-  };
+  });
 
   debug.inspectAt = (x, y) => {
     const el = pickPhysical(+x, +y, null, { noLock: true });

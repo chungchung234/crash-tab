@@ -568,9 +568,10 @@
   };
   /* restore() (Z / Escape / deactivate) must leave NOTHING of ours: no node, no timer, no borrowed filter,
    * no state flag. It runs BEFORE the base so the base's own node sweep and clearMoved() see an already
-   * quiet module — and the wet filter is put back while the element is still the element we saved it from. */
-  const ixRestoreBase = restore;
-  restore = function () { ixResetAll(); return ixRestoreBase(); };
+   * quiet module — and the wet filter is put back while the element is still the element we saved it from.
+   * 등록부(src/20-state.js §1.5)에 **등록**한다 — 예전에는 restore 바인딩을 재할당해 감쌌고, 그러면
+   * 누가 먼저 도는지를 modules.json 의 순서가 말없이 정했다. */
+  onRestore('interaction', () => { ixResetAll(); });
   function ixClearStates() {
     for (const el of Array.from(ixWetEls.keys())) ixUnwet(el);
     ixWetEls.clear();

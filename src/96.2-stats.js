@@ -32,7 +32,12 @@
     startedAt: 0,
     exiting: false,      // true while deactivate() is running, so its internal restore() is not a 복구
     snap: null,          // last-sampled counter values (the product's counters reset on restore/activate)
-    d: null              // pending deltas
+    d: null,             // pending deltas
+    /* 전·후 콜백 둘로 갈라진 두 래퍼가 서로에게 넘기던 지역 변수. 예전에는 한 클로저 안의
+     * `wasActive` / `user` 였다 — 등록부에서는 앞 단계가 적고 뒤 단계가 읽는다. 둘 다 재진입하지
+     * 않는다(restore 는 자기를 부르지 않고, deactivate 는 비활성이면 곧장 돌아선다). */
+    exitWasActive: false,
+    restoreUser: false
   };
   function lifeEnabled() { return settingsGet('collectLocalStats') === true; }
   function lifeOrigin() {
@@ -260,11 +265,12 @@
     });
   }
 
-  /* ---- lifecycle wrappers ------------------------------------------------------------
-   * The same binding-rewrite device src/99-api.js uses: the bundle is one closure and a function
-   * declaration's binding is writable, so this layer nests INSIDE the wrappers src/97, src/98 and
-   * src/99 add later (they capture whatever `activate` / `restore` / `deactivate` are when they run). */
-  const LIFE_BASE = { activate, deactivate, restore };
+  /* ---- lifecycle ----------------------------------------------------------------------
+   * activate() 는 아직 재할당이다 (등록부가 다루는 것은 restore / deactivate 둘뿐이다).
+   * restore / deactivate 는 src/20-state.js §1.5 의 등록부로 옮겼다: 이 층이 src/97 · src/98 ·
+   * src/99 의 **안쪽**에 있던 것은 그 셋이 나중에 실려 더 바깥을 감쌌기 때문이고, 등록부에서는
+   * 적재 순서가 그 자리를 그대로 준다 — 앞 단계는 적재 역순, 뒤 단계는 적재 순서. */
+  const LIFE_BASE = { activate };
   activate = function () {
     LIFE_BASE.activate();
     try { lifeStart(); } catch (e) { /* 통계가 활성화를 막는 일은 없다 */ }
@@ -273,32 +279,31 @@
    * sample has to be taken BEFORE it runs. Taking it after was good for exactly one wrong answer: every
    * session recorded 0 damage and 0 broken, because the only two moments §2 writes at — a 복구 and the
    * 종료 (which calls restore() on its way out) — are both on the far side of that reset. */
-  deactivate = function (silent) {
-    const wasActive = state.active;
-    if (wasActive) { try { lifeSample(); } catch (e) { /* ignore */ } }
+  onDeactivate('stats', () => {
+    LIFE.exitWasActive = state.active;
+    if (LIFE.exitWasActive) { try { lifeSample(); } catch (e) { /* ignore */ } }
     LIFE.exiting = true;
-    try {
-      return LIFE_BASE.deactivate(silent);
-    } finally {
-      LIFE.exiting = false;
-      if (wasActive) { try { lifeStop(); } catch (e) { /* ignore */ } }
-      else if (LIFE.timer) { try { clearT(LIFE.timer); } catch (e) { /* ignore */ } LIFE.timer = 0; }
-    }
-  };
-  restore = function () {
+  });
+  /* 뒤 단계는 본체가 던져도 돈다 — 예전 래퍼의 try/finally 가 하던 일이고, 등록부가 모든 뒤
+   * 단계에 대해 그렇게 한다. LIFE.exiting 이 켜진 채로 남으면 다음 복구가 집계되지 않는다. */
+  afterDeactivate('stats', () => {
+    LIFE.exiting = false;
+    if (LIFE.exitWasActive) { try { lifeStop(); } catch (e) { /* ignore */ } }
+    else if (LIFE.timer) { try { clearT(LIFE.timer); } catch (e) { /* ignore */ } LIFE.timer = 0; }
+  });
+  onRestore('stats', () => {
     /* deactivate() calls restore() on its way out; that is an EXIT, not a 복구, and counting it would
      * make §2's 복구 비율 (복구 / (복구 + 종료)) read 0.5 for someone who never pressed Z. */
-    const user = state.active && !LIFE.exiting;
-    if (user) { try { lifeSample(); } catch (e) { /* ignore */ } }
-    const r = LIFE_BASE.restore();
-    if (user && lifeEnabled()) {
-      try {
-        lifeDeltas().totalRestores++;
-        /* the counters are back at zero now; the snapshot has to follow them or the next sample would
-         * read the whole of the next 복구 as a decrease and add it twice */
-        if (LIFE.snap) { LIFE.snap.damage = 0; LIFE.snap.broken = 0; LIFE.snap.kills = Math.max(0, state.player.kills || 0); }
-        lifeArm();
-      } catch (e) { /* ignore */ }
-    }
-    return r;
-  };
+    LIFE.restoreUser = state.active && !LIFE.exiting;
+    if (LIFE.restoreUser) { try { lifeSample(); } catch (e) { /* ignore */ } }
+  });
+  afterRestore('stats', () => {
+    if (!LIFE.restoreUser || !lifeEnabled()) return;
+    try {
+      lifeDeltas().totalRestores++;
+      /* the counters are back at zero now; the snapshot has to follow them or the next sample would
+       * read the whole of the next 복구 as a decrease and add it twice */
+      if (LIFE.snap) { LIFE.snap.damage = 0; LIFE.snap.broken = 0; LIFE.snap.kills = Math.max(0, state.player.kills || 0); }
+      lifeArm();
+    } catch (e) { /* ignore */ }
+  });

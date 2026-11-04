@@ -1510,8 +1510,7 @@
   updateAmmoHud = function () { const r = altAmmoHudBase(); altHeatHud(); return r; };
   /* restore() (Z / Escape / deactivate) must leave NOTHING of ours: no node, no timer, no reserved round.
    * It runs BEFORE the base so the base's own node sweep and clearTimers() see an already-quiet module. */
-  const altRestoreBase = restore;
-  restore = function () { altResetAll(); return altRestoreBase(); };
+  onRestore('altfire', () => { altResetAll(); });
   function altResetAll() {
     altCancel('restore');
     altEnd();

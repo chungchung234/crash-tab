@@ -734,13 +734,10 @@
   // The <html> class is ours, so it goes when we do — nothing of ours may outlive a deactivate.
   /* AFTER the base, never before: deactivate() runs restore() while `state.active` is still true, and
    * restore()'s updateHud() would build the crosshair (and re-add the class) all over again. */
-  const deactivateChBase = deactivate;
-  deactivate = function (silent) {
-    const r = deactivateChBase(silent);
+  afterDeactivate('crosshair', () => {
     try { clearCrosshair(); } catch (e) { /* ignore */ }
     try { docEl.classList.remove('crs-aim'); } catch (e) { /* ignore */ }
-    return r;
-  };
+  });
 
   /* ---- debug surface (SPEC-crosshair §D is written against these) --------------------------------- */
   debug.crosshair = () => {

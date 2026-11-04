@@ -103,3 +103,85 @@
     }
   }
   function sendState(active) { safe(() => chrome.runtime.sendMessage({ type: 'crash:state', active: !!active })); }
+
+  /* ===================================================================== */
+  /* 1.5 생애 주기 등록부 — restore() 와 deactivate()                        */
+  /* ===================================================================== */
+  /* 이 둘은 "치워라" 라는 **한 가지 일**이고, 뒤에 실리는 모듈들은 전부 "내 것도 치워
+   * 줘" 를 말한다. 예전에는 그것을 **바인딩 재할당**으로 말했다 — 번들이 하나의 클로저라
+   * 뒤 모듈이 앞 모듈의 함수를 감쌀 수 있기 때문이다. restore 는 8겹, deactivate 는
+   * 5겹까지 쌓였고 두 가지가 나빴다.
+   *   1. 누가 바깥인지를 modules.json 의 순서가 정했다 — 파일 하나를 옮기면 실행 순서가
+   *      조용히 뒤집힌다. 아무도 그걸 적어 두지 않았다.
+   *   2. 중간에서 하나가 던지면 바깥쪽 겹이 통째로 돌지 않았다. 이 둘은 **무흔적 계약**의
+   *      핵심이므로, 그건 곧 페이지에 흔적이 남는다는 뜻이다.
+   *
+   * 래퍼가 아니라 콜백 목록이 맞다. 단계는 둘이고, 그 둘이 예전 체인의 안/밖을 그대로
+   * 옮긴 것이다 (재할당 체인에 추적을 박아 실측한 순서와 같다):
+   *
+   *   onRestore / onDeactivate       — 본체 **앞**. **적재 역순**으로 돈다. 나중에 올라온
+   *       층이 먼저 내려간다 — 생성의 역순 해체다. 예전 체인에서 가장 바깥 래퍼(= 가장
+   *       늦게 실린 모듈)의 선작업이 먼저 돌던 것과 같은 순서다.
+   *   afterRestore / afterDeactivate — 본체 **뒤**. **적재 순서**로 돈다. 가장 안쪽 래퍼의
+   *       후작업이 먼저 돌던 것과 같다. 본체가 던져도 돈다(finally) — src/96.2 의 통계
+   *       표본이 try/finally 로 그렇게 하고 있었고, 이제 전부가 그렇다.
+   *
+   * 콜백 하나가 던져도 나머지는 전부 돈다. 던진 것은 state.lastError 에 남는다.
+   * 래퍼 체인은 이걸 못 했다 — 그게 1번보다 조용한 고장이었다.
+   *
+   * 본체는 src/99-api.js 의 restoreCore() / deactivateCore() 다 (선언이므로 호이스팅된다.
+   * src/22-perf.js 가 src/92-tick.js 의 tickFrame 을 집는 것과 같은 장치다). */
+  const LIFE_HOOKS = { restore: [], restoreAfter: [], deactivate: [], deactivateAfter: [], probe: null, ran: [] };
+  function hookAdd(phase, tag, fn) { LIFE_HOOKS[phase].push({ tag, fn }); return fn; }
+  function onRestore(tag, fn) { return hookAdd('restore', tag, fn); }
+  function afterRestore(tag, fn) { return hookAdd('restoreAfter', tag, fn); }
+  function onDeactivate(tag, fn) { return hookAdd('deactivate', tag, fn); }
+  function afterDeactivate(tag, fn) { return hookAdd('deactivateAfter', tag, fn); }
+  /* down=true 는 적재 역순(해체), false 는 적재 순서(재무장). 하나가 던져도 나머지가 돈다. */
+  function hookRun(phase, down, arg) {
+    const list = LIFE_HOOKS[phase];
+    const n = list.length;
+    for (let k = 0; k < n; k++) {
+      const h = list[down ? n - 1 - k : k];
+      try { h.fn(arg); } catch (e) { state.lastError = String((e && e.stack) || e); }
+    }
+  }
+  function restore() {
+    hookRun('restore', true);
+    try { return restoreCore(); }
+    finally { hookRun('restoreAfter', false); }
+  }
+  function deactivate(silent) {
+    hookRun('deactivate', true, silent);
+    try { return deactivateCore(silent); }
+    finally { hookRun('deactivateAfter', false, silent); }
+  }
+  /* ── 단언이 보는 창 ───────────────────────────────────────────────────────
+   * hooks(): 각 단계를 **실행 순서대로** 이름으로 돌려준다. 등록이 하나라도 빠지면 길이가
+   * 어긋나고, 순서가 뒤집히면 이름 차례가 어긋난다 — 옮기다 흘린 것을 단언이 직접 잡는다. */
+  debug.hooks = () => ({
+    restore: LIFE_HOOKS.restore.map((h) => h.tag).reverse(),
+    restoreAfter: LIFE_HOOKS.restoreAfter.map((h) => h.tag),
+    deactivate: LIFE_HOOKS.deactivate.map((h) => h.tag).reverse(),
+    deactivateAfter: LIFE_HOOKS.deactivateAfter.map((h) => h.tag)
+  });
+  /* 던지는 콜백 하나가 나머지를 막지 않는다는 것도 단언이 **직접** 보게 한다: 한 단계에
+   * 표식 · 던지는 것 · 표식 셋을 끼우고, 실제로 돈 것을 순서대로 돌려준다. 떼어낼 수 있으므로
+   * 등록 수 단언과 서로 방해하지 않는다. */
+  debug.hookProbeOn = (phase) => {
+    debug.hookProbeOff();
+    if (!Array.isArray(LIFE_HOOKS[phase])) return null;
+    hookAdd(phase, 'probe-1', () => { LIFE_HOOKS.ran.push('one'); });
+    hookAdd(phase, 'probe-throw', () => { LIFE_HOOKS.ran.push('throw'); throw new Error('crs hook probe'); });
+    hookAdd(phase, 'probe-2', () => { LIFE_HOOKS.ran.push('two'); });
+    LIFE_HOOKS.probe = { phase, n: 3 };
+    return debug.hooks();
+  };
+  debug.hookProbeRan = () => LIFE_HOOKS.ran.slice();
+  debug.hookProbeOff = () => {
+    const p = LIFE_HOOKS.probe;
+    if (p) LIFE_HOOKS[p.phase].splice(LIFE_HOOKS[p.phase].length - p.n, p.n);
+    LIFE_HOOKS.probe = null;
+    LIFE_HOOKS.ran = [];
+    return debug.hooks();
+  };

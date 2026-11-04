@@ -4648,6 +4648,105 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
     }
   }
 
+  // =============================================================================================
+  // 생애 주기 등록부 (src/20-state.js §1.5)
+  //
+  // restore() 는 8겹, deactivate() 는 5겹의 **바인딩 재할당**으로 쌓여 있었다. 누가 바깥인지를
+  // modules.json 의 순서가 말없이 정했고, 중간에서 하나가 던지면 바깥쪽 겹이 통째로 돌지 않아
+  // 무흔적 계약이 조용히 깨졌다. 지금은 등록부다 — 아래 세 단언이 그 셋을 각각 잡는다.
+  //   1) 옮긴 개수와 등록 수가 같고, 실행 순서가 예전 체인의 실측 순서와 **글자 그대로** 같다.
+  //   2) src/ 어디에도 재할당이 남아 있지 않다 (순서 의존 자체가 사라졌다).
+  //   3) 콜백 하나가 던져도 그 뒤의 콜백들이 전부 돌고, 던진 것은 stats().lastError 에 남는다.
+  // =============================================================================================
+  {
+    const h = await openSettingsPage();
+    const p = h.page;
+
+    const hooks = await p.evaluate(() => window.__crashScreen.debug.hooks());
+    check('A.hooks (§1.5): restore 등록부가 앞 6 · 뒤 3 이다 — 래퍼 8겹(그 중 src/96.2 는 앞·뒤 둘)을 옮긴 수와 같다',
+      hooks.restore.length === 6 && hooks.restoreAfter.length === 3,
+      { restore: hooks.restore, restoreAfter: hooks.restoreAfter });
+    check('A.hooks (§1.5): deactivate 등록부가 앞 4 · 뒤 4 다 — 래퍼 5겹(그 중 셋이 앞·뒤 둘)을 옮긴 수와 같다',
+      hooks.deactivate.length === 4 && hooks.deactivateAfter.length === 4,
+      { deactivate: hooks.deactivate, deactivateAfter: hooks.deactivateAfter });
+    /* 기대값은 지어낸 것이 아니다: 바꾸기 전의 재할당 체인에 추적을 박고 한 번 돌려서 받아 적은
+     * 순서다. 앞 단계는 적재 역순(가장 늦게 실린 모듈이 가장 바깥이었다), 뒤 단계는 적재 순서. */
+    const WANT_ORDER = {
+      restore: ['inspect', 'stats', 'altfire', 'roles', 'utility', 'interaction'],
+      restoreAfter: ['stats', 'challenge', 'settings'],
+      deactivate: ['settings', 'inspect', 'challenge', 'stats'],
+      deactivateAfter: ['crosshair', 'stats', 'challenge', 'settings']
+    };
+    check('A.hooks (§1.5): 실행 순서가 재할당 체인에서 실측한 순서와 글자 그대로 같다 (순서가 뒤집히면 조용히 깨진다)',
+      JSON.stringify(hooks) === JSON.stringify(WANT_ORDER), { got: hooks, want: WANT_ORDER });
+
+    const SRC = path.join(ROOT, 'src');
+    const reassigned = fs.readdirSync(SRC).filter((f) => f.endsWith('.js')).map((f) => ({
+      file: f, n: (fs.readFileSync(path.join(SRC, f), 'utf8').match(/^[ \t]*(restore|deactivate) = function/gm) || []).length
+    })).filter((x) => x.n > 0);
+    check('A.hooks (§1.5): src/ 어디에도 restore/deactivate 재할당이 없다 — 바깥쪽이 파일 번호로 정해지던 의존이 사라졌다',
+      reassigned.length === 0, reassigned);
+
+    // ---- 던지는 콜백 하나가 나머지를 막지 않는다 ------------------------------------------------
+    await p.evaluate(() => {
+      const el = document.querySelector('#cluster .leaf:first-child');
+      const r = el.getBoundingClientRect();
+      window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2);
+    });
+    await sleep(150);
+    const probe = await p.evaluate(() => {
+      const d = window.__crashScreen.debug;
+      d.hookProbeOn('restore');                       // 표식 · 던지는 것 · 표식 셋을 앞 단계에 끼운다
+      const withProbe = d.hooks().restore.length;
+      const before = window.__crashScreen.stats();
+      window.__crashScreen.restore();
+      const after = window.__crashScreen.stats();
+      const ran = d.hookProbeRan();
+      const back = d.hookProbeOff().restore.length;   // 떼어낸다 — 등록 수 단언과 서로 방해하지 않는다
+      return {
+        ran, withProbe, back,
+        beforePieces: before.pieceCount, afterPieces: after.pieceCount,
+        beforeBroken: before.broken, afterBroken: after.broken, lastError: after.lastError
+      };
+    });
+    check('A.hooks (§1.5) 전제: 복구 직전에 실제로 치울 것이 있었다 (조각 · 부순 요소)',
+      probe.beforePieces > 0 && probe.beforeBroken > 0,
+      { pieces: probe.beforePieces, broken: probe.beforeBroken });
+    check('A.hooks (§1.5) 전제: 끼운 세 콜백이 등록부에 들어갔다가 다시 빠진다 (6 → 9 → 6)',
+      probe.withProbe === 9 && probe.back === 6, { withProbe: probe.withProbe, back: probe.back });
+    check('A.hooks (§1.5): 콜백 하나가 던져도 **그 뒤의 콜백들이 돈다** — 앞 단계는 적재 역순이라 two · throw · one 순서다',
+      Array.isArray(probe.ran) && probe.ran.join(',') === 'two,throw,one', probe.ran);
+    check('A.hooks (§1.5): 던진 것은 삼켜지지 않고 stats().lastError 에 남는다',
+      typeof probe.lastError === 'string' && probe.lastError.indexOf('crs hook probe') !== -1, probe.lastError);
+    check('A.hooks (§1.5): 던진 뒤의 **진짜** 등록 여섯도 전부 돌아서 복구가 실제로 끝났다 — 조각 0 · 부순 요소 0',
+      probe.afterPieces === 0 && probe.afterBroken === 0,
+      { pieces: probe.afterPieces, broken: probe.afterBroken });
+
+    // ---- 던지는 콜백이 있어도 종료는 흔적을 남기지 않는다 (래퍼 체인이 못 하던 바로 그것) --------
+    await p.evaluate(() => {
+      const el = document.querySelector('#cluster .leaf:nth-child(2)');
+      const r = el.getBoundingClientRect();
+      window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2);
+    });
+    await sleep(150);
+    const exit = await p.evaluate(() => {
+      const d = window.__crashScreen.debug;
+      d.hookProbeOn('deactivate');
+      window.__crashScreen.deactivate();
+      const ran = d.hookProbeRan();
+      d.hookProbeOff();
+      return {
+        ran, active: window.__crashScreen.active,
+        marked: document.querySelectorAll('[data-crs]').length,
+        nodes: document.querySelectorAll('.crs-piece, .crs-dmg, .crs-hit').length
+      };
+    });
+    check('A.hooks (§1.5): deactivate 앞 단계에서 던져도 나머지가 돌고 **흔적이 0 이다** — 예전 래퍼 체인은 여기서 바깥쪽 겹을 통째로 잃었다',
+      exit.ran.join(',') === 'two,throw,one' && exit.active === false && exit.marked === 0 && exit.nodes === 0, exit);
+
+    await closeSettingsPage(h);
+  }
+
 }
 
 // ---------------------------------------------------------------------------

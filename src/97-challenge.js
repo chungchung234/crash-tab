@@ -398,27 +398,24 @@
   /* ---- lifecycle ---------------------------------------------------------------------------------
    * restore() clears every tracked timer, so the challenge tick is re-armed behind it exactly as the perf
    * sample and the a11y layer are (src/99-api.js). deactivate() ends the run outright. */
-  const restoreChal = restore;
-  restore = function () {
-    restoreChal();
+  afterRestore('challenge', () => {
     progressSeen = 0;        // restore() zeroed state.damageDealt; the cumulative total keeps what it had
     if (!state.active) return;
     chalArm();
     chalHud();
     bossBarSync();
-  };
-  const deactivateChal = deactivate;
-  deactivate = function (silent) {
+  });
+  onDeactivate('challenge', () => {
     challengeStop(true);
     chalResultClose();
     untrack(chal.timer); chal.timer = 0;
     progressSave();          // whatever is still owed goes to disk before the page lets go
     untrack(progressData.timer); progressData.timer = 0;
-    const r = deactivateChal(silent);
+  });
+  afterDeactivate('challenge', () => {
     untrack(state.bossTimer); state.bossTimer = 0;
     state.bossRespawnAt = 0; state.slowmoUntil = 0; state.bossNodes = null;
-    return r;
-  };
+  });
 
   debug.challengeRecordsReset = () => { for (const id of CHAL_IDS) delete chalRecords[id]; return true; };
   debug.setProgress = (n) => {
