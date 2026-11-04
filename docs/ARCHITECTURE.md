@@ -572,7 +572,7 @@ doc.addEventListener('visibilitychange', …)   // 탭 복귀 시 배지 동기�
 | `src/83-scope.js` | 96 | 조준경: ADS 조준선 구성/표시·숨김, 2배 확대, 흔들림·반동 스텝 |
 | `src/84-sniper.js` | 35 | 저격총: 예광탄 이펙트와 헤드샷 치명타가 있는 히트스캔 발사 |
 | `src/85-loadout.js` | 38 | 로드아웃: `slotKey`/`slotOf`, `isPermutation`/`setLoadout`/`applyPreset`/`moveToSlot`/`stepSlot` |
-| `src/88-toast.js` | 23 | 토스트 알림: `toast`/`hideToast` |
+| `src/88.5-toast.js` | 23 | 토스트 알림: `toast`/`hideToast` |
 | `src/90-combat.js` | 508 | 전투: 적 선택·수명 주기(`selectTick`/`markHostile`/`hostileKilled`), 구체·빔 전투, 플레이어 체력·회복·KO |
 | `src/92-tick.js` | 98 | 물리 루프: `kick`/`tick`/`tickFrame`, `onResize` |
 | `src/95-events.js` | 218 | 이벤트: 포인터/키보드/휠/포커스 핸들러, `listen`/`bindEvents`/`unbindEvents` |

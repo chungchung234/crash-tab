@@ -23,6 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const build = require('./build.js');   // R19 asks the generator what content.js's Korean fallback should be
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
@@ -640,7 +641,27 @@ rule('R13', 'module-manifest', (r, ctx) => {
     const name = rel.slice('src/'.length);
     if (!listed.has(name)) r.fail('src/' + name + ' exists but is not listed in src/modules.json');
   }
-  if (!r.failed()) r.note(list.length + ' module(s), list and directory agree');
+  if (r.failed()) return;
+
+  /* The number in a module's file name is its place in the load order. Two modules sharing a number leave
+   * their order to a string sort of the names, which a rename silently flips; so every number is unique and
+   * the list is in ascending numeric order. A sub-slot is written 88.5-name.js — '.' sorts after '-', so a
+   * plain sort of the file names also reproduces the list, whichever way someone looks at it. */
+  const num = (name) => { const m = /^(\d+(?:\.\d+)?)-/.exec(name); return m ? parseFloat(m[1]) : null; };
+  const owner = new Map();
+  let prev = null;
+  for (const name of list) {
+    const n = num(name);
+    if (n === null) { r.fail('src/' + name + ' has no leading load-order number (expected NN-name.js or NN.N-name.js)'); continue; }
+    if (owner.has(n)) r.fail('load-order number ' + n + ' is used by both ' + owner.get(n) + ' and ' + name);
+    else owner.set(n, name);
+    if (prev !== null && n < prev.n) r.fail(name + ' (' + n + ') is listed after ' + prev.name + ' (' + prev.n + '): numbers must ascend along src/modules.json');
+    prev = { n, name };
+  }
+  const sorted = list.slice().sort();
+  const flip = list.findIndex((name, i) => name !== sorted[i]);
+  if (flip !== -1) r.fail('src/modules.json order differs from a plain sort of the file names at position ' + (flip + 1) + ' (' + list[flip] + ' vs ' + sorted[flip] + ')');
+  if (!r.failed()) r.note(list.length + ' module(s), list and directory agree; load-order numbers are unique and ascending, and match a plain sort of the names');
 });
 
 /* ---- R14 ---- */
@@ -964,6 +985,85 @@ rule('R18', 'weapon-icon-distinct', (r, ctx) => {
     r.note(pairs + ' icon pair(s) of ' + tiles.length + ' weapons are distinguishable at ' + cell + '×' + cell);
     if (worst) r.detail('closest pair: ' + worst.a + ' / ' + worst.b + ' — silhouette ' + worst.sil.toFixed(3) + ', colour ' + worst.col.toFixed(3) + ' (' + worst.margin.toFixed(2) + '× the threshold it passes on)');
   }
+});
+
+/* ===================================================================== */
+/* 6c. Korean fallback table + bundle size budget                         */
+/* ===================================================================== */
+
+/* ---- R19 ----
+ * content.js carries a Korean fallback table for pages and harnesses without chrome.i18n. The strings are
+ * GENERATED from _locales/ko/messages.json by tools/build.js (the keys come from src/ko-fallback-keys.json),
+ * so the product has one Korean source, not two. build.js --check already catches a stale content.js as a
+ * byte diff; this rule says WHY in terms of the locale, and also guards the source side: no hand-typed
+ * Hangul string may creep back into src/10-util.js. */
+rule('R19', 'ko-fallback-generated', (r, ctx) => {
+  if (!isFile(path.join(ctx.root, 'src/modules.json'))) return r.skip('src/ does not exist; content.js is still the authored file');
+  const utilRel = 'src/10-util.js';
+  const util = isFile(path.join(ctx.root, utilRel)) ? readText(path.join(ctx.root, utilRel)) : '';
+  const marker = build.KO_MARKER;
+  const markerCount = util.split(marker).length - 1;
+  if (markerCount !== 1) {
+    return r.fail(utilRel + ' must contain the ' + marker + ' marker exactly once (found ' + markerCount + ')');
+  }
+
+  /* no Hangul inside a non-comment line of the util module: the strings belong to the locale */
+  const lines = util.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (commentOnly(lines[i])) continue;
+    const m = /[\u3131-\u318E\uAC00-\uD7A3]/.exec(lines[i]);
+    if (m) r.fail(utilRel + ':' + (i + 1) + ': a Korean string is typed by hand here; it belongs in _locales/ko/messages.json (' + lines[i].trim().slice(0, 60) + ')');
+  }
+
+  let literal, keys;
+  try { keys = build.koFallbackKeys(ctx.root); literal = build.koFallbackLiteral(ctx.root); }
+  catch (e) { return r.fail(e.message); }
+
+  const cjs = path.join(ctx.root, 'content.js');
+  if (!isFile(cjs)) return r.fail('content.js does not exist');
+  const built = readText(cjs);
+  if (built.indexOf(marker) !== -1) r.fail('content.js still contains the unresolved ' + marker + ' marker (run node tools/build.js)');
+  else if (built.indexOf(literal) === -1) {
+    r.fail('content.js carries a Korean fallback table that does not match _locales/ko/messages.json');
+    r.detail('run node tools/build.js — the table is generated, never edited');
+    const ko = ctx.locales.ko && ctx.locales.ko.data;
+    const bad = keys.filter((k) => ko && ko[k] && built.indexOf(JSON.stringify(ko[k].message)) === -1);
+    for (const k of bad.slice(0, 10)) r.detail('    stale or missing text for "' + k + '"');
+    if (bad.length > 10) r.detail('    … and ' + (bad.length - 10) + ' more');
+  }
+  if (r.failed()) return;
+
+  const refs = ctx.i18nRefs;
+  const keySet = new Set(keys);
+  const uncovered = refs ? [...refs.keys()].filter((k) => !keySet.has(k) && ctx.locales.ko && ctx.locales.ko.data && Object.prototype.hasOwnProperty.call(ctx.locales.ko.data, k)) : [];
+  r.note(keys.length + ' fallback key(s) generated from _locales/ko, content.js matches the locale');
+  if (refs) r.detail(uncovered.length + ' other literal msg() key(s) have no built-in Korean fallback (not generated; unchanged by this rule)');
+});
+
+/* ---- R20 ----
+ * content.js is injected into arbitrary pages and content.css rides along with it. Nothing used to look at
+ * their size. The ceilings are about 1.35x the size at the time they were set (content.js 1187 KB,
+ * content.css 81 KB): they should not ring often, but they ring well before the bundle doubles. The current
+ * value and the room left are printed on every run, pass or fail, so whoever grows it can see the number. */
+const BUDGETS = [
+  { rel: 'content.js',  limitKB: 1600 },
+  { rel: 'content.css', limitKB: 200 },
+];
+rule('R20', 'bundle-size-budget', (r, ctx) => {
+  let any = false;
+  for (const b of BUDGETS) {
+    const p = path.join(ctx.root, b.rel);
+    if (!isFile(p)) { r.detail(b.rel.padEnd(12) + 'absent — nothing to measure (see R2)'); continue; }
+    any = true;
+    const bytes = fs.statSync(p).size;
+    const kb = bytes / 1024;
+    const left = b.limitKB - kb;
+    const line = b.rel.padEnd(12) + kb.toFixed(1).padStart(7) + ' KB of ' + b.limitKB + ' KB budget  ('
+      + (left >= 0 ? left.toFixed(1) + ' KB left, ' + (100 * kb / b.limitKB).toFixed(0) + '% used' : (-left).toFixed(1) + ' KB OVER') + ')';
+    if (left < 0) r.fail(line);
+    else r.detail(line);   // detail, not note: a FAIL prints details too, so the passing file still shows its number
+  }
+  if (!any) r.skip('neither content.js nor content.css exists');
 });
 
 /* ===================================================================== */
