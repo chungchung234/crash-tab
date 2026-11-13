@@ -169,6 +169,9 @@
         else if (c === 'KeyC' || k === 'c' || k === 'C') action = 'challenge';
         else if (c === 'KeyI' || k === 'i' || k === 'I') action = 'inspect';
         else if (c === 'KeyP' || k === 'p' || k === 'P') action = 'share';
+        /* SPEC-launch §3 도움말: `?` 또는 `F1`. 단축키 24개가 README 에만 있었고 README 는 플레이 중에
+         * 아무도 안 본다. `/` 단독은 잡지 않는다 — 페이지의 검색 단축키를 뺏지 않기 위해서다. */
+        else if (c === 'F1' || k === 'F1' || k === '?' || (c === 'Slash' && e.shiftKey)) action = 'help';
         else if ((c === 'Enter' || k === 'Enter') && chalResultOpen()) action = 'chalRetry';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
         else if (modeHasAvatar() && isSpaceKey(c, k)) action = 'dash';          // v1.4 §1.2
@@ -183,7 +186,7 @@
     handledKeys.add(e);
     try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
     if (action === 'move') { state.keys[arg] = true; kick(); return; }   // v1.4: a held key is simply a held key
-    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash' || action === 'challenge' || action === 'inspect' || action === 'share' || action === 'chalRetry')) return;
+    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash' || action === 'challenge' || action === 'inspect' || action === 'share' || action === 'help' || action === 'chalRetry')) return;
     if (action === 'escape') {   // layered (A2): scope-out if scoped, else exit (stops holds and the KO screen)
       /* SPEC-arsenal §A5 lists Escape among the 중단 조건 (전부 취소 + 환불). It is layered like the rest:
        * a charge in progress is the innermost layer, so the first Escape gives the rounds back rather than
@@ -211,6 +214,7 @@
     else if (action === 'challenge') challengeCycle();   // SPEC-product §3: C cycles off → 타임어택 → 목표 돌파 → 생존 → off
     else if (action === 'inspect') inspectToggle();      // SPEC-product §5
     else if (action === 'share') shareNow();             // SPEC-product §5
+    else if (action === 'help') toggleHelp();            // SPEC-launch §3
     else if (action === 'chalRetry') chalRetry();        // SPEC-product §3: 결과 오버레이의 `다시 (Enter)`
   }
   function onWheel(e) {

@@ -127,7 +127,10 @@
   }
   function loadPrefs() {
     // ── v1.4 §5: crsSeenCombatHelp is a LOCAL flag (the control card is shown once per machine, not synced) ──
-    safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
+    safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp', 'crsSeenIntro']), (loc) => {
+      if (loc && loc.crsSeenCombatHelp) state.seenHelp = true;
+      if (loc && loc.crsSeenIntro) state.seenIntro = true;   // SPEC-launch §3: 첫 안내도 기기마다 한 번
+    });
     safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
       const storedLoadout = migrateWeaponIds(res.crsLoadout);   // §8.1: a stored 'sword' becomes 'katana' on read
@@ -172,6 +175,19 @@
     }
     try { docEl.classList.remove('crs-active', 'crs-swing', 'crs-scoped'); } catch (e) { /* ignore */ }
   }
+  /* SPEC-launch §3: 설치하고 처음 켠 사람에게 한 번만. `chrome.runtime.onInstalled` 가 없고 조작 안내 카드는
+   * 서바이벌에서만 뜨는데(src/86-modes.js) 기본 모드는 램페이지라, 보통 사용자는 안내를 **하나도** 못 받고 있었다.
+   * 두 번에 나눠 띄운다 — 토스트가 한 줄짜리 알약이라 세 줄이 안 들어간다. 두 번째가 더 중요하다:
+   * 남의 웹페이지가 부서지는 것을 처음 본 사람의 첫 감정은 불안이고, 되돌릴 수 있다는 사실이 그걸 푼다.
+   * `crsSeenIntro` 는 `crsSeenCombatHelp` 와 같은 결 — local 이고 기기마다 한 번이다(동기화하지 않는다).
+   * 타이머는 `later()` 로 단다. 원장이 세므로 Escape 가 흔적을 남기지 않는다. */
+  function maybeShowIntro() {
+    if (state.seenIntro) return;
+    state.seenIntro = true;
+    safe(() => chrome.storage.local.set({ crsSeenIntro: true }));
+    toast(msg('introBody'));
+    later(() => { if (state.active) toast(msg('introRevert')); }, 2300);
+  }
   function activate() {
     if (state.active) return;
     try {
@@ -193,6 +209,7 @@
       updatePlayerHud();
       armCombat();   // synchronous with the default combat = true; loadPrefs may turn it off (A8)
       if (state.combat) toast(msg('toastCombatOn'));
+      else maybeShowIntro();   // SPEC-launch §3: 전투 안내가 안 뜨는 기본 모드에서 첫 안내를 대신 띄운다
       sendState(true);
     } catch (e) {
       try { deactivate(true); } catch (e2) { /* ignore */ }

@@ -4,7 +4,7 @@
     "description": "Extension name"
   },
   "appDesc": {
-    "message": "웹페이지의 구성 요소를 직접 부숴 보세요. 망치·권총·기관총·저격총·도끼·검·폭탄·로켓·화염방사기·붕괴, 열 가지 무기와 탄창·조준경·로드아웃으로 크기에 따라 체력이 정해진 요소들을 조각조각 부수고, 큰 요소들의 반격을 피해 보세요. 때린 자리에 자국이 남고 조각이 떨어져 쌓여요. 모든 것은 복구할 수 있어요.",
+    "message": "웹페이지의 요소를 직접 부수세요. 무기 23종, 탄창과 조준경, 로드아웃, 반격하는 적. 크기가 곧 체력이고 때린 자리에 자국과 조각이 남으며, 전부 되돌릴 수 있어요.",
     "description": "Extension description"
   },
   "actionTitle": {
@@ -287,6 +287,78 @@
     "message": "마우스로 조준",
     "description": "Control card: aim with the mouse"
   },
+  "btnChallenge": {
+    "message": "챌린지",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "btnInspect": {
+    "message": "인스펙터",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "btnShare": {
+    "message": "공유",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "btnHelp": {
+    "message": "도움말",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpTitle": {
+    "message": "단축키",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupWeapon": {
+    "message": "무기",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupAction": {
+    "message": "행동",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupMode": {
+    "message": "모드",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupTool": {
+    "message": "도구",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpWeaponSlots": {
+    "message": "무기 고르기",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpPrevNext": {
+    "message": "이전 / 다음 무기",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpReload": {
+    "message": "재장전",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpCycleMode": {
+    "message": "모드 바꾸기",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpScope": {
+    "message": "조준 (저격총)",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpSlash": {
+    "message": "드래그해서 베기",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpCharge": {
+    "message": "길게 눌러 모으기",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "introBody": {
+    "message": "클릭하면 그 자리의 요소가 부서져요. 숫자키로 무기를 바꿔요.",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "introRevert": {
+    "message": "언제든 되돌릴 수 있어요 — Z 복구 · Esc 종료 · ? 도움말",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
   "setDebrisLife": {
     "message": "파편이 사라지는 시간",
     "description": "Setting label: how long debris stays before it fades"
@@ -539,6 +611,10 @@
     "message": "최고 기록 갱신!",
     "description": "SPEC-product 3: the run beat the stored record"
   },
+  "chalBestSoFar": {
+    "message": "최고 기록",
+    "description": "SPEC-launch 5: previous record on the result overlay"
+  },
   "chalRetry": {
     "message": "다시",
     "description": "SPEC-product 3: result overlay restart button"
@@ -690,6 +766,10 @@
   "setCollectLocalStats": {
     "message": "기기 안 통계 수집",
     "description": "SPEC-product 2: settings-schema.json collectLocalStats label"
+  },
+  "setCollectOriginStats": {
+    "message": "기기 안 출처 기록",
+    "description": "SPEC-launch 2: settings-schema.json collectOriginStats label"
   },
   "cwBad": {
     "message": "사용자 정의 무기 항목이 올바르지 않아요",
@@ -966,6 +1046,26 @@
   "optStatTopOrigins": {
     "message": "상위 출처 10개",
     "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatChallenges": {
+    "message": "챌린지 기록",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optStatChalEmpty": {
+    "message": "아직 완주한 챌린지가 없어요. C 로 시작해 보세요.",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optColMode": {
+    "message": "모드",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optColBestRecord": {
+    "message": "최고 기록",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optColLastScore": {
+    "message": "마지막 점수",
+    "description": "SPEC-launch 5: challenge records in the options page"
   },
   "optColOrigin": {
     "message": "출처",

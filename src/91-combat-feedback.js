@@ -608,8 +608,13 @@
         if (state.keys.right) ax += 1;
         if (state.keys.up) ay -= 1;
         if (state.keys.down) ay += 1;
+        /* SPEC-launch §7: 들고 있는 무기의 `moveSpeed` 가 가속과 최고 속도에 그대로 곱해진다.
+         * 아래 마찰 분기의 `AV_MAX_SPEED` 문턱은 **배수를 걸지 않는다** — 그것은 속도 상한이 아니라
+         * "키를 떼면 한 프레임에 멈춘다" 를 성립시키는 넉넉한 문턱이고(바로 위 주석), 무기에 따라
+         * 멈추는 방식이 달라져서는 안 된다. */
+        const mul = avatarSpeedMul();
         const L = Math.hypot(ax, ay);
-        if (L > 0) { p.vx += (ax / L) * AV_ACCEL * dt; p.vy += (ay / L) * AV_ACCEL * dt; }
+        if (L > 0) { p.vx += (ax / L) * AV_ACCEL * mul * dt; p.vy += (ay / L) * AV_ACCEL * mul * dt; }
         /* Friction is DRAG, not braking: it only bites once the keys are let go. Applying it while a direction
           * is held would fight the 2800 px/s² accelerator to a standstill around 287 px/s and the 420 px/s top
           * speed could never be reached.
@@ -622,8 +627,9 @@
           p.vx *= f; p.vy *= f;
           if (Math.hypot(p.vx, p.vy) < AV_MAX_SPEED) { p.vx = 0; p.vy = 0; }
         }
+        const cap = AV_MAX_SPEED * mul;
         const sp = Math.hypot(p.vx, p.vy);
-        if (sp > AV_MAX_SPEED) { p.vx = p.vx / sp * AV_MAX_SPEED; p.vy = p.vy / sp * AV_MAX_SPEED; }
+        if (sp > cap) { p.vx = p.vx / sp * cap; p.vy = p.vy / sp * cap; }
         if (!L) { if (Math.abs(p.vx) < 1) p.vx = 0; if (Math.abs(p.vy) < 1) p.vy = 0; }
       }
       p.x += p.vx * dt; p.y += p.vy * dt;

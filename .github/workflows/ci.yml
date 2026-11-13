@@ -1,26 +1,39 @@
 name: CI
 
 # Spec A7. Runs on pushes to main that touch shippable code, on pull requests, and on demand.
-# paths-ignore keeps documentation-only commits from spending a full 20-minute runner slot:
+# Documentation-only commits skip the run so they do not spend a full 20-minute runner slot:
 # the heavy step here is the end-to-end suite, which downloads Chrome and drives three browsers.
 # Push several commits at once rather than one at a time — concurrency cancels superseded runs,
 # but each push still starts a run.
+#
+# The filter is `paths`, not `paths-ignore`, on purpose. docs/BALANCE.md is a GENERATED file and
+# `node tools/balance.js --check` fails when it is stale, so a hand-edited BALANCE.md must still
+# start a run. `paths-ignore` has no way to except one file; `paths` does: patterns are evaluated
+# in order, a `!` pattern excludes, and a later positive pattern re-includes. So: everything, minus
+# the documentation globs, plus docs/BALANCE.md. (GitHub docs: "Filter pattern cheat sheet" and
+# "Using filters to target specific paths" — a `!` pattern needs at least one positive pattern
+# before it, and `paths` and `paths-ignore` cannot be used together for the same event.)
+# Keep the two lists below identical.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/pull_request_template.md'
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!LICENSE'
+      - '!.github/ISSUE_TEMPLATE/**'
+      - '!.github/pull_request_template.md'
+      - 'docs/BALANCE.md'
   pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'LICENSE'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/pull_request_template.md'
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!LICENSE'
+      - '!.github/ISSUE_TEMPLATE/**'
+      - '!.github/pull_request_template.md'
+      - 'docs/BALANCE.md'
   workflow_dispatch:
 
 permissions:

@@ -40,6 +40,9 @@
     restoreUser: false
   };
   function lifeEnabled() { return settingsGet('collectLocalStats') === true; }
+  /* SPEC-launch §2: 출처 목록은 총계와 다른 종류의 데이터다. 둘을 한 스위치에 묶어 두면
+   * "아무것도 수집하지 않는다" 를 사실로 만드는 값이 누적 통계까지 같이 끄게 된다. */
+  function lifeOriginsEnabled() { return lifeEnabled() && settingsGet('collectOriginStats') === true; }
   function lifeOrigin() {
     let o = '';
     try { o = String(location.origin || ''); } catch (e) { o = ''; }
@@ -129,15 +132,24 @@
       if (!r || typeof r !== 'object') continue;
       po[k] = { bestScore: num(r.bestScore), broken: num(r.broken), plays: num(r.plays), lastPlayed: num(r.lastPlayed) };
     }
-    for (const k of Object.keys(d.origins)) {
-      const dd = d.origins[k];
-      const r = po[k] || { bestScore: 0, broken: 0, plays: 0, lastPlayed: 0 };
-      po[k] = {
-        bestScore: Math.max(r.bestScore, dd.bestScore),
-        broken: r.broken + dd.broken,
-        plays: r.plays + dd.plays,
-        lastPlayed: now0
-      };
+    /* SPEC-launch §2: 출처별 기록은 `collectOriginStats` 가 켜져 있을 때만 쌓인다 (기본값 꺼짐).
+     * 크롬 웹 스토어 User Data FAQ 2·4 가 "브라우저가 오가는 도메인" 을 web browsing activity 로 분류하고,
+     * FAQ 3 은 기기 밖으로 안 나가도 공개 대상이라고 못박는다. 총계(피해·파괴·세션·플레이 시간)는 어느
+     * 사이트였는지를 담지 않아 그 범주가 아니므로 `collectLocalStats` 아래 그대로 둔다 — 누적 통계는
+     * 제품의 기능이고, 끌 이유가 있는 것은 **출처 목록** 하나뿐이다.
+     * 꺼도 이미 저장된 것을 지우지는 않는다. 위에서 읽은 `po` 가 그대로 남고, 지우는 것은 옵션 페이지의
+     * 명시적인 초기화다 — 설정 하나를 끈 것이 기존 기록의 삭제를 뜻해서는 안 된다. */
+    if (lifeOriginsEnabled()) {
+      for (const k of Object.keys(d.origins)) {
+        const dd = d.origins[k];
+        const r = po[k] || { bestScore: 0, broken: 0, plays: 0, lastPlayed: 0 };
+        po[k] = {
+          bestScore: Math.max(r.bestScore, dd.bestScore),
+          broken: r.broken + dd.broken,
+          plays: r.plays + dd.plays,
+          lastPlayed: now0
+        };
+      }
     }
     /* §2 "출처 200개 상한, 가장 오래 안 쓴 것부터 퇴출" — LRU by lastPlayed. */
     const keys = Object.keys(po);

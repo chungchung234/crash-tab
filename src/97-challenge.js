@@ -276,6 +276,18 @@
     return rec;
   }
 
+  /* SPEC-launch §5: 못 깼을 때 보여 줄 한 줄. 기록이 아예 없으면 빈 문자열(첫 판에 '기록 0' 은 소음이다). */
+  function chalPrevBestText(r) {
+    const prev = r && r.prev;
+    if (!prev || !prev.plays) return '';
+    if (r.mode === 'timeAttack') {
+      if (!(prev.bestScore > 0)) return '';
+      return msg('chalBestSoFar') + ' ' + msg('labelScore') + ' ' + prev.bestScore;
+    }
+    if (!(prev.bestMs > 0)) return '';
+    return msg('chalBestSoFar') + ' ' + (prev.bestMs / 1000).toFixed(1) + msg('unitSec');
+  }
+
   /* ---- the result overlay (§3: 모드·점수·처치·소요·최고 기록 갱신 여부, 다시 (Enter) / 닫기 (Esc)) ---- */
   function chalResultOpen() { return !!chal.resultNode; }
   function chalResultClose() {
@@ -292,7 +304,10 @@
       const rs = doc.createElement('div'); rs.className = 'rs';
       rs.textContent = msg(CHAL_NAME[r.mode]) + ' · ' + msg('labelScore') + ' ' + r.score + ' · ' + msg('labelKills') + ' ' + r.kills
         + ' · ' + msg('chalElapsed') + ' ' + (r.elapsedMs / 1000).toFixed(1) + msg('unitSec');
-      const rb2 = doc.createElement('div'); rb2.className = 'rbest'; rb2.textContent = r.best ? '🏆 ' + msg('chalNewBest') : '';
+      const rb2 = doc.createElement('div'); rb2.className = 'rbest';
+      /* 갱신했으면 축하하고, 못 깼으면 **무엇을 넘어야 하는지** 말한다. 모드마다 기록의 종류가 다르다 —
+       * 타임어택은 점수, 목표 돌파는 가장 빠른 시간, 생존은 가장 오래 버틴 시간이다(chalIsBest 와 같은 갈래). */
+      rb2.textContent = r.best ? '🏆 ' + msg('chalNewBest') : chalPrevBestText(r);
       const rb = doc.createElement('div'); rb.className = 'rb';
       rb.append(
         hudButton(msg('chalRetry') + ' (Enter)', msg('chalRetry') + ' (Enter)', () => chalRetry()),
@@ -359,10 +374,14 @@
     const score = state.player.score, kills = state.player.kills;
     const completed = reason === 'time' || reason === 'targets' || reason === 'ko';
     const best = chalIsBest(id, score, ms, reason === 'targets');
+    /* SPEC-launch §5: 결과에 **이전 기록**을 싣는다. 지금까지는 갱신했을 때만 '🏆 최고 기록 갱신!' 을
+     * 띄우고 못 깨면 아무 말도 안 했다 — 2회차부터 피드백이 영구히 0이었다. 목표가 보여야 다시 한다.
+     * `chalRecordWrite` 가 기록을 덮어쓰므로 **그 전에** 떠 둔다. */
+    const prevRec = chalRecords[id] ? Object.assign({}, chalRecords[id]) : null;
     chal.id = null;
     untrack(chal.timer); chal.timer = 0;
     chalHud();
-    const r = { mode: id, reason, score, kills, elapsedMs: ms, broken: chalBrokenNow(), completed, best, at: Date.now() };
+    const r = { mode: id, reason, score, kills, elapsedMs: ms, broken: chalBrokenNow(), completed, best, prev: prevRec, at: Date.now() };
     chal.result = r; chal.lastEnd = r;
     chalRecordWrite(id, score, kills, ms, reason === 'targets', best);
     announceChallenge(false);

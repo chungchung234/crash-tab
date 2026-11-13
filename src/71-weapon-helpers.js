@@ -48,6 +48,18 @@
 
   function isMelee(id) { const W = WEAPONS[id || state.weapon]; return !!(W && W.kind === 'hammer'); }
   function swapMsOf(id) { const W = WEAPONS[id]; return (W && W.swapMs > 0) ? W.swapMs : SWAP_MS; }
+  /* SPEC-launch §7: 드론의 기동 배수. 위 표의 주석이 "NO drone avatar exists in this build" 라 적었지만
+   * 드론은 v1.4 §1.2 부터 있다(src/92-tick.js 의 `the drone lives in screen space`) — 주석이 낡았던 것이고,
+   * 그 사이 9단계가 `moveSpeed` 를 밸런스 손잡이로 썼다(`tools/balance.js` 의 handling 항). 종이 위에서만
+   * 맞던 축을 손에서도 맞게 배선한다. 미니건 0.55 가 "화력을 사는 대가로 기동성을 내준다" 를 실제로 뜻하게 된다.
+   * 조준 중 저격총은 `moveSpeedScoped` 로 더 느려진다 — 같은 이유로 지금껏 아무 효과가 없었다. */
+  function moveSpeedOf(id, scoped) {
+    const W = WEAPONS[id] || WEAPONS[state.weapon];
+    if (!W) return 1;
+    if (scoped && W.moveSpeedScoped != null) return W.moveSpeedScoped;
+    return W.moveSpeed == null ? 1 : W.moveSpeed;
+  }
+  function avatarSpeedMul() { return clamp(moveSpeedOf(state.weapon, state.scoped), 0.2, 2); }
   function critChanceOf(id, scoped) {
     const W = WEAPONS[id] || WEAPONS[state.weapon];
     if (!W) return 0.1;

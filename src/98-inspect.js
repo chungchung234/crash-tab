@@ -361,8 +361,30 @@
     replay.ops.push({ t: Math.round(now() - replay.startedAt), op, args: a });
     return true;
   }
+  /* SPEC-launch §6: 버그를 재현할 수 있게 하는 최소한의 정보. 이 제품은 **임의의 웹페이지**가 입력인데
+   * 리플레이가 조작만 담고 있어서 "A 사이트에서 깨졌어요" 를 받아도 되살릴 수가 없었다.
+   * **쿼리와 해시는 버린다** — 세션 토큰·초대 코드가 거기 들어간다. 내보낸 파일을 남에게 주는 기능이므로
+   * 경로까지만 담고, 그 사실을 PRIVACY.md 에 적는다. 길이 상한은 넘겨받은 값으로 파일을 부풀리지 않기 위함이다. */
+  function replaySite() {
+    try {
+      const u = new URL(String(location.href));
+      return {
+        href: String(u.origin + u.pathname).slice(0, 200),
+        title: String(document.title || '').slice(0, 120),
+        elements: document.querySelectorAll('*').length
+      };
+    } catch (e) { return null; }
+  }
+  function replaySiteValidate(s) {
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+    const href = typeof s.href === 'string' ? s.href.slice(0, 200) : '';
+    const title = typeof s.title === 'string' ? s.title.slice(0, 120) : '';
+    const els = Number(s.elements);
+    if (!href) return null;
+    return { href, title, elements: (isFinite(els) && els >= 0) ? Math.round(els) : 0 };
+  }
   function replayExport() {
-    return { v: 1, startedAt: replay.startedAt ? Math.round(replay.startedAt) : 0, viewport: { w: viewW(), h: viewH() }, ops: replay.ops.map((o) => ({ t: o.t, op: o.op, args: o.args.slice() })) };
+    return { v: 1, startedAt: replay.startedAt ? Math.round(replay.startedAt) : 0, site: replaySite(), viewport: { w: viewW(), h: viewH() }, ops: replay.ops.map((o) => ({ t: o.t, op: o.op, args: o.args.slice() })) };
   }
   /* Strict: anything it cannot vouch for is refused outright rather than repaired. */
   function replayValidate(obj) {
@@ -390,7 +412,9 @@
       ops.push({ t, op: o.op, args: args.slice() });
       last = t;
     }
-    return { v: 1, startedAt: Number(obj.startedAt) || 0, viewport: { w: vp.w, h: vp.h }, ops };
+    /* SPEC-launch §6: `site` 는 **선택**이다. v1 로 이미 내보낸 리플레이와 테스트가 만드는 최소 객체가
+     * 그대로 들어와야 하므로, 없으면 null 이고 있으면 형태만 보고 자른다 — 거부하지 않는다. */
+    return { v: 1, startedAt: Number(obj.startedAt) || 0, site: replaySiteValidate(obj.site), viewport: { w: vp.w, h: vp.h }, ops };
   }
   function replayImport(obj) {
     let bytes = 0;

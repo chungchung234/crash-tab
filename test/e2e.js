@@ -346,9 +346,10 @@ const TIME_BUDGET_MS = Number(process.env.CRS_TIME_BUDGET_MS || 240000);
 // suite is still what gates a commit and what CI runs; a partial run says so in its summary and refuses to
 // report the runtime check, so a green partial run can never be mistaken for a green full run.
 const SUITE_ARG = (process.argv.find((a) => a.startsWith('--suite=')) || '').slice(8);
-// SPEC-product §7 adds suite D (the options page in the real extension), so the full set is ABCD.
-const SUITES = String(process.env.CRS_SUITES || SUITE_ARG || 'ABCD').toUpperCase();
-const PARTIAL = SUITES !== 'ABCD';
+// SPEC-product §7 adds suite D (the options page in the real extension) and SPEC-launch §8 adds suite E
+// (the SHIPPED manifest, with no host_permissions), so the full set is ABCDE.
+const SUITES = String(process.env.CRS_SUITES || SUITE_ARG || 'ABCDE').toUpperCase();
+const PARTIAL = SUITES !== 'ABCDE';
 const WANT = (id) => SUITES.includes(id);
 
 // SPEC-test-speed §5 (block selection). Suite A is the long pole; it is cut into named blocks that each
@@ -2463,9 +2464,9 @@ async function suiteA(browser, origin, contentCss, contentJs) {
 
 
     // ---- api.weapons() stat-table contract (SPEC §3.1): swapMs/recoil/bloom/critChance/knockback/moveSpeed/
-    // falloff/pierce/aoeIgnoresCover for all 10 weapons. moveSpeed is checked as a STAT VALUE ONLY — the
-    // `survival`-mode drone avatar it is meant to drive does not exist in this worktree yet (see
-    // v15-handoff.md), so §6 item 12's movement-DISTANCE assertion is deliberately not written here.
+    // falloff/pierce/aoeIgnoresCover for all 10 weapons. moveSpeed is checked as a STAT VALUE here; that it
+    // actually DRIVES the drone is asserted in the combat block (A.launch §7), which is where an avatar
+    // exists. SPEC-launch §7 wired it — the stat had been carried and reported but unread since v1.5.
     const statFields = ['swapMs', 'recoil', 'bloom', 'critChance', 'knockback', 'moveSpeed', 'falloff'];
     const statMismatches = [];
     for (const id of WEAPON_IDS) {
@@ -2848,11 +2849,11 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check('A.weapons 11: hammer (falloff 0) deals identical damage near and far from centre', hammerFalloff11 === 0 && dmgNearH11 === dmgFarH11, { dmgNearH11, dmgFarH11, hammerFalloff11 });
     await api.debug(page, { infiniteAmmo: false, noSpread: true, noFalloff: true });
 
-    // ---- (12) moveSpeed — already asserted as a STAT above (see the api.weapons() stat-table check); the
-    //     §6 item 12 movement-DISTANCE ratio (rocket 0.80 vs katana 1.15, holding "D" 400 ms) needs the
-    //     `survival`-mode drone avatar, which this worktree does not have yet (owned by the parallel combat
-    //     workstream) — see v15-handoff.md. Leaving this as an explicit, honest gap rather than a fake pass.
-    info('A.weapons 12: movement-distance ratio test deferred — no survival-mode drone avatar exists in this worktree yet (moveSpeed stat values are covered by the api.weapons() table check above; see v15-handoff.md)');
+    // ---- (12) moveSpeed — asserted as a STAT above (the api.weapons() stat-table check). The movement-
+    //     DISTANCE ratio needs a survival-mode drone, which this block does not start, so it lives in the
+    //     `combat` block: see "A.launch §7: moveSpeed drives the drone". SPEC-launch §7 wired the stat;
+    //     until then the gap here was real (the drone existed since v1.4, but nothing read moveSpeed).
+    info('A.weapons 12: movement-distance ratio is asserted in the combat block (A.launch §7) — this block starts no avatar');
 
     // =============================================================================================
     // SPEC-combat-v2 §10.6 items 5-6 — pierce / "explosions ignore cover" on the new overlapping
@@ -4335,11 +4336,34 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
         !!rec && rec.sessions === 1 && rec.totalExits === 1 && rec.totalRestores === 1
         && rec.totalDamage > 0 && rec.totalBroken > 0,
         rec && { sessions: rec.sessions, exits: rec.totalExits, restores: rec.totalRestores, damage: rec.totalDamage, broken: rec.totalBroken });
-      const origins = rec && rec.perOrigin ? Object.keys(rec.perOrigin) : [];
-      const o0 = origins.length === 1 ? rec.perOrigin[origins[0]] : null;
-      check('A.stats (§2): perOrigin 이 이 출처 하나를 { bestScore, broken, plays, lastPlayed } 로 센다',
-        origins.length === 1 && origins[0] === origin && !!o0 && o0.plays === 1 && o0.broken > 0
+      /* SPEC-launch §2 가 출처 기록을 총계에서 떼어 내고 **기본값을 꺼짐**으로 바꿨다. 크롬 웹 스토어
+       * User Data FAQ 2·4 가 "브라우저가 오가는 도메인" 을 web browsing activity 로 분류하고 FAQ 3 이
+       * 기기 밖으로 안 나가도 공개 대상이라고 못박기 때문이다. 총계는 어느 사이트였는지를 담지 않아
+       * 그 범주가 아니므로 `collectLocalStats` 아래 그대로 둔다.
+       * 아래 단언은 **지우지 않았다.** 원래 보던 것(한 출처가 올바른 모양으로 세어진다)을 그대로 보되,
+       * 이제는 설정을 켠 상태에서 본다. 그리고 꺼진 기본값에서 아무것도 안 쌓이는지를 하나 더 본다. */
+      const originsDefault = rec && rec.perOrigin ? Object.keys(rec.perOrigin) : [];
+      check('A.launch §2: collectOriginStats 가 기본값 꺼짐이라 방금 세션의 출처가 기록되지 않았다',
+        (await p.evaluate(() => window.__crashScreen.settings().collectOriginStats)) === false
+        && !!rec && !!rec.perOrigin && originsDefault.length === 0,
+        { setting: await p.evaluate(() => window.__crashScreen.settings().collectOriginStats), origins: originsDefault });
+
+      await p.evaluate(() => window.__crashScreen.setSetting('collectOriginStats', true));
+      await sleep(80);
+      await p.evaluate(() => window.__crashScreen.activate());
+      await sleep(120);
+      await p.evaluate(() => { const r = document.querySelector('#cluster .leaf:first-child').getBoundingClientRect(); window.__crashScreen.smashAt(r.x + r.width / 2, r.y + r.height / 2); });
+      await sleep(140);
+      await p.evaluate(() => window.__crashScreen.deactivate());
+      await sleep(180);
+      const recOn = (await readLocal(p)).crsStats;
+      const origins = recOn && recOn.perOrigin ? Object.keys(recOn.perOrigin) : [];
+      const o0 = origins.length === 1 ? recOn.perOrigin[origins[0]] : null;
+      check('A.stats (§2): perOrigin 이 이 출처 하나를 { bestScore, broken, plays, lastPlayed } 로 센다 (켠 뒤)',
+        origins.length === 1 && origins[0] === origin && !!o0 && o0.plays >= 1 && o0.broken > 0
         && typeof o0.bestScore === 'number' && o0.lastPlayed > 0, { origins, o0 });
+      await p.evaluate(() => window.__crashScreen.setSetting('collectOriginStats', false));
+      await sleep(60);
       check('A.stats (§2): 파생 지표 — 복구 비율은 복구/(복구+종료) 이고 한 번씩이면 0.5 다',
         !!rec && Math.abs((rec.totalRestores / (rec.totalRestores + rec.totalExits)) - 0.5) < 1e-9,
         rec && { restores: rec.totalRestores, exits: rec.totalExits });
@@ -4370,6 +4394,11 @@ async function suiteASettings(browser, origin, contentCss, contentJs) {
       for (let i = 0; i < 205; i++) seeded['https://seed' + i + '.example'] = { bestScore: i, broken: 1, plays: 1, lastPlayed: 1000 + i };
       const h = await openSettingsPage(seedLocal, { crsStats: { perOrigin: seeded } });
       const p = h.page;
+      /* SPEC-launch §2 가 `collectOriginStats` 를 기본값 꺼짐으로 바꿨다. 이 단언은 LRU 퇴출을 보는 것이지
+       * 기본값을 보는 것이 아니므로, 기능을 켜고 본다 — 단언을 약하게 고치는 대신 전제를 세운다.
+       * (기본값이 실제로 꺼져 있는지는 §2.1 의 `A.launch §2` 가 따로 본다.) */
+      await p.evaluate(() => window.__crashScreen.setSetting('collectOriginStats', true));
+      await sleep(80);
       await p.evaluate(() => window.__crashScreen.deactivate());
       await sleep(150);
       const rec = (await readLocal(p)).crsStats;
@@ -7519,6 +7548,40 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   const pEdge72 = await api.player(page);
   check('A.v2 7.2: the avatar cannot be driven past the 20 px viewport margin (x ≤ innerWidth − 20)', !!pEdge72 && pEdge72.x <= VIEWPORT.width - 20 + 1, pEdge72 && pEdge72.x);
 
+  /* ---- (2b) SPEC-launch §7 — moveSpeed is WIRED, not merely reported -------------------------------
+   * v1.5 §6 item 12 deferred this with an honest `info()` ("no survival-mode drone avatar exists in this
+   * worktree yet"). The drone has existed since v1.4 §1.2 and SPEC-launch §7 wires the stat to it, so the
+   * deferred assertion is written here, in the block that actually has an avatar.
+   * The ratio is EXACT, not approximate: the acceleration ramp lasts AV_MAX_SPEED/AV_ACCEL regardless of the
+   * multiplier (both terms carry m), so distance(m) = m · distance(1). That lets this assert a ratio without
+   * knowing either constant — if someone retunes AV_ACCEL the assertion still holds.
+   * katana (fastest) and axe (slowest) are both in the DEFAULT loadout, so neither needs a loadout edit. */
+  async function heldRunDistance72(weaponId, holdMs) {
+    await api.setWeapon(page, weaponId);
+    await sleep(60);
+    await resetScene(200, 400);
+    const before = await api.player(page);
+    await page.keyboard.down('d');
+    await sleep(holdMs);
+    await page.keyboard.up('d');
+    const after = await api.player(page);
+    await sleep(240);                     // 다음 측정이 깨끗한 정지에서 출발하게 한다
+    return after.x - before.x;
+  }
+  const mv72 = await page.evaluate(() => {
+    const out = {};
+    for (const w of window.__crashScreen.arsenal()) out[w.id] = w.moveSpeed;
+    return out;
+  });
+  const dKatana72 = await heldRunDistance72('katana', 420);
+  const dAxe72 = await heldRunDistance72('axe', 420);
+  await api.setWeapon(page, 'hammer');
+  const wantRatio72 = mv72.katana / mv72.axe;
+  const gotRatio72 = dAxe72 > 0 ? dKatana72 / dAxe72 : 0;
+  check('A.launch §7: moveSpeed drives the drone — katana/axe travel ratio matches their moveSpeed ratio (±15 %, both held 420 ms)',
+    mv72.katana > mv72.axe && dKatana72 > dAxe72 && gotRatio72 >= wantRatio72 * 0.85 && gotRatio72 <= wantRatio72 * 1.15,
+    { moveSpeed: { katana: mv72.katana, axe: mv72.axe }, px: { katana: Math.round(dKatana72), axe: Math.round(dAxe72) }, wantRatio: +wantRatio72.toFixed(3), gotRatio: +gotRatio72.toFixed(3) });
+
   // ---- (3) the avatar's nose rotates toward the cursor (§7.3) ----
   await resetScene(500, 500);
   const readNoseAngle = () => page.evaluate(() => {
@@ -7851,6 +7914,38 @@ async function suiteA14(browser, origin, contentCss, contentJs) {
   check('A.v3 §3.1: HUD 에 진행 행과 막대가 보이고 남은 시간을 말한다',
     !!chalRow && chalRow.visible && /남은 시간/.test(chalRow.text) && Math.abs((chalRow.left + chalRow.width / 2) - chalRow.vw / 2) <= 24, chalRow);
   check('A.v3 §3.1: stats() 가 실행 중인 챌린지를 말한다', stAfterStart.challenge === 'timeAttack', stAfterStart.challenge);
+
+  /* ---- SPEC-launch §1 — 챌린지에서 점수가 오른다 -----------------------------------------------
+   * 이 단언이 없어서 1256개가 결함 위를 그대로 지나갔다. §3 은 timeAttack 을 "60초, **점수 최대화**" 로
+   * 정의하는데, 점수 가산이 `state.combat` 안에만 있고(src/70-break.js) 챌린지는 일부러 모드를 안 바꾸며
+   * (src/97-challenge.js: "they are about the page, not about the fight") 기본 모드 rampage 에서는
+   * `state.combat` 이 거짓이다. 셋이 맞물려 **기본 설정의 타임어택은 항상 0점**이었다.
+   * 위에서 이미 rampage 로 맞춰 두고(§3.1 준비) 챌린지를 시작했으므로 여기가 바로 그 조건이다.
+   * 대조군을 함께 둔다 — 챌린지 **밖의** rampage 는 여전히 0점이어야 한다. 그쪽은 의도된 동작이고,
+   * 한쪽만 도는 회귀(예: 모드를 강제로 바꿔 버리는 '수정')를 이 둘이 같이 잡는다. */
+  const taScoreMode = stAfterStart.mode;
+  const taScoreBefore = (await api.player(page)).score;
+  const scTA = await api.rect(page, '#small-card');
+  const taHits = await clickUntilBroken(page, '#small-card', scTA.cx, scTA.cy, 6);
+  await sleep(220);
+  const taScoreAfter = (await api.player(page)).score;
+  check('A.launch §1: 기본 모드(램페이지)로 시작한 타임어택에서 요소를 부수면 점수가 오른다',
+    taScoreMode === 'rampage' && taHits > 0 && taScoreAfter > taScoreBefore,
+    { mode: taScoreMode, hits: taHits, score: [taScoreBefore, taScoreAfter] });
+
+  await P(() => { window.__crashScreen.challenge.stop(); });
+  await api.restore(page);
+  await sleep(180);
+  const ctlScoreBefore = (await api.player(page)).score;
+  const scCtl = await api.rect(page, '#small-card');
+  const ctlHits = await clickUntilBroken(page, '#small-card', scCtl.cx, scCtl.cy, 6);
+  await sleep(220);
+  const ctlAfter = await api.player(page);
+  check('A.launch §1 대조군: 챌린지 밖의 램페이지는 부숴도 점수가 그대로다 (전투도 챌린지도 아니면 점수는 없다)',
+    (await api.stats(page)).mode === 'rampage' && ctlHits > 0 && ctlAfter.score === ctlScoreBefore,
+    { hits: ctlHits, score: [ctlScoreBefore, ctlAfter.score] });
+  await api.restore(page);
+  await sleep(120);
 
   // ---- §3.2 타임어택: 60초가 지나면 스스로 끝나고 결과를 띄우고 기록을 남긴다 ----
   await P(() => { window.__crashScreen.challenge.stop(); });
@@ -13422,7 +13517,7 @@ async function suiteB(browser, origin, contentCss, contentJs) {
 /* `name` keeps each suite's throwaway copy apart: suite C and suite D load the extension at the same
  * time in different browsers, and one rm -rf'ing the other's directory mid-run looks exactly like a
  * product bug. */
-function prepareExtensionCopy(name) {
+function prepareExtensionCopy(name, opts) {
   const dst = path.join(OUT, name || 'ext');
   fs.rmSync(dst, { recursive: true, force: true });
   fs.mkdirSync(dst, { recursive: true });
@@ -13434,6 +13529,10 @@ function prepareExtensionCopy(name) {
     const src = path.join(ROOT, name);
     if (fs.existsSync(src)) fs.cpSync(src, path.join(dst, name), { recursive: true });
   }
+  /* `grantHost: false` 면 매니페스트를 **그대로** 둔다 — 스위트 E 가 배포본 조건을 재기 위해 쓴다.
+   * 기본값은 지금까지와 같다: activeTab 은 진짜 사용자 제스처에만 주어지고 자동화는 그 길을 못 타므로,
+   * 주입 뒤의 동작을 보려는 스위트들은 host 권한을 스스로 부여한다. */
+  if (opts && opts.grantHost === false) return dst;
   const manifestPath = path.join(dst, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   manifest.host_permissions = ['http://127.0.0.1/*'];   // ONLY in the test copy (activeTab needs a real gesture)
@@ -13649,6 +13748,108 @@ async function suiteC(puppeteer, origin) {
 // block here closes the loop the other way round — a setting written from the options tab lands on an
 // ALREADY ACTIVE page without a re-activation (SPEC-settings §1.3), and a corrupt crsCustomWeapons does
 // not stop that page from coming up at all (SPEC-product §6, the completion criterion).
+/* ── Suite E — 배포본 매니페스트 그대로 ────────────────────────────────────────────────────────────
+ * SPEC-launch §8 · docs/review/10-real-chrome.md 발견 1.
+ *
+ * 스위트 C·D 는 `prepareExtensionCopy()` 가 **테스트 사본에만** 넣는 `host_permissions` 위에서 돈다.
+ * 주석이 이유를 정직하게 적어 뒀지만("activeTab needs a real gesture") 결과는 같다 — 사용자가 매번 타는
+ * 길에 자동 단언이 하나도 없었다. 실제로 저장소를 그대로 올려 토글해 보면 여섯 사이트 전부 `'blocked'` 다.
+ *
+ * 이 스위트는 매니페스트를 **손대지 않고** 확장을 올려, 그 조건에서만 도는 우리 코드를 본다:
+ * `isInjectable()` 의 URL 필터, `looksBlocked()` 의 거부 판정, 배지 ✕ 의 수명, 확장 페이지 접근.
+ *
+ * **이 스위트가 증명하지 못하는 것**(일부러 적는다): 진짜 사용자 제스처로 activeTab 이 부여된 뒤의
+ * 주입 성공 경로. 툴바 아이콘 클릭도 `chrome.commands` 단축키도 자동화가 만들 수 없다. 그 경로는
+ * 여전히 `docs/specs/running-tests.md` 의 수동 체크리스트가 맡는다 — 다만 이제 그 사실이
+ * 실행되는 단언으로 적혀 있고, 그 앞뒤의 코드는 기계가 본다. */
+async function suiteE(puppeteer, origin) {
+  console.log('\n=== Suite E: shipped manifest, no host_permissions (test/out/ext-shipped) ===');
+  const ext = prepareExtensionCopy('ext-shipped', { grantHost: false });
+  const browser = await puppeteer.launch({
+    headless: true,
+    enableExtensions: true,
+    args: BASE_ARGS.concat([`--disable-extensions-except=${ext}`, `--load-extension=${ext}`]),
+  });
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(ext, 'manifest.json'), 'utf8'));
+    check('E.manifest: 이 스위트가 올린 사본에 host_permissions 가 없다 — 배포되는 그 매니페스트다',
+      m.host_permissions === undefined && Array.isArray(m.permissions)
+      && m.permissions.slice().sort().join(',') === 'activeTab,scripting,storage',
+      { host_permissions: m.host_permissions, permissions: m.permissions });
+
+    const page = await browser.newPage();
+    await page.setViewport(VIEWPORT);
+    await page.goto(`${origin}/`, { waitUntil: 'load' });
+    const swTarget = await browser.waitForTarget((t) => t.type() === 'service_worker' && t.url().endsWith('/background.js'), { timeout: 10000 });
+    const worker = await swTarget.worker();
+    check('E.sw: 배포본 권한만으로도 서비스워커가 뜨고 리스너 셋이 등록된다', !!worker && await worker.evaluate(() => (
+      chrome.action.onClicked.hasListeners() && chrome.runtime.onMessage.hasListeners() && chrome.tabs.onUpdated.hasListeners()
+    )));
+
+    /* ---- isInjectable(): 어디에 넣을 수 있다고 보는가 (background.js 의 URL 필터) ---- */
+    const URLS = [
+      ['https://example.com/', true, '평범한 https'],
+      ['http://127.0.0.1:1/', true, '평범한 http'],
+      ['chrome://extensions/', false, 'chrome://'],
+      ['chrome-extension://abcdefghijklmnopabcdefghijklmnop/x.html', false, 'chrome-extension://'],
+      ['about:blank', false, 'about:'],
+      ['devtools://devtools/bundled/x.html', false, 'devtools://'],
+      ['view-source:https://example.com/', false, 'view-source:'],
+      ['https://chromewebstore.google.com/detail/x', false, '새 웹스토어 호스트'],
+      ['https://chrome.google.com/webstore/detail/x', false, '옛 웹스토어 경로'],
+      ['https://chrome.google.com/', true, '웹스토어가 아닌 chrome.google.com'],
+      ['', false, '빈 문자열'],
+      ['not a url', false, '파싱 실패']
+    ];
+    const verdicts = await worker.evaluate((list) => list.map(([u]) => !!self.__crashScreenIsInjectable(u)), URLS);
+    const wrong = URLS.map((u, i) => [u[2], u[1], verdicts[i]]).filter(([, want, got]) => want !== got);
+    check('E.isInjectable: 주입 가능/불가 판정 12가지가 전부 맞다 (chrome:// · 웹스토어 두 꼴 · view-source · 파싱 실패 포함)',
+      wrong.length === 0, wrong);
+
+    /* ---- activeTab 이 실제로 필요하다는 것, 그리고 거부가 어떻게 보이는가 ----
+     * 제스처 없이 부르면 chrome.scripting 이 거부하고 looksBlocked() 가 그것을 'blocked' 로 접는다.
+     * 이 경로가 바로 지금까지 단언이 0개였던 곳이다. */
+    await page.bringToFront();
+    const got = await worker.evaluate(async () => {
+      const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!t) return { res: 'no-tab' };
+      const res = await self.__crashScreenToggle(t);
+      return { res, id: t.id, url: t.url };
+    });
+    check('E.activeTab: 사용자 제스처 없이 부른 토글은 주입되지 않고 "blocked" 로 접힌다 — activeTab 이 말뿐이 아니다',
+      got.res === 'blocked', got);
+    check('E.activeTab: tab.url 이 비어 있어도(activeTab 이라 권한 없이는 안 보인다) 코드가 던지지 않는다',
+      got.url === undefined || typeof got.url === 'string', { url: got.url });
+    check('E.page: 거부됐으므로 페이지에 .crs-root 가 생기지 않았다',
+      (await api.has(page, '.crs-root')) === false);
+
+    /* ---- 배지 ✕ 의 수명 (flashBlocked: 1.5초) ---- */
+    const badgeNow = await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), got.id);
+    check('E.badge: 거부 직후 배지에 ✕ 가 뜬다', badgeNow === '✕', badgeNow);
+    const cleared = await poll(async () => (await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), got.id)) === '', 4000, 120);
+    check('E.badge: ✕ 가 1.5초 뒤 스스로 사라진다 (flashBlocked 의 타이머가 실제로 돈다)', cleared === true,
+      await worker.evaluate((id) => chrome.action.getBadgeText({ tabId: id }), got.id));
+
+    /* ---- 확장 자신의 페이지는 host 권한 없이도 열린다 ---- */
+    const extId = new URL(swTarget.url()).host;
+    for (const [rel, sel, label] of [['options/options.html', '#groups', '옵션 페이지'], ['share/share.html', 'body', '공유 페이지']]) {
+      const p2 = await browser.newPage();
+      let ok = false;
+      try {
+        await p2.goto(`chrome-extension://${extId}/${rel}`, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        ok = await p2.evaluate((s2) => !!document.querySelector(s2), sel);
+      } catch (e) { ok = false; }
+      check(`E.pages: ${label}(${rel})가 host 권한 없이 열린다`, ok === true);
+      await p2.close();
+    }
+
+    /* ---- 자동화가 못 하는 것을 적어 둔다 ---- */
+    info('E.gesture: activeTab 이 부여된 뒤의 주입 성공 경로는 이 스위트가 재지 못한다 — 툴바 클릭도 chrome.commands 단축키도 자동화가 만들 수 없다. docs/specs/running-tests.md 의 수동 체크리스트가 그 자리를 맡는다');
+  } finally {
+    await browser.close();
+  }
+}
+
 async function suiteD(puppeteer, origin) {
   console.log('\n=== Suite D: options page (SPEC-product §1 · §2 · §5 · §6) ===');
   const ext = prepareExtensionCopy('ext-d');
@@ -14206,8 +14407,9 @@ async function suiteD(puppeteer, origin) {
   for (const [name, fn] of A_BLOCKS) {
     if (name === 'settings' && WANT('D')) runLane('D', () => slot(() => suiteD(puppeteer, origin)));   // ~20 s
     if (WANT('A') && WANT_BLOCK(name)) runLane(name, () => ownBrowserQueued(fn));
-    if (name === 'settings') {   // the two short non-A suites go after the shortest A block
+    if (name === 'settings') {   // the short non-A suites go after the shortest A block
       if (WANT('C')) runLane('C', () => slot(() => suiteC(puppeteer, origin)));
+      if (WANT('E')) runLane('E', () => slot(() => suiteE(puppeteer, origin)));   // ~10 s — SPEC-launch §8
       if (WANT('B')) runLane('B', () => ownBrowserQueued((b) => suiteB(b, origin, contentCss, contentJs)));
     }
   }

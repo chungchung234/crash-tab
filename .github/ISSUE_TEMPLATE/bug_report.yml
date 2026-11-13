@@ -13,6 +13,26 @@ body:
         This extension makes no network requests. Before attaching logs or screenshots,
         please check that no private page content is visible in them.
 
+  - type: input
+    id: site
+    attributes:
+      label: 어느 사이트에서 일어났나요? (URL) / Which site? (URL)
+      description: |
+        이 확장은 임의의 웹페이지가 입력이라, 사이트를 모르면 재현할 수 없습니다. 로그인 뒤 화면이면 주소 대신 사이트 이름과 어느 화면인지 적어 주세요. 주소에 개인 정보(토큰, 계정)가 들어 있으면 지우고 적어 주세요.
+        This extension runs on arbitrary pages, so a bug cannot be reproduced without knowing the site. For pages behind a login, give the site name and which screen. Remove tokens or account details from the URL.
+      placeholder: "https://example.com/some/page"
+    validations:
+      required: true
+
+  - type: input
+    id: weapon-mode
+    attributes:
+      label: 쓰던 무기와 모드 / Weapon and mode in use
+      description: 옵션 페이지나 HUD 에 보이는 이름. 모르면 "기본" 이라고 적어 주세요. / The name shown in the options page or HUD. Write "default" if unsure.
+      placeholder: "망치 / 일반 모드 (Hammer / normal mode)"
+    validations:
+      required: true
+
   - type: textarea
     id: what-happened
     attributes:
@@ -28,7 +48,7 @@ body:
     id: steps
     attributes:
       label: 재현 방법 / Steps to reproduce
-      description: 가능하면 공개된 페이지 주소를 함께 적어주세요. / Include a public page URL when possible.
+      description: 위에 적은 사이트에서 무엇을 어떤 순서로 했는지 적어 주세요. / What you did on the site above, in order.
       placeholder: |
         1. https://example.com 접속
         2. Ctrl+Shift+X 로 활성화
@@ -92,7 +112,7 @@ body:
     id: extra
     attributes:
       label: 그 밖의 정보 / Anything else
-      description: 스크린샷, 녹화, 사용한 무기나 설정 등. / Screenshots, recordings, the weapon or settings in use.
+      description: 스크린샷, 녹화, 바꾼 설정 등. / Screenshots, recordings, changed settings.
     validations:
       required: false
 

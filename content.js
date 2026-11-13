@@ -402,6 +402,19 @@
     weaponFlame: "화염방사기",
     weaponFlameShort: "화염",
     weaponCollapse: "붕괴",
+    weaponLaser: "레이저 커터",
+    weaponMinigun: "미니건",
+    weaponShockwave: "충격포",
+    weaponTractor: "견인 광선",
+    weaponRubber: "고무탄",
+    weaponSqueaky: "뿅망치",
+    weaponWatergun: "물총",
+    weaponHorn: "나팔",
+    weaponChicken: "고무 치킨",
+    weaponShotgun: "샷건",
+    weaponNailgun: "못총",
+    weaponFreezegun: "냉각총",
+    weaponGravity: "중력탄",
     hudDamage: "피해",
     critLabel: "치명타!",
     headshotLabel: "헤드샷!",
@@ -424,6 +437,10 @@
     presetSniper: "저격",
     presetExplosive: "폭발",
     presetMelee: "근접",
+    presetInteraction: "상호작용",
+    presetFun: "예능",
+    presetBreach: "돌파",
+    presetCombo: "연계",
     presetCustom: "사용자 지정",
     labelCombat: "전투",
     labelHealth: "체력",
@@ -458,6 +475,30 @@
     helpMove: "이동",
     helpDash: "대시",
     helpAim: "마우스로 조준",
+    hudHintCharge: "길게 눌러 모으고 떼면 나가요",
+    hudHintBurst: "짧게 누르면 다른 공격이 나가요",
+    labelOverheat: "과열",
+    toastOverheat: "과열 — 식히는 중",
+    cwBad: "사용자 정의 무기 항목이 올바르지 않아요",
+    btnChallenge: "챌린지",
+    btnInspect: "인스펙터",
+    btnShare: "공유",
+    btnHelp: "도움말",
+    helpTitle: "단축키",
+    helpGroupWeapon: "무기",
+    helpGroupAction: "행동",
+    helpGroupMode: "모드",
+    helpGroupTool: "도구",
+    helpWeaponSlots: "무기 고르기",
+    helpPrevNext: "이전 / 다음 무기",
+    helpReload: "재장전",
+    helpCycleMode: "모드 바꾸기",
+    helpScope: "조준 (저격총)",
+    helpSlash: "드래그해서 베기",
+    helpCharge: "길게 눌러 모으기",
+    introBody: "클릭하면 그 자리의 요소가 부서져요. 숫자키로 무기를 바꿔요.",
+    introRevert: "언제든 되돌릴 수 있어요 — Z 복구 · Esc 종료 · ? 도움말",
+    setCollectOriginStats: "기기 안 출처 기록",
     setDebrisLife: "파편이 사라지는 시간",
     setPerfMode: "성능 모드",
     perfBadge: "성능 모드",
@@ -478,6 +519,7 @@
     chalSurvivalRun: "생존",
     chalResult: "챌린지 결과",
     chalNewBest: "최고 기록 갱신!",
+    chalBestSoFar: "최고 기록",
     chalRetry: "다시",
     chalClose: "닫기",
     chalRemain: "남은 시간",
@@ -556,6 +598,7 @@
     // §1 drone avatar (survival only): keys held, physics, dash window, afterimages
     avatar: null, keys: { up: false, down: false, left: false, right: false },
     dashUntil: 0, dashReadyAt: 0, invulUntil: 0, help: null, seenHelp: false,
+    seenIntro: false,   // SPEC-launch §3: 첫 활성화 안내를 봤는가 (crsSeenIntro, local, 기기마다 한 번)
     // §2 Virtua-Cop lock-ons, §3 repair beams + destruction-ratio meter
     locks: [], lockSeq: 0, locksBroken: 0,
     repairs: [], repaired: 0, ratio: 0, ratioTimer: 0, ratioNodes: null,
@@ -725,7 +768,7 @@
   /* schema file is absent (build.js then only warns): the unresolved form   */
   /* is Object.freeze([].concat()) — a frozen empty schema.                  */
   /* ===================================================================== */
-  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","breach","combo","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"},{"key":"unlockAll","type":"bool","default":true,"labelKey":"setUnlockAll","group":"advanced"},{"key":"recordReplay","type":"bool","default":true,"labelKey":"setRecordReplay","group":"advanced"},{"key":"collectLocalStats","type":"bool","default":true,"labelKey":"setCollectLocalStats","group":"advanced"}])));
+  const SETTINGS_SCHEMA = Object.freeze([].concat(Object.freeze([{"key":"mode","type":"enum","default":"rampage","options":["rampage","arcade","survival"],"labelKey":"setMode","group":"general"},{"key":"defaultWeapon","type":"enum","default":"hammer","options":["hammer","pistol","smg","sniper","axe","katana","bomb","rocket","flame","collapse","laser","minigun","shockwave","tractor","rubber","squeaky","watergun","horn","chicken","shotgun","nailgun","freezegun","gravity"],"labelKey":"setDefaultWeapon","group":"general"},{"key":"loadoutPreset","type":"enum","default":"default","options":["default","assault","sniper","explosive","melee","interaction","fun","breach","combo","custom"],"labelKey":"setLoadoutPreset","group":"general"},{"key":"debrisAnchor","type":"enum","default":"document","options":["document","viewport"],"labelKey":"setDebrisAnchor","group":"general"},{"key":"debrisLifeMs","type":"enum","default":6000,"options":[3000,6000,12000,0],"labelKey":"setDebrisLife","group":"general"},{"key":"debrisCap","type":"int","default":160,"min":20,"max":300,"labelKey":"setDebrisCap","group":"advanced"},{"key":"soundVolume","type":"int","default":28,"min":0,"max":100,"labelKey":"setSoundVolume","group":"general"},{"key":"muted","type":"bool","default":false,"labelKey":"setMuted","group":"general"},{"key":"weaponArt","type":"enum","default":"auto","options":["auto","svg","emoji"],"labelKey":"setWeaponArt","group":"general"},{"key":"viewmodel","type":"bool","default":true,"labelKey":"setViewmodel","group":"general"},{"key":"viewmodelScale","type":"enum","default":1,"options":[0.8,1,1.3],"labelKey":"setViewmodelScale","group":"general"},{"key":"crosshair","type":"enum","default":"auto","options":["auto","cross","dot","circle","off"],"labelKey":"setCrosshair","group":"general"},{"key":"crosshairColor","type":"enum","default":"white","options":["white","green","cyan","magenta"],"labelKey":"setCrosshairColor","group":"general"},{"key":"crosshairScale","type":"enum","default":1,"options":[0.75,1,1.25,1.5],"labelKey":"setCrosshairScale","group":"general"},{"key":"crosshairSpread","type":"bool","default":true,"labelKey":"setCrosshairSpread","group":"general"},{"key":"hitmarker","type":"bool","default":true,"labelKey":"setHitmarker","group":"general"},{"key":"showHpNumber","type":"bool","default":false,"labelKey":"setShowHpNumber","group":"general"},{"key":"targetMarker","type":"enum","default":"brackets","options":["brackets","full","off"],"labelKey":"setTargetMarker","group":"combat"},{"key":"hostileMarker","type":"enum","default":"quiet","options":["quiet","always","off"],"labelKey":"setHostileMarker","group":"combat"},{"key":"combatDifficulty","type":"enum","default":"normal","options":["easy","normal","hard"],"labelKey":"setCombatDifficulty","group":"combat"},{"key":"reduceMotion","type":"enum","default":"auto","options":["auto","on","off"],"labelKey":"setReduceMotion","group":"accessibility"},{"key":"highContrastMarkers","type":"bool","default":false,"labelKey":"setHighContrastMarkers","group":"accessibility"},{"key":"keyboardAim","type":"bool","default":false,"labelKey":"setKeyboardAim","group":"accessibility"},{"key":"perfMode","type":"enum","default":"auto","options":["auto","quality","performance"],"labelKey":"setPerfMode","group":"advanced"},{"key":"unlockAll","type":"bool","default":true,"labelKey":"setUnlockAll","group":"advanced"},{"key":"recordReplay","type":"bool","default":true,"labelKey":"setRecordReplay","group":"advanced"},{"key":"collectLocalStats","type":"bool","default":true,"labelKey":"setCollectLocalStats","group":"advanced"},{"key":"collectOriginStats","type":"bool","default":false,"labelKey":"setCollectOriginStats","group":"advanced"}])));
   const SETTING_GROUPS = ['general', 'combat', 'accessibility', 'advanced'];
   /* chrome.storage.sync keys are namespaced `crs.<key>` so they can never collide with the v1 flat keys
    * (crsWeapon, crsMuted, …) that §1.2 migrates away from. Only big things go to `local` — the one that
@@ -4096,6 +4139,21 @@
     '.presets{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin-top:6px}',
     '.presets .plabel{flex:none;font-size:11.5px;color:rgba(255,255,255,.7);white-space:nowrap;margin-right:2px}',
     '.presets button{flex:0 0 auto;min-width:max-content;height:24px;padding:0 4px;font-size:11px;border-radius:7px}',
+    /* SPEC-launch §3: 도구 줄과 도움말. 10단계가 만든 챌린지·인스펙터·공유가 키보드 전용이라
+       기본 경로에서 보이지 않았다. 그림자 DOM 안이므로 USER 오리진 !important 함정과 무관하다. */
+    '.tools{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}',
+    '.tools button{flex:1 1 0;height:26px;font-size:11.5px;border-radius:7px}',
+    '.tools button[aria-pressed="true"]{background:rgba(120,170,255,.28);border-color:rgba(150,190,255,.5)}',
+    /* 높이는 뷰포트에 묶는다 — 패널이 화면 밖으로 자라면 마지막 줄을 영영 못 본다. 바닥 여백은
+       잘린 줄이 "깨진 것" 으로 읽히지 않게 하는 것이다(처음 340px 로 뒀더니 `Esc 종료` 가 반으로 잘렸다). */
+    '.help{margin-top:8px;padding-top:8px;padding-bottom:4px;border-top:1px solid rgba(255,255,255,.14);max-height:min(52vh,420px);overflow:auto;overscroll-behavior:contain}',
+    '.help[hidden]{display:none}',
+    '.help h4{margin:8px 0 4px;font-size:11px;font-weight:700;letter-spacing:.3px;color:rgba(255,255,255,.62);text-transform:uppercase}',
+    '.help h4:first-child{margin-top:0}',
+    '.hrow{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px}',
+    '.hrow .hk{display:flex;gap:3px;flex:0 0 auto}',
+    '.hrow .ht{color:rgba(255,255,255,.88);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.hrow kbd{font:inherit;font-size:10.5px;line-height:16px;min-width:16px;height:18px;padding:0 4px;border-radius:5px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);text-align:center;display:inline-block}',
     '.presets .custom{flex:none;font-size:10.5px;color:#ffb224;white-space:nowrap}',
     'button:hover{background:rgba(255,255,255,.16)}',
     'button:focus-visible{outline:2px solid #e5484d;outline-offset:1px}',
@@ -4212,6 +4270,30 @@
     '.crs-replay.on{display:block}'
   ].join('\n');
 
+  /* ── SPEC-launch §3: 단축키는 **하나의 표**에서 생성한다 ────────────────────────────────────────
+   * 손으로 쓴 목록은 반드시 낡는다 — `README.md` 가 `H` 를 "전투 ON/OFF" 라고 1년 가까이 틀리게 적고 있었고
+   * 챌린지·인스펙터·공유는 아예 적히지 않았다. 이 표가 도움말 오버레이의 유일한 출처다.
+   * `avatar: true` 는 아바타가 있는 모드(아케이드·생존)에서만 보이는 줄이다 — 램페이지에서 WASD 를
+   * 안내하면 거짓말이 된다. */
+  const HELP_KEYS = [
+    { group: 'helpGroupWeapon', keys: ['1', '…', '0'], labelKey: 'helpWeaponSlots' },
+    { group: 'helpGroupWeapon', keys: ['Q', 'E'], labelKey: 'helpPrevNext' },
+    { group: 'helpGroupWeapon', keys: ['R'], labelKey: 'helpReload' },
+    { group: 'helpGroupAction', keys: ['Shift'], labelKey: 'helpScope' },
+    { group: 'helpGroupAction', keys: ['🖱'], labelKey: 'helpSlash' },
+    { group: 'helpGroupAction', keys: ['🖱'], labelKey: 'helpCharge' },
+    { group: 'helpGroupAction', keys: ['Space'], labelKey: 'helpDash', avatar: true },
+    { group: 'helpGroupAction', keys: ['W', 'A', 'S', 'D'], labelKey: 'helpMove', avatar: true },
+    { group: 'helpGroupMode', keys: ['H'], labelKey: 'helpCycleMode' },
+    { group: 'helpGroupMode', keys: ['C'], labelKey: 'btnChallenge' },
+    { group: 'helpGroupTool', keys: ['I'], labelKey: 'btnInspect' },
+    { group: 'helpGroupTool', keys: ['P'], labelKey: 'btnShare' },
+    { group: 'helpGroupTool', keys: ['M'], labelKey: 'btnMute' },
+    { group: 'helpGroupTool', keys: ['Z'], labelKey: 'btnRestore' },
+    { group: 'helpGroupTool', keys: ['Esc'], labelKey: 'btnExit' }
+  ];
+  const HELP_GROUP_ORDER = ['helpGroupWeapon', 'helpGroupAction', 'helpGroupMode', 'helpGroupTool'];
+
   function hudButton(label, title, onClick) {
     const b = doc.createElement('button');
     b.type = 'button';
@@ -4220,6 +4302,50 @@
     b.addEventListener('click', (e) => { e.preventDefault(); try { onClick(); } catch (err) { /* ignore */ } });
     return b;
   }
+  /* SPEC-launch §3: 도움말 오버레이. 그림자 DOM 안의 접이식 구역이라 새 최상위 노드도, USER 오리진
+   * CSS 도 끌어들이지 않는다. 내용은 HELP_KEYS 하나에서 생성되므로 키를 더하면 여기도 같이 는다. */
+  function buildHelpPanel() {
+    const box = doc.createElement('div');
+    box.className = 'help';
+    box.hidden = true;
+    box.setAttribute('role', 'region');
+    box.setAttribute('aria-label', msg('helpTitle'));
+    return box;
+  }
+  /* 아바타가 있는 모드에서만 WASD·Space 를 보인다 — 램페이지에서 안내하면 거짓말이다.
+   * 모드는 열려 있는 동안에도 바뀔 수 있으므로 **열 때마다** 다시 그린다. */
+  function renderHelp() {
+    const box = hudEls.help;
+    if (!box) return;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    let withAvatar = false;
+    try { withAvatar = !!modeHasAvatar(); } catch (e) { withAvatar = false; }
+    for (const g of HELP_GROUP_ORDER) {
+      const rows = HELP_KEYS.filter((r) => r.group === g && (!r.avatar || withAvatar));
+      if (!rows.length) continue;
+      const h = doc.createElement('h4'); h.textContent = msg(g);
+      box.append(h);
+      for (const r of rows) {
+        const line = doc.createElement('div'); line.className = 'hrow';
+        const kk = doc.createElement('span'); kk.className = 'hk';
+        for (const k of r.keys) { const kb = doc.createElement('kbd'); kb.textContent = k; kk.append(kb); }
+        const t = doc.createElement('span'); t.className = 'ht'; t.textContent = msg(r.labelKey);
+        line.append(kk, t);
+        box.append(line);
+      }
+    }
+  }
+  function helpOpen() { return !!(hudEls.help && !hudEls.help.hidden); }
+  function setHelpPanel(on) {
+    const box = hudEls.help;
+    if (!box) return false;
+    if (on) renderHelp();
+    box.hidden = !on;
+    if (hudEls.helpBtn) hudEls.helpBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    return !box.hidden;
+  }
+  function toggleHelp() { return setHelpPanel(!helpOpen()); }
+
   function buildHud() {
     const host = mk('crs-hud', 'crs-hud-host');
     let shadow = null;
@@ -4314,6 +4440,15 @@
     hudEls.combatBtn.className = 'crs-combat-toggle';
     hudEls.exit = hudButton('✕ ' + msg('btnExit'), msg('btnExit') + ' (Esc)', () => deactivate());
     actions.append(hudEls.sound, hudEls.restore, hudEls.combatBtn, hudEls.exit);
+    /* SPEC-launch §3: 10단계의 네 기능을 눈에 보이게 꺼낸다. 키는 그대로 두고 **입구만** 더한다. */
+    const tools = doc.createElement('div'); tools.className = 'tools';
+    hudEls.chalBtn = hudButton('🏁 ' + msg('btnChallenge'), msg('btnChallenge') + ' (C)', () => challengeCycle());
+    hudEls.inspectBtn = hudButton('🔍 ' + msg('btnInspect'), msg('btnInspect') + ' (I)', () => inspectToggle());
+    hudEls.shareBtn = hudButton('📷 ' + msg('btnShare'), msg('btnShare') + ' (P)', () => shareNow());
+    hudEls.helpBtn = hudButton('? ' + msg('btnHelp'), msg('btnHelp') + ' (?)', () => toggleHelp());
+    hudEls.helpBtn.setAttribute('aria-pressed', 'false');
+    tools.append(hudEls.chalBtn, hudEls.inspectBtn, hudEls.shareBtn, hudEls.helpBtn);
+    hudEls.help = buildHelpPanel();
     const status = doc.createElement('div'); status.className = 'status';
     hudEls.hint = doc.createElement('span'); hudEls.hint.className = 'hint';
     hudEls.pieces = doc.createElement('span');
@@ -4323,7 +4458,7 @@
     hudEls.combo = doc.createElement('span'); hudEls.combo.className = 'combo';
     hudEls.last = doc.createElement('span'); hudEls.last.className = 'last';
     status.append(hudEls.hint, hudEls.pieces, hudEls.cracks, hudEls.damage, hudEls.score, hudEls.combo, hudEls.last);
-    panel.append(title, grid, presets, hudEls.cur, actions, status);
+    panel.append(title, grid, presets, hudEls.cur, actions, tools, hudEls.help, status);
     mountPoint.append(panel);
     hudEls.panel = panel; hudEls.title = title;
     // v1.2 A11: ammo HUD (bottom-right), player HUD (bottom-left), toast (top-centre), KO overlay — shadow siblings of .panel
@@ -9743,11 +9878,17 @@
     rec.wasPlaying = !!opts.wasPlaying;
     state.lastBreakMs = now() - t0;
     state.lastBreakPieces = made;
-    // v1.2 A8 / A10: the single kill hook — hostile → kill (score max / ×1.5 clutch), else round(max/4) while combat is on
+    /* v1.2 A8 / A10: the single kill hook — hostile → kill (score max / ×1.5 clutch), else round(max/4).
+     * SPEC-launch §1: the page-score branch also runs while a CHALLENGE is up, not only while combat is.
+     * SPEC-product §3 defines timeAttack as "60초, 점수 최대화" and SPEC-combat §A deliberately leaves the
+     * mode alone for timeAttack / targetRush ("they are about the page, not about the fight"), while the
+     * default mode is rampage, where `state.combat` is false. Those two met here: breaking 24 elements in a
+     * default-mode timeAttack scored 0, and the suite never looked at the number. `chalRunning` is declared
+     * in src/97-challenge.js — a later module, but the build is one closure, so the declaration is hoisted. */
     try {
       const max = hpOf(el).max;
       if (state.hostiles.has(el)) hostileKilled(el, max);
-      else if (state.combat) { state.player.score += Math.round(max / 4); updatePlayerHud(); }
+      else if (state.combat || chalRunning()) { state.player.score += Math.round(max / 4); updatePlayerHud(); }
     } catch (e) { state.lastError = String((e && e.stack) || e); }
     /* SPEC-combat §C3: everything above this element just got weaker by 0.6 × what it was worth — and an
      * ancestor that was already hurt that much goes down with it. Runs AFTER hideOriginal(), so a recount
@@ -9768,6 +9909,14 @@
     cancelAnimsOf(el);
     const tag = tagOf(el);
     const dent = FORM_TAGS.has(tag) || tag === 'summary' || el.getAttribute('role') === 'button';
+    /* SPEC-launch §4: 안 죽은 요소의 반응을 키우는 일은 **여기서 하지 않는다.** 이 흔들림의 진폭을
+     * 10 → 18px 로 올려 봤다가 되돌렸다. 이 애니메이션은 페이지 요소 자신의 `transform` 을
+     * `composite: 'add'` 로 건드리는데, 변위(src/67-displace.js)와 부분 파괴(clip-path)가 **살아 있는 rect** 를
+     * 읽는다. 흔들림이 커지면 그 rect 가 더 움직여서 절단이 엉뚱한 자리에 떨어지고 충격량 측정이 오염된다.
+     * 단언 셋이 그걸 잡았다 — 충격포 충격량 비 1.815(공식 1.923), remain 면적 단조 감소, 절단 상한 8회.
+     * 진폭을 되돌리니 셋 다 통과했으므로 원인은 분명하다.
+     * 그래서 §4 의 보강은 **색조(src/73-hit-resolution.js)** 가 맡는다. 색조는 우리 오버레이의 별도 노드라
+     * 페이지 요소의 기하를 전혀 건드리지 않는다. 연출을 포기한 것이 아니라 기하를 안 건드리는 쪽으로 옮긴 것이다. */
     try {
       let a;
       if (dent) {
@@ -9837,6 +9986,18 @@
 
   function isMelee(id) { const W = WEAPONS[id || state.weapon]; return !!(W && W.kind === 'hammer'); }
   function swapMsOf(id) { const W = WEAPONS[id]; return (W && W.swapMs > 0) ? W.swapMs : SWAP_MS; }
+  /* SPEC-launch §7: 드론의 기동 배수. 위 표의 주석이 "NO drone avatar exists in this build" 라 적었지만
+   * 드론은 v1.4 §1.2 부터 있다(src/92-tick.js 의 `the drone lives in screen space`) — 주석이 낡았던 것이고,
+   * 그 사이 9단계가 `moveSpeed` 를 밸런스 손잡이로 썼다(`tools/balance.js` 의 handling 항). 종이 위에서만
+   * 맞던 축을 손에서도 맞게 배선한다. 미니건 0.55 가 "화력을 사는 대가로 기동성을 내준다" 를 실제로 뜻하게 된다.
+   * 조준 중 저격총은 `moveSpeedScoped` 로 더 느려진다 — 같은 이유로 지금껏 아무 효과가 없었다. */
+  function moveSpeedOf(id, scoped) {
+    const W = WEAPONS[id] || WEAPONS[state.weapon];
+    if (!W) return 1;
+    if (scoped && W.moveSpeedScoped != null) return W.moveSpeedScoped;
+    return W.moveSpeed == null ? 1 : W.moveSpeed;
+  }
+  function avatarSpeedMul() { return clamp(moveSpeedOf(state.weapon, state.scoped), 0.2, 2); }
   function critChanceOf(id, scoped) {
     const W = WEAPONS[id] || WEAPONS[state.weapon];
     if (!W) return 0.1;
@@ -10452,9 +10613,15 @@
   }
 
   /* --- hit tint (A5 item 2): a radial splash on the element rect, one node per element --- */
+  /* SPEC-launch §4: "피해가 들어갔다" 는 신호를 키우는 자리가 여기다. 실제 사이트에서 기본 무기로
+   * 다섯 번 때린 뒤 화면이 멀쩡해 보였는데, 원인의 절반이 안 죽은 요소의 반응이 너무 조용한 것이었다.
+   * 처음에는 요소 자신의 흔들림(src/70-break.js 의 reactDamage)을 키웠다가 **되돌렸다** — 그쪽은
+   * 페이지 요소의 transform 이라 변위와 부분 파괴가 읽는 rect 를 밀어 단언 셋을 깼다.
+   * 색조는 우리 오버레이의 별도 노드(.crs-hit)라 페이지 기하를 전혀 건드리지 않는다. 그래서 연출은
+   * 여기서 키운다: 중심 알파 .30 → .46, 가장자리 .22 → .34. 체력도 피해량도 밴드도 그대로다. */
   function tintGradient(rect, ix, iy) {
     const R = clamp(0.5 * Math.sqrt(Math.max(1, rect.width * rect.height)), 60, 220);
-    return 'radial-gradient(circle at ' + px(ix - rect.left) + ' ' + px(iy - rect.top) + ', rgba(229,72,77,.30) 0px, rgba(229,72,77,.22) 40%, rgba(229,72,77,0) ' + px(R) + ')';
+    return 'radial-gradient(circle at ' + px(ix - rect.left) + ' ' + px(iy - rect.top) + ', rgba(229,72,77,.46) 0px, rgba(229,72,77,.34) 40%, rgba(229,72,77,0) ' + px(R) + ')';
   }
   function removeTint(el) {
     const t = state.tints.get(el);
@@ -10469,10 +10636,12 @@
     if (reducedMotion()) { n.style.opacity = '0.1'; t.timer = later(() => removeTint(el), 180); return; }
     n.style.opacity = String(from);
     try {
-      t.anim = trackAnim(n.animate([{ opacity: from }, { opacity: 0 }], { duration: 180, easing: 'ease-out', fill: 'forwards' }));
+      /* SPEC-launch §4: 180 → 300ms. 눈이 "저기가 맞았다" 를 따라잡을 시간을 준다. 사라지는 속도가
+       * 타격의 무게를 정하는데, 180ms 는 연사 중에 아예 안 보였다. 모션 축소는 위에서 이미 갈라져 나간다. */
+      t.anim = trackAnim(n.animate([{ opacity: from }, { opacity: 0 }], { duration: 300, easing: 'ease-out', fill: 'forwards' }));
       t.anim.addEventListener('finish', () => removeTint(el));
     } catch (e) { /* ignore */ }
-    t.timer = later(() => removeTint(el), 400);
+    t.timer = later(() => removeTint(el), 540);
   }
   function showTint(el, rect, ix, iy, hold) {
     if (!root) return;
@@ -16764,8 +16933,13 @@
         if (state.keys.right) ax += 1;
         if (state.keys.up) ay -= 1;
         if (state.keys.down) ay += 1;
+        /* SPEC-launch §7: 들고 있는 무기의 `moveSpeed` 가 가속과 최고 속도에 그대로 곱해진다.
+         * 아래 마찰 분기의 `AV_MAX_SPEED` 문턱은 **배수를 걸지 않는다** — 그것은 속도 상한이 아니라
+         * "키를 떼면 한 프레임에 멈춘다" 를 성립시키는 넉넉한 문턱이고(바로 위 주석), 무기에 따라
+         * 멈추는 방식이 달라져서는 안 된다. */
+        const mul = avatarSpeedMul();
         const L = Math.hypot(ax, ay);
-        if (L > 0) { p.vx += (ax / L) * AV_ACCEL * dt; p.vy += (ay / L) * AV_ACCEL * dt; }
+        if (L > 0) { p.vx += (ax / L) * AV_ACCEL * mul * dt; p.vy += (ay / L) * AV_ACCEL * mul * dt; }
         /* Friction is DRAG, not braking: it only bites once the keys are let go. Applying it while a direction
           * is held would fight the 2800 px/s² accelerator to a standstill around 287 px/s and the 420 px/s top
           * speed could never be reached.
@@ -16778,8 +16952,9 @@
           p.vx *= f; p.vy *= f;
           if (Math.hypot(p.vx, p.vy) < AV_MAX_SPEED) { p.vx = 0; p.vy = 0; }
         }
+        const cap = AV_MAX_SPEED * mul;
         const sp = Math.hypot(p.vx, p.vy);
-        if (sp > AV_MAX_SPEED) { p.vx = p.vx / sp * AV_MAX_SPEED; p.vy = p.vy / sp * AV_MAX_SPEED; }
+        if (sp > cap) { p.vx = p.vx / sp * cap; p.vy = p.vy / sp * cap; }
         if (!L) { if (Math.abs(p.vx) < 1) p.vx = 0; if (Math.abs(p.vy) < 1) p.vy = 0; }
       }
       p.x += p.vx * dt; p.y += p.vy * dt;
@@ -17721,6 +17896,9 @@
         else if (c === 'KeyC' || k === 'c' || k === 'C') action = 'challenge';
         else if (c === 'KeyI' || k === 'i' || k === 'I') action = 'inspect';
         else if (c === 'KeyP' || k === 'p' || k === 'P') action = 'share';
+        /* SPEC-launch §3 도움말: `?` 또는 `F1`. 단축키 24개가 README 에만 있었고 README 는 플레이 중에
+         * 아무도 안 본다. `/` 단독은 잡지 않는다 — 페이지의 검색 단축키를 뺏지 않기 위해서다. */
+        else if (c === 'F1' || k === 'F1' || k === '?' || (c === 'Slash' && e.shiftKey)) action = 'help';
         else if ((c === 'Enter' || k === 'Enter') && chalResultOpen()) action = 'chalRetry';
         else if ((c === 'Enter' || k === 'Enter') && state.ko) action = 'restart';
         else if (modeHasAvatar() && isSpaceKey(c, k)) action = 'dash';          // v1.4 §1.2
@@ -17735,7 +17913,7 @@
     handledKeys.add(e);
     try { e.preventDefault(); e.stopImmediatePropagation(); } catch (err) { /* ignore */ }
     if (action === 'move') { state.keys[arg] = true; kick(); return; }   // v1.4: a held key is simply a held key
-    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash' || action === 'challenge' || action === 'inspect' || action === 'share' || action === 'chalRetry')) return;
+    if (e.repeat && (action === 'shift' || action === 'mute' || action === 'combat' || action === 'restore' || action === 'prev' || action === 'next' || action === 'restart' || action === 'dash' || action === 'challenge' || action === 'inspect' || action === 'share' || action === 'help' || action === 'chalRetry')) return;
     if (action === 'escape') {   // layered (A2): scope-out if scoped, else exit (stops holds and the KO screen)
       /* SPEC-arsenal §A5 lists Escape among the 중단 조건 (전부 취소 + 환불). It is layered like the rest:
        * a charge in progress is the innermost layer, so the first Escape gives the rounds back rather than
@@ -17763,6 +17941,7 @@
     else if (action === 'challenge') challengeCycle();   // SPEC-product §3: C cycles off → 타임어택 → 목표 돌파 → 생존 → off
     else if (action === 'inspect') inspectToggle();      // SPEC-product §5
     else if (action === 'share') shareNow();             // SPEC-product §5
+    else if (action === 'help') toggleHelp();            // SPEC-launch §3
     else if (action === 'chalRetry') chalRetry();        // SPEC-product §3: 결과 오버레이의 `다시 (Enter)`
   }
   function onWheel(e) {
@@ -18583,6 +18762,9 @@
     restoreUser: false
   };
   function lifeEnabled() { return settingsGet('collectLocalStats') === true; }
+  /* SPEC-launch §2: 출처 목록은 총계와 다른 종류의 데이터다. 둘을 한 스위치에 묶어 두면
+   * "아무것도 수집하지 않는다" 를 사실로 만드는 값이 누적 통계까지 같이 끄게 된다. */
+  function lifeOriginsEnabled() { return lifeEnabled() && settingsGet('collectOriginStats') === true; }
   function lifeOrigin() {
     let o = '';
     try { o = String(location.origin || ''); } catch (e) { o = ''; }
@@ -18672,15 +18854,24 @@
       if (!r || typeof r !== 'object') continue;
       po[k] = { bestScore: num(r.bestScore), broken: num(r.broken), plays: num(r.plays), lastPlayed: num(r.lastPlayed) };
     }
-    for (const k of Object.keys(d.origins)) {
-      const dd = d.origins[k];
-      const r = po[k] || { bestScore: 0, broken: 0, plays: 0, lastPlayed: 0 };
-      po[k] = {
-        bestScore: Math.max(r.bestScore, dd.bestScore),
-        broken: r.broken + dd.broken,
-        plays: r.plays + dd.plays,
-        lastPlayed: now0
-      };
+    /* SPEC-launch §2: 출처별 기록은 `collectOriginStats` 가 켜져 있을 때만 쌓인다 (기본값 꺼짐).
+     * 크롬 웹 스토어 User Data FAQ 2·4 가 "브라우저가 오가는 도메인" 을 web browsing activity 로 분류하고,
+     * FAQ 3 은 기기 밖으로 안 나가도 공개 대상이라고 못박는다. 총계(피해·파괴·세션·플레이 시간)는 어느
+     * 사이트였는지를 담지 않아 그 범주가 아니므로 `collectLocalStats` 아래 그대로 둔다 — 누적 통계는
+     * 제품의 기능이고, 끌 이유가 있는 것은 **출처 목록** 하나뿐이다.
+     * 꺼도 이미 저장된 것을 지우지는 않는다. 위에서 읽은 `po` 가 그대로 남고, 지우는 것은 옵션 페이지의
+     * 명시적인 초기화다 — 설정 하나를 끈 것이 기존 기록의 삭제를 뜻해서는 안 된다. */
+    if (lifeOriginsEnabled()) {
+      for (const k of Object.keys(d.origins)) {
+        const dd = d.origins[k];
+        const r = po[k] || { bestScore: 0, broken: 0, plays: 0, lastPlayed: 0 };
+        po[k] = {
+          bestScore: Math.max(r.bestScore, dd.bestScore),
+          broken: r.broken + dd.broken,
+          plays: r.plays + dd.plays,
+          lastPlayed: now0
+        };
+      }
     }
     /* §2 "출처 200개 상한, 가장 오래 안 쓴 것부터 퇴출" — LRU by lastPlayed. */
     const keys = Object.keys(po);
@@ -19130,6 +19321,18 @@
     return rec;
   }
 
+  /* SPEC-launch §5: 못 깼을 때 보여 줄 한 줄. 기록이 아예 없으면 빈 문자열(첫 판에 '기록 0' 은 소음이다). */
+  function chalPrevBestText(r) {
+    const prev = r && r.prev;
+    if (!prev || !prev.plays) return '';
+    if (r.mode === 'timeAttack') {
+      if (!(prev.bestScore > 0)) return '';
+      return msg('chalBestSoFar') + ' ' + msg('labelScore') + ' ' + prev.bestScore;
+    }
+    if (!(prev.bestMs > 0)) return '';
+    return msg('chalBestSoFar') + ' ' + (prev.bestMs / 1000).toFixed(1) + msg('unitSec');
+  }
+
   /* ---- the result overlay (§3: 모드·점수·처치·소요·최고 기록 갱신 여부, 다시 (Enter) / 닫기 (Esc)) ---- */
   function chalResultOpen() { return !!chal.resultNode; }
   function chalResultClose() {
@@ -19146,7 +19349,10 @@
       const rs = doc.createElement('div'); rs.className = 'rs';
       rs.textContent = msg(CHAL_NAME[r.mode]) + ' · ' + msg('labelScore') + ' ' + r.score + ' · ' + msg('labelKills') + ' ' + r.kills
         + ' · ' + msg('chalElapsed') + ' ' + (r.elapsedMs / 1000).toFixed(1) + msg('unitSec');
-      const rb2 = doc.createElement('div'); rb2.className = 'rbest'; rb2.textContent = r.best ? '🏆 ' + msg('chalNewBest') : '';
+      const rb2 = doc.createElement('div'); rb2.className = 'rbest';
+      /* 갱신했으면 축하하고, 못 깼으면 **무엇을 넘어야 하는지** 말한다. 모드마다 기록의 종류가 다르다 —
+       * 타임어택은 점수, 목표 돌파는 가장 빠른 시간, 생존은 가장 오래 버틴 시간이다(chalIsBest 와 같은 갈래). */
+      rb2.textContent = r.best ? '🏆 ' + msg('chalNewBest') : chalPrevBestText(r);
       const rb = doc.createElement('div'); rb.className = 'rb';
       rb.append(
         hudButton(msg('chalRetry') + ' (Enter)', msg('chalRetry') + ' (Enter)', () => chalRetry()),
@@ -19213,10 +19419,14 @@
     const score = state.player.score, kills = state.player.kills;
     const completed = reason === 'time' || reason === 'targets' || reason === 'ko';
     const best = chalIsBest(id, score, ms, reason === 'targets');
+    /* SPEC-launch §5: 결과에 **이전 기록**을 싣는다. 지금까지는 갱신했을 때만 '🏆 최고 기록 갱신!' 을
+     * 띄우고 못 깨면 아무 말도 안 했다 — 2회차부터 피드백이 영구히 0이었다. 목표가 보여야 다시 한다.
+     * `chalRecordWrite` 가 기록을 덮어쓰므로 **그 전에** 떠 둔다. */
+    const prevRec = chalRecords[id] ? Object.assign({}, chalRecords[id]) : null;
     chal.id = null;
     untrack(chal.timer); chal.timer = 0;
     chalHud();
-    const r = { mode: id, reason, score, kills, elapsedMs: ms, broken: chalBrokenNow(), completed, best, at: Date.now() };
+    const r = { mode: id, reason, score, kills, elapsedMs: ms, broken: chalBrokenNow(), completed, best, prev: prevRec, at: Date.now() };
     chal.result = r; chal.lastEnd = r;
     chalRecordWrite(id, score, kills, ms, reason === 'targets', best);
     announceChallenge(false);
@@ -19676,8 +19886,30 @@
     replay.ops.push({ t: Math.round(now() - replay.startedAt), op, args: a });
     return true;
   }
+  /* SPEC-launch §6: 버그를 재현할 수 있게 하는 최소한의 정보. 이 제품은 **임의의 웹페이지**가 입력인데
+   * 리플레이가 조작만 담고 있어서 "A 사이트에서 깨졌어요" 를 받아도 되살릴 수가 없었다.
+   * **쿼리와 해시는 버린다** — 세션 토큰·초대 코드가 거기 들어간다. 내보낸 파일을 남에게 주는 기능이므로
+   * 경로까지만 담고, 그 사실을 PRIVACY.md 에 적는다. 길이 상한은 넘겨받은 값으로 파일을 부풀리지 않기 위함이다. */
+  function replaySite() {
+    try {
+      const u = new URL(String(location.href));
+      return {
+        href: String(u.origin + u.pathname).slice(0, 200),
+        title: String(document.title || '').slice(0, 120),
+        elements: document.querySelectorAll('*').length
+      };
+    } catch (e) { return null; }
+  }
+  function replaySiteValidate(s) {
+    if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+    const href = typeof s.href === 'string' ? s.href.slice(0, 200) : '';
+    const title = typeof s.title === 'string' ? s.title.slice(0, 120) : '';
+    const els = Number(s.elements);
+    if (!href) return null;
+    return { href, title, elements: (isFinite(els) && els >= 0) ? Math.round(els) : 0 };
+  }
   function replayExport() {
-    return { v: 1, startedAt: replay.startedAt ? Math.round(replay.startedAt) : 0, viewport: { w: viewW(), h: viewH() }, ops: replay.ops.map((o) => ({ t: o.t, op: o.op, args: o.args.slice() })) };
+    return { v: 1, startedAt: replay.startedAt ? Math.round(replay.startedAt) : 0, site: replaySite(), viewport: { w: viewW(), h: viewH() }, ops: replay.ops.map((o) => ({ t: o.t, op: o.op, args: o.args.slice() })) };
   }
   /* Strict: anything it cannot vouch for is refused outright rather than repaired. */
   function replayValidate(obj) {
@@ -19705,7 +19937,9 @@
       ops.push({ t, op: o.op, args: args.slice() });
       last = t;
     }
-    return { v: 1, startedAt: Number(obj.startedAt) || 0, viewport: { w: vp.w, h: vp.h }, ops };
+    /* SPEC-launch §6: `site` 는 **선택**이다. v1 로 이미 내보낸 리플레이와 테스트가 만드는 최소 객체가
+     * 그대로 들어와야 하므로, 없으면 null 이고 있으면 형태만 보고 자른다 — 거부하지 않는다. */
+    return { v: 1, startedAt: Number(obj.startedAt) || 0, site: replaySiteValidate(obj.site), viewport: { w: vp.w, h: vp.h }, ops };
   }
   function replayImport(obj) {
     let bytes = 0;
@@ -19984,7 +20218,10 @@
   }
   function loadPrefs() {
     // ── v1.4 §5: crsSeenCombatHelp is a LOCAL flag (the control card is shown once per machine, not synced) ──
-    safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp']), (loc) => { if (loc && loc.crsSeenCombatHelp) state.seenHelp = true; });
+    safeThen(() => chrome.storage.local.get(['crsSeenCombatHelp', 'crsSeenIntro']), (loc) => {
+      if (loc && loc.crsSeenCombatHelp) state.seenHelp = true;
+      if (loc && loc.crsSeenIntro) state.seenIntro = true;   // SPEC-launch §3: 첫 안내도 기기마다 한 번
+    });
     safeThen(() => chrome.storage.sync.get(['crsWeapon', 'crsMode', 'crsPower', 'crsMuted', 'crsLoadout', 'crsLoadoutPreset', 'crsCombat', 'crsDebrisLifeMs', 'crsDebrisLife', 'crsDebrisAnchor']), (res) => {
       if (!res || !state.active) return;
       const storedLoadout = migrateWeaponIds(res.crsLoadout);   // §8.1: a stored 'sword' becomes 'katana' on read
@@ -20029,6 +20266,19 @@
     }
     try { docEl.classList.remove('crs-active', 'crs-swing', 'crs-scoped'); } catch (e) { /* ignore */ }
   }
+  /* SPEC-launch §3: 설치하고 처음 켠 사람에게 한 번만. `chrome.runtime.onInstalled` 가 없고 조작 안내 카드는
+   * 서바이벌에서만 뜨는데(src/86-modes.js) 기본 모드는 램페이지라, 보통 사용자는 안내를 **하나도** 못 받고 있었다.
+   * 두 번에 나눠 띄운다 — 토스트가 한 줄짜리 알약이라 세 줄이 안 들어간다. 두 번째가 더 중요하다:
+   * 남의 웹페이지가 부서지는 것을 처음 본 사람의 첫 감정은 불안이고, 되돌릴 수 있다는 사실이 그걸 푼다.
+   * `crsSeenIntro` 는 `crsSeenCombatHelp` 와 같은 결 — local 이고 기기마다 한 번이다(동기화하지 않는다).
+   * 타이머는 `later()` 로 단다. 원장이 세므로 Escape 가 흔적을 남기지 않는다. */
+  function maybeShowIntro() {
+    if (state.seenIntro) return;
+    state.seenIntro = true;
+    safe(() => chrome.storage.local.set({ crsSeenIntro: true }));
+    toast(msg('introBody'));
+    later(() => { if (state.active) toast(msg('introRevert')); }, 2300);
+  }
   function activate() {
     if (state.active) return;
     try {
@@ -20050,6 +20300,7 @@
       updatePlayerHud();
       armCombat();   // synchronous with the default combat = true; loadPrefs may turn it off (A8)
       if (state.combat) toast(msg('toastCombatOn'));
+      else maybeShowIntro();   // SPEC-launch §3: 전투 안내가 안 뜨는 기본 모드에서 첫 안내를 대신 띄운다
       sendState(true);
     } catch (e) {
       try { deactivate(true); } catch (e2) { /* ignore */ }

@@ -63,9 +63,15 @@
   }
 
   /* --- hit tint (A5 item 2): a radial splash on the element rect, one node per element --- */
+  /* SPEC-launch §4: "피해가 들어갔다" 는 신호를 키우는 자리가 여기다. 실제 사이트에서 기본 무기로
+   * 다섯 번 때린 뒤 화면이 멀쩡해 보였는데, 원인의 절반이 안 죽은 요소의 반응이 너무 조용한 것이었다.
+   * 처음에는 요소 자신의 흔들림(src/70-break.js 의 reactDamage)을 키웠다가 **되돌렸다** — 그쪽은
+   * 페이지 요소의 transform 이라 변위와 부분 파괴가 읽는 rect 를 밀어 단언 셋을 깼다.
+   * 색조는 우리 오버레이의 별도 노드(.crs-hit)라 페이지 기하를 전혀 건드리지 않는다. 그래서 연출은
+   * 여기서 키운다: 중심 알파 .30 → .46, 가장자리 .22 → .34. 체력도 피해량도 밴드도 그대로다. */
   function tintGradient(rect, ix, iy) {
     const R = clamp(0.5 * Math.sqrt(Math.max(1, rect.width * rect.height)), 60, 220);
-    return 'radial-gradient(circle at ' + px(ix - rect.left) + ' ' + px(iy - rect.top) + ', rgba(229,72,77,.30) 0px, rgba(229,72,77,.22) 40%, rgba(229,72,77,0) ' + px(R) + ')';
+    return 'radial-gradient(circle at ' + px(ix - rect.left) + ' ' + px(iy - rect.top) + ', rgba(229,72,77,.46) 0px, rgba(229,72,77,.34) 40%, rgba(229,72,77,0) ' + px(R) + ')';
   }
   function removeTint(el) {
     const t = state.tints.get(el);
@@ -80,10 +86,12 @@
     if (reducedMotion()) { n.style.opacity = '0.1'; t.timer = later(() => removeTint(el), 180); return; }
     n.style.opacity = String(from);
     try {
-      t.anim = trackAnim(n.animate([{ opacity: from }, { opacity: 0 }], { duration: 180, easing: 'ease-out', fill: 'forwards' }));
+      /* SPEC-launch §4: 180 → 300ms. 눈이 "저기가 맞았다" 를 따라잡을 시간을 준다. 사라지는 속도가
+       * 타격의 무게를 정하는데, 180ms 는 연사 중에 아예 안 보였다. 모션 축소는 위에서 이미 갈라져 나간다. */
+      t.anim = trackAnim(n.animate([{ opacity: from }, { opacity: 0 }], { duration: 300, easing: 'ease-out', fill: 'forwards' }));
       t.anim.addEventListener('finish', () => removeTint(el));
     } catch (e) { /* ignore */ }
-    t.timer = later(() => removeTint(el), 400);
+    t.timer = later(() => removeTint(el), 540);
   }
   function showTint(el, rect, ix, iy, hold) {
     if (!root) return;

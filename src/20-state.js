@@ -32,6 +32,7 @@
     // §1 drone avatar (survival only): keys held, physics, dash window, afterimages
     avatar: null, keys: { up: false, down: false, left: false, right: false },
     dashUntil: 0, dashReadyAt: 0, invulUntil: 0, help: null, seenHelp: false,
+    seenIntro: false,   // SPEC-launch §3: 첫 활성화 안내를 봤는가 (crsSeenIntro, local, 기기마다 한 번)
     // §2 Virtua-Cop lock-ons, §3 repair beams + destruction-ratio meter
     locks: [], lockSeq: 0, locksBroken: 0,
     repairs: [], repaired: 0, ratio: 0, ratioTimer: 0, ratioNodes: null,

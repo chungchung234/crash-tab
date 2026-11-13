@@ -443,11 +443,17 @@
     rec.wasPlaying = !!opts.wasPlaying;
     state.lastBreakMs = now() - t0;
     state.lastBreakPieces = made;
-    // v1.2 A8 / A10: the single kill hook — hostile → kill (score max / ×1.5 clutch), else round(max/4) while combat is on
+    /* v1.2 A8 / A10: the single kill hook — hostile → kill (score max / ×1.5 clutch), else round(max/4).
+     * SPEC-launch §1: the page-score branch also runs while a CHALLENGE is up, not only while combat is.
+     * SPEC-product §3 defines timeAttack as "60초, 점수 최대화" and SPEC-combat §A deliberately leaves the
+     * mode alone for timeAttack / targetRush ("they are about the page, not about the fight"), while the
+     * default mode is rampage, where `state.combat` is false. Those two met here: breaking 24 elements in a
+     * default-mode timeAttack scored 0, and the suite never looked at the number. `chalRunning` is declared
+     * in src/97-challenge.js — a later module, but the build is one closure, so the declaration is hoisted. */
     try {
       const max = hpOf(el).max;
       if (state.hostiles.has(el)) hostileKilled(el, max);
-      else if (state.combat) { state.player.score += Math.round(max / 4); updatePlayerHud(); }
+      else if (state.combat || chalRunning()) { state.player.score += Math.round(max / 4); updatePlayerHud(); }
     } catch (e) { state.lastError = String((e && e.stack) || e); }
     /* SPEC-combat §C3: everything above this element just got weaker by 0.6 × what it was worth — and an
      * ancestor that was already hurt that much goes down with it. Runs AFTER hideOriginal(), so a recount
@@ -468,6 +474,14 @@
     cancelAnimsOf(el);
     const tag = tagOf(el);
     const dent = FORM_TAGS.has(tag) || tag === 'summary' || el.getAttribute('role') === 'button';
+    /* SPEC-launch §4: 안 죽은 요소의 반응을 키우는 일은 **여기서 하지 않는다.** 이 흔들림의 진폭을
+     * 10 → 18px 로 올려 봤다가 되돌렸다. 이 애니메이션은 페이지 요소 자신의 `transform` 을
+     * `composite: 'add'` 로 건드리는데, 변위(src/67-displace.js)와 부분 파괴(clip-path)가 **살아 있는 rect** 를
+     * 읽는다. 흔들림이 커지면 그 rect 가 더 움직여서 절단이 엉뚱한 자리에 떨어지고 충격량 측정이 오염된다.
+     * 단언 셋이 그걸 잡았다 — 충격포 충격량 비 1.815(공식 1.923), remain 면적 단조 감소, 절단 상한 8회.
+     * 진폭을 되돌리니 셋 다 통과했으므로 원인은 분명하다.
+     * 그래서 §4 의 보강은 **색조(src/73-hit-resolution.js)** 가 맡는다. 색조는 우리 오버레이의 별도 노드라
+     * 페이지 요소의 기하를 전혀 건드리지 않는다. 연출을 포기한 것이 아니라 기하를 안 건드리는 쪽으로 옮긴 것이다. */
     try {
       let a;
       if (dent) {

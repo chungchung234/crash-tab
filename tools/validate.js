@@ -1081,6 +1081,323 @@ rule('R20', 'bundle-size-budget', (r, ctx) => {
 });
 
 /* ===================================================================== */
+/* 6d. 출시 차단 · 제품 정체성 · 스키마 대조 · 이름 충돌 (R21~R24)         */
+/* ===================================================================== */
+
+/* `_locales/<loc>/messages.json` 전부. ctx.locales 는 ko·en 둘만 담는데(R5 가 그 둘의 parity 를 본다),
+ * R21 과 R22 는 로케일이 하나 늘어도 같이 따라가야 한다 — 크롬은 로케일마다 **다른** 문자열을 읽으므로
+ * 한 로케일만 상한을 넘어도 그 로케일로 올릴 때 거부된다. 그래서 디렉터리를 직접 센다.
+ * 못 읽는 파일은 건너뛰고 이유를 적는다(파싱 실패 자체는 R5 가 말한다). */
+function localeMessageFiles(root) {
+  const dir = path.join(root, '_locales');
+  if (!isDir(dir)) return [];
+  const out = [];
+  for (const loc of fs.readdirSync(dir).sort()) {
+    const rel = '_locales/' + loc + '/messages.json';
+    if (!isFile(path.join(root, rel))) continue;
+    let data = null, error = null;
+    try { data = readJSON(path.join(root, rel)); } catch (e) { error = e.message; }
+    out.push({ loc, rel, data, error });
+  }
+  return out;
+}
+
+/* ---- R21 ----
+ * 크롬 웹스토어는 매니페스트 `description` 이 상한을 넘으면 심사가 아니라 **업로드 단계에서**
+ * `The description field in manifest is too long` 으로 거부한다. `name` 에도 같은 종류의 상한이 있다.
+ *
+ * 왜 이 규칙이 생겼나: 전체 검토(docs/review/00-종합.md B1)가 `appDesc` 를 ko 174자 · en 242자로 찾았다.
+ * **출시 블로커**였는데 스무 개 규칙 중 길이를 보는 것이 하나도 없었다. 제품은 다 만들어 놓고
+ * 업로드 버튼에서 막히는 종류의 결함이고, 검사 한 줄이면 영영 안 돌아온다.
+ *
+ * 무엇을 세는가 — **코드포인트**(`[...s].length`)다. UTF-8 바이트로 세면 한글은 글자당 3바이트라
+ * 132바이트가 44자가 되고, 그 상한으로는 한국어 설명문을 쓸 수가 없다. 크롬이 말하는 132는 문자 수다.
+ * UTF-16 코드 단위(`s.length`)와는 이모지(서로게이트 쌍)가 섞일 때만 갈리는데 이 문구들에는 이모지가
+ * 없어 결과가 같고, 코드포인트 쪽이 "글자"라는 말에 더 가깝다. 실패했을 때는 세 가지 수를 다 찍어
+ * 사람이 직접 판단할 수 있게 한다.
+ *
+ * `description` 이 `__MSG_<key>__` 꼴이면 **모든 로케일**의 그 키를 본다. */
+const MANIFEST_TEXT_LIMITS = [
+  { field: 'description', max: 132 },   // 넘으면 업로드가 거부된다
+  { field: 'name',        max: 45 },    // 매니페스트 이름의 상한
+];
+
+rule('R21', 'manifest-text-length', (r, ctx) => {
+  if (!ctx.manifest) return r.skip('manifest.json did not parse (see R1)');
+  const locales = localeMessageFiles(ctx.root);
+  const rows = [];
+  for (const lim of MANIFEST_TEXT_LIMITS) {
+    const raw = ctx.manifest[lim.field];
+    if (typeof raw !== 'string' || !raw) { r.detail(lim.field.padEnd(12) + 'absent from manifest.json — nothing to measure'); continue; }
+    const key = (/^__MSG_([A-Za-z0-9_@]+)__$/.exec(raw) || [])[1];
+    const where = [];
+    if (key) {
+      for (const L of locales) {
+        if (!L.data) { r.detail(L.rel + ' is unreadable (' + L.error + ') — ' + lim.field + ' not measured there (see R5)'); continue; }
+        const e = L.data[key];
+        if (!e || typeof e.message !== 'string') { r.detail(L.rel + ' has no "' + key + '" — ' + lim.field + ' not measured there (see R5 / R6)'); continue; }
+        where.push({ at: '_locales/' + L.loc + ' "' + key + '"', text: e.message });
+      }
+      if (where.length === 0) r.fail('manifest ' + lim.field + ' is ' + raw + ' but no locale defines "' + key + '" — its length cannot be checked');
+    } else {
+      where.push({ at: 'manifest.json ' + lim.field, text: raw });
+    }
+    for (const w of where) {
+      const cp = [...w.text].length;
+      rows.push({ field: lim.field, at: w.at, cp, max: lim.max });
+      if (cp <= lim.max) continue;
+      r.fail(w.at + ' is ' + cp + ' characters — the manifest ' + lim.field + ' takes at most ' + lim.max
+        + ' (' + (cp - lim.max) + ' over); Chrome rejects the UPLOAD, not the review');
+      r.detail('    code points ' + cp + ', UTF-16 units ' + w.text.length + ', UTF-8 bytes ' + Buffer.byteLength(w.text, 'utf8')
+        + ' — this rule counts code points');
+      r.detail('    ' + JSON.stringify([...w.text].slice(0, 60).join('')) + (cp > 60 ? ' …' : ''));
+    }
+  }
+  for (const row of rows) {
+    r.detail(row.field.padEnd(12) + row.at.padEnd(26) + String(row.cp).padStart(4) + ' / ' + row.max + ' characters');
+  }
+  if (!r.failed() && rows.length) {
+    const worst = rows.slice().sort((a, b) => (b.cp / b.max) - (a.cp / a.max))[0];
+    r.note(rows.length + ' manifest string(s) measured, the tightest is ' + worst.at + ' at ' + worst.cp + ' of ' + worst.max + ' characters');
+  }
+});
+
+/* ---- R22 ----
+ * docs/specs/material.md 가 "HUD 힌트, 스토어 설명, 로케일에서 '유리판' 은유를 전부 걷어낸다" 고
+ * 지시했는데 1년 가까이 이행되지 않고 README.md:3 과 `appDesc` 에 남아 있었다(docs/review/00-종합.md F3).
+ * 12단계가 HUD 문구(`화면을 부수세요` → `요소를 부수세요`)를 고치면서 **같은 결함이 바깥에 그대로 남은**
+ * 것은 명세의 완료 검사가 로케일만 봤기 때문이다. 그래서 이 규칙은 사용자에게 보이는 텍스트를 한자리에서
+ * 본다 — 로케일 전부 · README.md · manifest.json.
+ *
+ * 왜 fail 인가(R7 처럼 warn 이 아니라): 목록이 두 낱말뿐이고 둘 다 폐기된 모델을 **직접** 가리킨다.
+ * R7 이 warn 인 것은 "안 쓰이는 것처럼 보이지만 간접 참조일 수 있다" 는 진짜 불확실성 때문인데
+ * 여기에는 그 불확실성이 없다. 그리고 warn 으로 두면 또 1년을 간다 — 그게 이 결함의 이력이다. */
+
+/* 폐기된 제품 모델을 가리키는 말. **좁게** 잡는다 — 유리는 여전히 재질 5종 중 하나이고
+ * (docs/specs/material.md), "유리 균열" 같은 무기·재질 설명은 정당하다. 금지하는 것은 재질이 아니라
+ * **"페이지 전체가 유리판"** 이라는 은유뿐이다. 거짓 양성이 나오면 고치는 방법은 그 말을 목록에서 빼거나
+ * 더 좁히는 것이지 규칙을 끄는 것이 아니다. 패턴에 `g` 를 달지 않는다(FORBIDDEN_INJECTED 와 같은 이유 —
+ * `lastIndex` 가 호출 사이에 남는다). */
+const IDENTITY_BANNED = [
+  { re: /유리판/,        why: '폐기된 "페이지 = 유리판" 모델. 이 제품은 화면이 아니라 요소를 부순다 (CLAUDE.md 1행)' },
+  { re: /glass\s+pane/i, why: 'the retired "the page is a pane of glass" model — the English half of 유리판' },
+];
+
+rule('R22', 'product-identity-terms', (r, ctx) => {
+  const hits = [];
+  const scanLine = (where, text) => {
+    for (const b of IDENTITY_BANNED) {
+      const m = b.re.exec(text);
+      if (m) hits.push({ where, term: m[0], why: b.why, text: text.trim().slice(0, 100) });
+    }
+  };
+  let scanned = 0;
+
+  for (const L of localeMessageFiles(ctx.root)) {
+    if (!L.data) { r.detail(L.rel + ' is unreadable (' + L.error + ') — not scanned (see R5)'); continue; }
+    for (const k of Object.keys(L.data)) {
+      const e = L.data[k];
+      if (!e || typeof e.message !== 'string') continue;      // 모양 문제는 R5 가 말한다
+      scanned++;
+      scanLine(L.rel + ' "' + k + '"', e.message);
+    }
+  }
+  for (const rel of ['README.md', 'manifest.json']) {
+    const full = path.join(ctx.root, rel);
+    if (!isFile(full)) { r.detail(rel + ' does not exist — not scanned'); continue; }
+    const lines = readText(full).split(/\r?\n/);
+    scanned += lines.length;
+    for (let i = 0; i < lines.length; i++) scanLine(rel + ':' + (i + 1), lines[i]);
+  }
+
+  for (const h of hits) {
+    r.fail(h.where + ': "' + h.term + '" — ' + h.why);
+    r.detail('    ' + h.text);
+  }
+  if (!r.failed()) r.note(scanned + ' user-visible string(s) / line(s) carry none of the ' + IDENTITY_BANNED.length + ' retired-model terms');
+});
+
+/* ---- R23 ----
+ * R10 은 스키마의 **내부** 정합성만 본다 — 기본값이 options 안에 있는가, labelKey 가 로케일에 있는가.
+ * 그래서 `defaultWeapon` 의 options 가 v1.3 의 10종 모델에 멈춰 있는 동안 무기고가 23종으로 자라도
+ * 아무도 울지 않았고, **13종은 기본 무기로 지정할 수 없었다**(docs/review/00-종합.md F8).
+ * 이 규칙은 스키마를 제품 쪽 진실과 대조한다.
+ *
+ * src/ 는 하나의 클로저로 합쳐지는 조각들이라 require 로 못 읽는다. 무기고(WEAPON_IDS)와
+ * 프리셋(PRESETS)은 tools/balance.js 의 readArsenal() 을 **그대로 쓴다** — 같은 정적 파싱을 두 벌 두면
+ * 언젠가 둘이 어긋나고, 그러면 이 규칙이 막으려는 바로 그 종류의 표류가 규칙 안에서 벌어진다.
+ * 모드 목록만 balance.js 가 읽지 않으므로 여기서 따로 읽는다.
+ *
+ * `custom` 은 PRESETS 에 없지만 제품이 실제로 쓰는 값이다 — src/85-loadout.js 가 프리셋 없이 바뀐
+ * 로드아웃을 'custom' 으로 적고, src/99-api.js 와 src/96.1-custom.js 가 `(p === 'custom' || PRESETS[p])`
+ * 로 되읽는다. 그래서 스키마 쪽 특수값이 아니라 **정당한 열 번째 값**이고, 진실 목록에 넣는다. */
+const SCHEMA_ENUM_TRUTH = [
+  { key: 'defaultWeapon', from: 'WEAPON_IDS (src/00-prelude.js)' },
+  { key: 'loadoutPreset', from: "PRESETS (src/00-prelude.js) + 'custom'" },
+  { key: 'mode',          from: 'MODES (src/86-modes.js)' },
+];
+
+/** `const NAME = ['a', 'b', …];` 의 문자열 원소들. 배열이 한 덩어리로 닫히는 모양만 읽고, 못 찾으면
+ *  null 을 돌려 규칙이 **조용히 통과하지 않고** SKIP 하게 한다. */
+function readStringArrayLiteral(text, name) {
+  const m = new RegExp('(?:const|let|var)\\s+' + name + '\\s*=\\s*\\[([^\\]]*)\\]').exec(text);
+  if (!m) return null;
+  const out = [];
+  for (const s of m[1].matchAll(/'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g)) out.push(s[1] != null ? s[1] : s[2]);
+  return out;
+}
+
+rule('R23', 'settings-enum-vs-product', (r, ctx) => {
+  const p = path.join(ctx.root, 'settings-schema.json');
+  if (!isFile(p)) return r.skip('settings-schema.json does not exist yet (spec B1)');
+  if (!isFile(path.join(ctx.root, 'src/00-prelude.js'))) return r.skip('src/ does not exist; the product side cannot be read');
+  /* readArsenal() 은 tools/balance.js 자신의 repo root 에서 src/ 를 읽는다. 다른 트리로 validate 를
+   * 돌리면 엉뚱한 src/ 와 대조하게 되므로, 그럴 때는 대조하지 않고 이유를 찍는다. */
+  if (ctx.root !== REPO_ROOT) return r.skip('root is ' + ctx.root + ', but tools/balance.js reads the arsenal from ' + REPO_ROOT + ' — the comparison would be against the wrong src/');
+
+  let schema;
+  try { schema = readJSON(p); } catch (e) { return r.skip('settings-schema.json did not parse (see R10)'); }
+  if (!Array.isArray(schema)) return r.skip('settings-schema.json is not an array (see R10)');
+
+  let arsenal;
+  try { arsenal = require('./balance.js').readArsenal(); }
+  catch (e) { return r.fail('could not read the arsenal out of src/: ' + e.message); }
+  const modes = readStringArrayLiteral(readText(path.join(ctx.root, 'src/86-modes.js')), 'MODES');
+
+  const truth = {
+    defaultWeapon: arsenal.ids.map(String),
+    loadoutPreset: Object.keys(arsenal.presets).concat(['custom']),
+    mode: modes,
+  };
+
+  for (const spec of SCHEMA_ENUM_TRUTH) {
+    const want = truth[spec.key];
+    if (!want || want.length === 0) {
+      r.fail('could not read ' + spec.from + ' — "' + spec.key + '" was not compared against the product');
+      continue;
+    }
+    const entry = schema.find((e) => e && e.key === spec.key);
+    if (!entry) {
+      r.fail('settings-schema.json has no "' + spec.key + '" setting — this rule keeps it in step with ' + spec.from
+        + '; if the setting really is gone, drop it from SCHEMA_ENUM_TRUTH on purpose rather than letting the check go quiet');
+      continue;
+    }
+    if (!Array.isArray(entry.options)) { r.fail('settings-schema.json "' + spec.key + '" has no options array (see R10)'); continue; }
+    const have = entry.options.map(String);
+    const haveSet = new Set(have), wantSet = new Set(want);
+    const missing = want.filter((v) => !haveSet.has(v));
+    const extra = have.filter((v) => !wantSet.has(v));
+    if (missing.length) {
+      r.fail('settings-schema.json "' + spec.key + '" cannot reach ' + missing.length + ' value(s) the product has: ' + missing.join(', ')
+        + ' (options has ' + have.length + ', ' + spec.from + ' has ' + want.length + ')');
+    }
+    if (extra.length) {
+      r.fail('settings-schema.json "' + spec.key + '" offers ' + extra.length + ' value(s) the product does not know: ' + extra.join(', ')
+        + ' — they are not in ' + spec.from);
+    }
+    if (!missing.length && !extra.length) r.detail(spec.key.padEnd(16) + String(have.length).padStart(3) + ' option(s), all matching ' + spec.from);
+  }
+  if (!r.failed()) r.note(SCHEMA_ENUM_TRUTH.length + ' schema enum(s) agree with the product, value for value');
+});
+
+/* ---- R24 ----
+ * CLAUDE.md: "모듈은 하나의 클로저로 이어 붙인다. 서로 다른 모듈의 최상위 이름이 겹치면 뒤 모듈이
+ * 이긴다. **조용히 깨지므로** 새 최상위 이름은 먼저 grep 한다." 그 경고를 지키는 검사가 없었다.
+ * `const`/`let` 끼리 겹치면 content.js 가 SyntaxError 로 죽어 그나마 티가 나지만, `var` 와 `function`
+ * 은 **아무 소리 없이** 뒤엣것이 이긴다 — 그래서 grep 을 잊은 하루가 디버깅 반나절이 된다.
+ * 지금 저장소의 충돌은 0이다. 규칙을 넣기 가장 싼 때가 지금이다(docs/review/00-종합.md).
+ *
+ * 최상위 판정 기준은 **줄 머리 들여쓰기**다. tools/build.js 가 모듈들을 하나의 클로저 안에 그대로
+ * 이어 붙이므로 모든 모듈의 본문은 2칸에서 시작하고 중첩 블록은 4칸 이상이다. 그래서 "공백 0~2칸으로
+ * 시작하는 선언"이 최상위이고, 그보다 깊은 선언은 **아예 보지 않는다.**
+ *
+ * R17 은 "선언을 넉넉히 모으는 방향으로 틀린다" 고 적었다. 이 규칙은 **반대 방향으로 틀린다** —
+ * 최상위를 좁게 본다. 넓게 잡으면 중첩 스코프의 흔한 이름(i · el · out)이 모듈마다 겹쳐 거짓 양성이
+ * 쏟아지고, 그러면 사람이 규칙을 끈다. 좁게 잡으면 기껏해야 진짜 충돌 하나를 놓치는데, 놓친 충돌은
+ * 다음 사람이 다시 만나기라도 한다.
+ *
+ * 괄호 깊이로 재지 않는 이유: fvStripLiterals 는 `return /…\(/i.test(bg)` 꼴의 정규식 리터럴을 코드로
+ * 읽는다(`/` 앞 글자가 `n` 이라 리터럴로 안 본다). 그러면 src/32-material.js 의 괄호 균형이 깨지고
+ * 깊이 기준은 그 파일의 최상위 선언 **아홉 개를 조용히 잃는다.** 줄 머리 들여쓰기는 그 영향을 안 받는다. */
+function topLevelDeclared(code) {
+  const d = fvDeclared(code, true);          // const / let / var / function — R17 의 수집기 그대로
+  /* fvDeclared 의 topLevelOnly 경로는 class 를 안 본다(R17 은 볼 필요가 없었다). 최상위 class 도
+   * 같은 클로저의 이름 한 칸을 차지하므로 여기서는 센다. 지금 src/ 에는 하나도 없다. */
+  for (const m of code.matchAll(new RegExp('^ {0,2}class\\s+(' + FV_ID + ')', 'gm'))) d.add(m[1]);
+  return d;
+}
+
+rule('R24', 'module-top-level-collisions', (r, ctx) => {
+  const mj = path.join(ctx.root, 'src/modules.json');
+  if (!isFile(mj)) return r.skip('src/modules.json does not exist yet (spec A2)');
+  let doc;
+  try { doc = readJSON(mj); } catch (e) { return r.skip('src/modules.json did not parse (see R13)'); }
+  const list = Array.isArray(doc) ? doc : doc.modules;
+  if (!Array.isArray(list)) return r.skip('src/modules.json has no `modules` array (see R13)');
+
+  const owner = new Map();                   // 최상위 이름 -> 처음 선언한 모듈
+  let total = 0, files = 0;
+  for (const name of list) {                 // src/modules.json 순서 = build.js 의 이어 붙이는 순서
+    const full = path.join(ctx.root, 'src', name);
+    if (!isFile(full)) continue;             // 목록과 디렉터리가 어긋난 것은 R13 이 말한다
+    files++;
+    const names = topLevelDeclared(fvStripLiterals(readText(full)));
+    total += names.size;
+    for (const n of [...names].sort()) {
+      if (!owner.has(n)) { owner.set(n, name); continue; }
+      r.fail('`' + n + '` is declared at the top level of BOTH src/' + owner.get(n) + ' and src/' + name
+        + ' — they land in ONE closure, so src/' + name + ' wins and nothing throws (CLAUDE.md)');
+      r.detail('    rename one of them, or move it inside the function that needs it');
+    }
+  }
+  if (!r.failed()) r.note(files + ' module(s), ' + total + ' top-level name(s), none declared in two modules');
+});
+
+/* ---- R25 ---------------------------------------------------------------------------------------
+ * SPEC-launch §8: 간접 조회되는 이름은 한국어 폴백 표에 반드시 있어야 한다.
+ *
+ * `src/ko-fallback-keys.json` 은 **손으로 관리하는 목록**이고, 빌드는 거기 적힌 키의 문자열만
+ * `_locales/ko` 에서 가져다 content.js 에 굽는다(R19). 그래서 무기나 프리셋을 늘리면서 이 표를 안 늘리면
+ * `chrome.i18n` 이 없는 경로에서 HUD 가 `weaponMinigun` 같은 **생키를 그대로 보여 준다.**
+ *
+ * 실제로 그랬다. 7~9단계가 무기고를 10 → 23 으로, 프리셋을 5 → 9 로 늘리는 동안 표는 그대로여서
+ * 무기 이름 13개와 프리셋 이름 4개가 폴백 없이 세 단계를 버텼다. 확장으로 설치해 쓰면 `chrome.i18n`
+ * 이 가려 주기 때문에 **눈에 띄지 않았고**, 스위트 A 처럼 content.js 를 그냥 주입하는 경로에서만 드러났다.
+ *
+ * R7(i18n-unused)은 "쓰이지 않는 키" 를 보고 R19 는 "표에 적힌 키가 로케일과 맞는가" 를 본다.
+ * **"로케일에 있는데 표에 없는가" 는 아무도 안 봤다.** 이 규칙이 그 자리를 맡는다.
+ *
+ * 범위를 `weapon*` 과 `preset*` 으로 좁힌 이유: 이 둘만 `WEAPONS[id].name` · `PRESET_KEYS[name]` 처럼
+ * **변수로** 조회되어 리터럴 스캐너에 안 잡히고, 동시에 HUD 에 상시 노출된다. 리터럴로 쓰이는 키는
+ * 사람이 추가할 때 눈에 보이므로 여기서 다루지 않는다. */
+rule('R25', 'ko-fallback-covers-indirect', (r, ctx) => {
+  const listPath = path.join(ctx.root, 'src', 'ko-fallback-keys.json');
+  if (!isFile(listPath)) return r.skip('src/ko-fallback-keys.json does not exist');
+  const ko = ctx.locales.ko && ctx.locales.ko.data;
+  if (!ko) return r.skip('_locales/ko is unreadable (see R5)');
+  let listed;
+  try { listed = readJSON(listPath); } catch (e) { return r.fail('src/ko-fallback-keys.json did not parse: ' + e.message); }
+  if (!listed || !Array.isArray(listed.keys)) return r.fail('src/ko-fallback-keys.json has no `keys` array');
+  const have = new Set(listed.keys);
+
+  const PREFIXES = ['weapon', 'preset'];
+  let checked = 0;
+  const missing = [];
+  for (const key of Object.keys(ko)) {
+    if (!PREFIXES.some((p) => key.startsWith(p) && key.length > p.length && key[p.length] === key[p.length].toUpperCase())) continue;
+    checked++;
+    if (!have.has(key)) missing.push(key);
+  }
+  if (missing.length) {
+    r.fail(missing.length + ' indirectly-looked-up key(s) are in _locales/ko but NOT in src/ko-fallback-keys.json —');
+    r.fail('without chrome.i18n the HUD prints the raw key for each of these. Add them to the list:');
+    for (const k of missing.sort()) r.fail('  ' + k + '  ("' + String(ko[k].message).slice(0, 28) + '")');
+  } else {
+    r.note(checked + ' weapon*/preset* key(s) all have a Korean fallback');
+  }
+});
+
+/* ===================================================================== */
 /* 7. Runner                                                              */
 /* ===================================================================== */
 

@@ -19,7 +19,7 @@
 ```bash
 node tools/build.js       # src/modules.json 순서대로 content.js 로 합친다
 node tools/build.js --check   # 소스와 생성물이 어긋나면 실패
-node tools/validate.js    # 16개 규칙 (버전 일치, i18n, 아이콘, 텍스트 위생 등)
+node tools/validate.js    # 정적 규칙 전체 (버전 일치, i18n, 아이콘, 텍스트 위생 등). 개수는 출력 맨 끝 요약이 센다
 ```
 
 밸런스도 생성물이다. `tools/balance.js` 가 `src/` 의 무기 표를 **정적 파싱**해 SPEC-arsenal §F 의
@@ -85,6 +85,7 @@ CRS_BLOCKS=debris node test/e2e.js    # 파편 수명
 CRS_BLOCKS=settings node test/e2e.js  # 스키마·성능 가드·접근성·통계·키보드 조준
 CRS_BLOCKS=roles node test/e2e.js     # 표적 등급 계수·액션 분화
 CRS_SUITES=D node test/e2e.js         # 옵션 페이지 (실제 확장 로드)
+CRS_SUITES=E node test/e2e.js         # 배포본 매니페스트 그대로 — host_permissions 없이 (4.5초)
 ```
 
 블록 시간은 작업마다 바뀐다. **재면서 고쳐라** — `--- <블록> finished in` 줄이 찍힌다.
@@ -109,7 +110,10 @@ CRS_SUITES=D node test/e2e.js         # 옵션 페이지 (실제 확장 로드)
 - **동시 실행 수를 함부로 올리지 마라.** 천장은 코어 수가 아니라 **프레임 기아**다.
   레인을 늘리면 페이지가 프레임을 못 받아 드론이 아예 안 움직이고 반동 정점이 안 잡힌다.
   제품이 굶는 것이지 측정이 틀린 게 아니다. 기본값 4 는 측정해서 정한 값이고,
-  스위트가 커지면 **다시 재서** 정해라. `CRS_LANES=1` 로 완전 직렬화할 수 있다.
+  스위트가 커지면 **다시 재서** 정해라. 직렬화는 `CRS_LANES=1` 이지만 **혼자서는 완주하지 못한다** —
+  워치독이 240초(`TIME_BUDGET_MS`)에 죽이는데 `ammo`·`rules`·`core` 셋만 합쳐도 255초다.
+  예산을 같이 올려라: `CRS_LANES=1 CRS_TIME_BUDGET_MS=900000 node test/e2e.js`
+  (`docs/specs/running-tests.md`).
 
 ## 병렬 작업 (git worktree)
 

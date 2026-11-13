@@ -4,7 +4,7 @@
     "description": "Extension name"
   },
   "appDesc": {
-    "message": "Smash a web page one element at a time: ten weapons, magazines and reloading, a sniper scope, loadouts, size-based health, and big elements that fight back. Hits leave marks on the element itself and the pieces fall. Everything is reversible.",
+    "message": "Smash a real web page element by element: 23 weapons, magazines, a scope, loadouts, and elements that fight back. All reversible.",
     "description": "Extension description"
   },
   "actionTitle": {
@@ -287,6 +287,78 @@
     "message": "Aim with the mouse",
     "description": "Control card: aim with the mouse"
   },
+  "btnChallenge": {
+    "message": "Challenge",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "btnInspect": {
+    "message": "Inspector",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "btnShare": {
+    "message": "Share",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "btnHelp": {
+    "message": "Help",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpTitle": {
+    "message": "Shortcuts",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupWeapon": {
+    "message": "Weapons",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupAction": {
+    "message": "Actions",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupMode": {
+    "message": "Modes",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpGroupTool": {
+    "message": "Tools",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpWeaponSlots": {
+    "message": "Pick a weapon",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpPrevNext": {
+    "message": "Previous / next weapon",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpReload": {
+    "message": "Reload",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpCycleMode": {
+    "message": "Cycle mode",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpScope": {
+    "message": "Aim down scope (sniper)",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpSlash": {
+    "message": "Drag to slash",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "helpCharge": {
+    "message": "Hold to charge",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "introBody": {
+    "message": "Click to break the element under the pointer. Number keys switch weapons.",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
+  "introRevert": {
+    "message": "Everything is reversible — Z restore, Esc exit, ? for help",
+    "description": "SPEC-launch 3: first-session entry points"
+  },
   "setDebrisLife": {
     "message": "Debris lifetime",
     "description": "Setting label: how long debris stays before it fades"
@@ -539,6 +611,10 @@
     "message": "New best!",
     "description": "SPEC-product 3: the run beat the stored record"
   },
+  "chalBestSoFar": {
+    "message": "Best so far",
+    "description": "SPEC-launch 5: previous record on the result overlay"
+  },
   "chalRetry": {
     "message": "Retry",
     "description": "SPEC-product 3: result overlay restart button"
@@ -690,6 +766,10 @@
   "setCollectLocalStats": {
     "message": "Collect statistics on this device",
     "description": "SPEC-product 2: settings-schema.json collectLocalStats label"
+  },
+  "setCollectOriginStats": {
+    "message": "Per-site records on this device",
+    "description": "SPEC-launch 2: settings-schema.json collectOriginStats label"
   },
   "cwBad": {
     "message": "A custom weapon entry is not valid",
@@ -966,6 +1046,26 @@
   "optStatTopOrigins": {
     "message": "Top 10 origins",
     "description": "SPEC-product 1/2/6: options page, lifetime stats, custom weapons"
+  },
+  "optStatChallenges": {
+    "message": "Challenge records",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optStatChalEmpty": {
+    "message": "No challenge finished yet. Press C to start one.",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optColMode": {
+    "message": "Mode",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optColBestRecord": {
+    "message": "Best",
+    "description": "SPEC-launch 5: challenge records in the options page"
+  },
+  "optColLastScore": {
+    "message": "Last score",
+    "description": "SPEC-launch 5: challenge records in the options page"
   },
   "optColOrigin": {
     "message": "Origin",

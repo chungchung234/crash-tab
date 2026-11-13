@@ -709,6 +709,42 @@
       tr.appendChild(el('td', null, fmtDate(o.lastPlayed)));
       body.appendChild(tr);
     }
+    renderChallengeRecords(rec);
+  }
+
+  /* SPEC-launch §5: 챌린지 기록. `crsStats.challenges[mode]` 는 §3 이 처음부터 쓰고 있었는데
+   * 읽는 화면이 없었다 — 2회차부터 플레이어가 받는 피드백이 0이었다. 모드마다 기록의 종류가 다르다:
+   * 타임어택은 점수, 목표 돌파는 가장 빠른 시간, 생존은 가장 오래 버틴 시간이다. */
+  const CHAL_MODES = [['timeAttack', 'chalTimeAttack'], ['targetRush', 'chalTargetRush'], ['survival', 'chalSurvivalRun']];
+  function chalBestText(id, r) {
+    if (id === 'timeAttack') return String(Number(r.bestScore) || 0);
+    const ms = Number(r.bestMs) || 0;
+    return ms > 0 ? (ms / 1000).toFixed(1) + msg('optUnitSeconds', 's') : '—';
+  }
+  function renderChallengeRecords(rec) {
+    const ch = (rec && rec.challenges && typeof rec.challenges === 'object') ? rec.challenges : {};
+    const rows = CHAL_MODES.filter(([id]) => ch[id] && Number(ch[id].plays) > 0);
+    $('chal-empty').hidden = rows.length > 0;
+    $('chal-table').hidden = rows.length === 0;
+    const head = $('chal-head');
+    clear(head);
+    for (const [k, cls] of [['optColMode', 't'], ['optColPlays', ''], ['optColBestRecord', ''], ['optColLastScore', ''], ['optColLast', '']]) {
+      const th = el('th', cls || null, msg(k, k));
+      th.scope = 'col';
+      head.appendChild(th);
+    }
+    const body = $('chal-body');
+    clear(body);
+    for (const [id, nameKey] of rows) {
+      const r = ch[id];
+      const tr = el('tr');
+      tr.appendChild(el('td', 't', msg(nameKey, id)));
+      tr.appendChild(el('td', null, String(Number(r.plays) || 0)));
+      tr.appendChild(el('td', null, chalBestText(id, r)));
+      tr.appendChild(el('td', null, String(Number(r.lastScore) || 0)));
+      tr.appendChild(el('td', null, fmtDate(r.lastAt)));
+      body.appendChild(tr);
+    }
   }
   async function loadStats() {
     if (S.values.collectLocalStats !== true) { S.stats = null; renderStats(); return; }
@@ -1108,6 +1144,8 @@
     setText($('stats-off'), msg('optStatsOff', ''));
     setText($('h-origins'), msg('optStatTopOrigins', ''));
     setText($('origins-empty'), msg('optStatsEmpty', ''));
+    setText($('h-chal'), msg('optStatChallenges', ''));
+    setText($('chal-empty'), msg('optStatChalEmpty', ''));
     setText($('stats-reset'), msg('optStatsReset', 'Reset'));
     setText($('custom-hint'), msg('optCustomHint', ''));
     setText($('custom-empty'), msg('optCustomEmpty', ''));

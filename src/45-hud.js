@@ -28,6 +28,21 @@
     '.presets{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin-top:6px}',
     '.presets .plabel{flex:none;font-size:11.5px;color:rgba(255,255,255,.7);white-space:nowrap;margin-right:2px}',
     '.presets button{flex:0 0 auto;min-width:max-content;height:24px;padding:0 4px;font-size:11px;border-radius:7px}',
+    /* SPEC-launch §3: 도구 줄과 도움말. 10단계가 만든 챌린지·인스펙터·공유가 키보드 전용이라
+       기본 경로에서 보이지 않았다. 그림자 DOM 안이므로 USER 오리진 !important 함정과 무관하다. */
+    '.tools{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}',
+    '.tools button{flex:1 1 0;height:26px;font-size:11.5px;border-radius:7px}',
+    '.tools button[aria-pressed="true"]{background:rgba(120,170,255,.28);border-color:rgba(150,190,255,.5)}',
+    /* 높이는 뷰포트에 묶는다 — 패널이 화면 밖으로 자라면 마지막 줄을 영영 못 본다. 바닥 여백은
+       잘린 줄이 "깨진 것" 으로 읽히지 않게 하는 것이다(처음 340px 로 뒀더니 `Esc 종료` 가 반으로 잘렸다). */
+    '.help{margin-top:8px;padding-top:8px;padding-bottom:4px;border-top:1px solid rgba(255,255,255,.14);max-height:min(52vh,420px);overflow:auto;overscroll-behavior:contain}',
+    '.help[hidden]{display:none}',
+    '.help h4{margin:8px 0 4px;font-size:11px;font-weight:700;letter-spacing:.3px;color:rgba(255,255,255,.62);text-transform:uppercase}',
+    '.help h4:first-child{margin-top:0}',
+    '.hrow{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:12px}',
+    '.hrow .hk{display:flex;gap:3px;flex:0 0 auto}',
+    '.hrow .ht{color:rgba(255,255,255,.88);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.hrow kbd{font:inherit;font-size:10.5px;line-height:16px;min-width:16px;height:18px;padding:0 4px;border-radius:5px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18);text-align:center;display:inline-block}',
     '.presets .custom{flex:none;font-size:10.5px;color:#ffb224;white-space:nowrap}',
     'button:hover{background:rgba(255,255,255,.16)}',
     'button:focus-visible{outline:2px solid #e5484d;outline-offset:1px}',
@@ -144,6 +159,30 @@
     '.crs-replay.on{display:block}'
   ].join('\n');
 
+  /* ── SPEC-launch §3: 단축키는 **하나의 표**에서 생성한다 ────────────────────────────────────────
+   * 손으로 쓴 목록은 반드시 낡는다 — `README.md` 가 `H` 를 "전투 ON/OFF" 라고 1년 가까이 틀리게 적고 있었고
+   * 챌린지·인스펙터·공유는 아예 적히지 않았다. 이 표가 도움말 오버레이의 유일한 출처다.
+   * `avatar: true` 는 아바타가 있는 모드(아케이드·생존)에서만 보이는 줄이다 — 램페이지에서 WASD 를
+   * 안내하면 거짓말이 된다. */
+  const HELP_KEYS = [
+    { group: 'helpGroupWeapon', keys: ['1', '…', '0'], labelKey: 'helpWeaponSlots' },
+    { group: 'helpGroupWeapon', keys: ['Q', 'E'], labelKey: 'helpPrevNext' },
+    { group: 'helpGroupWeapon', keys: ['R'], labelKey: 'helpReload' },
+    { group: 'helpGroupAction', keys: ['Shift'], labelKey: 'helpScope' },
+    { group: 'helpGroupAction', keys: ['🖱'], labelKey: 'helpSlash' },
+    { group: 'helpGroupAction', keys: ['🖱'], labelKey: 'helpCharge' },
+    { group: 'helpGroupAction', keys: ['Space'], labelKey: 'helpDash', avatar: true },
+    { group: 'helpGroupAction', keys: ['W', 'A', 'S', 'D'], labelKey: 'helpMove', avatar: true },
+    { group: 'helpGroupMode', keys: ['H'], labelKey: 'helpCycleMode' },
+    { group: 'helpGroupMode', keys: ['C'], labelKey: 'btnChallenge' },
+    { group: 'helpGroupTool', keys: ['I'], labelKey: 'btnInspect' },
+    { group: 'helpGroupTool', keys: ['P'], labelKey: 'btnShare' },
+    { group: 'helpGroupTool', keys: ['M'], labelKey: 'btnMute' },
+    { group: 'helpGroupTool', keys: ['Z'], labelKey: 'btnRestore' },
+    { group: 'helpGroupTool', keys: ['Esc'], labelKey: 'btnExit' }
+  ];
+  const HELP_GROUP_ORDER = ['helpGroupWeapon', 'helpGroupAction', 'helpGroupMode', 'helpGroupTool'];
+
   function hudButton(label, title, onClick) {
     const b = doc.createElement('button');
     b.type = 'button';
@@ -152,6 +191,50 @@
     b.addEventListener('click', (e) => { e.preventDefault(); try { onClick(); } catch (err) { /* ignore */ } });
     return b;
   }
+  /* SPEC-launch §3: 도움말 오버레이. 그림자 DOM 안의 접이식 구역이라 새 최상위 노드도, USER 오리진
+   * CSS 도 끌어들이지 않는다. 내용은 HELP_KEYS 하나에서 생성되므로 키를 더하면 여기도 같이 는다. */
+  function buildHelpPanel() {
+    const box = doc.createElement('div');
+    box.className = 'help';
+    box.hidden = true;
+    box.setAttribute('role', 'region');
+    box.setAttribute('aria-label', msg('helpTitle'));
+    return box;
+  }
+  /* 아바타가 있는 모드에서만 WASD·Space 를 보인다 — 램페이지에서 안내하면 거짓말이다.
+   * 모드는 열려 있는 동안에도 바뀔 수 있으므로 **열 때마다** 다시 그린다. */
+  function renderHelp() {
+    const box = hudEls.help;
+    if (!box) return;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    let withAvatar = false;
+    try { withAvatar = !!modeHasAvatar(); } catch (e) { withAvatar = false; }
+    for (const g of HELP_GROUP_ORDER) {
+      const rows = HELP_KEYS.filter((r) => r.group === g && (!r.avatar || withAvatar));
+      if (!rows.length) continue;
+      const h = doc.createElement('h4'); h.textContent = msg(g);
+      box.append(h);
+      for (const r of rows) {
+        const line = doc.createElement('div'); line.className = 'hrow';
+        const kk = doc.createElement('span'); kk.className = 'hk';
+        for (const k of r.keys) { const kb = doc.createElement('kbd'); kb.textContent = k; kk.append(kb); }
+        const t = doc.createElement('span'); t.className = 'ht'; t.textContent = msg(r.labelKey);
+        line.append(kk, t);
+        box.append(line);
+      }
+    }
+  }
+  function helpOpen() { return !!(hudEls.help && !hudEls.help.hidden); }
+  function setHelpPanel(on) {
+    const box = hudEls.help;
+    if (!box) return false;
+    if (on) renderHelp();
+    box.hidden = !on;
+    if (hudEls.helpBtn) hudEls.helpBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    return !box.hidden;
+  }
+  function toggleHelp() { return setHelpPanel(!helpOpen()); }
+
   function buildHud() {
     const host = mk('crs-hud', 'crs-hud-host');
     let shadow = null;
@@ -246,6 +329,15 @@
     hudEls.combatBtn.className = 'crs-combat-toggle';
     hudEls.exit = hudButton('✕ ' + msg('btnExit'), msg('btnExit') + ' (Esc)', () => deactivate());
     actions.append(hudEls.sound, hudEls.restore, hudEls.combatBtn, hudEls.exit);
+    /* SPEC-launch §3: 10단계의 네 기능을 눈에 보이게 꺼낸다. 키는 그대로 두고 **입구만** 더한다. */
+    const tools = doc.createElement('div'); tools.className = 'tools';
+    hudEls.chalBtn = hudButton('🏁 ' + msg('btnChallenge'), msg('btnChallenge') + ' (C)', () => challengeCycle());
+    hudEls.inspectBtn = hudButton('🔍 ' + msg('btnInspect'), msg('btnInspect') + ' (I)', () => inspectToggle());
+    hudEls.shareBtn = hudButton('📷 ' + msg('btnShare'), msg('btnShare') + ' (P)', () => shareNow());
+    hudEls.helpBtn = hudButton('? ' + msg('btnHelp'), msg('btnHelp') + ' (?)', () => toggleHelp());
+    hudEls.helpBtn.setAttribute('aria-pressed', 'false');
+    tools.append(hudEls.chalBtn, hudEls.inspectBtn, hudEls.shareBtn, hudEls.helpBtn);
+    hudEls.help = buildHelpPanel();
     const status = doc.createElement('div'); status.className = 'status';
     hudEls.hint = doc.createElement('span'); hudEls.hint.className = 'hint';
     hudEls.pieces = doc.createElement('span');
@@ -255,7 +347,7 @@
     hudEls.combo = doc.createElement('span'); hudEls.combo.className = 'combo';
     hudEls.last = doc.createElement('span'); hudEls.last.className = 'last';
     status.append(hudEls.hint, hudEls.pieces, hudEls.cracks, hudEls.damage, hudEls.score, hudEls.combo, hudEls.last);
-    panel.append(title, grid, presets, hudEls.cur, actions, status);
+    panel.append(title, grid, presets, hudEls.cur, actions, tools, hudEls.help, status);
     mountPoint.append(panel);
     hudEls.panel = panel; hudEls.title = title;
     // v1.2 A11: ammo HUD (bottom-right), player HUD (bottom-left), toast (top-centre), KO overlay — shadow siblings of .panel
