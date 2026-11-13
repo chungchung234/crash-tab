@@ -1,6 +1,6 @@
 {
   "name": "crash-tab",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "화면부수기 — a Chrome extension that lets you smash any web page, element by element.",
   "license": "Apache-2.0",
