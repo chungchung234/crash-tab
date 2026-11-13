@@ -2287,7 +2287,16 @@
       const a = trackAnim(n.animate(o.keyframes, { duration: scaleMs(dur), easing: o.easing || 'ease-out', fill: 'forwards' }));
       a.addEventListener('finish', kill);
     } catch (e) { /* ignore */ }
-    later(kill, dur + (o.linger != null ? o.linger : 300));
+    /* 안전 타이머는 애니메이션의 `finish` 가 어떤 이유로든 안 올 때를 위한 그물이다. 그물의 여유는
+     * **배율을 따라 줄면 안 된다.** `later()` 는 `scaleMs()` 를 먹이므로 예전 코드(`later(kill, dur + linger)`)는
+     * 여유까지 배율로 줄여서, `timeScale 0.2` 에서 남는 여유가 300 → 60ms 가 됐다.
+     * 그런데 이 그물이 막아야 하는 것은 **프레임 기아**이고 그건 배율과 무관한 벽시계 현상이다.
+     * 부하가 높은 러너에서 애니메이션 시작이 60ms 넘게 밀리면 아직 `running` 인 노드를 타이머가 먼저 치웠다.
+     * CI 가 그걸 잡았다: `{cls:"crs-row-flash", state:"running", dur:52, life:101}` — 길이 52ms 짜리가
+     * 101ms 를 살고도 안 끝나 있었다.
+     * 그래서 지연을 **직접 real ms 로 계산해** `laterRaw` 에 넘긴다(그쪽 주석이 말하는 바로 그 용도다).
+     * 배율 1 에서는 `dur + linger` 로 예전과 **완전히 같고**, 줄어드는 것은 애니메이션 길이뿐이다. */
+    laterRaw(kill, scaleMs(dur) + (o.linger != null ? o.linger : 300));
     return n;
   }
   /* The one puff routine. A material's break dust (src/32-material.js) and the weapon's own particle kind
