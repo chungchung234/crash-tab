@@ -10,6 +10,8 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-13
+
 ### 추가
 
 - **무기 개성 · 명중률 (SPEC-weapon-identity, 로드맵 11단계).** 사용자 피드백 셋 — "액션이 너무 똑같고 재미도 없어",
@@ -413,7 +415,8 @@ FPS 레이어: 저격총과 조준경, 탄창과 재장전, 로드아웃, 그리
 - puppeteer 기반 e2e 스위트 3종: (A) 콘텐츠 스크립트 하네스, (B) 엄격한 CSP + Trusted Types 페이지,
   (C) 실제 확장 프로그램 로딩(서비스 워커 토글, 배지, 포인터 이벤트).
 
-[Unreleased]: https://github.com/chungchung234/crash-tab/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/chungchung234/crash-tab/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/chungchung234/crash-tab/releases/tag/v2.1.0
 [2.0.0]: https://github.com/chungchung234/crash-tab/releases/tag/v2.0.0
 [1.2.0]: https://github.com/chungchung234/crash-tab/releases/tag/v1.2.0
 [1.1.0]: https://github.com/chungchung234/crash-tab/releases/tag/v1.1.0
