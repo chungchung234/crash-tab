@@ -1397,6 +1397,76 @@ rule('R25', 'ko-fallback-covers-indirect', (r, ctx) => {
   }
 });
 
+
+/* ---- R26 ---- */
+/* 대시보드에 올리는 이미지는 패키지 **밖**이라 R11(아이콘)이 보지 않는다. 크기가 어긋나면 업로드
+ * 화면이 거절하는데, 그걸 알게 되는 시점이 하필 등록비를 내고 항목을 만든 다음이다.
+ *
+ * 구글이 **문서에 적어 둔 것만** 검사한다:
+ *   https://developer.chrome.com/docs/webstore/images
+ *   https://developer.chrome.com/docs/webstore/cws-dashboard-listing
+ *   · 스크린샷 — "1280x800 or 640x400 pixels", "at least one 1280x800 px screenshot, up to 5 total"
+ *   · 작은 타일 "440x280" · 마키 "1400x560", 둘 다 "A PNG or JPEG file"
+ *   · 타일은 **선택**이다 — "Only the store icon and at least one screenshot are mandatory".
+ *     작은 타일이 없으면 있는 확장 뒤로 밀리고("shown after extensions that do have that image"),
+ *     마키가 없으면 피처링에서 빠질 뿐("can't be featured in marquee") 게시는 된다. 그래서 WARN 이다.
+ *
+ * 알파 채널 · 스크린샷 파일 형식 · 용량 상한은 **문서에 없다.** "투명도는 거절된다"는 말이 흔하지만
+ * 공식 근거를 찾지 못했으므로 규칙으로 만들지 않고 colourType 을 상세에 찍기만 한다. 근거 없는
+ * 규칙은 언젠가 멀쩡한 자산을 막는다. */
+rule('R26', 'store-assets', (r, ctx) => {
+  const SHOT_DIR = path.join(ctx.root, 'store', 'screenshots');
+  const PROMO_DIR = path.join(ctx.root, 'store', 'promo');
+  if (!fs.existsSync(SHOT_DIR) && !fs.existsSync(PROMO_DIR)) return r.skip('store/ has neither screenshots nor promo');
+
+  const pngs = (dir) => (fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.png')).sort()
+    : []);
+  const head = (dir, rel, f) => {
+    try { return pngIHDR(fs.readFileSync(path.join(dir, f))); }
+    catch (e) { r.fail(rel + f + ': ' + e.message); return null; }
+  };
+
+  /* --- 스크린샷: 크기는 둘 중 하나, 장수는 1~5, 그중 하나는 1280x800 --- */
+  const SHOT_SIZES = [[1280, 800], [640, 400]];
+  const shots = pngs(SHOT_DIR);
+  if (!shots.length) r.fail('store/screenshots has no PNG — the dashboard requires at least one screenshot');
+  if (shots.length > 5) r.fail('store/screenshots has ' + shots.length + ' PNG(s) — the dashboard accepts at most 5');
+  let full = 0;
+  for (const f of shots) {
+    const h = head(SHOT_DIR, 'store/screenshots/', f);
+    if (!h) continue;
+    if (!SHOT_SIZES.some(([w, y]) => h.width === w && h.height === y)) {
+      r.fail('store/screenshots/' + f + ' is ' + h.width + 'x' + h.height + ' — must be 1280x800 or 640x400');
+    }
+    if (h.width === 1280 && h.height === 800) full++;
+    r.detail(('store/screenshots/' + f).padEnd(40) + String(h.width + 'x' + h.height).padEnd(10) + 'colourType ' + h.colorType);
+  }
+  if (shots.length && !full) r.fail('no screenshot is 1280x800 — the dashboard requires at least one at that size');
+
+  /* --- 프로모 타일: 선택이지만, 있다면 크기가 정확해야 한다 --- */
+  const TILES = {
+    'small-440x280.png': { w: 440, h: 280, why: 'listings without a small tile are shown after those that have one' },
+    'marquee-1400x560.png': { w: 1400, h: 560, why: 'the extension cannot be featured in marquee without it' }
+  };
+  const tiles = pngs(PROMO_DIR);
+  for (const f of tiles) {
+    const want = TILES[f];
+    if (!want) { r.warn('store/promo/' + f + ' is not a tile this rule knows (expected ' + Object.keys(TILES).join(' · ') + ')'); continue; }
+    const h = head(PROMO_DIR, 'store/promo/', f);
+    if (!h) continue;
+    if (h.width !== want.w || h.height !== want.h) {
+      r.fail('store/promo/' + f + ' is ' + h.width + 'x' + h.height + ', must be ' + want.w + 'x' + want.h
+        + ' — the name says one thing and the pixels say another; run `node tools/promo.js`');
+    }
+    r.detail(('store/promo/' + f).padEnd(40) + String(h.width + 'x' + h.height).padEnd(10) + 'colourType ' + h.colorType);
+  }
+  for (const name of Object.keys(TILES)) {
+    if (!tiles.includes(name)) r.warn('store/promo/' + name + ' is absent — optional, but ' + TILES[name].why);
+  }
+
+  if (!r.failed()) r.note(shots.length + ' screenshot(s) and ' + tiles.length + ' promo tile(s) match the sizes the dashboard documents');
+});
 /* ===================================================================== */
 /* 7. Runner                                                              */
 /* ===================================================================== */
@@ -1569,7 +1639,7 @@ function main(argv) {
       '       node tools/validate.js --compare-icons <dirA> <dirB>',
       '',
       '  --quiet   print only WARN and FAIL rules plus the summary',
-      '  --strict  treat warnings as failures (used by release.yml)',
+      '  --strict  treat warnings as failures (opt-in; no workflow turns it on)',
       '',
     ].join('\n'));
     return 0;
