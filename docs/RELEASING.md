@@ -244,51 +244,97 @@ unzip crash-tab-1.2.1.zip -d crash-tab-1.2.1
 ### 토큰 받는 법
 
 처음 한 번만 하면 됩니다. 전부 Google 쪽 작업이라 화면 문구는 바뀔 수 있습니다.
+Cloud Console 이 이 영역을 **Google Auth Platform** 으로 개편하면서 예전의 `OAuth 동의 화면` 이
+`대상`(Audience) · `브랜딩`(Branding) · `클라이언트`(Clients) · `데이터 액세스`(Data Access)
+네 페이지로 갈라졌습니다. 아래는 새 이름 기준이고, 괄호 안이 옛 이름입니다.
 
-1. **스토어에 항목을 먼저 만듭니다.**
+> **클라이언트 유형 — 공식 문서와 다른 길을 골랐습니다.**
+> [구글 공식 문서](https://developer.chrome.com/docs/webstore/using-api)는 **웹 애플리케이션**
+> 클라이언트를 만들어 승인된 리디렉션 URI 에 OAuth Playground 주소를 넣고,
+> Playground 화면에서 토큰을 받으라고 합니다. 그 길도 됩니다.
+> 여기서는 **데스크톱 앱** 클라이언트를 씁니다. 루프백 리디렉션(RFC 8252)이라 포트를 등록할
+> 필요가 없고, 클라이언트 보안 비밀을 구글 Playground 웹 페이지에 입력하지 않아도 되고,
+> `tools/cws-token.js` 가 브라우저가 돌려주는 코드를 직접 받아서 왕복이 아예 없습니다.
+> 웹 애플리케이션 클라이언트를 쓰고 싶으면 승인된 리디렉션 URI 에 `http://localhost:8818` 을
+> 넣으세요. 아래 스크립트가 그대로 동작합니다.
+
+1. **구글 계정에 2단계 인증을 켭니다.**
+   공식 문서의 전제 조건입니다. 꺼져 있으면 API 로 확장 프로그램을 게시하거나 갱신할 수 없습니다.
+2. **스토어에 항목을 먼저 만듭니다.**
    [Chrome 웹 스토어 개발자 대시보드](https://chrome.google.com/webstore/devconsole)에서
    `dist/crash-tab-<version>.zip`을 **수동으로 한 번** 업로드해 초안을 만듭니다.
    (API는 기존 항목을 갱신할 수만 있고, 새 항목을 만들지는 못합니다.)
-   개발자 등록비 5 USD가 한 번 듭니다. 주소창의 ID가 `CWS_EXTENSION_ID`입니다.
-2. **Google Cloud 프로젝트를 만들고 API를 켭니다.**
+   개발자 등록비가 한 번 듭니다. 주소창의 32자 ID가 `CWS_EXTENSION_ID`입니다.
+3. **Google Cloud 프로젝트를 만들고 API를 켭니다.**
    [Google Cloud Console](https://console.cloud.google.com/)에서 프로젝트를 만들고,
    `API 및 서비스 → 라이브러리`에서 **Chrome Web Store API**를 사용 설정합니다.
-3. **OAuth 동의 화면**을 설정합니다. 사용자 유형은 **외부**, 게시 상태는 **테스트** 그대로 두고,
-   테스트 사용자에 **스토어 항목을 소유한 구글 계정**을 추가합니다.
-4. **OAuth 클라이언트 ID**를 만듭니다. `API 및 서비스 → 사용자 인증 정보 → 사용자 인증 정보 만들기 →
-   OAuth 클라이언트 ID`, 애플리케이션 유형 **데스크톱 앱**.
-   여기서 나오는 값이 `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`입니다.
-5. **인증 코드**를 받습니다. 아래 주소를 브라우저에 넣고(위 3단계의 계정으로 로그인),
-   동의한 뒤 돌아온 주소의 `code=` 값을 복사합니다.
+4. **대상**(Audience, 옛 `OAuth 동의 화면`)을 설정합니다. 사용자 유형은 **외부**,
+   게시 상태는 **테스트** 그대로 두고, 테스트 사용자에 **스토어 항목을 소유한 구글 계정**을 추가합니다.
+5. **클라이언트**(Clients, 옛 `사용자 인증 정보`)에서 **OAuth 클라이언트 ID**를 만듭니다.
+   애플리케이션 유형 **데스크톱 앱**. 여기서 나오는 값이 `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`입니다.
+6. **토큰을 받습니다.**
 
-   ```
-   https://accounts.google.com/o/oauth2/auth
-     ?response_type=code
-     &access_type=offline
-     &prompt=consent
-     &scope=https://www.googleapis.com/auth/chromewebstore
-     &client_id=<CWS_CLIENT_ID>
-     &redirect_uri=http://localhost:8818
+   ```bash
+   node tools/cws-token.js --gh
    ```
 
-   `localhost:8818`에는 아무것도 떠 있지 않아도 됩니다. 브라우저가 연결에 실패해도
-   주소창에는 `code=`가 들어 있습니다.
-6. **리프레시 토큰으로 바꿉니다.**
+   클라이언트 ID와 보안 비밀을 묻고, 한 줄짜리 인증 주소를 찍고, `localhost:8818` 에서 기다립니다.
+   브라우저에서 동의하면 코드를 직접 받아 리프레시 토큰으로 바꾸고, `--gh` 면
+   `gh secret set` 으로 `CWS_CLIENT_ID` · `CWS_CLIENT_SECRET` · `CWS_REFRESH_TOKEN` 셋을
+   **화면에 찍지 않고** 넣습니다. 남은 하나는 직접 넣습니다:
+
+   ```bash
+   gh secret set CWS_EXTENSION_ID
+   ```
+
+   `--gh` 없이 돌리면 리프레시 토큰을 화면에 찍기만 합니다. 포트가 겹치면 `--port 8899`.
+   비밀은 argv 로 받지 않습니다(`ps` 에 보입니다) — 환경변수나 물음으로만 받습니다.
+   보안 비밀은 `sudo` 처럼 **입력하는 동안 화면에 한 글자도 나가지 않고**, 토큰은 파일에 쓰지 않습니다.
+
+#### 스크립트 없이 손으로 하려면
+
+네 군데서 틀립니다. 스크립트는 이 넷을 전부 없애려고 있는 것입니다.
+
+1. 인증 주소를 **한 줄로** 붙여넣어야 합니다. 줄바꿈이 섞이면 깨집니다.
+   (`<CWS_CLIENT_ID>` 만 바꿔 넣으세요.)
+
+   ```
+   https://accounts.google.com/o/oauth2/v2/auth?client_id=<CWS_CLIENT_ID>&redirect_uri=http%3A%2F%2Flocalhost%3A8818&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fchromewebstore&access_type=offline&prompt=consent
+   ```
+
+   `localhost:8818` 에는 아무것도 떠 있지 않아도 됩니다. 브라우저가 연결에 실패해도
+   주소창에는 `code=` 가 들어 있습니다.
+2. 주소창의 `code` 는 **URL 인코딩되어 있습니다.** `4/0AX…` 가 `4%2F0AX…` 로 보입니다.
+   그대로 `curl -d` 에 넘기면 구글이 `4%2F0AX…` 라는 코드로 읽고 `invalid_grant` 를 돌려줍니다.
+   `%2F` 를 `/` 로 **되돌려서** 넣으세요.
+3. `access_type=offline` 과 `prompt=consent` 중 하나라도 빠지면 응답에 `refresh_token` 이 없습니다.
+4. 인증 코드는 수십 초 안에 만료됩니다. 느긋하게 하면 다시 받아야 합니다.
 
    ```bash
    curl -s https://oauth2.googleapis.com/token \
      -d client_id=<CWS_CLIENT_ID> \
      -d client_secret=<CWS_CLIENT_SECRET> \
-     -d code=<5단계의 code> \
+     -d code=<%2F 를 / 로 되돌린 code> \
      -d grant_type=authorization_code \
      -d redirect_uri=http://localhost:8818
    ```
 
    응답의 `refresh_token`이 `CWS_REFRESH_TOKEN`입니다. `access_token`은 한 시간짜리라 저장할 필요 없습니다.
-   `refresh_token`이 응답에 없으면 `prompt=consent`와 `access_type=offline`을 빠뜨린 것입니다.
 
-리프레시 토큰은 동의 화면이 **테스트** 상태일 때 7일 뒤 만료될 수 있습니다.
-배포가 `invalid_grant`로 실패하면 5~6단계를 다시 하거나, 동의 화면을 **프로덕션**으로 게시하세요.
+#### 리프레시 토큰이 7일 뒤 죽는 문제
+
+동의 화면이 **테스트** 상태면 토큰이 7일 만에 만료됩니다. 구글 문서가 그렇게 적어 뒀습니다 —
+["Authorizations by a test user will expire seven days from the time of consent."](https://support.google.com/cloud/answer/15549945)
+그리고 오프라인 접근으로 받은 리프레시 토큰도 같이 만료된다고 이어 적습니다.
+이름·이메일·프로필만 요구하는 앱은 예외지만, 우리는 `chromewebstore` 범위를 쓰므로 해당하지 않습니다.
+
+배포가 `invalid_grant` 로 실패하면 둘 중 하나입니다.
+
+- **다시 받는다** — `node tools/cws-token.js --gh` 를 한 번 더 돌립니다. 7일마다 반복해야 합니다.
+- **대상을 `프로덕션` 으로 게시한다** — 7일 제한이 사라집니다.
+  다만 구글은 프로덕션 상태의 리프레시 토큰 수명을 **문서에 적어 두지 않았습니다.**
+  "영구"라고 쓴 글이 많지만 공식 근거는 없습니다. 미사용 기간이 길면 만료될 수 있다고 보고
+  실패하면 다시 받는 쪽으로 생각하세요.
 
 ### 워크플로가 하는 일
 

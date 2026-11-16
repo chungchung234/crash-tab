@@ -12,7 +12,9 @@
     "check": "node tools/build.js --check && node tools/validate.js",
     "test": "node test/e2e.js",
     "package": "node tools/package.js",
+    "cws-token": "node tools/cws-token.js",
     "icons": "python3 tools/make-icons.py",
+    "promo": "node tools/promo.js",
     "bump": "node tools/version.js"
   },
   "devDependencies": {
