@@ -169,6 +169,14 @@ function check(name, cond, detail) {
   return ok;
 }
 function info(msg) { console.log(`     ${msg}`); }
+/* 논리곱 단언의 고질병: `a && b && c` 가 거짓이면 **무엇이** 거짓인지 수치만 보고는 알 수 없다.
+ * CI 에서만 깨지는 단언은 그 한 줄이 전부이므로, 깨진 조항이 스스로 말하게 한다.
+ *   clauses([[이름, 조건, 읽은 값], …]) → { ok, broke: ['이름: 읽은 값', …] }
+ * `broke` 를 detail 에 실으면 실패 한 줄이 "어느 조항이 · 무엇을 읽고 · 무엇을 기대해서" 깨졌는지 말한다. */
+function clauses(list) {
+  const broke = list.filter((c) => !c[1]).map((c) => `${c[0]} — ${c[2]}`);
+  return { ok: broke.length === 0, broke };
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function poll(fn, timeout = 3000, interval = 40) {
   const start = Date.now();
@@ -2717,35 +2725,62 @@ async function suiteA(browser, origin, contentCss, contentJs) {
     check(`A.§D 명중률: 미니건을 0.6초 넘게 지속 사격하면 블룸이 발행 상한(${mgCap.toFixed(0)}px)까지 차고 거기서 멈춘다`,
       typeof heldStats9b.bloomNow === 'number' && heldStats9b.bloomNow >= mgCap - 0.5 && heldStats9b.bloomNow <= mgCap + 0.5,
       { bloomNow: heldStats9b.bloomNow, mgCap, shots: heldStats9b.shots });
-    /* 2) 블룸이 상한에 앉은 채로 N발을 쏴 버튼 상자 안에 몇 발이 들어가는지 센다. 앞 60발은 버린다
-     *    — 상한까지 오르는 사다리(10발)와 측정 시작 전의 감쇠를 측정에서 제외하기 위한 여유다. */
-    const ACC_N = 1000, ACC_WARM = 60;   // p≈0.66 에서 표준편차 1.5%p — 60% 문턱까지 4σ 다
-    const acc9b = await page.evaluate(async (pt, n, warm, box) => {
+    /* 2) 블룸이 상한에 앉은 채로 N발을 쏴 버튼 상자 안에 몇 발이 들어가는지 센다.
+     *
+     * 예전에는 "한 프레임에 200발, 그리고 await frame()" 을 60발 가열 뒤에 그냥 반복하고, 블룸은 루프가
+     * **끝난 뒤에 한 번** 읽었다. 그 읽기가 틀렸다 — 러너에서 블룸 7.2px / 상한 22px 로 깨졌다.
+     * 블룸은 발당 오르고(noteShot: 상한 22, 발당 2.2 → 10발이면 상한) 쉬면 식는다(0.4초 유예 뒤 120px/s,
+     * src/71-weapon-helpers.js). 프레임이 굶는 러너에서는 `await frame()` 한 번이 0.5초를 먹으므로
+     *   (ㄱ) 루프가 끝난 뒤의 읽기는 **마지막 프레임 간격만큼 식은 값**이고 — 쏠 때의 블룸이 아니다,
+     *   (ㄴ) 묶음 머리 몇 발이 상한보다 낮은 블룸으로 나간다.
+     * 둘 다 측정 쪽 결함이다. 그래서 묶음마다 가열해서 블룸을 상한으로 되돌리고(그 자취는 버린다),
+     * **그 묶음의 앞뒤에서 블룸을 읽어** 세는 탄이 전부 상한에서 나갔음을 가정이 아니라 측정으로 만든다.
+     * 프레임 간격도 같이 들고 나온다 — 러너가 얼마나 굶었는지가 실패 메시지에 바로 찍히도록. */
+    const ACC_N = 1000, ACC_PRIME = 20;   // p≈0.66 에서 표준편차 1.5%p — 60% 문턱까지 4σ 다. 가열 20발: 상한까지 10발 + 여유
+    const acc9b = await page.evaluate(async (pt, n, prime, box) => {
       const a = window.__crashScreen;
       const frame = () => new Promise((r) => requestAnimationFrame(r));
+      const inBox = (p) => Math.abs(p.x - pt.x) <= box.w / 2 && Math.abs(p.y - pt.y) <= box.h / 2;
       a.debug.noRecoil = true;
       a.debug.traceShots = true;
-      let fired = 0;
-      while (fired < n + warm) {
-        for (let i = 0; i < 200 && fired < n + warm; i++) { a.smashAt(pt.x, pt.y); fired++; }
-        await frame();
+      const BATCH = 200;
+      const blooms = [];   // 묶음마다 [가열 직후, 묶음 끝, 센 발수] — 이 묶음의 탄이 실제로 맞은 블룸
+      const gaps = [];     // 묶음 사이에 실제로 흐른 벽시계(ms). 프레임 기아의 크기 그 자체다
+      let fired = 0, counted = 0, hit = 0;
+      while (counted < n) {
+        for (let i = 0; i < prime; i++) { a.smashAt(pt.x, pt.y); fired++; }
+        a.debug.shotTrace();                      // 가열분은 세지 않는다
+        const b0 = a.stats().bloomNow;
+        const want = Math.min(BATCH, n - counted);
+        for (let i = 0; i < want; i++) { a.smashAt(pt.x, pt.y); fired++; }
+        const tr = a.debug.shotTrace();
+        const b1 = a.stats().bloomNow;            // 묶음 안에서는 매 발이 aim.at 을 밀어 올리므로 식을 틈이 없다
+        blooms.push([+b0.toFixed(2), +b1.toFixed(2), tr.length]);
+        for (const p of tr) { counted++; if (inBox(p)) hit++; }
+        if (!tr.length) break;   // 한 발도 안 나갔다 — 무한 루프 대신 표본 조항이 그 사실을 말하게 한다
+        if (counted < n) { const t = performance.now(); await frame(); gaps.push(Math.round(performance.now() - t)); }
       }
-      const trace = a.debug.shotTrace();
+      const bloomEnd = a.stats().bloomNow;
       a.debug.traceShots = false;
       a.debug.noRecoil = false;
-      let hit = 0, counted = 0;
-      for (let i = warm; i < trace.length; i++) {
-        const p = trace[i];
-        counted++;
-        if (Math.abs(p.x - pt.x) <= box.w / 2 && Math.abs(p.y - pt.y) <= box.h / 2) hit++;
-      }
-      return { fired, traced: trace.length, counted, hit, bloomNow: a.stats().bloomNow };
-    }, pt9b, ACC_N, ACC_WARM, HIT_BOX_E2E);
+      return { fired, counted, hit, blooms, gaps, bloomNow: bloomEnd };
+    }, pt9b, ACC_N, ACC_PRIME, HIT_BOX_E2E);
     const accRate9b = acc9b.counted > 0 ? acc9b.hit / acc9b.counted : 0;
-    info(`A.§D 명중률: 미니건 ${acc9b.counted}발 — 버튼(${HIT_BOX_E2E.w}×${HIT_BOX_E2E.h}) 안 ${acc9b.hit}발 = ${(accRate9b * 100).toFixed(1)}% (블룸 ${acc9b.bloomNow.toFixed(1)}px, 모델 발행값 ${(bModel.byId.minigun.pHit * 100).toFixed(1)}%)`);
+    const bloomMin9b = Math.min(...acc9b.blooms.map((b) => Math.min(b[0], b[1])));
+    info(`A.§D 명중률: 미니건 ${acc9b.counted}발 — 버튼(${HIT_BOX_E2E.w}×${HIT_BOX_E2E.h}) 안 ${acc9b.hit}발 = ${(accRate9b * 100).toFixed(1)}% (묶음 ${acc9b.blooms.length}개, 블룸 최저 ${bloomMin9b.toFixed(1)}px / 상한 ${mgCap.toFixed(0)}px, 프레임 간격 최대 ${Math.max(0, ...acc9b.gaps)}ms, 모델 발행값 ${(bModel.byId.minigun.pHit * 100).toFixed(1)}%)`);
+    /* 세 조항의 논리곱이었고, 러너에서 깨진 것은 블룸 조항인데 메시지는 통과한 60% 조항만 말했다
+     * (`{"accRate":0.694,"bloomNow":7.2,"mgCap":22}` — 수치를 보고도 어느 조항인지 알 수 없었다).
+     * 이제 조항마다 무엇을 읽고 무엇을 기대했는지 스스로 말한다. */
+    const c9b = clauses([
+      ['표본', acc9b.counted >= ACC_N - 5, `${acc9b.counted}발을 셌다 (${ACC_N - 5}발 이상이어야 한다, 쏜 것은 ${acc9b.fired}발)`],
+      ['블룸 상한', bloomMin9b >= mgCap - 0.5,
+        `묶음 ${acc9b.blooms.length}개의 앞뒤에서 읽은 블룸의 최솟값 ${bloomMin9b.toFixed(1)}px (발행 상한 ${mgCap.toFixed(0)}px 에서 0.5px 안이어야 한다) · 묶음별 [가열 직후, 묶음 끝, 발수] ${JSON.stringify(acc9b.blooms)} · 묶음 사이 프레임 간격 ${JSON.stringify(acc9b.gaps)}ms`],
+      ['명중률', accRate9b >= 0.60, `${(accRate9b * 100).toFixed(1)}% (60% 이상이어야 한다, ${acc9b.hit}/${acc9b.counted})`]
+    ]);
     check(`A.§D 명중률 (핵심): 미니건이 0.6초 지속 사격 뒤에도 버튼을 60% 이상 맞힌다 — ${acc9b.counted}발을 페이지 안에서 세어 ${(accRate9b * 100).toFixed(1)}%`,
-      acc9b.counted >= ACC_N - 5 && acc9b.bloomNow >= mgCap - 0.5 && accRate9b >= 0.60,
-      { counted: acc9b.counted, hit: acc9b.hit, accRate: +accRate9b.toFixed(4), bloomNow: acc9b.bloomNow, mgCap });
+      c9b.ok,
+      { broke: c9b.broke, counted: acc9b.counted, hit: acc9b.hit, accRate: +accRate9b.toFixed(4),
+        bloomMin: +bloomMin9b.toFixed(2), bloomEnd: acc9b.bloomNow, mgCap, gaps: acc9b.gaps });
     /* 발행값(tools/balance.js)은 무기 표만 본다 — fireMinigun 안의 기계적 ±7px 원뿔이 표에 없다.
      *
      * 처음엔 그래서 발행값이 **상한**이라고 읽고 `실측 ≤ 발행 + 0.01` 을 걸었는데, 5회 중 2회 졌다
@@ -3648,6 +3683,20 @@ async function suiteA(browser, origin, contentCss, contentJs) {
   await api.restore(page);
   await sleep(100);
   const arenaE = await api.rect(page, '#arena');
+  /* 기준점이 둘이었다 — 러너에서만 깨지던 이유다.
+   * 제품의 시계는 blastFx() 가 `later(blastMark, 40)` 를 거는 순간 시작하는데, fireBomb() 은 그 **뒤에**
+   * blastIgnite() 와 aoeHit() 를 동기로 더 돌린다 (src/76-weapon-fire.js). 예전 측정은 smashAt() 이
+   * 돌아온 뒤에 비로소 setTimeout(…, 30) 을 걸었으므로, 그 동기 잔여가 10ms 만 넘어도 제품의 40ms
+   * 타이머가 우리 30ms 타이머보다 먼저 만료된다 — 자국은 제때 그려졌는데 "30ms 에 이미 있다" 로 읽힌다.
+   * 로컬에서는 잔여가 1~2ms 라 보이지 않고, 부하가 걸린 러너에서는 매번 진다. 임계값이 아니라 기준점 문제다.
+   *
+   * 그래서 시계를 하나로 만든다: 발사 **직전** t0 를 찍고, 경과 시간을 페이지 안에서 직접 읽어 기록한다.
+   *   · 자국이 생긴 시각은 싼 신호(debug.lastBlastRec — blastMark 진입에서 쓰인다)로 1ms 해상도로 좁힌다.
+   *     픽셀 전수 조사는 getImageData 만 수 ms 라 폴링에 쓰면 측정이 측정을 밀어낸다.
+   *   · "없다 / 있다" 는 원래대로 **캔버스 잉크**로 본다. 30ms 를 넘긴 시점에서 한 번(아직 자국 레코드가
+   *     없을 때), 자국이 보인 직후에 한 번. 두 번 다 읽은 실제 경과 시각을 같이 적는다.
+   * 실패하면 syncMs(동기 잔여) · 읽은 시각 · 자국이 생긴 창이 전부 메시지에 찍히므로 다음 한 번의
+   * CI 실행이 원인을 확정한다. */
   const timingE = await page.evaluate((x, y) => new Promise((res) => {
     const ink = () => {
       let n = 0;
@@ -3659,15 +3708,46 @@ async function suiteA(browser, origin, contentCss, contentJs) {
       }
       return n;
     };
+    const a = window.__crashScreen;
     const before = ink();
-    window.__crashScreen.smashAt(x, y, 'bomb');
-    setTimeout(() => {
-      const at30 = ink();
-      setTimeout(() => res({ before, at30, at80: ink() }), 52);
-    }, 30);
+    a.debug.lastBlastRec = null;          // 이 발의 자국만 보도록 레코드를 비운다
+    const t0 = performance.now();
+    a.smashAt(x, y, 'bomb');
+    const syncMs = performance.now() - t0;   // fireBomb 의 동기 잔여 (blastIgnite + aoeHit) — 예전 측정이 놓친 값
+    const scale = (typeof a.debug.timeScaleNow === 'function') ? a.debug.timeScaleNow() : 1;   // 배율이 1 이 아니면 제품의 40ms 자체가 줄어든다 — 그 사실도 메시지에 적는다
+    let at30 = -1, at30Ms = -1, inkMs = -1, lastZero = -1, samples = 0;
+    const tick = () => {
+      const ms = performance.now() - t0;
+      samples++;
+      if (!a.debug.lastBlastRec) {
+        lastZero = ms;
+        /* 원래 단언의 "30ms 에는 없다" 표본. 전수 조사는 메인 스레드를 잡으므로 **그 비용도 같이 적는다**
+         * — 우리 측정이 제품의 40ms 타이머를 얼마나 밀었는지가 markMs 에 그대로 섞이기 때문이다. */
+        if (at30Ms < 0 && ms >= 30) { const ti = performance.now(); at30 = ink(); inkMs = performance.now() - ti; at30Ms = ms; }
+        if (ms > 400) { res({ before, scale, syncMs: +syncMs.toFixed(1), at30, at30Ms: +at30Ms.toFixed(1), inkMs: +inkMs.toFixed(1), lastZero: +lastZero.toFixed(1), markMs: -1, at80: ink(), at80Ms: +ms.toFixed(1), samples }); return; }
+        setTimeout(tick, 1);
+        return;
+      }
+      /* 자국 레코드가 보였다 — blastMark() 는 한 태스크 안에서 레코드를 쓰고 칠하므로 지금 읽는 잉크가
+       * 그 자국이다. 진짜로 생긴 시각은 (lastZero, ms] 안에 있다. */
+      res({ before, scale, syncMs: +syncMs.toFixed(1), at30, at30Ms: +at30Ms.toFixed(1), inkMs: +inkMs.toFixed(1), lastZero: +lastZero.toFixed(1), markMs: +ms.toFixed(1), at80: ink(), at80Ms: +(performance.now() - t0).toFixed(1), samples });
+    };
+    tick();
   }), arenaE.cx, arenaE.cy);
+  /* 통과해도 찍는다 — 러너의 여유가 얼마나 남았는지는 실패한 뒤가 아니라 **지금** 보여야 한다. */
+  info(`A.destr §E4 타이밍: 동기 잔여 ${timingE.syncMs}ms · 자국은 ${timingE.lastZero}~${timingE.markMs}ms 사이 · 30ms 표본은 ${timingE.at30Ms}ms 에 잉크 ${timingE.at30} (전수 조사 ${timingE.inkMs}ms) · 끝 잉크 ${timingE.at80} (표본 ${timingE.samples}개, 배율 ${timingE.scale})`);
+  const cE4 = clauses([
+    ['발사 전 자국 없음', timingE.before === 0, `before=${timingE.before} (0 이어야 한다)`],
+    ['30ms 에는 자국 없음', timingE.at30 === 0 && timingE.at30Ms >= 30,
+      `${timingE.at30Ms}ms 에 읽은 잉크 ${timingE.at30} (30ms 이후에 0 이어야 한다)`],
+    ['자국이 생긴 창이 (30, 80] 안', timingE.markMs > 30 && timingE.markMs <= 80 && timingE.lastZero >= 30,
+      timingE.markMs < 0
+        ? `400ms 안에 자국이 생기지 않았다 (동기 잔여 ${timingE.syncMs}ms, 표본 ${timingE.samples}개)`
+        : `자국은 ${timingE.lastZero}~${timingE.markMs}ms 사이에 생겼다 (동기 잔여 ${timingE.syncMs}ms, 표본 ${timingE.samples}개)`],
+    ['자국이 실제로 칠해짐', timingE.at80 > 0, `${timingE.at80Ms}ms 에 읽은 잉크 ${timingE.at80} (> 0 이어야 한다)`]
+  ]);
   check('A.destr §E4: 자국은 섬광이 걷히는 40ms 에 그려진다 — 발사 후 30ms 에는 자국이 없고 80ms 에는 있다',
-    timingE.before === 0 && timingE.at30 === 0 && timingE.at80 > 0, timingE);
+    cE4.ok, Object.assign({ broke: cE4.broke }, timingE));
 
   // ---- §E2 폭발 자국과 망치 자국은 다른 종류의 자국이다 -----------------------------------------
   // 같은 요소(#big-card, 같은 재질)를 한 번은 망치로, 한 번은 폭탄으로 때리고 같은 두 자를 댄다:
@@ -13431,7 +13511,21 @@ async function suiteB(browser, origin, contentCss, contentJs) {
   const sB0 = await api.stats(page);
   await api.setWeapon(page, 'smg');
   const apB = await arenaPt(page);
-  await holdAt(page, apB, 200);
+  /* 예전에는 200ms 를 고정으로 누르고 **세 무기의 발수를 합쳐** 5발 이상인지 보았다. smg 의 틱은 70ms 이고
+   * 그 틱은 later() 체인이므로(src/79-weapon-actions.js startHold), 프레임이 굶는 러너에서는 같은 200ms 에
+   * 3틱이 아니라 2틱만 들어온다 — 러너에서 8→12 (4발) 로 깨진 것이 그것이고, 카드는 그때도 부서져 있었다
+   * (hp 0). 합계가 깨졌는데 메시지는 합계도 무기별 몫도 말하지 않았다.
+   * 여기서 재는 것은 "엄격 CSP + Trusted Types 아래에서 세 무기의 CSSOM 연출이 전부 돌았는가" 이므로
+   * **무기별로** 센다. smg 는 고정 시간이 아니라 틱이 들어올 때까지 누른다 (CLAUDE.md: 고정 대기가 아니라
+   * 폴링). 합계 하한은 3+1+1 로 예전과 같은 5 이고, 달라진 것은 그 5가 어디서 왔는지 말한다는 점이다. */
+  await page.mouse.move(apB.x, apB.y);
+  await page.mouse.down();
+  const tSmgB = Date.now();
+  await poll(async () => ((await api.stats(page)).shots - sB0.shots) >= 3, 1500, 40);
+  const smgHeldB = Date.now() - tSmgB;
+  await page.mouse.up();
+  const sSmgB = await api.stats(page);
+  const smgTicksB = sSmgB.shots - sB0.shots;
   await api.setWeapon(page, 'katana');
   const bcB = await api.rect(page, '#big-card');
   const scB = await api.rectNoScroll(page, '#small-card');
@@ -13440,6 +13534,8 @@ async function suiteB(browser, origin, contentCss, contentJs) {
   await page.mouse.move(scB.left + 12, scB.top + 12, { steps: 6 });
   await page.mouse.up();
   await sleep(300);   // let the slash jolt on #big-card (reactDamage, 260 ms) settle before measuring its rect
+  const sKatB = await api.stats(page);
+  const katanaShotsB = sKatB.shots - sSmgB.shots;
   await api.setWeapon(page, 'rocket');
   const bcB2 = await api.rect(page, '#big-card');
   await page.mouse.click(bcB2.left + 12, bcB2.top + 12);
@@ -13454,9 +13550,23 @@ async function suiteB(browser, origin, contentCss, contentJs) {
     await sleep(250);
   }
   const sB1 = await api.stats(page);
+  const rocketShotsB = sB1.shots - sKatB.shots;
   // the detail carries what was actually measured: hp vs max, the §C partial count, and the magazine —
   // "not broken" has three different causes and they are told apart here instead of by re-running by hand
-  check('B.weapons: smg hold, katana drag and rocket ran under strict CSP (shots ≥ 5, #big-card broken by the rockets)', sB1.shots - sB0.shots >= 5 && await poll(() => api.broken(page, '#big-card'), 600), { shots: [sB0.shots, sB1.shots], hp: await api.hpOf(page, '#big-card'), partial: sB1.partial, ammo: await api.ammo(page), cracks: sB1.cracks });
+  const brokenB = await poll(() => api.broken(page, '#big-card'), 600);
+  const hpB = await api.hpOf(page, '#big-card');
+  const ammoB = await api.ammo(page);
+  const cB = clauses([
+    ['smg 연사', smgTicksB >= 3, `${smgTicksB}틱 (70ms 틱, 3틱 들어올 때까지 최대 1.5초 눌렀다)`],
+    ['카타나 드래그', katanaShotsB >= 1, `${katanaShotsB}발`],
+    ['로켓', rocketShotsB >= 1, `${rocketShotsB}발 (탄창 ${ammoB.mag}/${ammoB.size})`],
+    ['#big-card 파괴', !!brokenB, `hp ${hpB.hp}/${hpB.max} (own ${hpB.own}), 부분 파괴 ${sB1.partial}, 자국 ${sB1.cracks}`]
+  ]);
+  info(`B.weapons: smg ${smgTicksB}틱 (${smgHeldB}ms 눌러서) · 카타나 ${katanaShotsB}발 · 로켓 ${rocketShotsB}발 (탄창 ${ammoB.mag}/${ammoB.size}) · #big-card hp ${hpB.hp}/${hpB.max}`);
+  check('B.weapons: smg hold, katana drag and rocket ran under strict CSP (무기별 ≥ 3·1·1 발, #big-card broken by the rockets)',
+    cB.ok,
+    { broke: cB.broke, shots: [sB0.shots, sB1.shots], smg: smgTicksB, katana: katanaShotsB, rocket: rocketShotsB,
+      hp: hpB, partial: sB1.partial, ammo: ammoB, cracks: sB1.cracks });
   // v1.2 nodes whose CSSOM styling would be the next to trip style-src / Trusted Types: the scope overlay plus the
   // 2× body transform, the sniper tracer, a hostile aura + orb, the player HUD and the KO overlay
   await api.restore(page);
